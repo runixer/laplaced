@@ -12,7 +12,7 @@ import (
 func TestHistory(t *testing.T) {
 	store, cleanup := setupTestDB(t)
 	defer cleanup()
-	store.Init()
+	_ = store.Init()
 
 	userID := int64(123)
 	messages := []Message{
@@ -52,7 +52,7 @@ func TestHistory(t *testing.T) {
 func TestImportMessage(t *testing.T) {
 	store, cleanup := setupTestDB(t)
 	defer cleanup()
-	store.Init()
+	_ = store.Init()
 
 	userID := int64(123)
 	createdAt := time.Now().Add(-1 * time.Hour).UTC()
@@ -76,11 +76,11 @@ func TestImportMessage(t *testing.T) {
 func TestGetRecentHistory(t *testing.T) {
 	store, cleanup := setupTestDB(t)
 	defer cleanup()
-	store.Init()
+	_ = store.Init()
 
 	userID := int64(123)
 	for i := 0; i < 10; i++ {
-		store.AddMessageToHistory(userID, Message{Role: "user", Content: "msg"})
+		_ = store.AddMessageToHistory(userID, Message{Role: "user", Content: "msg"})
 		time.Sleep(10 * time.Millisecond) // Ensure order
 	}
 
@@ -98,13 +98,11 @@ func TestGetRecentHistory(t *testing.T) {
 func TestGetMessagesByIDs(t *testing.T) {
 	store, cleanup := setupTestDB(t)
 	defer cleanup()
-	store.Init()
+	_ = store.Init()
 
 	userID := int64(123)
-	var ids []int64
 	for i := 0; i < 5; i++ {
-		store.AddMessageToHistory(userID, Message{Role: "user", Content: "msg"})
-		ids = append(ids, int64(i+1))
+		_ = store.AddMessageToHistory(userID, Message{Role: "user", Content: "msg"})
 	}
 
 	// Get subset
@@ -120,10 +118,10 @@ func TestGetMessagesByIDs(t *testing.T) {
 func TestUpdateMessageTopic(t *testing.T) {
 	store, cleanup := setupTestDB(t)
 	defer cleanup()
-	store.Init()
+	_ = store.Init()
 
 	userID := int64(123)
-	store.AddMessageToHistory(userID, Message{Role: "user", Content: "msg"})
+	_ = store.AddMessageToHistory(userID, Message{Role: "user", Content: "msg"})
 
 	// Initially topic_id is null
 	msgs, _ := store.GetMessagesInRange(context.Background(), userID, 0, math.MaxInt64)
@@ -143,11 +141,11 @@ func TestUpdateMessageTopic(t *testing.T) {
 func TestGetUnprocessedMessages(t *testing.T) {
 	store, cleanup := setupTestDB(t)
 	defer cleanup()
-	store.Init()
+	_ = store.Init()
 
 	userID := int64(123)
-	store.AddMessageToHistory(userID, Message{Role: "user", Content: "processed", TopicID: new(int64)}) // Has topic
-	store.AddMessageToHistory(userID, Message{Role: "user", Content: "unprocessed"})                    // No topic
+	_ = store.AddMessageToHistory(userID, Message{Role: "user", Content: "processed", TopicID: new(int64)}) // Has topic
+	_ = store.AddMessageToHistory(userID, Message{Role: "user", Content: "unprocessed"})                    // No topic
 
 	msgs, err := store.GetUnprocessedMessages(userID)
 	assert.NoError(t, err)

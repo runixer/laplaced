@@ -70,7 +70,7 @@ func TestSendMessage(t *testing.T) {
 			Ok:     true,
 			Result: json.RawMessage(`{"message_id": 1, "chat": {"id": 123, "type": "private"}, "text": "Hello"}`),
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -103,7 +103,7 @@ func TestSetMyCommands(t *testing.T) {
 		resp := APIResponse{
 			Ok: true,
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -134,7 +134,7 @@ func TestSetWebhook(t *testing.T) {
 		resp := APIResponse{
 			Ok: true,
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -164,7 +164,7 @@ func TestSendChatAction(t *testing.T) {
 		resp := APIResponse{
 			Ok: true,
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -195,7 +195,7 @@ func TestGetFile(t *testing.T) {
 			Ok:     true,
 			Result: json.RawMessage(`{"file_id": "file-id", "file_path": "path/to/file"}`),
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -230,7 +230,7 @@ func TestSetMessageReaction(t *testing.T) {
 		resp := APIResponse{
 			Ok: true,
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -265,7 +265,7 @@ func TestGetUpdates(t *testing.T) {
 			Ok:     true,
 			Result: json.RawMessage(`[{"update_id": 10, "message": {"message_id": 1, "text": "Hello"}}]`),
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 

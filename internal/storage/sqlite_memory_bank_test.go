@@ -9,7 +9,7 @@ import (
 func TestMemoryBank(t *testing.T) {
 	store, cleanup := setupTestDB(t)
 	defer cleanup()
-	store.Init()
+	_ = store.Init()
 
 	userID := int64(123)
 

@@ -10,7 +10,7 @@ import (
 func TestGetFactStats(t *testing.T) {
 	store, cleanup := setupTestDB(t)
 	defer cleanup()
-	store.Init()
+	_ = store.Init()
 
 	now := time.Now().UTC()
 	facts := []Fact{
@@ -41,7 +41,7 @@ func TestGetFactStats(t *testing.T) {
 func TestFactCRUD(t *testing.T) {
 	store, cleanup := setupTestDB(t)
 	defer cleanup()
-	store.Init()
+	_ = store.Init()
 
 	userID := int64(123)
 	fact := Fact{

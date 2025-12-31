@@ -53,19 +53,19 @@ func (s *SQLiteStore) DeleteTopicCascade(id int64) error {
 
 	// Delete facts linked to this topic
 	if _, err := tx.Exec("DELETE FROM structured_facts WHERE topic_id = ?", id); err != nil {
-		tx.Rollback()
+		_ = tx.Rollback()
 		return err
 	}
 
 	// Delete history linked to this topic
 	if _, err := tx.Exec("DELETE FROM fact_history WHERE topic_id = ?", id); err != nil {
-		tx.Rollback()
+		_ = tx.Rollback()
 		return err
 	}
 
 	// Delete topic
 	if _, err := tx.Exec("DELETE FROM topics WHERE id = ?", id); err != nil {
-		tx.Rollback()
+		_ = tx.Rollback()
 		return err
 	}
 
@@ -321,10 +321,10 @@ func (s *SQLiteStore) GetMergeCandidates(userID int64) ([]MergeCandidate, error)
 		}
 
 		if len(emb1) > 0 {
-			json.Unmarshal(emb1, &t1.Embedding)
+			_ = json.Unmarshal(emb1, &t1.Embedding)
 		}
 		if len(emb2) > 0 {
-			json.Unmarshal(emb2, &t2.Embedding)
+			_ = json.Unmarshal(emb2, &t2.Embedding)
 		}
 
 		candidates = append(candidates, MergeCandidate{Topic1: t1, Topic2: t2})

@@ -279,7 +279,7 @@ func TestProcessSession_AddFact_RecordsHistory(t *testing.T) {
 		},
 	}
 	respBytes, _ := json.Marshal(respJSON)
-	json.Unmarshal(respBytes, &resp)
+	_ = json.Unmarshal(respBytes, &resp)
 
 	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(&resp, nil)
 
@@ -367,7 +367,7 @@ func TestProcessSession_UpdateFact_RecordsHistory(t *testing.T) {
 		},
 	}
 	respBytes, _ := json.Marshal(respJSON)
-	json.Unmarshal(respBytes, &resp)
+	_ = json.Unmarshal(respBytes, &resp)
 
 	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(&resp, nil)
 
@@ -449,7 +449,7 @@ func TestProcessSession_RemoveFact_RecordsHistory(t *testing.T) {
 		},
 	}
 	respBytes, _ := json.Marshal(respJSON)
-	json.Unmarshal(respBytes, &resp)
+	_ = json.Unmarshal(respBytes, &resp)
 
 	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(&resp, nil)
 

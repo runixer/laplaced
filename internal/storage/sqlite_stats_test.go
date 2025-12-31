@@ -10,7 +10,7 @@ import (
 func TestStats(t *testing.T) {
 	store, cleanup := setupTestDB(t)
 	defer cleanup()
-	store.Init()
+	_ = store.Init()
 
 	stats := []Stat{
 		{UserID: 123, TokensUsed: 100, CostUSD: 0.01},
@@ -41,28 +41,28 @@ func TestStats(t *testing.T) {
 func TestGetDashboardStats(t *testing.T) {
 	store, cleanup := setupTestDB(t)
 	defer cleanup()
-	store.Init()
+	_ = store.Init()
 
 	userID := int64(123)
 
 	// 1. Add Topics
 	// Topic 1: Processed, Consolidated
-	store.AddTopic(Topic{UserID: userID, Summary: "T1", StartMsgID: 1, EndMsgID: 2, FactsExtracted: true, IsConsolidated: true})
+	_, _ = store.AddTopic(Topic{UserID: userID, Summary: "T1", StartMsgID: 1, EndMsgID: 2, FactsExtracted: true, IsConsolidated: true})
 	// Topic 2: Not Processed, Not Consolidated
-	store.AddTopic(Topic{UserID: userID, Summary: "T2", StartMsgID: 3, EndMsgID: 5, FactsExtracted: false, IsConsolidated: false})
+	_, _ = store.AddTopic(Topic{UserID: userID, Summary: "T2", StartMsgID: 3, EndMsgID: 5, FactsExtracted: false, IsConsolidated: false})
 
 	// 2. Add Facts
-	store.AddFact(Fact{UserID: userID, Content: "F1", Category: "bio", Type: "identity"})
-	store.AddFact(Fact{UserID: userID, Content: "F2", Category: "bio", Type: "identity"})
-	store.AddFact(Fact{UserID: userID, Content: "F3", Category: "work", Type: "context"})
+	_, _ = store.AddFact(Fact{UserID: userID, Content: "F1", Category: "bio", Type: "identity"})
+	_, _ = store.AddFact(Fact{UserID: userID, Content: "F2", Category: "bio", Type: "identity"})
+	_, _ = store.AddFact(Fact{UserID: userID, Content: "F3", Category: "work", Type: "context"})
 
 	// 3. Add Messages
-	store.AddMessageToHistory(userID, Message{Role: "user", Content: "m1", TopicID: new(int64)}) // Processed
-	store.AddMessageToHistory(userID, Message{Role: "user", Content: "m2"})                      // Unprocessed
+	_ = store.AddMessageToHistory(userID, Message{Role: "user", Content: "m1", TopicID: new(int64)}) // Processed
+	_ = store.AddMessageToHistory(userID, Message{Role: "user", Content: "m2"})                      // Unprocessed
 
 	// 4. Add RAG Logs
-	store.AddRAGLog(RAGLog{UserID: userID, TotalCostUSD: 0.01})
-	store.AddRAGLog(RAGLog{UserID: userID, TotalCostUSD: 0.02})
+	_ = store.AddRAGLog(RAGLog{UserID: userID, TotalCostUSD: 0.01})
+	_ = store.AddRAGLog(RAGLog{UserID: userID, TotalCostUSD: 0.02})
 
 	// Get Stats
 	stats, err := store.GetDashboardStats(userID)

@@ -47,7 +47,7 @@ func TestCreateChatCompletion(t *testing.T) {
 				TotalTokens      int `json:"total_tokens"`
 			}{PromptTokens: 100, CompletionTokens: 23, TotalTokens: 123},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -108,7 +108,7 @@ func TestCreateChatCompletionLogging(t *testing.T) {
 				TotalTokens      int `json:"total_tokens"`
 			}{PromptTokens: 2, CompletionTokens: 3, TotalTokens: 5},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 

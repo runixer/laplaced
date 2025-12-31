@@ -635,7 +635,11 @@ func (s *Service) processChunk(ctx context.Context, userID int64, chunk []storag
 	}
 
 	// Reload vectors
-	go s.ReloadVectors()
+	go func() {
+		if err := s.ReloadVectors(); err != nil {
+			s.logger.Error("failed to reload vectors", "error", err)
+		}
+	}()
 
 	// Trigger consolidation
 	s.TriggerConsolidation()
@@ -699,7 +703,7 @@ func (s *Service) processFactExtraction(ctx context.Context) {
 
 			if len(msgs) == 0 {
 				// Empty topic? Mark processed.
-				s.topicRepo.SetTopicFactsExtracted(topic.ID, true)
+				_ = s.topicRepo.SetTopicFactsExtracted(topic.ID, true)
 				continue
 			}
 

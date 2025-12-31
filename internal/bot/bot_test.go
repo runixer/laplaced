@@ -364,7 +364,7 @@ bot:
   voice_recognition_prefix: "(Распознано из аудио):"
   system_prompt: "System"
 `
-	os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte(content), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte(content), 0644)
 	tr, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
 	return tr
 }

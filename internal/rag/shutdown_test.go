@@ -142,7 +142,7 @@ func TestGracefulShutdown(t *testing.T) {
 
 	// Create dummy translator
 	tmpDir := t.TempDir()
-	os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("key: value"), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("key: value"), 0644)
 	translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)

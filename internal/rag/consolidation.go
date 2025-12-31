@@ -67,7 +67,11 @@ func (s *Service) processConsolidation(ctx context.Context) {
 				} else {
 					s.logger.Info("Merged topics", "t1", candidate.Topic1.ID, "t2", candidate.Topic2.ID, "new_summary", newSummary)
 					// Reload vectors after successful merge
-					go s.ReloadVectors()
+					go func() {
+						if err := s.ReloadVectors(); err != nil {
+							s.logger.Error("failed to reload vectors after merge", "error", err)
+						}
+					}()
 					// Trigger new consolidation to handle the new state
 					s.TriggerConsolidation()
 					// Break to refresh candidates

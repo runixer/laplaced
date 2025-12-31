@@ -166,6 +166,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 			if err != nil {
 				// executeToolCalls logs errors but returns messages with error info if needed
 				// If it returns a critical error, we might want to stop, but currently it returns messages
+				_ = err // Error already logged in executeToolCalls
 			}
 			orMessages = append(orMessages, toolMessages...)
 
@@ -571,7 +572,7 @@ func (b *Bot) processSingleMessage(ctx context.Context, msg *telegram.Message, l
 
 			toolMessages, err := b.executeToolCalls(ctx, chatID, msg.MessageThreadID, userID, choice.ToolCalls, logger)
 			if err != nil {
-				// Logged inside
+				_ = err // Error already logged in executeToolCalls
 			}
 			orMessages = append(orMessages, toolMessages...)
 			continue

@@ -17,7 +17,7 @@ func createTestTranslator(t *testing.T) *i18n.Translator {
 telegram:
   forwarded_from: "[Переслано от %s пользователем %s в %s]"
 `
-	os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte(content), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte(content), 0644)
 	tr, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
 	return tr
 }

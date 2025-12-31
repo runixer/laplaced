@@ -11,7 +11,7 @@ import (
 func TestGetAllUsers(t *testing.T) {
 	store, cleanup := setupTestDB(t)
 	defer cleanup()
-	store.Init()
+	_ = store.Init()
 
 	// 1. Add a regular user
 	user1 := User{ID: 1, Username: "user1", FirstName: "User", LastName: "One"}
@@ -70,17 +70,17 @@ func TestGetAllUsers(t *testing.T) {
 func TestResetUserData(t *testing.T) {
 	store, cleanup := setupTestDB(t)
 	defer cleanup()
-	store.Init()
+	_ = store.Init()
 
 	userID := int64(123)
 
 	// Add data across tables
-	store.UpsertUser(User{ID: userID, Username: "test"})
-	store.AddTopic(Topic{UserID: userID, Summary: "Topic"})
-	store.AddFact(Fact{UserID: userID, Content: "Fact"})
-	store.AddMessageToHistory(userID, Message{Role: "user", Content: "msg", TopicID: new(int64)}) // TopicID not null
-	store.AddRAGLog(RAGLog{UserID: userID, OriginalQuery: "q"})
-	store.UpdateMemoryBank(userID, "memory")
+	_ = store.UpsertUser(User{ID: userID, Username: "test"})
+	_, _ = store.AddTopic(Topic{UserID: userID, Summary: "Topic"})
+	_, _ = store.AddFact(Fact{UserID: userID, Content: "Fact"})
+	_ = store.AddMessageToHistory(userID, Message{Role: "user", Content: "msg", TopicID: new(int64)}) // TopicID not null
+	_ = store.AddRAGLog(RAGLog{UserID: userID, OriginalQuery: "q"})
+	_ = store.UpdateMemoryBank(userID, "memory")
 
 	// Reset
 	err := store.ResetUserData(userID)

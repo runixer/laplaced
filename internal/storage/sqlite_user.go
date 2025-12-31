@@ -116,7 +116,7 @@ func (s *SQLiteStore) ResetUserData(userID int64) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	s.logger.Info("Resetting user data", "user_id", userID)
 

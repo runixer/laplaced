@@ -225,7 +225,7 @@ func (s *Server) getCommonData(r *http.Request) (ui.PageData, error) {
 
 	var selectedUserID int64
 	if idStr := r.URL.Query().Get("user_id"); idStr != "" {
-		fmt.Sscanf(idStr, "%d", &selectedUserID)
+		_, _ = fmt.Sscanf(idStr, "%d", &selectedUserID)
 	}
 
 	return ui.PageData{
@@ -337,7 +337,7 @@ func (s *Server) topicsHandler(w http.ResponseWriter, r *http.Request) {
 	limit := 20
 	page := 1
 	if pStr := r.URL.Query().Get("page"); pStr != "" {
-		fmt.Sscanf(pStr, "%d", &page)
+		_, _ = fmt.Sscanf(pStr, "%d", &page)
 		if page < 1 {
 			page = 1
 		}
@@ -478,7 +478,7 @@ func (s *Server) debugRAGHandler(w http.ResponseWriter, r *http.Request) {
 		userIDStr := r.FormValue("user_id")
 
 		var userID int64 = 0
-		fmt.Sscanf(userIDStr, "%d", &userID)
+		_, _ = fmt.Sscanf(userIDStr, "%d", &userID)
 
 		s.logger.Info("Debug RAG search", "user_id", userID, "query", query)
 
@@ -538,7 +538,7 @@ func (s *Server) topicDebugHandler(w http.ResponseWriter, r *http.Request) {
 	limit := 20
 	page := 1
 	if pStr := r.URL.Query().Get("page"); pStr != "" {
-		fmt.Sscanf(pStr, "%d", &page)
+		_, _ = fmt.Sscanf(pStr, "%d", &page)
 		if page < 1 {
 			page = 1
 		}
@@ -637,7 +637,7 @@ func (s *Server) factsHistoryHandler(w http.ResponseWriter, r *http.Request) {
 	limit := 50
 	page := 1
 	if pStr := r.URL.Query().Get("page"); pStr != "" {
-		fmt.Sscanf(pStr, "%d", &page)
+		_, _ = fmt.Sscanf(pStr, "%d", &page)
 		if page < 1 {
 			page = 1
 		}

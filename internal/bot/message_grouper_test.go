@@ -11,16 +11,7 @@ import (
 	"github.com/runixer/laplaced/internal/telegram"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
-
-type MockBot struct {
-	mock.Mock
-}
-
-func (m *MockBot) processMessageGroup(ctx context.Context, group *MessageGroup) {
-	m.Called(ctx, group)
-}
 
 func TestMessageGrouper_SingleMessage(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))

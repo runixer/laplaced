@@ -43,7 +43,7 @@ func NewSpeechKitClient(ctx context.Context, logger *slog.Logger, apiKey, folder
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(nil)))
 	}
 
-	conn, err := grpc.DialContext(ctx, target, opts...)
+	conn, err := grpc.DialContext(ctx, target, opts...) //nolint:staticcheck // TODO: migrate to grpc.NewClient
 	if err != nil {
 		return nil, fmt.Errorf("failed to create grpc connection: %w", err)
 	}

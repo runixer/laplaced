@@ -28,12 +28,6 @@ type TelegramHTMLRenderer struct {
 	alignments  []extast.Alignment
 }
 
-// tableCell represents a cell in the table with its content
-type tableCell struct {
-	content string
-	width   int // display width in characters
-}
-
 // NewTelegramHTMLRenderer creates a new TelegramHTMLRenderer
 func NewTelegramHTMLRenderer(opts ...ghtml.Option) renderer.NodeRenderer {
 	r := &TelegramHTMLRenderer{
@@ -693,31 +687,6 @@ func convertTablesToMonospace(htmlStr string) string {
 
 		if len(rows) == 0 {
 			return tableHTML
-		}
-
-		// Calculate column widths
-		numCols := len(rows[0])
-		colWidths := make([]int, numCols)
-
-		for _, row := range rows {
-			for i, cell := range row {
-				if i < numCols {
-					width := utf8.RuneCountInString(cell)
-					if width > colWidths[i] {
-						colWidths[i] = width
-					}
-				}
-			}
-		}
-
-		// Calculate total table width
-		totalWidth := 0
-		for _, width := range colWidths {
-			totalWidth += width
-		}
-		// Add separators width: (numCols - 1) * 3 for " │ "
-		if numCols > 1 {
-			totalWidth += (numCols - 1) * 3
 		}
 
 		// Always use vertical format for reliability and better mobile readability

@@ -10,6 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
+
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/openrouter"
@@ -334,7 +337,7 @@ func (b *Bot) formatRAGResults(results []rag.TopicSearchResult, query string) st
 			} else {
 				// Assistant/System messages: we build the header
 				dateStr := msg.CreatedAt.Format("2006-01-02 15:04:05")
-				roleTitle := strings.Title(msg.Role)
+				roleTitle := cases.Title(language.English).String(msg.Role)
 				textContent = fmt.Sprintf("[%s (%s)]: %s", roleTitle, dateStr, msg.Content)
 			}
 
