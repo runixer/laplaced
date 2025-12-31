@@ -53,3 +53,4 @@ laplaced.db
 # AI assistants
 .roorules
 .claude/
+bin/
