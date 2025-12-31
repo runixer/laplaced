@@ -1,0 +1,279 @@
+{{define "title"}}Topics{{end}}
+{{define "styles"}}
+<style>
+    .topic-row { cursor: pointer; }
+    .topic-row:hover { background-color: #f8f9fa; }
+    .msg-preview { font-family: monospace; font-size: 13px; color: #495057; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    .msg-full-content { font-family: monospace; font-size: 13px; white-space: pre-wrap; background-color: #fff; word-break: break-word; }
+    .role-badge { font-size: 10px; text-transform: uppercase; font-weight: bold; width: 70px; display: inline-block; text-align: center; }
+    .sort-link { text-decoration: none; color: inherit; }
+    .sort-link:hover { text-decoration: underline; }
+
+    /* Mobile Optimization */
+    @media (max-width: 768px) {
+        .table-responsive {
+            overflow-x: visible;
+        }
+        table.table {
+            table-layout: auto !important;
+        }
+        .table thead {
+            display: none;
+        }
+        .table tbody tr.topic-row {
+            display: flex;
+            flex-wrap: wrap;
+            background: white;
+            margin-bottom: 1rem;
+            border: 1px solid #dee2e6;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            align-items: center;
+        }
+        .table tbody tr.topic-row td {
+            display: block;
+            padding: 0.25rem 0;
+            border: none;
+        }
+        
+        /* ID */
+        .topic-row td:nth-child(1) {
+            width: 50%;
+            font-size: 0.85rem;
+            color: #6c757d;
+            order: 1;
+        }
+        /* Date */
+        .topic-row td:nth-child(2) {
+            width: 50%;
+            text-align: right;
+            font-size: 0.85rem;
+            color: #6c757d;
+            order: 2;
+        }
+        /* Summary */
+        .topic-row td:nth-child(3) {
+            width: 100%;
+            margin: 0.5rem 0;
+            font-size: 1rem;
+            order: 3;
+        }
+        /* Stats */
+        .topic-row td:nth-child(4) {
+            width: auto;
+            margin-right: 1rem;
+            order: 4;
+        }
+        /* Status */
+        .topic-row td:nth-child(5) {
+            width: auto;
+            order: 5;
+            flex-grow: 1;
+        }
+        /* Chevron */
+        .topic-row td:nth-child(6) {
+            width: calc(100% + 2rem);
+            text-align: center;
+            margin: 0.5rem -1rem -1rem -1rem;
+            color: #adb5bd;
+            order: 6;
+            padding: 0.75rem;
+            background-color: #f8f9fa;
+            border-radius: 0 0 0.5rem 0.5rem;
+            cursor: pointer;
+        }
+
+        /* Expanded row container */
+        tr:not(.topic-row) {
+            display: block;
+        }
+        tr:not(.topic-row) td {
+            display: block;
+            padding: 0;
+            border: none;
+        }
+        
+        /* Form controls stacking */
+        .card-body form .col-md-4,
+        .card-body form .col-md-2,
+        .card-body form .col-md-1 {
+            margin-bottom: 1rem;
+        }
+        .card-body form .col-md-1:last-child {
+            margin-bottom: 0;
+        }
+    }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="container-fluid">
+    <!-- Control Bar -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <form method="GET" action="/ui/topics" class="row g-3 align-items-end">
+                {{if .SelectedUserID}}
+                <input type="hidden" name="user_id" value="{{.SelectedUserID}}">
+                {{end}}
+                
+                <div class="col-md-4">
+                    <label class="form-label">Search</label>
+                    <input type="text" name="q" class="form-control" placeholder="Search in summary..." value="{{.Data.Filter.Search}}">
+                </div>
+                
+                <div class="col-md-2">
+                    <label class="form-label">Facts</label>
+                    <select name="has_facts" class="form-select">
+                        <option value="" {{if eq .Data.Filter.HasFacts nil}}selected{{end}}>All</option>
+                        <option value="true" {{if and (ne .Data.Filter.HasFacts nil) (derefBool .Data.Filter.HasFacts)}}selected{{end}}>Found</option>
+                        <option value="false" {{if and (ne .Data.Filter.HasFacts nil) (not (derefBool .Data.Filter.HasFacts))}}selected{{end}}>Not Found</option>
+                    </select>
+                </div>
+
+                <div class="col-md-2">
+                    <label class="form-label">Merged</label>
+                    <select name="merged" class="form-select">
+                        <option value="" {{if eq .Data.Filter.IsConsolidated nil}}selected{{end}}>All</option>
+                        <option value="true" {{if and (ne .Data.Filter.IsConsolidated nil) (derefBool .Data.Filter.IsConsolidated)}}selected{{end}}>Yes</option>
+                        <option value="false" {{if and (ne .Data.Filter.IsConsolidated nil) (not (derefBool .Data.Filter.IsConsolidated))}}selected{{end}}>No</option>
+                    </select>
+                </div>
+
+                <div class="col-md-2">
+                    <label class="form-label">Sort By</label>
+                    <select name="sort" class="form-select">
+                        <option value="created_at" {{if eq .Data.SortBy "created_at"}}selected{{end}}>Date</option>
+                        <option value="size" {{if eq .Data.SortBy "size"}}selected{{end}}>Size (Msgs)</option>
+                        <option value="facts_count" {{if eq .Data.SortBy "facts_count"}}selected{{end}}>Facts Count</option>
+                    </select>
+                </div>
+
+                <div class="col-md-1">
+                    <label class="form-label">Dir</label>
+                    <select name="dir" class="form-select">
+                        <option value="DESC" {{if eq .Data.SortDir "DESC"}}selected{{end}}>Desc</option>
+                        <option value="ASC" {{if eq .Data.SortDir "ASC"}}selected{{end}}>Asc</option>
+                    </select>
+                </div>
+
+                <div class="col-md-1">
+                    <button type="submit" class="btn btn-primary w-100">Apply</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Topics Table -->
+    <div class="card">
+        <div class="card-header bg-white">
+            <div class="d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Topics ({{.Data.Total}})</h5>
+                <div class="small text-muted">Page {{.Data.Page}} of {{.Data.Pages}}</div>
+            </div>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover mb-0" style="table-layout: fixed;">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width: 50px">ID</th>
+                        <th style="width: 150px">Date</th>
+                        <th>Summary</th>
+                        <th style="width: 100px">Stats</th>
+                        <th style="width: 100px">Status</th>
+                        <th style="width: 50px"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Data.Topics}}
+                    <tr class="topic-row" data-bs-toggle="collapse" data-bs-target="#collapse-{{.ID}}">
+                        <td><small class="text-muted">#{{.ID}}</small></td>
+                        <td><small>{{.CreatedAt.Format "Jan 02 15:04"}}</small></td>
+                        <td>
+                            <div class="fw-bold" style="white-space: pre-wrap;">{{.Summary}}</div>
+                            <div class="small text-muted">User: {{.UserID}}</div>
+                        </td>
+                        <td>
+                            <div class="badge bg-light text-dark border">{{.MessageCount}} msgs</div>
+                            {{if gt .FactsCount 0}}
+                            <div class="badge bg-success">{{.FactsCount}} facts</div>
+                            {{else}}
+                            <div class="badge bg-light text-muted border">0 facts</div>
+                            {{end}}
+                        </td>
+                        <td>
+                            {{if .IsConsolidated}}
+                            <span class="badge bg-info text-dark">Merged</span>
+                            {{else if .ConsolidationChecked}}
+                            <span class="badge bg-light text-muted border" title="Merge topics not found">No Merge</span>
+                            {{end}}
+                            {{if .FactsExtracted}}
+                            <span class="badge bg-secondary" title="Facts Extracted">Proc</span>
+                            {{end}}
+                        </td>
+                        <td>
+                            <i class="bi bi-chevron-down"></i>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="6" class="p-0">
+                            <div class="collapse" id="collapse-{{.ID}}">
+                                <div class="bg-light p-3 border-bottom">
+                                    <div class="accordion accordion-flush" id="accordion-{{.ID}}">
+                                        {{range .Messages}}
+                                        <div class="accordion-item">
+                                            <h2 class="accordion-header">
+                                                <button class="accordion-button collapsed py-2" type="button" data-bs-toggle="collapse" data-bs-target="#msg-{{.ID}}">
+                                                    <div class="d-flex align-items-center w-100 overflow-hidden">
+                                                        <span class="badge rounded-pill me-2 {{if eq .Role "user"}}bg-success{{else if eq .Role "assistant"}}bg-warning text-dark{{else}}bg-primary{{end}} role-badge">{{.Role}}</span>
+                                                        <span class="msg-preview flex-grow-1">{{.Content}}</span>
+                                                        <span class="text-muted small ms-2">#{{.ID}}</span>
+                                                    </div>
+                                                </button>
+                                            </h2>
+                                            <div id="msg-{{.ID}}" class="accordion-collapse collapse" data-bs-parent="#accordion-{{.TopicID}}">
+                                                <div class="accordion-body msg-full-content py-2">
+                                                    {{.Content}}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        {{end}}
+                                    </div>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Pagination -->
+        <div class="card-footer bg-white d-flex justify-content-center">
+            <nav>
+                <ul class="pagination mb-0">
+                    <li class="page-item {{if eq .Data.Page 1}}disabled{{end}}">
+                        <a class="page-link" href="?page={{sub .Data.Page 1}}&user_id={{.SelectedUserID}}&q={{.Data.Filter.Search}}&has_facts={{if ne .Data.Filter.HasFacts nil}}{{derefBool .Data.Filter.HasFacts}}{{end}}&merged={{if ne .Data.Filter.IsConsolidated nil}}{{derefBool .Data.Filter.IsConsolidated}}{{end}}&sort={{.Data.SortBy}}&dir={{.Data.SortDir}}">Previous</a>
+                    </li>
+                    
+                    {{range seq 1 .Data.Pages}}
+                    <li class="page-item {{if eq . $.Data.Page}}active{{end}}">
+                        <a class="page-link" href="?page={{.}}&user_id={{$.SelectedUserID}}&q={{$.Data.Filter.Search}}&has_facts={{if ne $.Data.Filter.HasFacts nil}}{{derefBool $.Data.Filter.HasFacts}}{{end}}&merged={{if ne $.Data.Filter.IsConsolidated nil}}{{derefBool $.Data.Filter.IsConsolidated}}{{end}}&sort={{$.Data.SortBy}}&dir={{$.Data.SortDir}}">{{.}}</a>
+                    </li>
+                    {{end}}
+                    
+                    <li class="page-item {{if eq .Data.Page .Data.Pages}}disabled{{end}}">
+                        <a class="page-link" href="?page={{add .Data.Page 1}}&user_id={{.SelectedUserID}}&q={{.Data.Filter.Search}}&has_facts={{if ne .Data.Filter.HasFacts nil}}{{derefBool .Data.Filter.HasFacts}}{{end}}&merged={{if ne .Data.Filter.IsConsolidated nil}}{{derefBool .Data.Filter.IsConsolidated}}{{end}}&sort={{.Data.SortBy}}&dir={{.Data.SortDir}}">Next</a>
+                    </li>
+                </ul>
+            </nav>
+        </div>
+    </div>
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+    // Optional: Add any client-side scripts if needed
+</script>
+{{end}}

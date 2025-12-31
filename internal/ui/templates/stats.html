@@ -1,0 +1,315 @@
+{{define "title"}}Dashboard{{end}}
+{{define "content"}}
+	<!-- KPI Cards -->
+	<div class="row mb-4">
+		<!-- Topics -->
+		<div class="col-md-3">
+			<div class="card text-white bg-primary mb-3 h-100">
+				<div class="card-header"><i class="bi bi-chat-square-text"></i> Topics</div>
+				<div class="card-body">
+					<h2 class="card-title">{{.Data.Dashboard.TotalTopics}}</h2>
+					<p class="card-text">
+						<small>Avg Size: {{printf "%.1f" .Data.Dashboard.AvgTopicSize}} msgs</small><br>
+						<small>Processed: {{printf "%.1f" .Data.Dashboard.ProcessedTopicsPct}}%</small><br>
+						<small>Consolidated: {{.Data.Dashboard.ConsolidatedTopics}}</small>
+					</p>
+				</div>
+			</div>
+		</div>
+		<!-- Facts -->
+		<div class="col-md-3">
+			<div class="card text-white bg-success mb-3 h-100">
+				<div class="card-header"><i class="bi bi-lightbulb"></i> Facts</div>
+				<div class="card-body">
+					<h2 class="card-title">{{.Data.Dashboard.TotalFacts}}</h2>
+					<p class="card-text">
+						<small>Stored in structured format.</small>
+					</p>
+				</div>
+			</div>
+		</div>
+		<!-- Messages -->
+		<div class="col-md-3">
+			<div class="card text-white bg-info mb-3 h-100">
+				<div class="card-header"><i class="bi bi-chat-dots"></i> Messages</div>
+				<div class="card-body">
+					<h2 class="card-title">{{.Data.Dashboard.TotalMessages}}</h2>
+					<p class="card-text">
+						<small>Unprocessed: <strong>{{.Data.Dashboard.UnprocessedMessages}}</strong></small>
+					</p>
+				</div>
+			</div>
+		</div>
+		<!-- RAG -->
+		<div class="col-md-3">
+			<div class="card text-white bg-warning mb-3 h-100">
+				<div class="card-header"><i class="bi bi-search"></i> RAG Usage</div>
+				<div class="card-body">
+					<h2 class="card-title">{{.Data.Dashboard.TotalRAGQueries}}</h2>
+					<p class="card-text">
+						<small>Avg Cost: ${{printf "%.4f" .Data.Dashboard.AvgRAGCost}}</small>
+					</p>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Charts -->
+	<div class="row mb-4">
+		<div class="col-md-6">
+			<div class="card h-100">
+				<div class="card-header">Facts by Category</div>
+				<div class="card-body">
+					<canvas id="factsCategoryChart"></canvas>
+				</div>
+			</div>
+		</div>
+		<div class="col-md-6">
+			<div class="card h-100">
+				<div class="card-header">Facts by Type</div>
+				<div class="card-body">
+					<canvas id="factsTypeChart"></canvas>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<div class="row mb-4">
+		<div class="col-md-6">
+			<div class="card h-100">
+				<div class="card-header">Activity (Last 14 Days)</div>
+				<div class="card-body">
+					<canvas id="activityChart"></canvas>
+				</div>
+			</div>
+		</div>
+		<div class="col-md-6">
+			<div class="card h-100">
+				<div class="card-header">Facts Growth (Last 30 Days)</div>
+				<div class="card-body">
+					<canvas id="factsGrowthChart"></canvas>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- User Stats Table -->
+	<div class="row">
+		<div class="col-12">
+			<div class="card shadow-sm">
+				<div class="card-header">User Token Usage & Cost</div>
+				<div class="card-body p-0">
+					<div class="table-responsive">
+						<table class="table table-striped table-hover mb-0" id="statsTable">
+							<thead class="table-light">
+								<tr>
+									<th onclick="sortTable('statsTable', 0)" style="cursor: pointer;">User ID</th>
+									<th onclick="sortTable('statsTable', 1)" style="cursor: pointer;">Tokens Used</th>
+									<th onclick="sortTable('statsTable', 2)" style="cursor: pointer;">Cost (USD)</th>
+								</tr>
+							</thead>
+							<tbody>
+								{{range .Data.Stats}}
+								<tr>
+									<td>{{.UserID}}</td>
+									<td>{{.TokensUsed}}</td>
+									<td>{{printf "%.6f" .CostUSD}}</td>
+								</tr>
+								{{end}}
+								<tr class="table-secondary fw-bold">
+									<td>Total</td>
+									<td>{{.Data.TotalTokens}}</td>
+									<td>{{printf "%.6f" .Data.TotalCost}}</td>
+								</tr>
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+{{end}}
+
+{{define "scripts"}}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+	// Helper to parse Go map to JS object
+	const factsCategoryData = {
+		{{range $k, $v := .Data.Dashboard.FactsByCategory}}
+		"{{$k}}": {{$v}},
+		{{end}}
+	};
+
+	const factsTypeData = {
+		{{range $k, $v := .Data.Dashboard.FactsByType}}
+		"{{$k}}": {{$v}},
+		{{end}}
+	};
+
+	const activityData = {
+		{{range $k, $v := .Data.Dashboard.MessagesPerDay}}
+		"{{$k}}": {{$v}},
+		{{end}}
+	};
+
+	const factsGrowthData = {
+		{{range $k, $v := .Data.Dashboard.FactsGrowth}}
+		"{{$k}}": {{$v}},
+		{{end}}
+	};
+
+	// Sort activity data by date
+	const sortedActivityKeys = Object.keys(activityData).sort();
+	const sortedActivityValues = sortedActivityKeys.map(k => activityData[k]);
+
+	// Sort facts growth data by date
+	const sortedFactsGrowthKeys = Object.keys(factsGrowthData).sort();
+	const sortedFactsGrowthValues = sortedFactsGrowthKeys.map(k => factsGrowthData[k]);
+
+	// Colors
+	const bgColors = [
+		'rgba(255, 99, 132, 0.2)',
+		'rgba(54, 162, 235, 0.2)',
+		'rgba(255, 206, 86, 0.2)',
+		'rgba(75, 192, 192, 0.2)',
+		'rgba(153, 102, 255, 0.2)',
+		'rgba(255, 159, 64, 0.2)'
+	];
+	const borderColors = [
+		'rgba(255, 99, 132, 1)',
+		'rgba(54, 162, 235, 1)',
+		'rgba(255, 206, 86, 1)',
+		'rgba(75, 192, 192, 1)',
+		'rgba(153, 102, 255, 1)',
+		'rgba(255, 159, 64, 1)'
+	];
+
+	// Facts by Category Chart
+	new Chart(document.getElementById('factsCategoryChart'), {
+		type: 'doughnut',
+		data: {
+			labels: Object.keys(factsCategoryData),
+			datasets: [{
+				data: Object.values(factsCategoryData),
+				backgroundColor: bgColors,
+				borderColor: borderColors,
+				borderWidth: 1
+			}]
+		},
+		options: {
+			responsive: true,
+			plugins: {
+				legend: { position: 'bottom' }
+			}
+		}
+	});
+
+	// Facts by Type Chart
+	new Chart(document.getElementById('factsTypeChart'), {
+		type: 'pie',
+		data: {
+			labels: Object.keys(factsTypeData),
+			datasets: [{
+				data: Object.values(factsTypeData),
+				backgroundColor: bgColors,
+				borderColor: borderColors,
+				borderWidth: 1
+			}]
+		},
+		options: {
+			responsive: true,
+			plugins: {
+				legend: { position: 'bottom' }
+			}
+		}
+	});
+
+	// Activity Chart
+	new Chart(document.getElementById('activityChart'), {
+		type: 'bar',
+		data: {
+			labels: sortedActivityKeys,
+			datasets: [{
+				label: 'Messages',
+				data: sortedActivityValues,
+				backgroundColor: 'rgba(54, 162, 235, 0.2)',
+				borderColor: 'rgba(54, 162, 235, 1)',
+				borderWidth: 1
+			}]
+		},
+		options: {
+			responsive: true,
+			scales: {
+				y: { beginAtZero: true }
+			},
+			plugins: {
+				legend: { display: false }
+			}
+		}
+	});
+
+	// Facts Growth Chart
+	new Chart(document.getElementById('factsGrowthChart'), {
+		type: 'line',
+		data: {
+			labels: sortedFactsGrowthKeys,
+			datasets: [{
+				label: 'Facts Created',
+				data: sortedFactsGrowthValues,
+				backgroundColor: 'rgba(75, 192, 192, 0.2)',
+				borderColor: 'rgba(75, 192, 192, 1)',
+				borderWidth: 2,
+				tension: 0.1,
+				fill: true
+			}]
+		},
+		options: {
+			responsive: true,
+			scales: {
+				y: { beginAtZero: true }
+			},
+			plugins: {
+				legend: { display: false }
+			}
+		}
+	});
+
+	// Table Sorting
+	function sortTable(tableId, n) {
+	  var table, rows, switching, i, x, y, shouldSwitch, dir, switchcount = 0;
+	  table = document.getElementById(tableId);
+	  switching = true;
+	  dir = "asc"; 
+	  while (switching) {
+		switching = false;
+		rows = table.rows;
+		for (i = 1; i < (rows.length - 1); i++) {
+		  shouldSwitch = false;
+		  x = rows[i].getElementsByTagName("TD")[n];
+		  y = rows[i + 1].getElementsByTagName("TD")[n];
+		  var xVal = x.innerHTML.toLowerCase();
+		  var yVal = y.innerHTML.toLowerCase();
+		  if (!isNaN(parseFloat(xVal)) && isFinite(xVal)) {
+			  xVal = parseFloat(xVal);
+			  yVal = parseFloat(yVal);
+		  }
+		  if (dir == "asc") {
+			if (xVal > yVal) { shouldSwitch = true; break; }
+		  } else if (dir == "desc") {
+			if (xVal < yVal) { shouldSwitch = true; break; }
+		  }
+		}
+		if (shouldSwitch) {
+		  rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
+		  switching = true;
+		  switchcount ++;      
+		} else {
+		  if (switchcount == 0 && dir == "asc") {
+			dir = "desc";
+			switching = true;
+		  }
+		}
+	  }
+	}
+</script>
+{{end}}

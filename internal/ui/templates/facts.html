@@ -1,0 +1,248 @@
+{{define "title"}}Facts{{end}}
+{{define "styles"}}
+<style>
+    .badge-identity { background-color: #3c1e70; color: white; }
+    .badge-context { background-color: #0d6efd; }
+    .badge-status { background-color: #fd7e14; }
+    
+    .badge-cat-bio { background-color: #198754; }
+    .badge-cat-work { background-color: #6c757d; }
+    .badge-cat-hobby { background-color: #d63384; }
+    .badge-cat-preference { background-color: #795548; }
+    .badge-cat-other { background-color: #adb5bd; }
+    
+    .importance-high { color: #198754; font-weight: bold; }
+    .importance-med { color: #fd7e14; font-weight: bold; }
+    .importance-low { color: #dc3545; font-weight: bold; }
+
+    /* Mobile Optimization */
+    @media (max-width: 768px) {
+        /* Filter input */
+        .col-md-4 {
+            width: 100%;
+            margin-bottom: 1rem;
+        }
+
+        /* Table to Card */
+        .table-responsive {
+            overflow-x: visible;
+        }
+        #factsTable thead {
+            display: none;
+        }
+        #factsTable tbody tr {
+            display: flex;
+            flex-wrap: wrap;
+            background: white;
+            margin-bottom: 1rem;
+            border: 1px solid #dee2e6;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            align-items: center;
+        }
+        #factsTable tbody tr td {
+            display: block;
+            padding: 0.25rem 0;
+            border: none;
+        }
+
+        /* ID */
+        #factsTable tbody tr td:nth-child(1) {
+            width: 100%;
+            font-size: 0.8rem;
+            color: #6c757d;
+            order: 1;
+            margin-bottom: 0.5rem;
+        }
+        
+        /* Type & Category */
+        #factsTable tbody tr td:nth-child(2) { /* Type */
+            width: auto;
+            order: 2;
+            margin-right: 0.5rem;
+        }
+        #factsTable tbody tr td:nth-child(3) { /* Category */
+            width: auto;
+            order: 3;
+        }
+        
+        /* Entity */
+        #factsTable tbody tr td:nth-child(4) {
+            width: 100%;
+            font-size: 1.1rem;
+            margin-top: 0.5rem;
+            order: 4;
+        }
+        
+        /* Relation */
+        #factsTable tbody tr td:nth-child(5) {
+            width: 100%;
+            font-style: italic;
+            color: #6c757d;
+            margin-bottom: 0.5rem;
+            order: 5;
+        }
+        
+        /* Content */
+        #factsTable tbody tr td:nth-child(6) {
+            width: 100%;
+            margin-bottom: 0.5rem;
+            order: 6;
+        }
+        
+        /* Importance */
+        #factsTable tbody tr td:nth-child(7) {
+            width: auto;
+            margin-right: 1rem;
+            order: 7;
+        }
+        
+        /* Updated */
+        #factsTable tbody tr td:nth-child(8) {
+            width: auto;
+            color: #6c757d;
+            font-size: 0.85rem;
+            order: 8;
+            flex-grow: 1;
+            text-align: right;
+        }
+        
+        /* Actions */
+        #factsTable tbody tr td:nth-child(9) {
+            width: 100%;
+            margin-top: 0.5rem;
+            order: 9;
+            text-align: center;
+        }
+        #factsTable tbody tr td:nth-child(9) .btn {
+            width: 100%;
+            padding: 0.5rem;
+            font-size: 1rem;
+        }
+    }
+</style>
+{{end}}
+
+{{define "content"}}
+	<div class="row justify-content-center mb-4 align-items-center">
+		<div class="col-md-4">
+			<input type="text" id="filterInput" class="form-control" onkeyup="filterTable('filterInput', 'factsTable')" placeholder="Filter facts...">
+		</div>
+	</div>
+
+	<div class="table-responsive shadow-sm">
+		<table class="table table-striped table-hover mb-0" id="factsTable">
+			<thead class="table-light">
+				<tr>
+					<th onclick="sortTable('factsTable', 0)" style="cursor: pointer;">ID</th>
+					<th onclick="sortTable('factsTable', 1)" style="cursor: pointer;">Type</th>
+					<th onclick="sortTable('factsTable', 2)" style="cursor: pointer;">Category</th>
+					<th onclick="sortTable('factsTable', 3)" style="cursor: pointer;">Entity</th>
+					<th onclick="sortTable('factsTable', 4)" style="cursor: pointer;">Relation</th>
+					<th onclick="sortTable('factsTable', 5)" style="cursor: pointer;">Content</th>
+					<th onclick="sortTable('factsTable', 6)" style="cursor: pointer;">Imp.</th>
+					<th onclick="sortTable('factsTable', 7)" style="cursor: pointer;">Updated</th>
+					<th>Actions</th>
+				</tr>
+			</thead>
+			<tbody>
+				{{range .Data}}
+				<tr>
+					<td class="text-muted small">{{.ID}}</td>
+					<td><span class="badge badge-{{.Type}}">{{.Type}}</span></td>
+					<td><span class="badge badge-cat-{{.Category}}">{{.Category}}</span></td>
+					<td><strong>{{.Entity}}</strong></td>
+					<td class="text-muted">{{.Relation}}</td>
+					<td>{{.Content}}</td>
+					<td>
+						<span class="{{if ge .Importance 80}}importance-high{{else if ge .Importance 50}}importance-med{{else}}importance-low{{end}}">
+							{{.Importance}}
+						</span>
+					</td>
+					<td class="text-muted small">
+						{{if .LastUpdated.IsZero}}
+							{{.CreatedAt.Format "2006-01-02"}}
+						{{else}}
+							{{.LastUpdated.Format "2006-01-02"}}
+						{{end}}
+					</td>
+					<td>
+						<a href="/ui/debug/rag?query={{.Content}}&user_id={{.UserID}}" class="btn btn-sm btn-outline-primary" target="_blank">Context</a>
+					</td>
+				</tr>
+				{{end}}
+			</tbody>
+		</table>
+	</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+function filterTable(inputId, tableId) {
+  var input, filter, table, tr, td, i, txtValue;
+  input = document.getElementById(inputId);
+  filter = input.value.toUpperCase();
+  table = document.getElementById(tableId);
+  tr = table.getElementsByTagName("tr");
+  for (i = 0; i < tr.length; i++) {
+	if (tr[i].getElementsByTagName("th").length > 0) continue;
+	var found = false;
+	var tds = tr[i].getElementsByTagName("td");
+	for (var j = 0; j < tds.length; j++) {
+	  if (tds[j]) {
+		txtValue = tds[j].textContent || tds[j].innerText;
+		if (txtValue.toUpperCase().indexOf(filter) > -1) {
+		  found = true;
+		  break;
+		}
+	  }
+	}
+	if (found) {
+	  tr[i].style.display = "";
+	} else {
+	  tr[i].style.display = "none";
+	}
+  }
+}
+
+function sortTable(tableId, n) {
+  var table, rows, switching, i, x, y, shouldSwitch, dir, switchcount = 0;
+  table = document.getElementById(tableId);
+  switching = true;
+  dir = "asc"; 
+  while (switching) {
+	switching = false;
+	rows = table.rows;
+	for (i = 1; i < (rows.length - 1); i++) {
+	  shouldSwitch = false;
+	  x = rows[i].getElementsByTagName("TD")[n];
+	  y = rows[i + 1].getElementsByTagName("TD")[n];
+	  var xVal = x.innerHTML.toLowerCase();
+	  var yVal = y.innerHTML.toLowerCase();
+	  // Try to parse as number
+	  if (!isNaN(parseFloat(xVal)) && isFinite(xVal)) {
+		  xVal = parseFloat(xVal);
+		  yVal = parseFloat(yVal);
+	  }
+	  
+	  if (dir == "asc") {
+		if (xVal > yVal) { shouldSwitch = true; break; }
+	  } else if (dir == "desc") {
+		if (xVal < yVal) { shouldSwitch = true; break; }
+	  }
+	}
+	if (shouldSwitch) {
+	  rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
+	  switching = true;
+	  switchcount ++;      
+	} else {
+	  if (switchcount == 0 && dir == "asc") {
+		dir = "desc";
+		switching = true;
+	  }
+	}
+  }
+}
+</script>
+{{end}}

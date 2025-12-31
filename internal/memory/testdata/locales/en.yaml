@@ -1,0 +1,2 @@
+memory.system_prompt: 'System Prompt %s %s %s %s'
+memory.consolidation_prompt: 'Consolidation Prompt'

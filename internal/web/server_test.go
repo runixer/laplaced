@@ -1,0 +1,648 @@
+package web
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/storage"
+	"github.com/runixer/laplaced/internal/telegram"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+)
+
+// MockBotAPI is a mock for the telegram.BotAPI interface
+type MockBotAPI struct {
+	mock.Mock
+}
+
+func (m *MockBotAPI) SendMessage(ctx context.Context, req telegram.SendMessageRequest) (*telegram.Message, error) {
+	args := m.Called(ctx, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*telegram.Message), args.Error(1)
+}
+
+func (m *MockBotAPI) SetMyCommands(ctx context.Context, req telegram.SetMyCommandsRequest) error {
+	args := m.Called(ctx, req)
+	return args.Error(0)
+}
+
+func (m *MockBotAPI) SetWebhook(ctx context.Context, req telegram.SetWebhookRequest) error {
+	args := m.Called(ctx, req)
+	return args.Error(0)
+}
+
+func (m *MockBotAPI) SendChatAction(ctx context.Context, req telegram.SendChatActionRequest) error {
+	args := m.Called(ctx, req)
+	return args.Error(0)
+}
+
+func (m *MockBotAPI) GetFile(ctx context.Context, req telegram.GetFileRequest) (*telegram.File, error) {
+	args := m.Called(ctx, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*telegram.File), args.Error(1)
+}
+
+func (m *MockBotAPI) SetMessageReaction(ctx context.Context, req telegram.SetMessageReactionRequest) error {
+	args := m.Called(ctx, req)
+	return args.Error(0)
+}
+
+func (m *MockBotAPI) GetToken() string {
+	args := m.Called()
+	return args.String(0)
+}
+
+func (m *MockBotAPI) GetUpdates(ctx context.Context, req telegram.GetUpdatesRequest) ([]telegram.Update, error) {
+	args := m.Called(ctx, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]telegram.Update), args.Error(1)
+}
+
+// MockStorage is a mock type for the Storage interface
+type MockStorage struct {
+	mock.Mock
+}
+
+func (m *MockStorage) AddMessageToHistory(userID int64, message storage.Message) error {
+	args := m.Called(userID, message)
+	return args.Error(0)
+}
+
+func (m *MockStorage) ImportMessage(userID int64, message storage.Message) error {
+	args := m.Called(userID, message)
+	return args.Error(0)
+}
+
+func (m *MockStorage) GetHistory(userID int64) ([]storage.Message, error) {
+	args := m.Called(userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.Message), args.Error(1)
+}
+
+func (m *MockStorage) GetRecentHistory(userID int64, limit int) ([]storage.Message, error) {
+	args := m.Called(userID, limit)
+	return args.Get(0).([]storage.Message), args.Error(1)
+}
+
+func (m *MockStorage) GetMessagesByIDs(ids []int64) ([]storage.Message, error) {
+	args := m.Called(ids)
+	return args.Get(0).([]storage.Message), args.Error(1)
+}
+
+func (m *MockStorage) GetFactsByIDs(ids []int64) ([]storage.Fact, error) {
+	args := m.Called(ids)
+	return args.Get(0).([]storage.Fact), args.Error(1)
+}
+
+func (m *MockStorage) ClearHistory(userID int64) error {
+	args := m.Called(userID)
+	return args.Error(0)
+}
+
+func (m *MockStorage) AddStat(stat storage.Stat) error {
+	args := m.Called(stat)
+	return args.Error(0)
+}
+
+func (m *MockStorage) GetStats() (map[int64]storage.Stat, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[int64]storage.Stat), args.Error(1)
+}
+
+func (m *MockStorage) GetDashboardStats(userID int64) (*storage.DashboardStats, error) {
+	args := m.Called(userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*storage.DashboardStats), args.Error(1)
+}
+
+func (m *MockStorage) AddRAGLog(log storage.RAGLog) error {
+	args := m.Called(log)
+	return args.Error(0)
+}
+
+func (m *MockStorage) GetRAGLogs(userID int64, limit int) ([]storage.RAGLog, error) {
+	args := m.Called(userID, limit)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.RAGLog), args.Error(1)
+}
+
+func (m *MockStorage) AddTopic(topic storage.Topic) (int64, error) {
+	args := m.Called(topic)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockStorage) CreateTopic(topic storage.Topic) (int64, error) {
+	args := m.Called(topic)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockStorage) ResetUserData(userID int64) error {
+	args := m.Called(userID)
+	return args.Error(0)
+}
+
+func (m *MockStorage) DeleteTopic(id int64) error {
+	args := m.Called(id)
+	return args.Error(0)
+}
+
+func (m *MockStorage) DeleteTopicCascade(id int64) error {
+	args := m.Called(id)
+	return args.Error(0)
+}
+
+func (m *MockStorage) GetLastTopicEndMessageID(userID int64) (int64, error) {
+	args := m.Called(userID)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockStorage) GetAllTopics() ([]storage.Topic, error) {
+	args := m.Called()
+	return args.Get(0).([]storage.Topic), args.Error(1)
+}
+
+func (m *MockStorage) GetTopics(userID int64) ([]storage.Topic, error) {
+	args := m.Called(userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.Topic), args.Error(1)
+}
+
+func (m *MockStorage) GetTopicsPendingFacts(userID int64) ([]storage.Topic, error) {
+	args := m.Called(userID)
+	return args.Get(0).([]storage.Topic), args.Error(1)
+}
+
+func (m *MockStorage) GetTopicsExtended(filter storage.TopicFilter, limit, offset int, sortBy, sortDir string) (storage.TopicResult, error) {
+	args := m.Called(filter, limit, offset, sortBy, sortDir)
+	return args.Get(0).(storage.TopicResult), args.Error(1)
+}
+
+func (m *MockStorage) UpdateMessageTopic(messageID, topicID int64) error {
+	args := m.Called(messageID, topicID)
+	return args.Error(0)
+}
+
+func (m *MockStorage) SetTopicFactsExtracted(topicID int64, extracted bool) error {
+	args := m.Called(topicID, extracted)
+	return args.Error(0)
+}
+
+func (m *MockStorage) SetTopicConsolidationChecked(topicID int64, checked bool) error {
+	args := m.Called(topicID, checked)
+	return args.Error(0)
+}
+
+func (m *MockStorage) GetMessagesInRange(ctx context.Context, userID int64, startID, endID int64) ([]storage.Message, error) {
+	args := m.Called(ctx, userID, startID, endID)
+	return args.Get(0).([]storage.Message), args.Error(1)
+}
+
+func (m *MockStorage) GetMemoryBank(userID int64) (string, error) {
+	args := m.Called(userID)
+	return args.String(0), args.Error(1)
+}
+
+func (m *MockStorage) UpdateMemoryBank(userID int64, content string) error {
+	args := m.Called(userID, content)
+	return args.Error(0)
+}
+
+func (m *MockStorage) UpsertUser(user storage.User) error {
+	args := m.Called(user)
+	return args.Error(0)
+}
+
+func (m *MockStorage) GetAllUsers() ([]storage.User, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.User), args.Error(1)
+}
+
+func (m *MockStorage) UpdateFact(fact storage.Fact) error {
+	args := m.Called(fact)
+	return args.Error(0)
+}
+
+func (m *MockStorage) UpdateFactTopic(oldTopicID, newTopicID int64) error {
+	args := m.Called(oldTopicID, newTopicID)
+	return args.Error(0)
+}
+
+func (m *MockStorage) DeleteFact(userID, factID int64) error {
+	args := m.Called(userID, factID)
+	return args.Error(0)
+}
+
+func (m *MockStorage) AddFact(fact storage.Fact) (int64, error) {
+	args := m.Called(fact)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockStorage) AddFactHistory(history storage.FactHistory) error {
+	args := m.Called(history)
+	return args.Error(0)
+}
+
+func (m *MockStorage) UpdateFactHistoryTopic(oldTopicID, newTopicID int64) error {
+	args := m.Called(oldTopicID, newTopicID)
+	return args.Error(0)
+}
+
+func (m *MockStorage) GetFactHistory(userID int64, limit int) ([]storage.FactHistory, error) {
+	args := m.Called(userID, limit)
+	return args.Get(0).([]storage.FactHistory), args.Error(1)
+}
+
+func (m *MockStorage) GetFactHistoryExtended(filter storage.FactHistoryFilter, limit, offset int, sortBy, sortDir string) (storage.FactHistoryResult, error) {
+	args := m.Called(filter, limit, offset, sortBy, sortDir)
+	return args.Get(0).(storage.FactHistoryResult), args.Error(1)
+}
+
+func (m *MockStorage) GetAllFacts() ([]storage.Fact, error) {
+	args := m.Called()
+	return args.Get(0).([]storage.Fact), args.Error(1)
+}
+
+func (m *MockStorage) GetFactStats() (storage.FactStats, error) {
+	args := m.Called()
+	return args.Get(0).(storage.FactStats), args.Error(1)
+}
+
+func (m *MockStorage) GetFacts(userID int64) ([]storage.Fact, error) {
+	args := m.Called(userID)
+	if args.Get(0) == nil {
+		return []storage.Fact{}, args.Error(1)
+	}
+	return args.Get(0).([]storage.Fact), args.Error(1)
+}
+
+func (m *MockStorage) GetUnprocessedMessages(userID int64) ([]storage.Message, error) {
+	args := m.Called(userID)
+	return args.Get(0).([]storage.Message), args.Error(1)
+}
+
+func (m *MockStorage) GetTopicExtractionLogs(limit, offset int) ([]storage.RAGLog, int, error) {
+	args := m.Called(limit, offset)
+	return args.Get(0).([]storage.RAGLog), args.Int(1), args.Error(2)
+}
+
+func (m *MockStorage) GetMergeCandidates(userID int64) ([]storage.MergeCandidate, error) {
+	args := m.Called(userID)
+	return args.Get(0).([]storage.MergeCandidate), args.Error(1)
+}
+
+// MockBot is a mock type for the Bot interface
+type MockBot struct {
+	mock.Mock
+}
+
+func (m *MockBot) API() telegram.BotAPI {
+	args := m.Called()
+	return args.Get(0).(telegram.BotAPI)
+}
+
+func (m *MockBot) HandleUpdate(ctx context.Context, update json.RawMessage, remoteAddr string) {
+	m.Called(ctx, update, remoteAddr)
+}
+
+func TestStatsHandler(t *testing.T) {
+	// Arrange
+	mockStorage := new(MockStorage)
+	mockBot := new(MockBot)
+
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	assert.NoError(t, err)
+
+	stats := map[int64]storage.Stat{
+		123: {UserID: 123, TokensUsed: 1000, CostUSD: 0.001},
+	}
+	dashboardStats := &storage.DashboardStats{
+		TotalTopics: 10,
+		TotalFacts:  5,
+	}
+	mockStorage.On("GetStats").Return(stats, nil)
+	mockStorage.On("GetDashboardStats", int64(0)).Return(dashboardStats, nil)
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123, Username: "testuser"}}, nil)
+
+	req, err := http.NewRequest("GET", "/ui/stats", nil)
+	assert.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.statsHandler)
+
+	// Act
+	handler.ServeHTTP(rr, req)
+
+	// Assert
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "<td>123</td>")
+	mockStorage.AssertExpectations(t)
+}
+
+func TestHealthzHandler(t *testing.T) {
+	// Arrange
+	mockBot := new(MockBot)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	assert.NoError(t, err)
+
+	req, err := http.NewRequest("GET", "/healthz", nil)
+	assert.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.healthzHandler)
+
+	// Act
+	handler.ServeHTTP(rr, req)
+
+	// Assert
+	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestWebhookHandler(t *testing.T) {
+	// Arrange
+	mockBot := new(MockBot)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	assert.NoError(t, err)
+
+	updateJSON := `{"update_id":1,"message":{"text":"hello"}}`
+	body := []byte(updateJSON)
+	req, err := http.NewRequest("POST", "/telegram/webhook", bytes.NewBuffer(body))
+	assert.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	// We need to match the raw json.RawMessage
+	mockBot.On("HandleUpdate", mock.Anything, json.RawMessage(body), mock.Anything).Return()
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.webhookHandler)
+
+	// Act
+	handler.ServeHTTP(rr, req)
+
+	// Assert
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	// Since the handler now runs in a goroutine, we need to wait a bit.
+	// In a more complex scenario, we might use channels or waitgroups.
+	time.Sleep(10 * time.Millisecond)
+
+	mockBot.AssertCalled(t, "HandleUpdate", mock.Anything, json.RawMessage(body), mock.Anything)
+}
+
+func TestWebhookHandler_TooLarge(t *testing.T) {
+	// Arrange
+	mockBot := new(MockBot)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	assert.NoError(t, err)
+
+	// Create a body larger than 10MB
+	largeBody := make([]byte, 10*1024*1024+1)
+	req, err := http.NewRequest("POST", "/telegram/webhook", bytes.NewBuffer(largeBody))
+	assert.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.webhookHandler)
+
+	// Act
+	handler.ServeHTTP(rr, req)
+
+	// Assert
+	assert.Equal(t, http.StatusRequestEntityTooLarge, rr.Code)
+	mockBot.AssertNotCalled(t, "HandleUpdate", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestServerRouting_CorrectPath(t *testing.T) {
+	// Arrange
+	mockStorage := new(MockStorage)
+	mockBot := new(MockBot)
+	mockAPI := new(MockBotAPI)
+	cfg := &config.Config{}
+	token := "test-token"
+
+	mockBot.On("API").Return(mockAPI)
+	mockAPI.On("GetToken").Return(token)
+	mockStorage.On("GetStats").Return(map[int64]storage.Stat{}, nil) // For stats handler
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	assert.NoError(t, err)
+	handler := server.buildTestHandler(token)
+	testServer := httptest.NewServer(handler)
+	defer testServer.Close()
+
+	updateJSON := `{"update_id":1}`
+	body := []byte(updateJSON)
+	mockBot.On("HandleUpdate", mock.Anything, json.RawMessage(body), mock.Anything).Return()
+
+	// Act
+	resp, err := http.Post(testServer.URL+"/telegram/"+token, "application/json", bytes.NewBuffer(body))
+
+	// Assert
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	time.Sleep(100 * time.Millisecond)
+	mockBot.AssertExpectations(t)
+}
+
+func TestServerRouting_IncorrectPath(t *testing.T) {
+	// Arrange
+	mockStorage := new(MockStorage)
+	mockBot := new(MockBot)
+	mockAPI := new(MockBotAPI)
+	cfg := &config.Config{}
+	token := "test-token"
+
+	mockBot.On("API").Return(mockAPI)
+	mockAPI.On("GetToken").Return(token)
+	mockStorage.On("GetStats").Return(map[int64]storage.Stat{}, nil) // For stats handler
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	assert.NoError(t, err)
+	handler := server.buildTestHandler(token)
+	testServer := httptest.NewServer(handler)
+	defer testServer.Close()
+
+	updateJSON := `{"update_id":1}`
+	body := []byte(updateJSON)
+
+	// Act
+	resp, err := http.Post(testServer.URL+"/", "application/json", bytes.NewBuffer(body))
+
+	// Assert
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	mockBot.AssertNotCalled(t, "HandleUpdate", mock.Anything, mock.Anything)
+}
+
+// buildTestHandler is a helper to create a handler with all routes for testing.
+func (s *Server) buildTestHandler(token string) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ui/stats", s.statsHandler)
+	mux.HandleFunc("/healthz", s.healthzHandler)
+	mux.HandleFunc("/telegram/"+token, s.webhookHandler)
+	return s.loggingMiddleware(mux)
+}
+
+func TestFactsHistoryHandler(t *testing.T) {
+	// Arrange
+	mockStorage := new(MockStorage)
+	mockBot := new(MockBot)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	cfg.Server.DebugMode = true // Enable debug routes
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	assert.NoError(t, err)
+
+	topicID := int64(123)
+	history := []storage.FactHistory{
+		{
+			ID: 1, FactID: 1, UserID: 1, Action: "add", NewContent: "test", TopicID: &topicID,
+		},
+		{
+			ID: 2, FactID: 2, UserID: 1, Action: "update", OldContent: "old", NewContent: "new", TopicID: nil,
+		},
+	}
+	result := storage.FactHistoryResult{
+		Data:       history,
+		TotalCount: 2,
+	}
+
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 1, Username: "user1"}}, nil)
+	mockStorage.On("GetFactHistoryExtended", mock.Anything, 50, 0, "", "DESC").Return(result, nil)
+
+	req, err := http.NewRequest("GET", "/ui/facts/history", nil)
+	assert.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.factsHistoryHandler)
+
+	// Act
+	handler.ServeHTTP(rr, req)
+
+	// Assert
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "#123") // Check if TopicID link is rendered
+	mockStorage.AssertExpectations(t)
+}
+
+func TestTopicsHandler(t *testing.T) {
+	// Arrange
+	mockStorage := new(MockStorage)
+	mockBot := new(MockBot)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	cfg.Server.DebugMode = true
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	assert.NoError(t, err)
+
+	topics := []storage.Topic{
+		{ID: 1, UserID: 123, Summary: "Topic 1", StartMsgID: 1, EndMsgID: 2, CreatedAt: time.Now()},
+	}
+	messages := []storage.Message{
+		{ID: 1, UserID: 123, Role: "user", Content: "Hello", TopicID: &topics[0].ID},
+		{ID: 2, UserID: 123, Role: "assistant", Content: "Hi", TopicID: &topics[0].ID},
+	}
+
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123, Username: "testuser"}}, nil)
+
+	result := storage.TopicResult{
+		Data: []storage.TopicExtended{
+			{Topic: topics[0], MessageCount: 2, FactsCount: 0},
+		},
+		TotalCount: 1,
+	}
+	mockStorage.On("GetTopicsExtended", mock.Anything, 20, 0, mock.Anything, "DESC").Return(result, nil)
+
+	mockStorage.On("GetMessagesInRange", mock.Anything, int64(123), int64(1), int64(2)).Return(messages, nil)
+
+	req, err := http.NewRequest("GET", "/ui/topics", nil)
+	assert.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.topicsHandler)
+
+	// Act
+	handler.ServeHTTP(rr, req)
+
+	// Assert
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "Topic 1")
+	assert.Contains(t, rr.Body.String(), "Hello")
+	// Check if the accordion ID is rendered correctly (this was the bug)
+	// The bug was data-bs-parent="#accordion-{{$.ID}}" failing.
+	// If it renders, it means the template execution succeeded.
+	// We can also check if the correct ID is in the output.
+	assert.Contains(t, rr.Body.String(), `data-bs-parent="#accordion-1"`)
+
+	mockStorage.AssertExpectations(t)
+}
+
+func TestUpdateMetrics(t *testing.T) {
+	// Arrange
+	mockStorage := new(MockStorage)
+	mockBot := new(MockBot)
+	cfg := &config.Config{}
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	assert.NoError(t, err)
+
+	stats := storage.FactStats{
+		CountByType: map[string]int{
+			"identity": 10,
+			"context":  5,
+		},
+		AvgAgeDays: 2.5,
+	}
+
+	mockStorage.On("GetFactStats").Return(stats, nil)
+
+	// Act
+	server.updateMetrics()
+
+	// Assert
+	mockStorage.AssertExpectations(t)
+}

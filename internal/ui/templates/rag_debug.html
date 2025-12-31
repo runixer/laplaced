@@ -1,0 +1,82 @@
+{{define "title"}}RAG Search Debugger{{end}}
+{{define "styles"}}
+<style>
+    .result-card { border: 1px solid #dee2e6; padding: 15px; margin-bottom: 15px; border-radius: 4px; background: #fff; }
+    .score { font-weight: bold; }
+    .score-high { color: #198754; }
+    .score-med { color: #fd7e14; }
+    .score-low { color: #dc3545; }
+    pre { background: #f8f9fa; padding: 10px; overflow-x: auto; border-radius: 4px; }
+</style>
+{{end}}
+
+{{define "content"}}
+	<div class="row justify-content-center">
+		<div class="col-md-8">
+			<div class="card shadow-sm">
+				<div class="card-body">
+					<form method="POST">
+						<input type="hidden" name="user_id" value="{{.UserID}}">
+						
+						<div class="mb-3">
+							<label class="form-label fw-bold">Query:</label>
+							<textarea name="query" class="form-control" rows="3" required>{{.Query}}</textarea>
+						</div>
+						
+						<div class="mb-3 form-check">
+							<input type="checkbox" class="form-check-input" id="skip_enrichment" name="skip_enrichment">
+							<label class="form-check-label" for="skip_enrichment">Skip Enrichment (search exactly as typed)</label>
+						</div>
+
+						<button type="submit" class="btn btn-primary w-100">Search</button>
+					</form>
+				</div>
+			</div>
+
+			{{if .Error}}
+			<div class="alert alert-danger mt-4">
+				<strong>Error:</strong> {{.Error}}
+			</div>
+			{{end}}
+
+			{{if .Results}}
+			<div class="mt-4">
+				<h3 class="mb-3">Enrichment</h3>
+				<div class="card mb-4">
+					<div class="card-body">
+						<div class="mb-2"><strong>Original:</strong> {{.Query}}</div>
+						<div class="mb-2"><strong>Enriched:</strong> {{.EnrichedQuery}}</div>
+						<details>
+							<summary class="text-primary" style="cursor: pointer;">Enrichment Prompt</summary>
+							<pre class="mt-2 mb-0">{{.EnrichmentPrompt}}</pre>
+						</details>
+					</div>
+				</div>
+
+				<h3 class="mb-3">Results ({{len .Results}})</h3>
+				{{range .Results}}
+				<div class="result-card shadow-sm">
+					<div class="d-flex justify-content-between align-items-center mb-2">
+						<div class="score {{if ge .Score 0.7}}score-high{{else if ge .Score 0.5}}score-med{{else}}score-low{{end}}">
+							Score: {{printf "%.4f" .Score}}
+						</div>
+						<div class="badge bg-secondary">Topic</div>
+					</div>
+					<div class="mb-2"><strong>Topic:</strong> {{.Topic.Summary}}</div>
+					<details>
+						<summary class="text-primary" style="cursor: pointer;">Messages ({{len .Messages}})</summary>
+						<div class="mt-2 border-top pt-2">
+							{{range .Messages}}
+							<div class="small mb-1 pb-1 border-bottom">
+								<strong>{{.Role}}:</strong> {{.Content}}
+							</div>
+							{{end}}
+						</div>
+					</details>
+				</div>
+				{{end}}
+			</div>
+			{{end}}
+		</div>
+	</div>
+{{end}}

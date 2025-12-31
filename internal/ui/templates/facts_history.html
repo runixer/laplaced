@@ -1,0 +1,144 @@
+{{define "title"}}Facts History{{end}}
+{{define "styles"}}
+<style>
+    .badge-add { background-color: #0f5132; color: white; }
+    .badge-update { background-color: #fd7e14; color: white; }
+    .badge-delete { background-color: #dc3545; color: white; }
+    
+    .diff-old { color: #dc3545; text-decoration: line-through; background-color: #f8d7da; padding: 2px 4px; border-radius: 2px; }
+    .diff-new { color: #198754; background-color: #d1e7dd; padding: 2px 4px; border-radius: 2px; }
+    
+    .reason { font-style: italic; color: #6c757d; }
+    .sort-link { text-decoration: none; color: inherit; }
+    .sort-link:hover { text-decoration: underline; }
+</style>
+{{end}}
+
+{{define "content"}}
+	<div class="card mb-4 shadow-sm">
+		<div class="card-body">
+			<form method="GET" class="row g-3 align-items-end">
+				<input type="hidden" name="user_id" value="{{.SelectedUserID}}">
+				<div class="col-md-2">
+					<label class="form-label">Action</label>
+					<select name="action" class="form-select" onchange="this.form.submit()">
+						<option value="">All Actions</option>
+						<option value="add" {{if eq .Data.Filter.Action "add"}}selected{{end}}>Add</option>
+						<option value="update" {{if eq .Data.Filter.Action "update"}}selected{{end}}>Update</option>
+						<option value="delete" {{if eq .Data.Filter.Action "delete"}}selected{{end}}>Delete</option>
+					</select>
+				</div>
+				<div class="col-md-2">
+					<label class="form-label">Category</label>
+					<select name="category" class="form-select" onchange="this.form.submit()">
+						<option value="">All Categories</option>
+						<option value="bio" {{if eq .Data.Filter.Category "bio"}}selected{{end}}>Bio</option>
+						<option value="work" {{if eq .Data.Filter.Category "work"}}selected{{end}}>Work</option>
+						<option value="hobby" {{if eq .Data.Filter.Category "hobby"}}selected{{end}}>Hobby</option>
+						<option value="preference" {{if eq .Data.Filter.Category "preference"}}selected{{end}}>Preference</option>
+						<option value="other" {{if eq .Data.Filter.Category "other"}}selected{{end}}>Other</option>
+					</select>
+				</div>
+				<div class="col-md-3">
+					<label class="form-label">Search</label>
+					<input type="text" name="search" class="form-control" value="{{.Data.Filter.Search}}" placeholder="Search content...">
+				</div>
+				<div class="col-md-2">
+					<button type="submit" class="btn btn-primary w-100">Filter</button>
+				</div>
+			</form>
+		</div>
+	</div>
+
+	<div class="table-responsive shadow-sm mb-4">
+		<table class="table table-striped table-hover mb-0">
+			<thead class="table-light">
+				<tr>
+					<th><a href="?sort=created_at&dir={{if eq .Data.SortBy "created_at"}}{{if eq .Data.SortDir "ASC"}}DESC{{else}}ASC{{end}}{{else}}DESC{{end}}&user_id={{.Data.Filter.UserID}}&action={{.Data.Filter.Action}}&category={{.Data.Filter.Category}}&search={{.Data.Filter.Search}}" class="sort-link">Time {{if eq .Data.SortBy "created_at"}}{{if eq .Data.SortDir "ASC"}}▲{{else}}▼{{end}}{{end}}</a></th>
+					<th>User</th>
+					<th><a href="?sort=action&dir={{if eq .Data.SortBy "action"}}{{if eq .Data.SortDir "ASC"}}DESC{{else}}ASC{{end}}{{else}}ASC{{end}}&user_id={{.Data.Filter.UserID}}&action={{.Data.Filter.Action}}&category={{.Data.Filter.Category}}&search={{.Data.Filter.Search}}" class="sort-link">Action {{if eq .Data.SortBy "action"}}{{if eq .Data.SortDir "ASC"}}▲{{else}}▼{{end}}{{end}}</a></th>
+					<th>Fact ID</th>
+					<th><a href="?sort=category&dir={{if eq .Data.SortBy "category"}}{{if eq .Data.SortDir "ASC"}}DESC{{else}}ASC{{end}}{{else}}ASC{{end}}&user_id={{.Data.Filter.UserID}}&action={{.Data.Filter.Action}}&category={{.Data.Filter.Category}}&search={{.Data.Filter.Search}}" class="sort-link">Category {{if eq .Data.SortBy "category"}}{{if eq .Data.SortDir "ASC"}}▲{{else}}▼{{end}}{{end}}</a></th>
+					<th>Entity</th>
+					<th>Relation</th>
+					<th>Imp.</th>
+					<th>Change</th>
+					<th>Reason</th>
+					<th>Topic</th>
+				</tr>
+			</thead>
+			<tbody>
+				{{range .Data.History}}
+				<tr>
+					<td class="text-muted small text-nowrap">{{.CreatedAt.Format "2006-01-02 15:04:05"}}</td>
+					<td>{{.UserID}}</td>
+					<td><span class="badge badge-{{.Action}}">{{.Action}}</span></td>
+					<td>{{.FactID}}</td>
+					<td><span class="badge bg-secondary">{{.Category}}</span></td>
+					<td>{{.Entity}}</td>
+					<td>{{.Relation}}</td>
+					<td>{{.Importance}}</td>
+					<td>
+						{{if eq .Action "add"}}
+							<div class="diff-new">{{.NewContent}}</div>
+						{{else if eq .Action "delete"}}
+							<div class="diff-old">{{.OldContent}}</div>
+						{{else}}
+							{{if ne .OldContent .NewContent}}
+								<div class="diff-old mb-1">{{.OldContent}}</div>
+								<div class="diff-new">{{.NewContent}}</div>
+							{{else}}
+								<div class="text-muted fst-italic">(Content unchanged)</div>
+							{{end}}
+						{{end}}
+					</td>
+					<td class="reason">
+						{{.Reason}}
+						{{if .RequestInput}}
+						<details class="mt-1">
+							<summary class="text-muted small" style="cursor: pointer;">Input</summary>
+							<pre class="small bg-light p-2 mt-1 border rounded" style="white-space: pre-wrap; max-height: 200px; overflow-y: auto;">{{.RequestInput}}</pre>
+						</details>
+						{{end}}
+					</td>
+					<td>
+						{{if .TopicID}}
+							{{if ne (derefInt64 .TopicID) 0}}
+								<a href="/ui/topics?user_id={{.UserID}}#topic-{{derefInt64 .TopicID}}" target="_blank">#{{derefInt64 .TopicID}}</a>
+							{{end}}
+						{{end}}
+					</td>
+				</tr>
+				{{end}}
+			</tbody>
+		</table>
+	</div>
+
+	<!-- Pagination -->
+	{{if gt .Data.Pages 1}}
+	<nav aria-label="Page navigation">
+		<ul class="pagination justify-content-center">
+			<li class="page-item {{if eq .Data.Page 1}}disabled{{end}}">
+				<a class="page-link" href="?page={{if gt .Data.Page 1}}{{printf "%d" (call (print .Data.Page | printf "%d" | len) 1)}}{{else}}1{{end}}&user_id={{.Data.Filter.UserID}}&action={{.Data.Filter.Action}}&category={{.Data.Filter.Category}}&search={{.Data.Filter.Search}}&sort={{.Data.SortBy}}&dir={{.Data.SortDir}}">Previous</a>
+			</li>
+			
+			{{$currentPage := .Data.Page}}
+			{{$totalPages := .Data.Pages}}
+			
+			{{range $i := seq 1 $totalPages}}
+				{{if or (eq $i 1) (eq $i $totalPages) (and (ge $i (sub $currentPage 2)) (le $i (add $currentPage 2)))}}
+					<li class="page-item {{if eq $i $currentPage}}active{{end}}">
+						<a class="page-link" href="?page={{$i}}&user_id={{$.Data.Filter.UserID}}&action={{$.Data.Filter.Action}}&category={{$.Data.Filter.Category}}&search={{$.Data.Filter.Search}}&sort={{$.Data.SortBy}}&dir={{$.Data.SortDir}}">{{$i}}</a>
+					</li>
+				{{else if or (eq $i (sub $currentPage 3)) (eq $i (add $currentPage 3))}}
+					<li class="page-item disabled"><span class="page-link">...</span></li>
+				{{end}}
+			{{end}}
+
+			<li class="page-item {{if eq .Data.Page .Data.Pages}}disabled{{end}}">
+				<a class="page-link" href="?page={{add .Data.Page 1}}&user_id={{.Data.Filter.UserID}}&action={{.Data.Filter.Action}}&category={{.Data.Filter.Category}}&search={{.Data.Filter.Search}}&sort={{.Data.SortBy}}&dir={{.Data.SortDir}}">Next</a>
+			</li>
+		</ul>
+	</nav>
+	{{end}}
+{{end}}

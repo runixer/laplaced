@@ -1,0 +1,94 @@
+# Log configuration
+log:
+  level: "info"
+
+# Server Configuration
+server:
+  listen_port: "9081" # Internal port for webhooks and the web interface
+  debug_mode: false   # Enable debug endpoints (/debug, /stats, /topics)
+  auth:
+    enabled: true
+    username: "admin"
+    password: "" # If empty, a random password will be generated on startup
+
+# Telegram Bot Configuration
+telegram:
+  token: "" # Set via LAPLACED_TELEGRAM_TOKEN
+  webhook_url: "" # Public URL for Telegram Webhook
+  proxy_url: "" # Optional: "http://user:pass@host:port"
+
+# OpenRouter API Configuration
+openrouter:
+  api_key: "" # Set via LAPLACED_OPENROUTER_API_KEY
+  proxy_url: "" # Optional, leave empty if not needed
+  model: "google/gemini-3-pro-preview"
+  pdf_parser_engine: "native" # Can be "native", "pdf-text", or "mistral-ocr"
+  request_cost: 0.0
+  price_tiers:
+    - up_to_tokens: 200000       # Tier 1 threshold
+      prompt_cost: 1.25          # Price per 1M input tokens
+      completion_cost: 10.0      # Price per 1M output tokens
+    - up_to_tokens: 1048576      # Tier 2 threshold
+      prompt_cost: 2.50
+      completion_cost: 15.0
+
+# RAG Configuration
+rag:
+  enabled: true
+  embedding_model: "google/gemini-embedding-001"
+  summary_model: "google/gemini-3-flash-preview"
+  query_model: "google/gemini-3-flash-preview"
+  topic_model: "google/gemini-3-flash-preview"
+  
+  max_context_messages: 50      # Short-term memory size
+  retrieved_messages_count: 20  # How many historical messages to inject
+  retrieved_topics_count: 5     # How many topics to inject
+  similarity_threshold: 0.5     # Cosine similarity threshold
+  consolidation_similarity_threshold: 0.8 # Threshold for merging topics
+  min_safety_threshold: 0.3     # Minimum score to consider a match
+  max_chunk_size: 400           # Max messages per topic chunk
+  
+  backfill_batch_size: 20       # Batch size for background vectorization
+  backfill_interval: "1s"       # Pause between batches
+  chunk_interval: "5h"          # Time gap to consider a new topic
+  # topic_extraction_prompt: |
+  #   Override topic extraction prompt here...
+  # enrichment_prompt: |
+  #   Override enrichment prompt here...
+
+# Internet Search Configuration
+internet_search:
+  enabled: true
+  model: "perplexity/sonar-pro"
+
+# Tools Configuration
+tools:
+  - name: "internet_search"
+    model: "perplexity/sonar-pro"
+    # description: "Override tool description here..."
+    # parameter_description: "Override parameter description here..."
+  - name: "memory_search"
+    model: "memory"
+  - name: "manage_memory"
+    model: "memory"
+
+# Bot Configuration
+bot:
+  language: "en" # Default language (en, ru)
+  bot_name: "Laplaced"
+  # system_prompt: |
+  #   Override system prompt here...
+  # system_prompt_extra: "Additional instructions appended to the system prompt."
+  turn_wait_duration: "2s"
+  # allowed_user_ids: [] # List of Telegram User IDs allowed to use the bot. Set via LAPLACED_ALLOWED_USER_IDS=123,456 or in config.yml
+
+# Database Configuration
+database:
+  path: "data/laplaced.db"
+
+# Yandex Cloud SpeechKit Configuration (Optional, for STT)
+yandex:
+  enabled: false
+  api_key: "" # Set via LAPLACED_YANDEX_API_KEY
+  folder_id: "" # Set via LAPLACED_YANDEX_FOLDER_ID
+  language: "ru-RU" # Language code for recognition (e.g., ru-RU, en-US)
