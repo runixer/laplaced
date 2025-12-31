@@ -26,6 +26,8 @@ import (
 	"github.com/joho/godotenv"
 )
 
+var Version = "dev"
+
 func runHealthcheck(configPath string) int {
 	// Try to load config to get the port
 	// We suppress errors here because if config fails, we might still want to try default port
@@ -67,7 +69,13 @@ func main() {
 
 	configPath := flag.String("config", "configs/config.yaml", "path to config file")
 	healthcheck := flag.Bool("healthcheck", false, "run healthcheck and exit")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("laplaced", Version)
+		os.Exit(0)
+	}
 
 	if *healthcheck {
 		os.Exit(runHealthcheck(*configPath))
@@ -178,7 +186,7 @@ func main() {
 		}
 	}()
 
-	logger.Info("Starting Laplaced...")
+	logger.Info("Starting Laplaced", "version", Version)
 
 	if cfg.Telegram.WebhookURL != "" {
 		// Set webhook
