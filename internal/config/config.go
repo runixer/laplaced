@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/ilyakaznacheev/cleanenv"
@@ -120,7 +121,7 @@ func Load(path string) (*Config, error) {
 			}
 			// File doesn't exist, just use defaults
 			// Log this so users know their config wasn't loaded
-			println("WARNING: Config file not found at", path, "- using defaults")
+			slog.Warn("config file not found, using defaults", "path", path)
 		} else {
 			// Expand environment variables in user config (legacy support)
 			expandedData := []byte(os.ExpandEnv(string(data)))
@@ -129,7 +130,7 @@ func Load(path string) (*Config, error) {
 			if err := yaml.Unmarshal(expandedData, &cfg); err != nil {
 				return nil, err
 			}
-			println("INFO: Loaded user config from", path)
+			slog.Info("loaded user config", "path", path)
 		}
 	}
 

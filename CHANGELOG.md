@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Optimized RAG retrieval: now fetches only matched topics instead of all topics
 - Optimized `HasFacts` filter: uses `EXISTS` subquery instead of `COUNT(*)` for faster execution
+- Replaced `println()` with structured logging (`slog`) in config loading
+- Removed `goto` statement in i18n package, using simpler control flow
 
 ### Fixed
 - Fixed OpenRouter client returning nil instead of error on non-OK HTTP status

@@ -102,21 +102,18 @@ func (t *Translator) Get(lang, key string, args ...interface{}) string {
 	if tr, ok := t.translations[lang]; ok {
 		if v, ok := tr[key]; ok {
 			val = v
-			goto Format
 		}
 	}
 
-	// Fallback to default language
-	if lang != t.defaultLang {
+	// Fallback to default language if key not found
+	if val == key && lang != t.defaultLang {
 		if tr, ok := t.translations[t.defaultLang]; ok {
 			if v, ok := tr[key]; ok {
 				val = v
-				goto Format
 			}
 		}
 	}
 
-Format:
 	if len(args) > 0 {
 		return fmt.Sprintf(val, args...)
 	}
