@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-01-01
+
 ### Changed
 - Switched from `math/rand` to `math/rand/v2` for better randomness in backoff jitter
 - Migrated from deprecated `grpc.DialContext` to `grpc.NewClient` in Yandex SpeechKit client
@@ -122,7 +124,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker and docker-compose deployment
 - Configuration via YAML and environment variables
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/runixer/laplaced/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/runixer/laplaced/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/runixer/laplaced/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/runixer/laplaced/compare/v0.1.2...v0.1.3
