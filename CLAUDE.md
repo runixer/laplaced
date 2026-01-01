@@ -135,6 +135,37 @@ Key env vars:
 Default language is configurable via `bot.language` in config. Supported: `en`, `ru`.
 Translation files in `locales/` directory.
 
+## Git Workflow
+
+### When to Commit
+
+After completing a task (feature, refactoring, bug fix), **always offer to commit**. Don't wait for the user to ask.
+
+### Commit Style
+
+- **Format**: Short imperative subject, optional body with details
+- **Subject**: Start with verb (Add, Fix, Refactor, Update, Remove)
+- **Length**: Subject ≤50 chars, body lines ≤72 chars
+
+```bash
+# Single-line for simple changes
+git commit -m "Fix typo in error message"
+
+# Multi-line for complex changes
+git commit -m "$(cat <<'EOF'
+Refactor buildContext: extract helper methods
+
+- Extract formatCoreIdentityFacts and deduplicateTopics
+- Reduce cyclomatic complexity from 46 to 34
+- Add tests for extracted methods
+EOF
+)"
+```
+
+### Pre-commit Hook
+
+Project has `golangci-lint` pre-commit hook. If commit fails, fix lint errors and retry.
+
 ## CI/CD
 
 GitHub Actions workflow (`.github/workflows/ci.yml`):
