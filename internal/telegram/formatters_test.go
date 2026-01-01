@@ -2,11 +2,12 @@ package telegram
 
 import (
 	"fmt"
-	"github.com/runixer/laplaced/internal/i18n"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/runixer/laplaced/internal/i18n"
 
 	"github.com/stretchr/testify/assert"
 )

@@ -146,8 +146,9 @@ func (s *Server) Start(ctx context.Context) error {
 	handler = s.loggingMiddleware(handler)
 
 	server := &http.Server{
-		Addr:    ":" + s.cfg.Server.ListenPort,
-		Handler: handler,
+		Addr:              ":" + s.cfg.Server.ListenPort,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	go func() {

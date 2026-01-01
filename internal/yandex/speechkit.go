@@ -2,6 +2,7 @@ package yandex
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -160,7 +161,7 @@ func (c *SpeechKitClient) Recognize(ctx context.Context, audioData []byte) (stri
 	var finalTexts []string
 	for {
 		resp, err := stream.Recv()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

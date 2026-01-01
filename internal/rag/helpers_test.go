@@ -58,10 +58,10 @@ func TestFindChunkBounds(t *testing.T) {
 
 func TestFindStragglers(t *testing.T) {
 	tests := []struct {
-		name            string
-		chunk           []storage.Message
-		topics          []ExtractedTopic
-		wantStragglers  []int64
+		name               string
+		chunk              []storage.Message
+		topics             []ExtractedTopic
+		wantStragglers     []int64
 		wantStragglerCount int
 	}{
 		{
@@ -71,9 +71,9 @@ func TestFindStragglers(t *testing.T) {
 			wantStragglers: nil,
 		},
 		{
-			name:           "empty topics - all stragglers",
-			chunk:          []storage.Message{{ID: 1}, {ID: 2}, {ID: 3}},
-			topics:         []ExtractedTopic{},
+			name:               "empty topics - all stragglers",
+			chunk:              []storage.Message{{ID: 1}, {ID: 2}, {ID: 3}},
+			topics:             []ExtractedTopic{},
 			wantStragglerCount: 3,
 		},
 		{

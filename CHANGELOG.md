@@ -7,9 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added `.golangci.yml` with extended linter set (goimports, misspell, gocritic, gosec, bodyclose, errorlint)
+
 ### Fixed
 - Fixed "context canceled" warnings for typing action by using detached context with timeout
 - Fixed bot token leaking in error log messages - now sanitized as `[REDACTED]`
+
+### Security
+- Fixed potential Slowloris attack vector by adding `ReadHeaderTimeout` to HTTP server
 
 ## [0.1.3] - 2026-01-01
 

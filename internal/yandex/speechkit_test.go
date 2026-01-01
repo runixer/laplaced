@@ -2,6 +2,7 @@ package yandex
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -35,7 +36,7 @@ func (m *mockRecognizerServer) RecognizeStreaming(stream stt.Recognizer_Recogniz
 	// Read audio chunks until the client closes the stream
 	for {
 		_, err := stream.Recv()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

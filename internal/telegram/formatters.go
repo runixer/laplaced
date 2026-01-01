@@ -2,9 +2,10 @@ package telegram
 
 import (
 	"fmt"
-	"github.com/runixer/laplaced/internal/i18n"
 	"strings"
 	"time"
+
+	"github.com/runixer/laplaced/internal/i18n"
 )
 
 // Format formats user information for display, including their username if available.

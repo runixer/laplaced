@@ -91,7 +91,7 @@ func TestDeduplicateTopics(t *testing.T) {
 				},
 			},
 			recentHistory: []storage.Message{{ID: 1}, {ID: 2}, {ID: 3}},
-			expectedCount: 2,                        // topic 1 removed
+			expectedCount: 2,                       // topic 1 removed
 			expectedMsgs:  map[int]int{0: 1, 1: 2}, // topic2 has 1, topic3 has 2
 		},
 	}

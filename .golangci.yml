@@ -1,0 +1,39 @@
+linters:
+  enable:
+    - goimports    # imports formatting (includes gofmt)
+    - misspell     # typos in comments/strings
+    - gocritic     # bugs, performance, style checks
+    - gosec        # security issues
+    - bodyclose    # HTTP response body must be closed
+    - errorlint    # proper error wrapping (errors.Is/As)
+    - unconvert    # unnecessary type conversions
+
+linters-settings:
+  gosec:
+    excludes:
+      # SQL with parameterized queries (?) is safe
+      - G201  # SQL string formatting
+      - G202  # SQL string concatenation
+      # math/rand is fine for non-crypto (emoji reactions)
+      - G404
+
+  gocritic:
+    enabled-tags:
+      - diagnostic
+    disabled-checks:
+      - exitAfterDefer    # acceptable in cmd/ startup code
+      - ifElseChain       # style preference
+      - elseif            # style preference
+      - singleCaseSwitch  # sometimes intentional for future cases
+
+issues:
+  exclude-rules:
+    # Test files: relax rules
+    - path: _test\.go
+      linters:
+        - gosec
+        - bodyclose
+        - gocritic
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
