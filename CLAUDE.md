@@ -71,6 +71,56 @@ internal/
 - **Profile**: Up to 50 facts about the user, always included in context
 - **RAG**: Vector similarity search retrieves relevant past discussions
 
+## Testing
+
+### Running Tests
+
+```bash
+go test ./...                    # All tests
+go test ./internal/bot/... -v    # Specific package with verbose output
+```
+
+### Test Style
+
+- **Framework**: `testify/assert` for assertions, `testify/mock` for mocks
+- **Pattern**: Table-driven tests with subtests (`t.Run`)
+- **Location**: `*_test.go` files alongside source code
+
+### Available Test Helpers (`internal/bot/bot_test.go`)
+
+- `createTestTranslator(t)` — creates `*i18n.Translator` with test translations
+- `MockBotAPI` — mock for Telegram API
+- `MockStorage` — mock for all storage repositories
+- `MockOpenRouterClient` — mock for LLM client
+- `MockFileDownloader` — mock for file downloads
+- `MockYandexClient` — mock for speech recognition
+
+### Writing Tests for New Functions
+
+1. For pure functions (no dependencies): test directly with table-driven tests
+2. For methods with dependencies: use existing mocks from `bot_test.go`
+3. Add translations to `createTestTranslator` if function uses `translator.Get()`
+
+Example structure:
+```go
+func TestMyFunction(t *testing.T) {
+    tests := []struct {
+        name     string
+        input    InputType
+        expected OutputType
+    }{
+        {"case 1", input1, expected1},
+        {"case 2", input2, expected2},
+    }
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            result := myFunction(tt.input)
+            assert.Equal(t, tt.expected, result)
+        })
+    }
+}
+```
+
 ## Configuration
 
 Config loaded from `configs/config.yaml`, overridable via environment variables prefixed with `LAPLACED_`.

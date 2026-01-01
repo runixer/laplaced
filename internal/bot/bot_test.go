@@ -363,6 +363,9 @@ telegram:
 bot:
   voice_recognition_prefix: "(Распознано из аудио):"
   system_prompt: "System"
+memory:
+  facts_user_header: "=== Facts about User ==="
+  facts_others_header: "=== Facts about Others ==="
 `
 	_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte(content), 0644)
 	tr, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")

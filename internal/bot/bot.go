@@ -422,6 +422,67 @@ func (b *Bot) handleVoiceMessage(ctx context.Context, msg *telegram.Message, log
 	b.processMessageGroup(context.Background(), group)
 }
 
+// formatCoreIdentityFacts formats core identity facts into a string for the system prompt.
+// It separates facts about the user from facts about other entities.
+func (b *Bot) formatCoreIdentityFacts(facts []storage.Fact) string {
+	if len(facts) == 0 {
+		return ""
+	}
+
+	var userFacts, otherFacts []storage.Fact
+	for _, f := range facts {
+		if strings.EqualFold(f.Entity, "User") {
+			userFacts = append(userFacts, f)
+		} else {
+			otherFacts = append(otherFacts, f)
+		}
+	}
+
+	var result string
+	if len(userFacts) > 0 {
+		result += fmt.Sprintf("%s\n", b.translator.Get(b.cfg.Bot.Language, "memory.facts_user_header"))
+		for _, f := range userFacts {
+			result += fmt.Sprintf("- [ID:%d] [%s] [%s/%s] (Updated: %s) %s\n",
+				f.ID, f.Entity, f.Category, f.Type, f.LastUpdated.Format("2006-01-02"), f.Content)
+		}
+		result += "\n"
+	}
+
+	if len(otherFacts) > 0 {
+		result += fmt.Sprintf("%s\n", b.translator.Get(b.cfg.Bot.Language, "memory.facts_others_header"))
+		for _, f := range otherFacts {
+			result += fmt.Sprintf("- [ID:%d] [%s] [%s/%s] (Updated: %s) %s\n",
+				f.ID, f.Entity, f.Category, f.Type, f.LastUpdated.Format("2006-01-02"), f.Content)
+		}
+		result += "\n"
+	}
+
+	return strings.TrimRight(result, "\n")
+}
+
+// deduplicateTopics removes messages from retrieved topics that are already present in recent history.
+func (b *Bot) deduplicateTopics(topics []rag.TopicSearchResult, recentHistory []storage.Message) []rag.TopicSearchResult {
+	recentIDs := make(map[int64]bool, len(recentHistory))
+	for _, msg := range recentHistory {
+		recentIDs[msg.ID] = true
+	}
+
+	var filtered []rag.TopicSearchResult
+	for _, topicRes := range topics {
+		var filteredMsgs []storage.Message
+		for _, msg := range topicRes.Messages {
+			if !recentIDs[msg.ID] {
+				filteredMsgs = append(filteredMsgs, msg)
+			}
+		}
+		if len(filteredMsgs) > 0 {
+			topicRes.Messages = filteredMsgs
+			filtered = append(filtered, topicRes)
+		}
+	}
+	return filtered
+}
+
 func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageContent string, currentMessageRaw string, currentUserMessageParts []interface{}) ([]openrouter.Message, *rag.RetrievalDebugInfo, error) {
 	// 0. Get Session Memory (Short-Term Archive)
 	unprocessedHistory, err := b.msgRepo.GetUnprocessedMessages(userID)
@@ -443,37 +504,7 @@ func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageCont
 	}
 
 	// Format Core Identity for System Prompt
-	var memoryBankFormatted string
-	if len(coreIdentityFacts) > 0 {
-		var userFacts []storage.Fact
-		var otherFacts []storage.Fact
-
-		for _, f := range coreIdentityFacts {
-			if strings.EqualFold(f.Entity, "User") {
-				userFacts = append(userFacts, f)
-			} else {
-				otherFacts = append(otherFacts, f)
-			}
-		}
-
-		if len(userFacts) > 0 {
-			memoryBankFormatted += fmt.Sprintf("%s\n", b.translator.Get(b.cfg.Bot.Language, "memory.facts_user_header"))
-			for _, f := range userFacts {
-				memoryBankFormatted += fmt.Sprintf("- [ID:%d] [%s] [%s/%s] (Updated: %s) %s\n", f.ID, f.Entity, f.Category, f.Type, f.LastUpdated.Format("2006-01-02"), f.Content)
-			}
-			memoryBankFormatted += "\n"
-		}
-
-		if len(otherFacts) > 0 {
-			memoryBankFormatted += fmt.Sprintf("%s\n", b.translator.Get(b.cfg.Bot.Language, "memory.facts_others_header"))
-			for _, f := range otherFacts {
-				memoryBankFormatted += fmt.Sprintf("- [ID:%d] [%s] [%s/%s] (Updated: %s) %s\n", f.ID, f.Entity, f.Category, f.Type, f.LastUpdated.Format("2006-01-02"), f.Content)
-			}
-			memoryBankFormatted += "\n"
-		}
-
-		memoryBankFormatted = strings.TrimRight(memoryBankFormatted, "\n")
-	}
+	memoryBankFormatted := b.formatCoreIdentityFacts(coreIdentityFacts)
 
 	recentHistory := unprocessedHistory
 
@@ -508,26 +539,7 @@ func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageCont
 		if err != nil {
 			b.logger.Error("RAG retrieval failed", "error", err)
 		} else {
-			// Deduplicate topics
-			recentIDs := make(map[int64]bool)
-			for _, msg := range recentHistory {
-				recentIDs[msg.ID] = true
-			}
-
-			var filteredTopics []rag.TopicSearchResult
-			for _, topicRes := range retrievedResults {
-				var filteredMsgs []storage.Message
-				for _, msg := range topicRes.Messages {
-					if !recentIDs[msg.ID] {
-						filteredMsgs = append(filteredMsgs, msg)
-					}
-				}
-				if len(filteredMsgs) > 0 {
-					topicRes.Messages = filteredMsgs
-					filteredTopics = append(filteredTopics, topicRes)
-				}
-			}
-			retrievedResults = filteredTopics
+			retrievedResults = b.deduplicateTopics(retrievedResults, recentHistory)
 		}
 
 		// Retrieve relevant facts (Layer 2 - Context)
