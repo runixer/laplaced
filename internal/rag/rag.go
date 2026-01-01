@@ -477,6 +477,43 @@ type ExtractedTopic struct {
 	EndMsgID   int64  `json:"end_msg_id"`
 }
 
+// findChunkBounds returns the min and max message IDs in a chunk.
+func findChunkBounds(chunk []storage.Message) (minID, maxID int64) {
+	if len(chunk) == 0 {
+		return 0, 0
+	}
+	minID, maxID = chunk[0].ID, chunk[0].ID
+	for _, m := range chunk[1:] {
+		if m.ID < minID {
+			minID = m.ID
+		}
+		if m.ID > maxID {
+			maxID = m.ID
+		}
+	}
+	return minID, maxID
+}
+
+// findStragglers returns message IDs from chunk that are not covered by any topic.
+func findStragglers(chunk []storage.Message, topics []ExtractedTopic) []int64 {
+	coveredIDs := make(map[int64]bool)
+	for _, t := range topics {
+		for _, msg := range chunk {
+			if msg.ID >= t.StartMsgID && msg.ID <= t.EndMsgID {
+				coveredIDs[msg.ID] = true
+			}
+		}
+	}
+
+	var stragglers []int64
+	for _, msg := range chunk {
+		if !coveredIDs[msg.ID] {
+			stragglers = append(stragglers, msg.ID)
+		}
+	}
+	return stragglers
+}
+
 func (s *Service) processChunk(ctx context.Context, userID int64, chunk []storage.Message) error {
 	if len(chunk) == 0 {
 		return nil
@@ -490,16 +527,7 @@ func (s *Service) processChunk(ctx context.Context, userID int64, chunk []storag
 	}
 
 	// 2. Validate Coverage
-	chunkStartID := chunk[0].ID
-	chunkEndID := chunk[0].ID
-	for _, m := range chunk {
-		if m.ID < chunkStartID {
-			chunkStartID = m.ID
-		}
-		if m.ID > chunkEndID {
-			chunkEndID = m.ID
-		}
-	}
+	chunkStartID, chunkEndID := findChunkBounds(chunk)
 	referenceDate := chunk[len(chunk)-1].CreatedAt
 
 	var validTopics []ExtractedTopic
@@ -531,39 +559,13 @@ func (s *Service) processChunk(ctx context.Context, userID int64, chunk []storag
 		}
 
 		// Update IDs to match actual messages found to ensure AddTopic updates them
-		minID := foundMessages[0].ID
-		maxID := foundMessages[0].ID
-		for _, m := range foundMessages {
-			if m.ID < minID {
-				minID = m.ID
-			}
-			if m.ID > maxID {
-				maxID = m.ID
-			}
-		}
-		t.StartMsgID = minID
-		t.EndMsgID = maxID
+		t.StartMsgID, t.EndMsgID = findChunkBounds(foundMessages)
 
 		validTopics = append(validTopics, t)
 	}
 
 	// Check for stragglers (messages not covered by any topic)
-	coveredIDs := make(map[int64]bool)
-	for _, t := range validTopics {
-		for _, msg := range chunk {
-			if msg.ID >= t.StartMsgID && msg.ID <= t.EndMsgID {
-				coveredIDs[msg.ID] = true
-			}
-		}
-	}
-
-	var stragglerIDs []int64
-	for _, msg := range chunk {
-		if !coveredIDs[msg.ID] {
-			stragglerIDs = append(stragglerIDs, msg.ID)
-		}
-	}
-
+	stragglerIDs := findStragglers(chunk, validTopics)
 	if len(stragglerIDs) > 0 {
 		s.logger.Warn("Topic extraction incomplete: stragglers detected", "count", len(stragglerIDs), "ids", stragglerIDs)
 		// Log received topics for debug
