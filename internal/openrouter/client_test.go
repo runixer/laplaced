@@ -147,6 +147,107 @@ func TestCreateChatCompletionLogging(t *testing.T) {
 	assert.True(t, foundRequestLog, "Did not find the 'Sending request to OpenRouter' log entry")
 }
 
+func TestCreateChatCompletionRetry(t *testing.T) {
+	attempts := 0
+
+	// Mock server that fails twice then succeeds
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts <= 2 {
+			// Return 429 (rate limit) or 503 (service unavailable) for first two attempts
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error": "rate limited"}`))
+			return
+		}
+
+		// Third attempt succeeds
+		w.Header().Set("Content-Type", "application/json")
+		resp := ChatCompletionResponse{
+			Choices: []struct {
+				Message struct {
+					Role             string      `json:"role"`
+					Content          string      `json:"content"`
+					ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
+					ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
+				} `json:"message"`
+			}{
+				{
+					Message: struct {
+						Role             string      `json:"role"`
+						Content          string      `json:"content"`
+						ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
+						ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
+					}{Role: "assistant", Content: "Success after retry!"},
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	assert.NoError(t, err)
+
+	req := ChatCompletionRequest{
+		Model:    "test_model",
+		Messages: []Message{{Role: "user", Content: "Hello"}},
+	}
+
+	resp, err := client.CreateChatCompletion(context.Background(), req)
+	assert.NoError(t, err)
+	assert.Equal(t, 3, attempts, "Should have made 3 attempts (2 retries)")
+	assert.Equal(t, "Success after retry!", resp.Choices[0].Message.Content)
+}
+
+func TestCreateChatCompletionMaxRetriesExceeded(t *testing.T) {
+	attempts := 0
+
+	// Mock server that always fails
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error": "service unavailable"}`))
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	assert.NoError(t, err)
+
+	req := ChatCompletionRequest{
+		Model:    "test_model",
+		Messages: []Message{{Role: "user", Content: "Hello"}},
+	}
+
+	_, err = client.CreateChatCompletion(context.Background(), req)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "503")
+	assert.Equal(t, 4, attempts, "Should have made 4 attempts (initial + 3 retries)")
+}
+
+func TestIsRetryableStatusCode(t *testing.T) {
+	tests := []struct {
+		code     int
+		expected bool
+	}{
+		{http.StatusOK, false},
+		{http.StatusBadRequest, false},
+		{http.StatusUnauthorized, false},
+		{http.StatusTooManyRequests, true},
+		{http.StatusInternalServerError, true},
+		{http.StatusBadGateway, true},
+		{http.StatusServiceUnavailable, true},
+		{http.StatusGatewayTimeout, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(http.StatusText(tt.code), func(t *testing.T) {
+			assert.Equal(t, tt.expected, isRetryableStatusCode(tt.code))
+		})
+	}
+}
+
 func TestFilterReasoningForLog(t *testing.T) {
 	tests := []struct {
 		name     string

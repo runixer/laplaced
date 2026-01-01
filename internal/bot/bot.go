@@ -760,7 +760,7 @@ func (b *Bot) performAddFact(ctx context.Context, userID int64, p memoryOpParams
 		return "Error adding fact.", err
 	}
 
-	_ = b.factHistoryRepo.AddFactHistory(storage.FactHistory{
+	if err := b.factHistoryRepo.AddFactHistory(storage.FactHistory{
 		FactID:     id,
 		UserID:     userID,
 		Action:     "add",
@@ -771,7 +771,9 @@ func (b *Bot) performAddFact(ctx context.Context, userID int64, p memoryOpParams
 		Relation:   "related_to",
 		Importance: importance,
 		TopicID:    nil,
-	})
+	}); err != nil {
+		b.logger.Warn("failed to add fact history", "fact_id", id, "error", err)
+	}
 
 	return "Fact added successfully.", nil
 }
@@ -782,7 +784,10 @@ func (b *Bot) performDeleteFact(ctx context.Context, userID int64, p memoryOpPar
 	}
 
 	// Fetch old fact for history
-	oldFacts, _ := b.factRepo.GetFactsByIDs([]int64{p.FactID})
+	oldFacts, err := b.factRepo.GetFactsByIDs([]int64{p.FactID})
+	if err != nil {
+		b.logger.Warn("failed to fetch old fact for history", "fact_id", p.FactID, "error", err)
+	}
 	var oldContent, category, entity, relation string
 	var importance int
 	if len(oldFacts) > 0 {
@@ -797,7 +802,7 @@ func (b *Bot) performDeleteFact(ctx context.Context, userID int64, p memoryOpPar
 		return "Error deleting fact.", err
 	}
 
-	_ = b.factHistoryRepo.AddFactHistory(storage.FactHistory{
+	if err := b.factHistoryRepo.AddFactHistory(storage.FactHistory{
 		FactID:     p.FactID,
 		UserID:     userID,
 		Action:     "delete",
@@ -808,7 +813,9 @@ func (b *Bot) performDeleteFact(ctx context.Context, userID int64, p memoryOpPar
 		Relation:   relation,
 		Importance: importance,
 		TopicID:    nil,
-	})
+	}); err != nil {
+		b.logger.Warn("failed to add fact history", "fact_id", p.FactID, "error", err)
+	}
 
 	return "Fact deleted successfully.", nil
 }
@@ -837,7 +844,10 @@ func (b *Bot) performUpdateFact(ctx context.Context, userID int64, p memoryOpPar
 	}
 
 	// Fetch old fact for history
-	oldFacts, _ := b.factRepo.GetFactsByIDs([]int64{p.FactID})
+	oldFacts, err := b.factRepo.GetFactsByIDs([]int64{p.FactID})
+	if err != nil {
+		b.logger.Warn("failed to fetch old fact for history", "fact_id", p.FactID, "error", err)
+	}
 	var oldContent, category, entity, relation string
 	if len(oldFacts) > 0 {
 		oldContent = oldFacts[0].Content
@@ -859,7 +869,7 @@ func (b *Bot) performUpdateFact(ctx context.Context, userID int64, p memoryOpPar
 		return "Error updating fact.", err
 	}
 
-	_ = b.factHistoryRepo.AddFactHistory(storage.FactHistory{
+	if err := b.factHistoryRepo.AddFactHistory(storage.FactHistory{
 		FactID:     p.FactID,
 		UserID:     userID,
 		Action:     "update",
@@ -871,7 +881,9 @@ func (b *Bot) performUpdateFact(ctx context.Context, userID int64, p memoryOpPar
 		Relation:   relation,
 		Importance: importance,
 		TopicID:    nil,
-	})
+	}); err != nil {
+		b.logger.Warn("failed to add fact history", "fact_id", p.FactID, "error", err)
+	}
 
 	return "Fact updated successfully.", nil
 }

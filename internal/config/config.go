@@ -2,6 +2,8 @@ package config
 
 import (
 	_ "embed"
+	"errors"
+	"fmt"
 	"os"
 
 	"github.com/ilyakaznacheev/cleanenv"
@@ -148,4 +150,73 @@ func LoadDefault() (*Config, error) {
 // Useful for generating example config files.
 func DefaultConfigBytes() []byte {
 	return defaultConfig
+}
+
+// Validate checks configuration for required fields and valid ranges.
+// Returns an error describing all validation failures.
+func (c *Config) Validate() error {
+	var errs []error
+
+	// Required fields
+	if c.Telegram.Token == "" {
+		errs = append(errs, errors.New("telegram.token is required"))
+	}
+	if c.OpenRouter.APIKey == "" {
+		errs = append(errs, errors.New("openrouter.api_key is required"))
+	}
+	if c.Database.Path == "" {
+		errs = append(errs, errors.New("database.path is required"))
+	}
+
+	// Yandex requires api_key and folder_id if enabled
+	if c.Yandex.Enabled {
+		if c.Yandex.APIKey == "" {
+			errs = append(errs, errors.New("yandex.api_key is required when yandex.enabled is true"))
+		}
+		if c.Yandex.FolderID == "" {
+			errs = append(errs, errors.New("yandex.folder_id is required when yandex.enabled is true"))
+		}
+	}
+
+	// Server auth requires username and password if enabled
+	if c.Server.Auth.Enabled {
+		if c.Server.Auth.Username == "" {
+			errs = append(errs, errors.New("server.auth.username is required when server.auth.enabled is true"))
+		}
+		if c.Server.Auth.Password == "" {
+			errs = append(errs, errors.New("server.auth.password is required when server.auth.enabled is true"))
+		}
+	}
+
+	// RAG thresholds must be in range [0, 1]
+	if c.RAG.Enabled {
+		if c.RAG.SimilarityThreshold < 0 || c.RAG.SimilarityThreshold > 1 {
+			errs = append(errs, fmt.Errorf("rag.similarity_threshold must be between 0 and 1, got %f", c.RAG.SimilarityThreshold))
+		}
+		if c.RAG.ConsolidationSimilarityThreshold < 0 || c.RAG.ConsolidationSimilarityThreshold > 1 {
+			errs = append(errs, fmt.Errorf("rag.consolidation_similarity_threshold must be between 0 and 1, got %f", c.RAG.ConsolidationSimilarityThreshold))
+		}
+		if c.RAG.MinSafetyThreshold < 0 || c.RAG.MinSafetyThreshold > 1 {
+			errs = append(errs, fmt.Errorf("rag.min_safety_threshold must be between 0 and 1, got %f", c.RAG.MinSafetyThreshold))
+		}
+
+		// Positive integers
+		if c.RAG.MaxContextMessages <= 0 {
+			errs = append(errs, fmt.Errorf("rag.max_context_messages must be positive, got %d", c.RAG.MaxContextMessages))
+		}
+		if c.RAG.RetrievedMessagesCount <= 0 {
+			errs = append(errs, fmt.Errorf("rag.retrieved_messages_count must be positive, got %d", c.RAG.RetrievedMessagesCount))
+		}
+		if c.RAG.RetrievedTopicsCount <= 0 {
+			errs = append(errs, fmt.Errorf("rag.retrieved_topics_count must be positive, got %d", c.RAG.RetrievedTopicsCount))
+		}
+		if c.RAG.MaxChunkSize <= 0 {
+			errs = append(errs, fmt.Errorf("rag.max_chunk_size must be positive, got %d", c.RAG.MaxChunkSize))
+		}
+	}
+
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	return nil
 }

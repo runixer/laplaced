@@ -181,6 +181,41 @@ func TestGetLastTopicEndMessageID(t *testing.T) {
 	assert.Equal(t, int64(0), maxID)
 }
 
+func TestGetTopicsByIDs(t *testing.T) {
+	store, cleanup := setupTestDB(t)
+	defer cleanup()
+	_ = store.Init()
+
+	userID := int64(123)
+	id1, _ := store.AddTopic(Topic{UserID: userID, Summary: "Topic 1", Embedding: []float32{1.0, 0.0}})
+	_, _ = store.AddTopic(Topic{UserID: userID, Summary: "Topic 2", Embedding: []float32{0.0, 1.0}})
+	id3, _ := store.AddTopic(Topic{UserID: userID, Summary: "Topic 3", Embedding: []float32{0.5, 0.5}})
+
+	// Get specific IDs
+	topics, err := store.GetTopicsByIDs([]int64{id1, id3})
+	assert.NoError(t, err)
+	assert.Len(t, topics, 2)
+
+	// Verify returned topics
+	summaries := make(map[string]bool)
+	for _, t := range topics {
+		summaries[t.Summary] = true
+	}
+	assert.True(t, summaries["Topic 1"])
+	assert.True(t, summaries["Topic 3"])
+	assert.False(t, summaries["Topic 2"])
+
+	// Empty IDs returns nil
+	topics, err = store.GetTopicsByIDs([]int64{})
+	assert.NoError(t, err)
+	assert.Nil(t, topics)
+
+	// Non-existent IDs returns empty
+	topics, err = store.GetTopicsByIDs([]int64{999, 888})
+	assert.NoError(t, err)
+	assert.Empty(t, topics)
+}
+
 func TestGetTopicsPendingFacts(t *testing.T) {
 	store, cleanup := setupTestDB(t)
 	defer cleanup()

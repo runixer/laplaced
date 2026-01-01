@@ -31,6 +31,7 @@ type TopicRepository interface {
 	DeleteTopicCascade(id int64) error
 	GetLastTopicEndMessageID(userID int64) (int64, error)
 	GetAllTopics() ([]Topic, error)
+	GetTopicsByIDs(ids []int64) ([]Topic, error)
 	GetTopics(userID int64) ([]Topic, error)
 	SetTopicFactsExtracted(topicID int64, extracted bool) error
 	SetTopicConsolidationChecked(topicID int64, checked bool) error

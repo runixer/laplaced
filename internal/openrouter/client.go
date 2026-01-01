@@ -4,13 +4,23 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
 	"time"
+)
+
+// Retry configuration
+const (
+	maxRetries   = 3
+	baseDelay    = 1 * time.Second
+	maxDelay     = 30 * time.Second
+	jitterFactor = 0.2 // 20% jitter
 )
 
 type Client interface {
@@ -55,6 +65,54 @@ type clientImpl struct {
 	apiKey      string
 	apiEndpoint string
 	logger      *slog.Logger
+}
+
+// isRetryableStatusCode returns true if the HTTP status code indicates a retryable error.
+func isRetryableStatusCode(statusCode int) bool {
+	switch statusCode {
+	case http.StatusTooManyRequests, // 429
+		http.StatusInternalServerError, // 500
+		http.StatusBadGateway,          // 502
+		http.StatusServiceUnavailable,  // 503
+		http.StatusGatewayTimeout:      // 504
+		return true
+	default:
+		return false
+	}
+}
+
+// isRetryableError returns true if the error is a network/timeout error that should be retried.
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Check for timeout errors
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	// Check for connection errors
+	var opErr *net.OpError
+	return errors.As(err, &opErr)
+}
+
+// calculateBackoff returns the delay for the given attempt using exponential backoff with jitter.
+func calculateBackoff(attempt int) time.Duration {
+	// Limit attempt to avoid overflow (2^5 = 32 seconds is already > maxDelay)
+	if attempt > 5 {
+		attempt = 5
+	}
+	// Exponential backoff: baseDelay * 2^attempt
+	delay := baseDelay * time.Duration(1<<attempt)
+	if delay > maxDelay {
+		delay = maxDelay
+	}
+
+	// Add jitter: ±20%
+	jitter := time.Duration(float64(delay) * jitterFactor * (2*rand.Float64() - 1))
+	return delay + jitter
 }
 
 type ImageURL struct {
@@ -323,29 +381,63 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		return ChatCompletionResponse{}, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(body))
-	if err != nil {
-		return ChatCompletionResponse{}, err
-	}
+	var responseBody []byte
+	var lastErr error
 
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("User-Agent", "laplaced/1.0")
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			delay := calculateBackoff(attempt - 1)
+			c.logger.Warn("Retrying OpenRouter request",
+				"attempt", attempt,
+				"max_retries", maxRetries,
+				"delay", delay,
+				"last_error", lastErr,
+			)
 
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return ChatCompletionResponse{}, err
-	}
-	defer resp.Body.Close()
+			select {
+			case <-ctx.Done():
+				return ChatCompletionResponse{}, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
 
-	c.logger.Debug("OpenRouter response received", "status", resp.Status)
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(body))
+		if err != nil {
+			return ChatCompletionResponse{}, err
+		}
 
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return ChatCompletionResponse{}, err
-	}
+		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("User-Agent", "laplaced/1.0")
 
-	if resp.StatusCode != http.StatusOK {
+		resp, err := c.httpClient.Do(httpReq)
+		if err != nil {
+			if isRetryableError(err) && attempt < maxRetries {
+				lastErr = err
+				continue
+			}
+			return ChatCompletionResponse{}, err
+		}
+
+		responseBody, err = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return ChatCompletionResponse{}, err
+		}
+
+		c.logger.Debug("OpenRouter response received", "status", resp.Status, "attempt", attempt)
+
+		if resp.StatusCode == http.StatusOK {
+			break // Success
+		}
+
+		// Check if we should retry
+		if isRetryableStatusCode(resp.StatusCode) && attempt < maxRetries {
+			lastErr = fmt.Errorf("openrouter API error: %s", resp.Status)
+			continue
+		}
+
+		// Non-retryable error or max retries reached
 		c.logger.Error("OpenRouter returned non-OK status", "status", resp.Status, "body", string(responseBody))
 		return ChatCompletionResponse{}, fmt.Errorf("openrouter API error: %s", resp.Status)
 	}
@@ -393,27 +485,61 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 		return EmbeddingResponse{}, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", embeddingsURL, bytes.NewBuffer(body))
-	if err != nil {
-		return EmbeddingResponse{}, err
-	}
+	var responseBody []byte
+	var lastErr error
 
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("User-Agent", "laplaced/1.0")
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			delay := calculateBackoff(attempt - 1)
+			c.logger.Warn("Retrying OpenRouter embeddings request",
+				"attempt", attempt,
+				"max_retries", maxRetries,
+				"delay", delay,
+				"last_error", lastErr,
+			)
 
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return EmbeddingResponse{}, err
-	}
-	defer resp.Body.Close()
+			select {
+			case <-ctx.Done():
+				return EmbeddingResponse{}, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
 
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return EmbeddingResponse{}, err
-	}
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", embeddingsURL, bytes.NewBuffer(body))
+		if err != nil {
+			return EmbeddingResponse{}, err
+		}
 
-	if resp.StatusCode != http.StatusOK {
+		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("User-Agent", "laplaced/1.0")
+
+		resp, err := c.httpClient.Do(httpReq)
+		if err != nil {
+			if isRetryableError(err) && attempt < maxRetries {
+				lastErr = err
+				continue
+			}
+			return EmbeddingResponse{}, err
+		}
+
+		responseBody, err = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return EmbeddingResponse{}, err
+		}
+
+		if resp.StatusCode == http.StatusOK {
+			break // Success
+		}
+
+		// Check if we should retry
+		if isRetryableStatusCode(resp.StatusCode) && attempt < maxRetries {
+			lastErr = fmt.Errorf("openrouter API error: %s", resp.Status)
+			continue
+		}
+
+		// Non-retryable error or max retries reached
 		c.logger.Error("OpenRouter embeddings returned non-OK status", "status", resp.Status, "body", string(responseBody))
 		return EmbeddingResponse{}, fmt.Errorf("openrouter API error: %s", resp.Status)
 	}

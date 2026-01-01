@@ -7,10 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added retry logic with exponential backoff to OpenRouter client (max 3 retries on 429/5xx)
+- Added configuration validation with clear error messages for required fields and value ranges
+- Added `GetTopicsByIDs()` method for efficient topic retrieval by IDs
+
+### Changed
+- Optimized RAG retrieval: now fetches only matched topics instead of all topics
+
 ### Fixed
 - Fixed OpenRouter client returning nil instead of error on non-OK HTTP status
 - Fixed `sendResponses()` retry logic using unbounded `context.Background()` - now uses 30s timeout
 - Fixed web server calling `os.Exit(1)` on failure - now triggers graceful shutdown via `cancel()`
+- Fixed ignored errors in fact history operations - now logged with warning level
 
 ### Removed
 - Removed dead code: unused `processSingleMessage()` function and its test

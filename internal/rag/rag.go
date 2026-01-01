@@ -269,14 +269,20 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		matches = matches[:maxTopics]
 	}
 
-	// Fetch messages from topics
-	allTopics, err := s.topicRepo.GetAllTopics()
+	// Collect topic IDs from matches
+	topicIDs := make([]int64, len(matches))
+	for i, m := range matches {
+		topicIDs[i] = m.topicID
+	}
+
+	// Fetch only the topics we need
+	topics, err := s.topicRepo.GetTopicsByIDs(topicIDs)
 	if err != nil {
 		s.logger.Error("failed to load topics for retrieval", "error", err)
 		return nil, debugInfo, err
 	}
 	topicMap := make(map[int64]storage.Topic)
-	for _, t := range allTopics {
+	for _, t := range topics {
 		topicMap[t.ID] = t
 	}
 

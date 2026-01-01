@@ -87,6 +87,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := cfg.Validate(); err != nil {
+		slog.Error("invalid configuration", "error", err)
+		os.Exit(1)
+	}
+
 	var logLevel slog.Level
 	if err := logLevel.UnmarshalText([]byte(cfg.Log.Level)); err != nil {
 		slog.Warn("unknown log level, defaulting to info", "level", cfg.Log.Level)

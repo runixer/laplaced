@@ -111,6 +111,47 @@ func (s *SQLiteStore) GetAllTopics() ([]Topic, error) {
 	return topics, nil
 }
 
+func (s *SQLiteStore) GetTopicsByIDs(ids []int64) ([]Topic, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	// Build placeholders for IN clause
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(
+		"SELECT id, user_id, summary, start_msg_id, end_msg_id, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at FROM topics WHERE id IN (%s)",
+		strings.Join(placeholders, ","),
+	)
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var topics []Topic
+	for rows.Next() {
+		var t Topic
+		var embBytes []byte
+		if err := rows.Scan(&t.ID, &t.UserID, &t.Summary, &t.StartMsgID, &t.EndMsgID, &embBytes, &t.FactsExtracted, &t.IsConsolidated, &t.ConsolidationChecked, &t.CreatedAt); err != nil {
+			return nil, err
+		}
+		if len(embBytes) > 0 {
+			if err := json.Unmarshal(embBytes, &t.Embedding); err != nil {
+				s.logger.Warn("failed to unmarshal topic embedding", "id", t.ID, "error", err)
+				continue
+			}
+		}
+		topics = append(topics, t)
+	}
+	return topics, nil
+}
+
 func (s *SQLiteStore) GetTopics(userID int64) ([]Topic, error) {
 	query := "SELECT id, user_id, summary, start_msg_id, end_msg_id, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at FROM topics WHERE user_id = ?"
 	rows, err := s.db.Query(query, userID)

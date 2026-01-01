@@ -106,6 +106,10 @@ func (m *MockStorage) GetAllTopics() ([]storage.Topic, error) {
 	args := m.Called()
 	return args.Get(0).([]storage.Topic), args.Error(1)
 }
+func (m *MockStorage) GetTopicsByIDs(ids []int64) ([]storage.Topic, error) {
+	args := m.Called(ids)
+	return args.Get(0).([]storage.Topic), args.Error(1)
+}
 func (m *MockStorage) GetTopics(userID int64) ([]storage.Topic, error) {
 	args := m.Called(userID)
 	return args.Get(0).([]storage.Topic), args.Error(1)
@@ -337,8 +341,11 @@ func TestRetrieve_TopicsGrouping(t *testing.T) {
 		},
 	}, nil)
 
-	// 3. GetAllTopics (called again inside Retrieve to map IDs to Structs)
-	// (Already mocked above)
+	// 3. GetTopicsByIDs (called inside Retrieve to fetch matched topics)
+	mockStore.On("GetTopicsByIDs", mock.MatchedBy(func(ids []int64) bool {
+		// Should request IDs of matching topics (A and C)
+		return len(ids) > 0
+	})).Return(topics, nil)
 
 	// 4. GetMessagesInRange for matching topics
 	// Topic A matches (similarity 1.0 > 0.5)

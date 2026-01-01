@@ -166,3 +166,147 @@ bot:
 	assert.True(t, cfg.RAG.Enabled)                        // from default
 	assert.Equal(t, "en", cfg.Bot.Language)                // from default
 }
+
+func TestValidate(t *testing.T) {
+	// Helper to create a valid config
+	validConfig := func() *Config {
+		cfg, _ := LoadDefault()
+		cfg.Telegram.Token = "test_token"
+		cfg.OpenRouter.APIKey = "test_api_key"
+		cfg.Database.Path = "test.db"
+		// Default has auth.enabled=true, set password to avoid validation error
+		cfg.Server.Auth.Password = "test_password"
+		return cfg
+	}
+
+	tests := []struct {
+		name        string
+		modify      func(*Config)
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:    "valid config",
+			modify:  func(c *Config) {},
+			wantErr: false,
+		},
+		{
+			name:        "missing telegram token",
+			modify:      func(c *Config) { c.Telegram.Token = "" },
+			wantErr:     true,
+			errContains: "telegram.token is required",
+		},
+		{
+			name:        "missing openrouter api key",
+			modify:      func(c *Config) { c.OpenRouter.APIKey = "" },
+			wantErr:     true,
+			errContains: "openrouter.api_key is required",
+		},
+		{
+			name:        "missing database path",
+			modify:      func(c *Config) { c.Database.Path = "" },
+			wantErr:     true,
+			errContains: "database.path is required",
+		},
+		{
+			name: "yandex enabled without api key",
+			modify: func(c *Config) {
+				c.Yandex.Enabled = true
+				c.Yandex.APIKey = ""
+				c.Yandex.FolderID = "folder123"
+			},
+			wantErr:     true,
+			errContains: "yandex.api_key is required",
+		},
+		{
+			name: "yandex enabled without folder id",
+			modify: func(c *Config) {
+				c.Yandex.Enabled = true
+				c.Yandex.APIKey = "api_key_123"
+				c.Yandex.FolderID = ""
+			},
+			wantErr:     true,
+			errContains: "yandex.folder_id is required",
+		},
+		{
+			name: "auth enabled without username",
+			modify: func(c *Config) {
+				c.Server.Auth.Enabled = true
+				c.Server.Auth.Username = ""
+				c.Server.Auth.Password = "pass123"
+			},
+			wantErr:     true,
+			errContains: "server.auth.username is required",
+		},
+		{
+			name: "auth enabled without password",
+			modify: func(c *Config) {
+				c.Server.Auth.Enabled = true
+				c.Server.Auth.Username = "user"
+				c.Server.Auth.Password = ""
+			},
+			wantErr:     true,
+			errContains: "server.auth.password is required",
+		},
+		{
+			name: "similarity threshold out of range (negative)",
+			modify: func(c *Config) {
+				c.RAG.Enabled = true
+				c.RAG.SimilarityThreshold = -0.1
+			},
+			wantErr:     true,
+			errContains: "rag.similarity_threshold must be between 0 and 1",
+		},
+		{
+			name: "similarity threshold out of range (>1)",
+			modify: func(c *Config) {
+				c.RAG.Enabled = true
+				c.RAG.SimilarityThreshold = 1.5
+			},
+			wantErr:     true,
+			errContains: "rag.similarity_threshold must be between 0 and 1",
+		},
+		{
+			name: "max context messages non-positive",
+			modify: func(c *Config) {
+				c.RAG.Enabled = true
+				c.RAG.MaxContextMessages = 0
+			},
+			wantErr:     true,
+			errContains: "rag.max_context_messages must be positive",
+		},
+		{
+			name: "rag disabled skips rag validation",
+			modify: func(c *Config) {
+				c.RAG.Enabled = false
+				c.RAG.SimilarityThreshold = -1 // would fail if validated
+				c.RAG.MaxContextMessages = 0   // would fail if validated
+			},
+			wantErr: false,
+		},
+		{
+			name: "multiple errors collected",
+			modify: func(c *Config) {
+				c.Telegram.Token = ""
+				c.OpenRouter.APIKey = ""
+			},
+			wantErr:     true,
+			errContains: "telegram.token is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			tt.modify(cfg)
+
+			err := cfg.Validate()
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}

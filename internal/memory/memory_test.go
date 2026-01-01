@@ -98,6 +98,10 @@ func (m *MockStorage) GetAllTopics() ([]storage.Topic, error) {
 	args := m.Called()
 	return args.Get(0).([]storage.Topic), args.Error(1)
 }
+func (m *MockStorage) GetTopicsByIDs(ids []int64) ([]storage.Topic, error) {
+	args := m.Called(ids)
+	return args.Get(0).([]storage.Topic), args.Error(1)
+}
 func (m *MockStorage) GetTopics(userID int64) ([]storage.Topic, error) {
 	args := m.Called(userID)
 	return args.Get(0).([]storage.Topic), args.Error(1)
