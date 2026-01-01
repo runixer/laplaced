@@ -104,6 +104,16 @@ func (b *Bot) API() telegram.BotAPI {
 	return b.api
 }
 
+// GetActiveSessions returns information about active sessions (unprocessed messages) for all users.
+func (b *Bot) GetActiveSessions() ([]rag.ActiveSessionInfo, error) {
+	return b.ragService.GetActiveSessions()
+}
+
+// ForceCloseSession immediately processes unprocessed messages for a user into topics.
+func (b *Bot) ForceCloseSession(ctx context.Context, userID int64) (int, error) {
+	return b.ragService.ForceProcessUser(ctx, userID)
+}
+
 func (b *Bot) SetWebhook(webhookURL, secretToken string) error {
 	req := telegram.SetWebhookRequest{
 		URL:         webhookURL,

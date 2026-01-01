@@ -1,0 +1,98 @@
+{{define "title"}}Active Sessions{{end}}
+{{define "styles"}}
+<style>
+    .session-card {
+        border-left: 4px solid #0d6efd;
+        background: #f8f9fa;
+    }
+    .session-card:hover {
+        background: #e9ecef;
+    }
+    .badge-messages {
+        background-color: #198754;
+    }
+    .session-empty {
+        text-align: center;
+        padding: 3rem;
+        color: #6c757d;
+    }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center">
+            <h4 class="mb-0">Session Inspector</h4>
+            <button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">
+                Refresh
+            </button>
+        </div>
+        <p class="text-muted mt-2 mb-0">
+            View and manage active sessions. A session contains unprocessed messages that will be converted to topics after inactivity timeout (default: 5 hours).
+        </p>
+    </div>
+</div>
+
+{{if .Data}}
+<div class="row">
+    {{range .Data}}
+    <div class="col-md-6 col-lg-4 mb-3">
+        <div class="card session-card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                    <h6 class="card-title mb-0">User ID: {{.UserID}}</h6>
+                    <span class="badge badge-messages">{{.MessageCount}} msg</span>
+                </div>
+                <div class="small text-muted">
+                    <div><strong>First message:</strong> {{.FirstMessage}}</div>
+                    <div><strong>Last message:</strong> {{.LastMessage}}</div>
+                    <div><strong>Duration:</strong> {{.Duration}}</div>
+                </div>
+            </div>
+            <div class="card-footer bg-transparent border-top-0">
+                <form method="POST" action="/ui/debug/sessions" onsubmit="return confirm('Force close this session? All unprocessed messages will be converted to topics immediately.');">
+                    <input type="hidden" name="user_id" value="{{.UserID}}">
+                    <button type="submit" class="btn btn-warning btn-sm w-100">
+                        Force Process
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    {{end}}
+</div>
+{{else}}
+<div class="card">
+    <div class="card-body session-empty">
+        <span style="font-size: 3rem;">&#9989;</span>
+        <h5>No Active Sessions</h5>
+        <p class="mb-0">All messages have been processed into topics. Sessions appear when users have unprocessed messages.</p>
+    </div>
+</div>
+{{end}}
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card bg-light">
+            <div class="card-body">
+                <h6 class="card-title">How Sessions Work</h6>
+                <p class="card-text small mb-0">
+                    Messages are collected into a session until there's a period of inactivity (default: 5 hours between messages).
+                    After the timeout, messages are grouped into topics and facts are extracted.
+                    "Force Process" immediately triggers topic creation without waiting for the timeout.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+// Auto-refresh every 30 seconds
+setTimeout(function() {
+    location.reload();
+}, 30000);
+</script>
+{{end}}

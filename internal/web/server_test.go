@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
 
@@ -346,6 +347,19 @@ func (m *MockBot) API() telegram.BotAPI {
 
 func (m *MockBot) HandleUpdateAsync(ctx context.Context, update json.RawMessage, remoteAddr string) {
 	m.Called(ctx, update, remoteAddr)
+}
+
+func (m *MockBot) GetActiveSessions() ([]rag.ActiveSessionInfo, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]rag.ActiveSessionInfo), args.Error(1)
+}
+
+func (m *MockBot) ForceCloseSession(ctx context.Context, userID int64) (int, error) {
+	args := m.Called(ctx, userID)
+	return args.Int(0), args.Error(1)
 }
 
 func TestStatsHandler(t *testing.T) {

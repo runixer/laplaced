@@ -9,12 +9,21 @@ import (
 	"github.com/runixer/laplaced/internal/telegram"
 )
 
+// SessionInfo represents information about an active message grouping session.
+type SessionInfo struct {
+	UserID       int64
+	MessageCount int
+	StartedAt    time.Time
+	LastMessage  time.Time
+}
+
 // MessageGroup represents a collection of messages from a single user that are processed together.
 type MessageGroup struct {
 	Messages   []*telegram.Message
 	Timer      *time.Timer
 	CancelFunc context.CancelFunc
 	UserID     int64
+	StartedAt  time.Time // When the first message in this group was received
 }
 
 // MessageGrouper handles the grouping of incoming messages from users.
@@ -106,8 +115,9 @@ func (mg *MessageGrouper) AddMessage(msg *telegram.Message) {
 	if !ok {
 		// Create a new group if one doesn't exist
 		group = &MessageGroup{
-			Messages: []*telegram.Message{},
-			UserID:   userID,
+			Messages:  []*telegram.Message{},
+			UserID:    userID,
+			StartedAt: time.Now(),
 		}
 		mg.groups[userID] = group
 		mg.logger.Debug("created new message group", slog.Int64("user_id", userID))
@@ -178,4 +188,79 @@ func (mg *MessageGrouper) processGroup(ctx context.Context, userID int64) {
 
 	// Pass the context down to the handler.
 	mg.onGroupReady(ctx, processingGroup)
+}
+
+// GetActiveSessions returns information about all active message grouping sessions.
+func (mg *MessageGrouper) GetActiveSessions() []SessionInfo {
+	mg.mu.Lock()
+	defer mg.mu.Unlock()
+
+	sessions := make([]SessionInfo, 0, len(mg.groups))
+	for _, group := range mg.groups {
+		if len(group.Messages) == 0 {
+			continue
+		}
+
+		// Get the timestamp of the last message
+		lastMsg := group.Messages[len(group.Messages)-1]
+		lastMsgTime := time.Unix(int64(lastMsg.Date), 0)
+
+		sessions = append(sessions, SessionInfo{
+			UserID:       group.UserID,
+			MessageCount: len(group.Messages),
+			StartedAt:    group.StartedAt,
+			LastMessage:  lastMsgTime,
+		})
+	}
+
+	return sessions
+}
+
+// ForceCloseSession immediately processes and closes a session for the given user.
+// Returns true if a session was found and closed, false otherwise.
+func (mg *MessageGrouper) ForceCloseSession(userID int64) bool {
+	mg.mu.Lock()
+
+	group, ok := mg.groups[userID]
+	if !ok || len(group.Messages) == 0 {
+		mg.mu.Unlock()
+		return false
+	}
+
+	// Stop the timer if it's running
+	if group.Timer != nil {
+		if group.Timer.Stop() {
+			// Timer was stopped before firing, we need to call wg.Done() since
+			// we're going to process it ourselves
+			mg.wg.Done()
+		}
+	}
+
+	// Take ownership of messages
+	messagesToProcess := make([]*telegram.Message, len(group.Messages))
+	copy(messagesToProcess, group.Messages)
+
+	// Clear the group
+	delete(mg.groups, userID)
+	mg.mu.Unlock()
+
+	mg.logger.Info("force closing session",
+		slog.Int64("user_id", userID),
+		slog.Int("message_count", len(messagesToProcess)))
+
+	// Process the group immediately
+	processingGroup := &MessageGroup{
+		Messages:  messagesToProcess,
+		UserID:    userID,
+		StartedAt: group.StartedAt,
+	}
+
+	// Track this in WaitGroup and process
+	mg.wg.Add(1)
+	go func() {
+		defer mg.wg.Done()
+		mg.onGroupReady(context.Background(), processingGroup)
+	}()
+
+	return true
 }

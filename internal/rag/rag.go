@@ -553,6 +553,41 @@ func (s *Service) ForceProcessUser(ctx context.Context, userID int64) (int, erro
 	return processedCount, nil
 }
 
+// ActiveSessionInfo contains information about unprocessed messages for a user.
+type ActiveSessionInfo struct {
+	UserID           int64
+	MessageCount     int
+	FirstMessageTime time.Time
+	LastMessageTime  time.Time
+}
+
+// GetActiveSessions returns information about unprocessed messages (active sessions) for all users.
+func (s *Service) GetActiveSessions() ([]ActiveSessionInfo, error) {
+	users := s.cfg.Bot.AllowedUserIDs
+	var sessions []ActiveSessionInfo
+
+	for _, userID := range users {
+		messages, err := s.msgRepo.GetUnprocessedMessages(userID)
+		if err != nil {
+			s.logger.Error("failed to fetch unprocessed messages for user", "user_id", userID, "error", err)
+			continue
+		}
+
+		if len(messages) == 0 {
+			continue
+		}
+
+		sessions = append(sessions, ActiveSessionInfo{
+			UserID:           userID,
+			MessageCount:     len(messages),
+			FirstMessageTime: messages[0].CreatedAt,
+			LastMessageTime:  messages[len(messages)-1].CreatedAt,
+		})
+	}
+
+	return sessions, nil
+}
+
 type ExtractedTopic struct {
 	Summary    string `json:"summary"`
 	StartMsgID int64  `json:"start_msg_id"`

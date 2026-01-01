@@ -79,10 +79,12 @@ func getClientIP(r *http.Request) string {
 	return addr
 }
 
-// Bot is an interface that abstracts the bot's functionality needed by the web server.
-type Bot interface {
+// BotInterface is an interface that abstracts the bot's functionality needed by the web server.
+type BotInterface interface {
 	HandleUpdateAsync(ctx context.Context, update json.RawMessage, remoteAddr string)
 	API() telegram.BotAPI
+	GetActiveSessions() ([]rag.ActiveSessionInfo, error)
+	ForceCloseSession(ctx context.Context, userID int64) (int, error)
 }
 
 // dashboardStatsCache holds cached dashboard stats with TTL
@@ -134,7 +136,7 @@ type Server struct {
 	topicRepo       storage.TopicRepository
 	msgRepo         storage.MessageRepository
 	factHistoryRepo storage.FactHistoryRepository
-	bot             Bot
+	bot             BotInterface
 	rag             *rag.Service
 	logger          *slog.Logger
 	renderer        *ui.Renderer
@@ -143,7 +145,7 @@ type Server struct {
 	wg              sync.WaitGroup
 }
 
-func NewServer(ctx context.Context, logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, statsRepo storage.StatsRepository, logRepo storage.LogRepository, topicRepo storage.TopicRepository, msgRepo storage.MessageRepository, factHistoryRepo storage.FactHistoryRepository, bot Bot, rag *rag.Service) (*Server, error) {
+func NewServer(ctx context.Context, logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, statsRepo storage.StatsRepository, logRepo storage.LogRepository, topicRepo storage.TopicRepository, msgRepo storage.MessageRepository, factHistoryRepo storage.FactHistoryRepository, bot BotInterface, rag *rag.Service) (*Server, error) {
 	renderer, err := ui.NewRenderer()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize renderer: %w", err)
@@ -187,6 +189,7 @@ func (s *Server) Start(ctx context.Context) error {
 		mux.HandleFunc("/ui/inspector", s.inspectorHandler)
 		mux.HandleFunc("/ui/debug/rag", s.debugRAGHandler)
 		mux.HandleFunc("/ui/debug/topics", s.topicDebugHandler)
+		mux.HandleFunc("/ui/debug/sessions", s.sessionsHandler)
 		mux.HandleFunc("/ui/topics", s.topicsHandler)
 		mux.HandleFunc("/ui/facts", s.factsHandler)
 		mux.HandleFunc("/ui/facts/history", s.factsHistoryHandler)
@@ -778,6 +781,77 @@ func (s *Server) factsHistoryHandler(w http.ResponseWriter, r *http.Request) {
 	pageData.Data = data
 
 	if err := s.renderer.Render(w, "facts_history.html", pageData, ui.GetFuncMap()); err != nil {
+		s.logger.Error("failed to render template", "error", err)
+		http.Error(w, "Failed to render template", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) sessionsHandler(w http.ResponseWriter, r *http.Request) {
+	// Handle POST request to force close a session
+	if r.Method == http.MethodPost {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "Invalid form data", http.StatusBadRequest)
+			return
+		}
+		userIDStr := r.FormValue("user_id")
+		var userID int64
+		if _, err := fmt.Sscanf(userIDStr, "%d", &userID); err != nil {
+			http.Error(w, "Invalid user ID", http.StatusBadRequest)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		processedCount, err := s.bot.ForceCloseSession(ctx, userID)
+		if err != nil {
+			s.logger.Error("Failed to force close session", "user_id", userID, "error", err)
+		} else {
+			s.logger.Info("Force closed session via web UI", "user_id", userID, "processed_messages", processedCount)
+		}
+
+		// Redirect back to the sessions page
+		http.Redirect(w, r, "/ui/debug/sessions", http.StatusSeeOther)
+		return
+	}
+
+	// GET request - display sessions
+	sessions, err := s.bot.GetActiveSessions()
+	if err != nil {
+		s.logger.Error("failed to get active sessions", "error", err)
+		http.Error(w, "Failed to get sessions", http.StatusInternalServerError)
+		return
+	}
+
+	pageData, err := s.getCommonData(r)
+	if err != nil {
+		s.logger.Error("failed to get common data", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	type sessionDisplayData struct {
+		UserID       int64
+		MessageCount int
+		FirstMessage string
+		LastMessage  string
+		Duration     string
+	}
+
+	displaySessions := make([]sessionDisplayData, 0, len(sessions))
+	for _, sess := range sessions {
+		displaySessions = append(displaySessions, sessionDisplayData{
+			UserID:       sess.UserID,
+			MessageCount: sess.MessageCount,
+			FirstMessage: sess.FirstMessageTime.Format("2006-01-02 15:04:05"),
+			LastMessage:  sess.LastMessageTime.Format("2006-01-02 15:04:05"),
+			Duration:     time.Since(sess.FirstMessageTime).Round(time.Minute).String(),
+		})
+	}
+
+	pageData.Data = displaySessions
+
+	if err := s.renderer.Render(w, "sessions.html", pageData, ui.GetFuncMap()); err != nil {
 		s.logger.Error("failed to render template", "error", err)
 		http.Error(w, "Failed to render template", http.StatusInternalServerError)
 	}
