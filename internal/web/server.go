@@ -53,6 +53,32 @@ func init() {
 	prometheus.MustRegister(ragLatency)
 }
 
+// getClientIP extracts the real client IP from the request.
+// It checks X-Forwarded-For and X-Real-IP headers (set by reverse proxies like traefik),
+// falling back to RemoteAddr if no proxy headers are present.
+func getClientIP(r *http.Request) string {
+	// X-Forwarded-For may contain multiple IPs: "client, proxy1, proxy2"
+	// The first one is the original client IP
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if idx := strings.Index(xff, ","); idx != -1 {
+			return strings.TrimSpace(xff[:idx])
+		}
+		return strings.TrimSpace(xff)
+	}
+
+	// X-Real-IP is typically set by nginx/traefik
+	if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
+		return xrip
+	}
+
+	// Fallback to RemoteAddr (strips port if present)
+	addr := r.RemoteAddr
+	if idx := strings.LastIndex(addr, ":"); idx != -1 {
+		return addr[:idx]
+	}
+	return addr
+}
+
 // Bot is an interface that abstracts the bot's functionality needed by the web server.
 type Bot interface {
 	HandleUpdateAsync(ctx context.Context, update json.RawMessage, remoteAddr string)
@@ -246,7 +272,7 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Telegram.WebhookSecret != "" {
 		token := r.Header.Get("X-Telegram-Bot-Api-Secret-Token")
 		if token != s.cfg.Telegram.WebhookSecret {
-			s.logger.Warn("Webhook request with invalid secret token", "remote_addr", r.RemoteAddr)
+			s.logger.Warn("Webhook request with invalid secret token", "client_ip", getClientIP(r), "user_agent", r.UserAgent())
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
@@ -273,7 +299,7 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 	// Process the update asynchronously with proper shutdown tracking.
 	// Use server's context (not request context) so processing continues after handler returns.
 	// HandleUpdateAsync uses the bot's WaitGroup to ensure graceful shutdown.
-	s.bot.HandleUpdateAsync(s.ctx, json.RawMessage(body), r.RemoteAddr)
+	s.bot.HandleUpdateAsync(s.ctx, json.RawMessage(body), getClientIP(r))
 }
 
 func (s *Server) getCommonData(r *http.Request) (ui.PageData, error) {
@@ -775,13 +801,14 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 			s.logger.Debug("Received HTTP request",
 				"method", r.Method,
 				"path", path,
-				"remote_addr", r.RemoteAddr,
+				"client_ip", getClientIP(r),
 			)
 		} else {
 			s.logger.Info("Received HTTP request",
 				"method", r.Method,
 				"path", path,
-				"remote_addr", r.RemoteAddr,
+				"client_ip", getClientIP(r),
+				"user_agent", r.UserAgent(),
 			)
 		}
 		next.ServeHTTP(w, r)

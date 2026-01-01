@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Fixed data race in web server: context now passed to constructor instead of being set in Start()
 - Fixed remaining ignored errors in fact history debug logging (4 additional locations)
+- Fixed client IP logging behind reverse proxy - now uses X-Forwarded-For/X-Real-IP headers
+- Added User-Agent logging for HTTP requests
 - Fixed potential race condition in `LoadNewVectors()` when multiple goroutines load vectors concurrently
 - Fixed untracked goroutines in RAG service (`LoadNewVectors`, `ReloadVectors`) - now properly tracked by WaitGroup for graceful shutdown
 - Fixed metrics update goroutine in web server not tracked by WaitGroup

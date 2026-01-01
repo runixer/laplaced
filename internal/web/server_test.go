@@ -663,3 +663,67 @@ func TestUpdateMetrics(t *testing.T) {
 	// Assert
 	mockStorage.AssertExpectations(t)
 }
+
+func TestGetClientIP(t *testing.T) {
+	tests := []struct {
+		name       string
+		remoteAddr string
+		headers    map[string]string
+		expected   string
+	}{
+		{
+			name:       "No proxy headers - uses RemoteAddr",
+			remoteAddr: "192.168.1.100:12345",
+			headers:    nil,
+			expected:   "192.168.1.100",
+		},
+		{
+			name:       "X-Forwarded-For single IP",
+			remoteAddr: "172.27.32.1:6779",
+			headers:    map[string]string{"X-Forwarded-For": "203.0.113.50"},
+			expected:   "203.0.113.50",
+		},
+		{
+			name:       "X-Forwarded-For multiple IPs - first is client",
+			remoteAddr: "172.27.32.1:6779",
+			headers:    map[string]string{"X-Forwarded-For": "203.0.113.50, 70.41.3.18, 150.172.238.178"},
+			expected:   "203.0.113.50",
+		},
+		{
+			name:       "X-Real-IP header",
+			remoteAddr: "172.27.32.1:6779",
+			headers:    map[string]string{"X-Real-IP": "203.0.113.75"},
+			expected:   "203.0.113.75",
+		},
+		{
+			name:       "X-Forwarded-For takes precedence over X-Real-IP",
+			remoteAddr: "172.27.32.1:6779",
+			headers: map[string]string{
+				"X-Forwarded-For": "203.0.113.50",
+				"X-Real-IP":       "203.0.113.75",
+			},
+			expected: "203.0.113.50",
+		},
+		{
+			name:       "RemoteAddr without port",
+			remoteAddr: "192.168.1.100",
+			headers:    nil,
+			expected:   "192.168.1.100",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &http.Request{
+				RemoteAddr: tt.remoteAddr,
+				Header:     make(http.Header),
+			}
+			for k, v := range tt.headers {
+				req.Header.Set(k, v)
+			}
+
+			result := getClientIP(req)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
