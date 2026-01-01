@@ -44,39 +44,54 @@ func NewMessageGrouper(b *Bot, logger *slog.Logger, turnWait time.Duration, onGr
 	}
 }
 
-// Stop cancels all pending message groups and their timers.
+// Stop processes all pending message groups and waits for completion.
 // Should be called during graceful shutdown.
 func (mg *MessageGrouper) Stop() {
 	mg.logger.Info("Stopping message grouper...")
 
-	// Cancel the parent context - this will cancel all child contexts
-	mg.parentCancel()
+	// Don't cancel parent context yet - we want pending groups to be processed
 
 	mg.mu.Lock()
-	// Stop all pending timers
+	// Collect groups that need immediate processing
+	var pendingGroups []*MessageGroup
 	for userID, group := range mg.groups {
 		if group.Timer != nil {
 			// Timer.Stop returns true if the timer was stopped before firing
-			// In that case, the callback won't run, so we need to call wg.Done()
 			if group.Timer.Stop() {
-				mg.wg.Done()
-				mg.logger.Debug("stopped pending timer for user", slog.Int64("user_id", userID))
+				// Timer was stopped before firing - we need to process this group
+				mg.logger.Debug("processing pending group on shutdown", slog.Int64("user_id", userID))
+				pendingGroups = append(pendingGroups, group)
 			} else {
+				// Timer already fired - callback is running or will run
 				mg.logger.Debug("timer already fired for user", slog.Int64("user_id", userID))
 			}
 		}
-		if group.CancelFunc != nil {
-			group.CancelFunc()
-		}
+		// Don't cancel the context - let processing complete
 	}
 
 	// Clear the groups map
 	mg.groups = make(map[int64]*MessageGroup)
 	mg.mu.Unlock()
 
+	// Process pending groups immediately with non-cancellable context
+	for _, group := range pendingGroups {
+		// The wg.Add(1) was already called in AddMessage, wg.Done() will be called after processing
+		go func(g *MessageGroup) {
+			defer mg.wg.Done()
+			mg.logger.Info("processing message group on shutdown",
+				slog.Int64("user_id", g.UserID),
+				slog.Int("message_count", len(g.Messages)))
+			// Use background context since we're shutting down
+			mg.onGroupReady(context.Background(), g)
+		}(group)
+	}
+
 	// Wait for all active processGroup operations to complete
 	mg.logger.Info("Waiting for active message processing to complete...")
 	mg.wg.Wait()
+
+	// Now cancel the parent context (cleanup)
+	mg.parentCancel()
 	mg.logger.Info("Message grouper stopped")
 }
 

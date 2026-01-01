@@ -264,3 +264,246 @@ func TestProcessMessageGroup_LLMContextNotCancelled(t *testing.T) {
 	assert.False(t, llmContextCancelled, "LLM context should not be cancelled when parent is cancelled")
 	llmContextMu.Unlock()
 }
+
+// TestHandleVoiceMessage_CompletesOnContextCancel verifies that voice message
+// processing (download, speech recognition, LLM generation) completes even when
+// the parent context is cancelled. This is critical for graceful shutdown.
+func TestHandleVoiceMessage_CompletesOnContextCancel(t *testing.T) {
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	mockAPI := new(MockBotAPI)
+	mockStore := new(MockStorage)
+	mockORClient := new(MockOpenRouterClient)
+	mockDownloader := new(MockFileDownloader)
+	mockSpeechKit := new(MockYandexClient)
+
+	cfg := &config.Config{
+		Bot: config.BotConfig{
+			SystemPrompt: "Test prompt",
+			Language:     "en",
+		},
+		OpenRouter: config.OpenRouterConfig{
+			Model: "test-model",
+		},
+	}
+
+	bot := &Bot{
+		api:             mockAPI,
+		userRepo:        mockStore,
+		msgRepo:         mockStore,
+		statsRepo:       mockStore,
+		logRepo:         mockStore,
+		factRepo:        mockStore,
+		factHistoryRepo: mockStore,
+		orClient:        mockORClient,
+		downloader:      mockDownloader,
+		speechKitClient: mockSpeechKit,
+		cfg:             cfg,
+		logger:          logger,
+		translator:      translator,
+	}
+	bot.messageGrouper = NewMessageGrouper(bot, logger, 0, bot.processMessageGroup)
+
+	userID := int64(123)
+	chatID := int64(456)
+	voiceFileID := "voice_file_id"
+	voiceData := []byte("fake_voice_data")
+	recognizedText := "Hello world"
+
+	msg := &telegram.Message{
+		MessageID: 1,
+		From:      &telegram.User{ID: userID, FirstName: "User", Username: "testuser"},
+		Chat:      &telegram.Chat{ID: chatID},
+		Date:      1234567890,
+		Voice:     &telegram.Voice{FileID: voiceFileID},
+	}
+
+	// Track when SendMessage is called
+	var sendMessageCalled bool
+	var sendMessageMu sync.Mutex
+
+	// Mock file download with delay
+	mockDownloader.On("DownloadFile", mock.Anything, voiceFileID).
+		Run(func(args mock.Arguments) {
+			time.Sleep(30 * time.Millisecond)
+		}).
+		Return(voiceData, nil)
+
+	// Mock speech recognition with delay - context will be cancelled during this
+	mockSpeechKit.On("Recognize", mock.Anything, voiceData).
+		Run(func(args mock.Arguments) {
+			time.Sleep(100 * time.Millisecond)
+		}).
+		Return(recognizedText, nil)
+
+	// Setup remaining mocks
+	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
+	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
+	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		sendMessageMu.Lock()
+		sendMessageCalled = true
+		sendMessageMu.Unlock()
+	}).Return(&telegram.Message{MessageID: 2}, nil)
+
+	fakeTextMessage := &telegram.Message{
+		MessageID: msg.MessageID,
+		From:      msg.From,
+		Chat:      msg.Chat,
+		Date:      msg.Date,
+		Text:      translator.Get("en", "bot.voice_recognition_prefix") + " " + recognizedText,
+	}
+	expectedHistoryContent := fakeTextMessage.BuildContent(translator, "en")
+
+	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{
+		{Role: "user", Content: expectedHistoryContent},
+	}, nil)
+	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
+	mockStore.On("AddMessageToHistory", userID, mock.Anything).Return(nil)
+	mockStore.On("UpdateStats", mock.Anything).Return(nil)
+	mockStore.On("AddStat", mock.Anything).Return(nil)
+	mockStore.On("Log", mock.Anything).Return(nil)
+
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(createSimpleChatResponse("Test response"), nil)
+
+	// Create cancellable context
+	ctx, cancel := context.WithCancel(context.Background())
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		bot.handleVoiceMessage(ctx, msg, logger)
+	}()
+
+	// Cancel context after download starts but before recognition completes
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	// Wait for processing to complete
+	wg.Wait()
+
+	// Verify that SendMessage was called despite context cancellation
+	sendMessageMu.Lock()
+	assert.True(t, sendMessageCalled, "SendMessage should be called even after context cancellation")
+	sendMessageMu.Unlock()
+
+	mockSpeechKit.AssertCalled(t, "Recognize", mock.Anything, voiceData)
+	mockORClient.AssertCalled(t, "CreateChatCompletion", mock.Anything, mock.Anything)
+}
+
+// TestHandleVoiceMessage_SpeechContextNotCancelled verifies that the context
+// passed to speech recognition is not cancelled when parent context is cancelled.
+func TestHandleVoiceMessage_SpeechContextNotCancelled(t *testing.T) {
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	mockAPI := new(MockBotAPI)
+	mockStore := new(MockStorage)
+	mockORClient := new(MockOpenRouterClient)
+	mockDownloader := new(MockFileDownloader)
+	mockSpeechKit := new(MockYandexClient)
+
+	cfg := &config.Config{
+		Bot: config.BotConfig{
+			SystemPrompt: "Test prompt",
+			Language:     "en",
+		},
+		OpenRouter: config.OpenRouterConfig{
+			Model: "test-model",
+		},
+	}
+
+	bot := &Bot{
+		api:             mockAPI,
+		userRepo:        mockStore,
+		msgRepo:         mockStore,
+		statsRepo:       mockStore,
+		logRepo:         mockStore,
+		factRepo:        mockStore,
+		factHistoryRepo: mockStore,
+		orClient:        mockORClient,
+		downloader:      mockDownloader,
+		speechKitClient: mockSpeechKit,
+		cfg:             cfg,
+		logger:          logger,
+		translator:      translator,
+	}
+	bot.messageGrouper = NewMessageGrouper(bot, logger, 0, bot.processMessageGroup)
+
+	userID := int64(123)
+	chatID := int64(456)
+	voiceFileID := "voice_file_id"
+	voiceData := []byte("fake_voice_data")
+	recognizedText := "Hello world"
+
+	msg := &telegram.Message{
+		MessageID: 1,
+		From:      &telegram.User{ID: userID, FirstName: "User", Username: "testuser"},
+		Chat:      &telegram.Chat{ID: chatID},
+		Date:      1234567890,
+		Voice:     &telegram.Voice{FileID: voiceFileID},
+	}
+
+	// Track context state when speech recognition is called
+	var speechContextCancelled bool
+	var speechContextMu sync.Mutex
+
+	mockDownloader.On("DownloadFile", mock.Anything, voiceFileID).Return(voiceData, nil)
+
+	// Check if context is cancelled when speech recognition is called
+	mockSpeechKit.On("Recognize", mock.Anything, voiceData).
+		Run(func(args mock.Arguments) {
+			ctx := args.Get(0).(context.Context)
+			// Wait to ensure parent context would be cancelled by now
+			time.Sleep(50 * time.Millisecond)
+			speechContextMu.Lock()
+			speechContextCancelled = ctx.Err() != nil
+			speechContextMu.Unlock()
+		}).
+		Return(recognizedText, nil)
+
+	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
+	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
+	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{MessageID: 2}, nil)
+
+	fakeTextMessage := &telegram.Message{
+		MessageID: msg.MessageID,
+		From:      msg.From,
+		Chat:      msg.Chat,
+		Date:      msg.Date,
+		Text:      translator.Get("en", "bot.voice_recognition_prefix") + " " + recognizedText,
+	}
+	expectedHistoryContent := fakeTextMessage.BuildContent(translator, "en")
+
+	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{
+		{Role: "user", Content: expectedHistoryContent},
+	}, nil)
+	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
+	mockStore.On("AddMessageToHistory", userID, mock.Anything).Return(nil)
+	mockStore.On("UpdateStats", mock.Anything).Return(nil)
+	mockStore.On("AddStat", mock.Anything).Return(nil)
+	mockStore.On("Log", mock.Anything).Return(nil)
+
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(createSimpleChatResponse("Test response"), nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		bot.handleVoiceMessage(ctx, msg, logger)
+	}()
+
+	// Cancel parent context quickly
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+
+	wg.Wait()
+
+	// The speech recognition context should NOT be cancelled
+	speechContextMu.Lock()
+	assert.False(t, speechContextCancelled, "Speech recognition context should not be cancelled when parent is cancelled")
+	speechContextMu.Unlock()
+}

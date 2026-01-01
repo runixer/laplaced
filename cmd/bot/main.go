@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -223,7 +222,8 @@ func main() {
 						AllowedUpdates: []string{"message", "edited_message", "callback_query"},
 					})
 					if err != nil {
-						if !errors.Is(err, context.Canceled) {
+						// Only log and retry if context is not cancelled (shutdown)
+						if ctx.Err() == nil {
 							logger.Error("failed to get updates", "error", err)
 							time.Sleep(5 * time.Second)
 						}

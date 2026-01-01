@@ -11,8 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `.golangci.yml` with extended linter set (goimports, misspell, gocritic, gosec, bodyclose, errorlint)
 
 ### Fixed
+- Fixed excessive log size from OpenRouter responses - removed raw body logging and filtered out `reasoning.encrypted` blobs
 - Fixed "context canceled" warnings for typing action by using detached context with timeout
 - Fixed bot token leaking in error log messages - now sanitized as `[REDACTED]`
+- Fixed graceful shutdown for voice messages: file download, speech recognition, and response sending now complete even when shutdown is triggered
 - Fixed file downloader missing HTTP timeout and context support
 - Fixed file downloader not using configured proxy (was only using environment variables)
 - Fixed graceful shutdown: MessageGrouper now properly waits for active downloads to complete
@@ -20,7 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed MessageGrouper not tracking active processing with WaitGroup
 - Fixed voice message handler using `context.Background()` - now properly supports cancellation
 - Fixed webhook handler not tracking goroutines with WaitGroup - now uses `HandleUpdateAsync` for proper shutdown
-- Fixed LLM responses not being sent during graceful shutdown - now uses non-cancellable context for generation
+- Fixed graceful shutdown: RAG retrieval, LLM generation, and typing action now complete even when shutdown is triggered
+- Fixed graceful shutdown: pending message groups in turnWait are now processed immediately instead of being dropped
+- Fixed noisy "failed to get updates" error during shutdown - now properly suppressed when context is cancelled
 
 ### Security
 - Fixed potential Slowloris attack vector by adding `ReadHeaderTimeout` to HTTP server

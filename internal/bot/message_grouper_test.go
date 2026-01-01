@@ -97,3 +97,108 @@ func TestMessageGrouper_TimerReset(t *testing.T) {
 	assert.NotNil(t, groupProcessed)
 	assert.Len(t, groupProcessed.Messages, 2)
 }
+
+// TestMessageGrouper_Stop_ProcessesPendingGroups verifies that Stop() processes
+// pending message groups instead of dropping them. This is critical for graceful
+// shutdown - messages sent during turnWait must not be lost because Telegram
+// considers them already delivered.
+func TestMessageGrouper_Stop_ProcessesPendingGroups(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	var groupsProcessed []*MessageGroup
+	var mu sync.Mutex
+
+	onGroupReady := func(ctx context.Context, group *MessageGroup) {
+		mu.Lock()
+		groupsProcessed = append(groupsProcessed, group)
+		mu.Unlock()
+	}
+
+	// Use long turnWait to ensure timer doesn't fire before Stop()
+	grouper := NewMessageGrouper(nil, logger, 1*time.Second, onGroupReady)
+
+	// Add messages for two different users
+	msg1 := &telegram.Message{MessageID: 1, From: &telegram.User{ID: 123}}
+	msg2 := &telegram.Message{MessageID: 2, From: &telegram.User{ID: 456}}
+	msg3 := &telegram.Message{MessageID: 3, From: &telegram.User{ID: 123}} // Same user as msg1
+
+	grouper.AddMessage(msg1)
+	grouper.AddMessage(msg2)
+	grouper.AddMessage(msg3)
+
+	// Stop should process both pending groups
+	grouper.Stop()
+
+	// Verify both groups were processed
+	mu.Lock()
+	defer mu.Unlock()
+
+	assert.Len(t, groupsProcessed, 2, "Should process 2 pending groups (one per user)")
+
+	// Find groups by user ID
+	var user123Group, user456Group *MessageGroup
+	for _, g := range groupsProcessed {
+		switch g.UserID {
+		case 123:
+			user123Group = g
+		case 456:
+			user456Group = g
+		}
+	}
+
+	assert.NotNil(t, user123Group, "Group for user 123 should be processed")
+	assert.NotNil(t, user456Group, "Group for user 456 should be processed")
+
+	assert.Len(t, user123Group.Messages, 2, "User 123 should have 2 messages")
+	assert.Len(t, user456Group.Messages, 1, "User 456 should have 1 message")
+}
+
+// TestMessageGrouper_Stop_WaitsForActiveProcessing verifies that Stop() waits
+// for active processing to complete before returning.
+func TestMessageGrouper_Stop_WaitsForActiveProcessing(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+
+	processingStarted := make(chan struct{})
+	processingDone := make(chan struct{})
+
+	onGroupReady := func(ctx context.Context, group *MessageGroup) {
+		close(processingStarted)
+		// Simulate slow processing
+		time.Sleep(100 * time.Millisecond)
+		close(processingDone)
+	}
+
+	// Short turnWait so timer fires quickly
+	grouper := NewMessageGrouper(nil, logger, 10*time.Millisecond, onGroupReady)
+
+	msg := &telegram.Message{MessageID: 1, From: &telegram.User{ID: 123}}
+	grouper.AddMessage(msg)
+
+	// Wait for processing to start
+	<-processingStarted
+
+	// Stop should block until processing completes
+	stopDone := make(chan struct{})
+	go func() {
+		grouper.Stop()
+		close(stopDone)
+	}()
+
+	// Verify Stop() hasn't returned yet
+	select {
+	case <-stopDone:
+		t.Fatal("Stop() returned before processing completed")
+	case <-time.After(50 * time.Millisecond):
+		// Good, Stop is still waiting
+	}
+
+	// Wait for processing to complete
+	<-processingDone
+
+	// Now Stop should return
+	select {
+	case <-stopDone:
+		// Good, Stop returned after processing completed
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Stop() didn't return after processing completed")
+	}
+}

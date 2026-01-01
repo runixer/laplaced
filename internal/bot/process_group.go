@@ -35,6 +35,11 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 
 	chatID := lastMsg.Chat.ID
 
+	// Use non-cancellable context for all operations that should complete during shutdown.
+	// This ensures RAG retrieval, LLM generation, and response sending all complete
+	// even when graceful shutdown is triggered.
+	shutdownSafeCtx := context.WithoutCancel(ctx)
+
 	// React to the message with a certain probability
 	if rand.Float32() < 0.1 { // 10% chance
 		reaction := availableReactions[rand.Intn(len(availableReactions))]
@@ -45,18 +50,18 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 				{Type: "emoji", Emoji: reaction},
 			},
 		}
-		if err := b.api.SetMessageReaction(ctx, reactionReq); err != nil {
+		if err := b.api.SetMessageReaction(shutdownSafeCtx, reactionReq); err != nil {
 			logger.Warn("failed to set message reaction", "error", err)
 		}
 	}
 
-	typingCtx, cancelTyping := context.WithCancel(ctx)
+	typingCtx, cancelTyping := context.WithCancel(shutdownSafeCtx)
 	defer cancelTyping()
 	go b.sendTypingActionLoop(typingCtx, chatID, lastMsg.MessageThreadID)
 
-	historyContent, rawQuery, currentUserMessageContent, err := b.prepareUserMessage(ctx, group, logger)
+	historyContent, rawQuery, currentUserMessageContent, err := b.prepareUserMessage(shutdownSafeCtx, group, logger)
 	if err != nil {
-		b.sendResponses(ctx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
+		b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
 		return
 	}
 
@@ -72,10 +77,10 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		return
 	}
 
-	orMessages, ragInfo, err := b.buildContext(ctx, userID, historyContent, rawQuery, currentUserMessageContent)
+	orMessages, ragInfo, err := b.buildContext(shutdownSafeCtx, userID, historyContent, rawQuery, currentUserMessageContent)
 	if err != nil {
 		logger.Error("failed to build context", "error", err)
-		b.sendResponses(ctx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.generic_error")}}, logger)
+		b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.generic_error")}}, logger)
 		return
 	}
 
@@ -96,11 +101,6 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	toolIterations := 0
 	const maxToolIterations = 10
 
-	// Use non-cancellable context for LLM operations to ensure responses are sent
-	// even during graceful shutdown. Messages sent after shutdown begins will be
-	// redelivered by Telegram after restart.
-	llmCtx := context.WithoutCancel(ctx)
-
 	for {
 		if toolIterations >= maxToolIterations {
 			logger.Warn("max tool iterations reached", "iterations", toolIterations)
@@ -117,16 +117,16 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 			Tools:    tools,
 		}
 
-		resp, err := b.orClient.CreateChatCompletion(llmCtx, req)
+		resp, err := b.orClient.CreateChatCompletion(shutdownSafeCtx, req)
 		if err != nil {
 			logger.Error("failed to get completion from OpenRouter", "error", err)
-			b.sendResponses(llmCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
+			b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
 			return
 		}
 
 		if len(resp.Choices) == 0 {
 			logger.Warn("empty response from OpenRouter")
-			b.sendResponses(llmCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.empty_response")}}, logger)
+			b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.empty_response")}}, logger)
 			return
 		}
 
@@ -150,7 +150,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 				if err != nil {
 					logger.Error("failed to finalize intermediate response", "error", err)
 				} else {
-					b.sendResponses(llmCtx, chatID, intermediateResponses, logger)
+					b.sendResponses(shutdownSafeCtx, chatID, intermediateResponses, logger)
 				}
 			}
 
@@ -162,7 +162,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 				ReasoningDetails: choice.ReasoningDetails,
 			})
 
-			toolMessages, err := b.executeToolCalls(llmCtx, chatID, lastMsg.MessageThreadID, userID, choice.ToolCalls, logger)
+			toolMessages, err := b.executeToolCalls(shutdownSafeCtx, chatID, lastMsg.MessageThreadID, userID, choice.ToolCalls, logger)
 			if err != nil {
 				// executeToolCalls logs errors but returns messages with error info if needed
 				// If it returns a critical error, we might want to stop, but currently it returns messages
@@ -192,7 +192,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 
 	b.recordMetrics(userID, totalPromptTokens, totalCompletionTokens, ragInfo, orMessages, finalResponse, logger)
 
-	b.sendResponses(llmCtx, chatID, responses, logger)
+	b.sendResponses(shutdownSafeCtx, chatID, responses, logger)
 }
 
 func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logger *slog.Logger) (string, string, []interface{}, error) {
@@ -482,6 +482,9 @@ func (b *Bot) processSingleMessage(ctx context.Context, msg *telegram.Message, l
 
 	logger.Info("processing single message")
 
+	// Use non-cancellable context for all operations that should complete during shutdown.
+	shutdownSafeCtx := context.WithoutCancel(ctx)
+
 	fullMessageContent := msg.BuildContent(b.translator, b.cfg.Bot.Language)
 	if fullMessageContent == "" {
 		logger.Warn("generated empty message content, not processing further", "message_id", msg.MessageID)
@@ -498,10 +501,10 @@ func (b *Bot) processSingleMessage(ctx context.Context, msg *telegram.Message, l
 		rawQuery = msg.Caption
 	}
 
-	orMessages, ragInfo, err := b.buildContext(ctx, userID, fullMessageContent, rawQuery, nil)
+	orMessages, ragInfo, err := b.buildContext(shutdownSafeCtx, userID, fullMessageContent, rawQuery, nil)
 	if err != nil {
 		logger.Error("failed to build context", "error", err)
-		b.sendResponses(ctx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.generic_error")}}, logger)
+		b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.generic_error")}}, logger)
 		return
 	}
 
@@ -511,11 +514,6 @@ func (b *Bot) processSingleMessage(ctx context.Context, msg *telegram.Message, l
 	var finalResponse string
 	toolIterations := 0
 	const maxToolIterations = 10
-
-	// Use non-cancellable context for LLM operations to ensure responses are sent
-	// even during graceful shutdown. Messages sent after shutdown begins will be
-	// redelivered by Telegram after restart.
-	llmCtx := context.WithoutCancel(ctx)
 
 	for {
 		if toolIterations >= maxToolIterations {
@@ -532,16 +530,16 @@ func (b *Bot) processSingleMessage(ctx context.Context, msg *telegram.Message, l
 			Tools:    tools,
 		}
 
-		resp, err := b.orClient.CreateChatCompletion(llmCtx, req)
+		resp, err := b.orClient.CreateChatCompletion(shutdownSafeCtx, req)
 		if err != nil {
 			logger.Error("failed to get completion from OpenRouter", "error", err)
-			b.sendResponses(llmCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
+			b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
 			return
 		}
 
 		if len(resp.Choices) == 0 {
 			logger.Warn("empty response from OpenRouter")
-			b.sendResponses(llmCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.empty_response")}}, logger)
+			b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.empty_response")}}, logger)
 			return
 		}
 
@@ -564,7 +562,7 @@ func (b *Bot) processSingleMessage(ctx context.Context, msg *telegram.Message, l
 				if err != nil {
 					logger.Error("failed to finalize intermediate response", "error", err)
 				} else {
-					b.sendResponses(llmCtx, chatID, intermediateResponses, logger)
+					b.sendResponses(shutdownSafeCtx, chatID, intermediateResponses, logger)
 				}
 			}
 
@@ -575,7 +573,7 @@ func (b *Bot) processSingleMessage(ctx context.Context, msg *telegram.Message, l
 				ReasoningDetails: choice.ReasoningDetails,
 			})
 
-			toolMessages, err := b.executeToolCalls(llmCtx, chatID, msg.MessageThreadID, userID, choice.ToolCalls, logger)
+			toolMessages, err := b.executeToolCalls(shutdownSafeCtx, chatID, msg.MessageThreadID, userID, choice.ToolCalls, logger)
 			if err != nil {
 				_ = err // Error already logged in executeToolCalls
 			}
@@ -600,5 +598,5 @@ func (b *Bot) processSingleMessage(ctx context.Context, msg *telegram.Message, l
 
 	b.recordMetrics(userID, totalPromptTokens, totalCompletionTokens, ragInfo, orMessages, finalResponse, logger)
 
-	b.sendResponses(llmCtx, chatID, responses, logger)
+	b.sendResponses(shutdownSafeCtx, chatID, responses, logger)
 }

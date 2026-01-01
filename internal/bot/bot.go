@@ -416,28 +416,32 @@ func (b *Bot) handleVoiceMessage(ctx context.Context, msg *telegram.Message, log
 
 	logger.Info("processing voice message", "message_id", msg.MessageID)
 
+	// Use shutdown-safe context to ensure voice recognition completes even during graceful shutdown.
+	// This prevents EOF errors when gRPC streams are interrupted by context cancellation.
+	shutdownSafeCtx := context.WithoutCancel(ctx)
+
 	if b.speechKitClient == nil {
 		logger.Info("speechkit client is disabled, ignoring voice message")
-		b.sendResponses(ctx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.voice_recognition_disabled")}}, logger)
+		b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.voice_recognition_disabled")}}, logger)
 		return
 	}
 
-	typingCtx, cancelTyping := context.WithCancel(ctx)
+	typingCtx, cancelTyping := context.WithCancel(shutdownSafeCtx)
 	defer cancelTyping()
 	go b.sendTypingActionLoop(typingCtx, chatID, msg.MessageThreadID)
 
-	audioData, err := b.downloader.DownloadFile(ctx, msg.Voice.FileID)
+	audioData, err := b.downloader.DownloadFile(shutdownSafeCtx, msg.Voice.FileID)
 	if err != nil {
 		logger.Error("failed to download voice message file", "error", err, "file_id", msg.Voice.FileID)
-		b.sendResponses(ctx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
+		b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
 		return
 	}
 
-	// Use the passed context for speech recognition to support cancellation
-	recognizedText, err := b.speechKitClient.Recognize(ctx, audioData)
+	// Use shutdown-safe context for speech recognition to ensure it completes during shutdown
+	recognizedText, err := b.speechKitClient.Recognize(shutdownSafeCtx, audioData)
 	if err != nil {
 		logger.Error("failed to recognize speech", "error", err)
-		b.sendResponses(ctx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
+		b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
 		return
 	}
 
@@ -455,12 +459,11 @@ func (b *Bot) handleVoiceMessage(ctx context.Context, msg *telegram.Message, log
 	}
 
 	// For voice messages, we create a temporary group with just this message
-	// Use the passed context to support cancellation during LLM generation
 	group := &MessageGroup{
 		Messages: []*telegram.Message{fakeTextMessage},
 		UserID:   userID,
 	}
-	b.processMessageGroup(ctx, group)
+	b.processMessageGroup(shutdownSafeCtx, group)
 }
 
 // formatCoreIdentityFacts formats core identity facts into a string for the system prompt.

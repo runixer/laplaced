@@ -146,3 +146,63 @@ func TestCreateChatCompletionLogging(t *testing.T) {
 	}
 	assert.True(t, foundRequestLog, "Did not find the 'Sending request to OpenRouter' log entry")
 }
+
+func TestFilterReasoningForLog(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    interface{}
+		expected interface{}
+	}{
+		{
+			name:     "nil input",
+			input:    nil,
+			expected: nil,
+		},
+		{
+			name:     "non-array input",
+			input:    "some string",
+			expected: "some string",
+		},
+		{
+			name: "filters out encrypted reasoning",
+			input: []interface{}{
+				map[string]interface{}{
+					"type": "reasoning.text",
+					"text": "This is readable reasoning",
+				},
+				map[string]interface{}{
+					"type": "reasoning.encrypted",
+					"data": "CiUBjz1rX3MB/waIzY5/GWJubVYRagRy...",
+				},
+			},
+			expected: []interface{}{
+				map[string]interface{}{
+					"type": "reasoning.text",
+					"text": "This is readable reasoning",
+				},
+			},
+		},
+		{
+			name: "only encrypted returns nil",
+			input: []interface{}{
+				map[string]interface{}{
+					"type": "reasoning.encrypted",
+					"data": "CiUBjz1rX3MB...",
+				},
+			},
+			expected: nil,
+		},
+		{
+			name:     "empty array",
+			input:    []interface{}{},
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := filterReasoningForLog(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

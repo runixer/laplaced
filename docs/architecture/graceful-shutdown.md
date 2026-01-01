@@ -90,6 +90,7 @@ sequenceDiagram
     participant TG as Telegram
     participant Bot as Bot
     participant MG as MessageGrouper
+    participant RAG as RAG Service
     participant LLM as OpenRouter
 
     TG->>Bot: Update (сообщение)
@@ -99,11 +100,14 @@ sequenceDiagram
 
     MG->>Bot: processMessageGroup(ctx)
 
-    Note over Bot: llmCtx := context.WithoutCancel(ctx)
+    Note over Bot: shutdownSafeCtx := context.WithoutCancel(ctx)
 
-    Bot->>LLM: CreateChatCompletion(llmCtx)
+    Bot->>RAG: buildContext(shutdownSafeCtx)
+    RAG-->>Bot: контекст с историей
 
-    Note over Bot: SIGTERM получен<br/>ctx отменён, но llmCtx — нет
+    Bot->>LLM: CreateChatCompletion(shutdownSafeCtx)
+
+    Note over Bot: SIGTERM получен<br/>ctx отменён, но shutdownSafeCtx — нет
 
     LLM-->>Bot: Response
     Bot->>TG: SendMessage (ответ)
@@ -113,22 +117,38 @@ sequenceDiagram
 
 ## Ключевые решения
 
-### 1. LLM генерация не отменяется при shutdown
+### 1. Вся обработка сообщения не отменяется при shutdown
 
-**Проблема:** При отмене контекста HTTP запрос к OpenRouter прерывается, пользователь не получает ответ.
+**Проблема:** При отмене контекста HTTP запросы (RAG, LLM, отправка) прерываются, пользователь не получает ответ.
 
-**Решение:** Используем `context.WithoutCancel(ctx)` для LLM вызовов:
+**Решение:** Используем `context.WithoutCancel(ctx)` для всех операций обработки:
 
 ```go
 // process_group.go
-llmCtx := context.WithoutCancel(ctx)
-resp, err := b.orClient.CreateChatCompletion(llmCtx, req)
+func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
+    // Создаём non-cancellable контекст в начале обработки
+    shutdownSafeCtx := context.WithoutCancel(ctx)
+
+    // Typing action использует этот контекст
+    typingCtx, cancelTyping := context.WithCancel(shutdownSafeCtx)
+    go b.sendTypingActionLoop(typingCtx, chatID, threadID)
+
+    // RAG retrieval использует этот контекст
+    orMessages, ragInfo, err := b.buildContext(shutdownSafeCtx, userID, ...)
+
+    // LLM генерация использует этот контекст
+    resp, err := b.orClient.CreateChatCompletion(shutdownSafeCtx, req)
+
+    // Отправка ответа тоже
+    b.sendResponses(shutdownSafeCtx, chatID, responses, logger)
+}
 ```
 
 **Обоснование:**
 - Пользователь должен получить ответ на уже принятое сообщение
-- LLM генерация может занимать до минуты
-- Новые сообщения после shutdown всё равно будут доставлены Telegram после рестарта
+- RAG + LLM генерация может занимать до минуты
+- Typing action должен показываться пока идёт обработка
+- Новые сообщения после shutdown будут доставлены Telegram после рестарта
 
 ### 2. WaitGroup.Add() вызывается ДО старта горутины
 
@@ -152,18 +172,30 @@ go func() {
 }()
 ```
 
-### 3. Timer.Stop() возвращает bool
+### 3. Pending группы обрабатываются при shutdown
 
-**Проблема:** При остановке таймера нужно корректно обработать WaitGroup.
+**Проблема:** Если пользователь отправил сообщение и сразу произошёл shutdown (в течение turnWait), сообщение может быть потеряно — Telegram считает его доставленным.
+
+**Решение:** При shutdown обрабатываем все pending группы немедленно:
 
 ```go
-if group.Timer.Stop() {
-    // Таймер остановлен ДО срабатывания — callback не выполнится
-    mg.wg.Done()  // Декрементируем вручную
-} else {
-    // Таймер уже сработал — callback выполняется или выполнен
-    // wg.Done() будет вызван в callback
+// message_grouper.go - Stop()
+for userID, group := range mg.groups {
+    if group.Timer.Stop() {
+        // Таймер остановлен ДО срабатывания — обрабатываем группу сейчас
+        pendingGroups = append(pendingGroups, group)
+    }
 }
+
+// Запускаем обработку pending групп
+for _, group := range pendingGroups {
+    go func(g *MessageGroup) {
+        defer mg.wg.Done()
+        mg.onGroupReady(context.Background(), g)
+    }(group)
+}
+
+mg.wg.Wait() // Ждём завершения всех обработок
 ```
 
 ### 4. Webhook использует server context, не request context
@@ -207,11 +239,9 @@ func (b *Bot) sendAction(ctx context.Context, chatID int64, action string) {
 | Момент отправки | Long Polling | Webhook |
 |-----------------|--------------|---------|
 | До shutdown | Обрабатывается, ответ отправляется | Обрабатывается, ответ отправляется |
-| Во время LLM генерации | LLM завершится, ответ отправится | LLM завершится, ответ отправится |
-| В turnWait (ожидание группировки) | Таймер отменится, сообщение потеряется* | Таймер отменится, сообщение потеряется* |
+| Во время обработки (RAG + LLM) | Обработка завершится, ответ отправится | Обработка завершится, ответ отправится |
+| В turnWait (ожидание группировки) | Группа обработается немедленно | Группа обработается немедленно |
 | После shutdown | Придёт после рестарта | Telegram повторит доставку |
-
-*Сообщения в turnWait теряются локально, но Telegram сохраняет offset — после рестарта они придут снова.
 
 ## Тестирование
 

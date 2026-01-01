@@ -18,6 +18,38 @@ type Client interface {
 	CreateEmbeddings(ctx context.Context, req EmbeddingRequest) (EmbeddingResponse, error)
 }
 
+// filterReasoningForLog filters out encrypted reasoning entries from reasoning_details.
+// Keeps only "reasoning.text" entries which are human-readable and useful for debugging.
+// This prevents massive base64 blobs from polluting logs.
+func filterReasoningForLog(details interface{}) interface{} {
+	if details == nil {
+		return nil
+	}
+
+	// reasoning_details is typically []interface{} of maps
+	arr, ok := details.([]interface{})
+	if !ok {
+		return details
+	}
+
+	var filtered []interface{}
+	for _, item := range arr {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		// Keep only reasoning.text entries, skip reasoning.encrypted
+		if t, ok := m["type"].(string); ok && t == "reasoning.text" {
+			filtered = append(filtered, m)
+		}
+	}
+
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
+}
+
 type clientImpl struct {
 	httpClient  *http.Client
 	apiKey      string
@@ -321,11 +353,9 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		return ChatCompletionResponse{}, nil
 	}
 
-	c.logger.Debug("OpenRouter raw response body", "body", string(responseBody))
-
 	var chatResp ChatCompletionResponse
 	if err := json.NewDecoder(bytes.NewBuffer(responseBody)).Decode(&chatResp); err != nil {
-		c.logger.Error("Failed to decode OpenRouter response", "error", err, "body", string(responseBody))
+		c.logger.Error("Failed to decode OpenRouter response", "error", err, "body_length", len(responseBody))
 		return ChatCompletionResponse{}, err
 	}
 
@@ -334,7 +364,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		c.logger.Debug("OpenRouter response content",
 			"content", msg.Content,
 			"tool_calls_count", len(msg.ToolCalls),
-			"reasoning_details", msg.ReasoningDetails,
+			"reasoning_details", filterReasoningForLog(msg.ReasoningDetails),
 		)
 	}
 
