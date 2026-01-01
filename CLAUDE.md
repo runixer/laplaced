@@ -84,3 +84,21 @@ Key env vars:
 
 Default language is configurable via `bot.language` in config. Supported: `en`, `ru`.
 Translation files in `locales/` directory.
+
+## CI/CD
+
+GitHub Actions workflow (`.github/workflows/ci.yml`):
+- **On push to main**: lint, test, build binaries (amd64/arm64), build & push Docker image
+- **On tag v***: all above + create GitHub Release with binaries
+
+Docker image: `ghcr.io/runixer/laplaced:latest`
+
+```bash
+# Check CI status
+gh run list
+
+# Create release
+git tag v0.1.x && git push --tags
+```
+
+@.claude/deploy.md
