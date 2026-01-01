@@ -121,6 +121,45 @@ func TestMyFunction(t *testing.T) {
 }
 ```
 
+## Refactoring & Cyclomatic Complexity
+
+### Checking Complexity
+
+```bash
+~/go/bin/gocyclo -top 10 .    # Top 10 most complex functions
+```
+
+### When to Refactor
+
+**Good candidates for extraction:**
+- Pure functions with no dependencies (easiest to test)
+- Code reused in multiple places
+- Isolated logic blocks with clear input/output
+- Deeply nested conditionals that can be flattened
+
+**Don't refactor just for metrics:**
+- Linear pipelines (sequential steps) are often clearer as one function
+- Functions used exactly once may not benefit from extraction
+- High complexity from many `if err != nil` checks is normal in Go
+
+### Decision Framework
+
+1. **Analyze the function** — Is it truly complex or just long?
+2. **Identify extraction candidates** — Look for reusable or isolatable blocks
+3. **Consider readability** — Will splitting improve or fragment understanding?
+4. **Prefer partial refactoring** — Extract 2-3 helpers, not 7 tiny functions
+5. **Always add tests** — Extracted functions must have table-driven tests
+
+### Example Assessment
+
+```
+Before: buildContext (complexity 46)
+Analysis: Linear pipeline, but has 2 clear extractable blocks
+Action: Extract formatCoreIdentityFacts + deduplicateTopics
+After: buildContext (34), two tested helpers
+Result: Better than splitting into 7 single-use functions
+```
+
 ## Configuration
 
 Config loaded from `configs/config.yaml`, overridable via environment variables prefixed with `LAPLACED_`.
