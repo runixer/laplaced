@@ -180,6 +180,12 @@ Translation files in `locales/` directory.
 
 After completing a task (feature, refactoring, bug fix), **always offer to commit**. Don't wait for the user to ask.
 
+**Before committing, check:**
+1. Does this change need a CHANGELOG entry? (see [Changelog](#changelog) section)
+2. Are there any security fixes? → Add to `### Security`
+3. New features or config? → Add to `### Added`
+4. Bug fixes? → Add to `### Fixed`
+
 ### Commit Style
 
 - **Format**: Short imperative subject, optional body with details
