@@ -10,8 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Added `.golangci.yml` with extended linter set (goimports, misspell, gocritic, gosec, bodyclose, errorlint)
 
+### Changed
+- Voice messages now go through MessageGrouper for proper grouping with text messages
+- Forwarded voice messages now correctly show their original source in transcription
+
 ### Fixed
 - Fixed excessive log size from OpenRouter responses - removed raw body logging and filtered out `reasoning.encrypted` blobs
+- Removed noisy "Partial recognition result" debug logging from SpeechKit client
 - Fixed "context canceled" warnings for typing action by using detached context with timeout
 - Fixed bot token leaking in error log messages - now sanitized as `[REDACTED]`
 - Fixed graceful shutdown for voice messages: file download, speech recognition, and response sending now complete even when shutdown is triggered

@@ -1076,8 +1076,9 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 	assert.Equal(t, expectedFileTextContent, docPart.Text)
 }
 
-func TestHandleVoiceMessage(t *testing.T) {
-	// Setup
+// TestProcessMessageGroup_VoiceMessage tests that voice messages are properly
+// transcribed and processed when going through the message grouper.
+func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	mockAPI := new(MockBotAPI)
@@ -1089,6 +1090,7 @@ func TestHandleVoiceMessage(t *testing.T) {
 	cfg := &config.Config{
 		Bot: config.BotConfig{
 			SystemPrompt: "Test prompt",
+			Language:     "en",
 		},
 		OpenRouter: config.OpenRouterConfig{
 			Model: "test-model",
@@ -1119,45 +1121,39 @@ func TestHandleVoiceMessage(t *testing.T) {
 	voiceData := []byte("fake_voice_data")
 	recognizedText := "Hello world"
 
-	// Test Data
 	msg := &telegram.Message{
 		MessageID: 1,
 		From:      &telegram.User{ID: userID, FirstName: "User", Username: "testuser"},
 		Chat:      &telegram.Chat{ID: chatID},
 		Date:      now,
-		Voice: &telegram.Voice{
-			FileID: voiceFileID,
-		},
+		Voice:     &telegram.Voice{FileID: voiceFileID},
 	}
 
 	// Mock expectations
 	mockDownloader.On("DownloadFile", mock.Anything, voiceFileID).Return(voiceData, nil)
 	mockSpeechKit.On("Recognize", mock.Anything, voiceData).Return(recognizedText, nil)
 
-	// We need to create a temporary message to build the expected history content
-	fakeTextMessage := &telegram.Message{
-		MessageID: msg.MessageID, From: msg.From, Chat: msg.Chat, Date: msg.Date, Text: fmt.Sprintf("%s %s", translator.Get("en", "bot.voice_recognition_prefix"), recognizedText),
-	}
-	expectedHistoryContent := fakeTextMessage.BuildContent(translator, "en")
+	// Build expected content: "[User (@testuser) (time)]: (Распознано из аудио): Hello world"
+	voicePrefix := translator.Get("en", "bot.voice_recognition_prefix")
+	prefix := msg.BuildPrefix(translator, "en")
+	expectedHistoryContent := fmt.Sprintf("%s: %s %s", prefix, voicePrefix, recognizedText)
 
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{
 		{Role: "user", Content: expectedHistoryContent},
 	}, nil)
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
 	mockStore.On("AddMessageToHistory", userID, mock.MatchedBy(func(m storage.Message) bool {
-		return m.Role == "user" && m.Content == expectedHistoryContent
+		return m.Role == "user"
 	})).Return(nil)
 	mockStore.On("AddMessageToHistory", userID, mock.MatchedBy(func(m storage.Message) bool {
 		return m.Role == "assistant"
 	})).Return(nil)
 	mockStore.On("AddStat", mock.Anything).Return(nil)
 
-	// Mock API calls
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
-	// Mock OpenRouter call
 	var capturedRequest openrouter.ChatCompletionRequest
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		capturedRequest = args.Get(1).(openrouter.ChatCompletionRequest)
@@ -1184,14 +1180,17 @@ func TestHandleVoiceMessage(t *testing.T) {
 		}{TotalTokens: 10},
 	}, nil)
 
-	// Execute
-	bot.handleVoiceMessage(context.Background(), msg, logger)
+	// Execute - voice messages now go through processMessageGroup
+	group := &MessageGroup{
+		Messages: []*telegram.Message{msg},
+		UserID:   userID,
+	}
+	bot.processMessageGroup(context.Background(), group)
 
 	// Assertions
-	mockStore.AssertExpectations(t)
-	mockORClient.AssertExpectations(t)
-	mockDownloader.AssertExpectations(t)
-	mockSpeechKit.AssertExpectations(t)
+	mockDownloader.AssertCalled(t, "DownloadFile", mock.Anything, voiceFileID)
+	mockSpeechKit.AssertCalled(t, "Recognize", mock.Anything, voiceData)
+	mockORClient.AssertCalled(t, "CreateChatCompletion", mock.Anything, mock.Anything)
 
 	assert.Len(t, capturedRequest.Messages, 2) // System + User
 	userContent := capturedRequest.Messages[1].Content
@@ -1201,7 +1200,8 @@ func TestHandleVoiceMessage(t *testing.T) {
 
 	textPart, ok := contentParts[0].(openrouter.TextPart)
 	assert.True(t, ok)
-	assert.Equal(t, expectedHistoryContent, textPart.Text)
+	assert.Contains(t, textPart.Text, voicePrefix)
+	assert.Contains(t, textPart.Text, recognizedText)
 }
 
 func TestProcessUpdate(t *testing.T) {

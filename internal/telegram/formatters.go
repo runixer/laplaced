@@ -79,17 +79,17 @@ func (mo *MessageOrigin) Format(forwardedBy *User, translator *i18n.Translator, 
 	return translator.Get(lang, "telegram.forwarded_from", from, forwardedBy.Format(), formatTime(mo.Date))
 }
 
+// BuildPrefix constructs the prefix for a message (user info or forwarding info).
+func (m *Message) BuildPrefix(translator *i18n.Translator, lang string) string {
+	if m.ForwardOrigin != nil {
+		return m.ForwardOrigin.Format(m.From, translator, lang)
+	}
+	return fmt.Sprintf("[%s (%s)]", m.From.Format(), formatTime(m.Date))
+}
+
 // BuildContent constructs the full text content for a message, including prefixes for user, time, and forwarding.
 func (m *Message) BuildContent(translator *i18n.Translator, lang string) string {
-	var prefixBuilder strings.Builder
-	if m.ForwardOrigin != nil {
-		prefixBuilder.WriteString(m.ForwardOrigin.Format(m.From, translator, lang))
-	} else {
-		prefixBuilder.WriteString(fmt.Sprintf("[%s (%s)]",
-			m.From.Format(),
-			formatTime(m.Date),
-		))
-	}
+	prefix := m.BuildPrefix(translator, lang)
 
 	var messageText string
 	if m.Text != "" {
@@ -101,6 +101,10 @@ func (m *Message) BuildContent(translator *i18n.Translator, lang string) string 
 	if messageText == "" {
 		if len(m.Photo) > 0 {
 			messageText = "(photo)"
+		} else if m.Voice != nil {
+			// Voice content is transcribed separately in the bot logic
+			// Return empty string here, the actual content will be built after transcription
+			return ""
 		} else if m.Document != nil {
 			// Document content is handled separately in the bot logic
 		} else {
@@ -108,5 +112,5 @@ func (m *Message) BuildContent(translator *i18n.Translator, lang string) string 
 		}
 	}
 
-	return fmt.Sprintf("%s: %s", prefixBuilder.String(), messageText)
+	return fmt.Sprintf("%s: %s", prefix, messageText)
 }

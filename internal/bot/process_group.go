@@ -277,6 +277,46 @@ func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logge
 			}
 		}
 
+		// Handle voice messages - transcribe and add to content
+		if msg.Voice != nil {
+			if b.speechKitClient == nil {
+				logger.Info("speechkit client is disabled, skipping voice message transcription")
+			} else {
+				audioData, err := b.downloader.DownloadFile(ctx, msg.Voice.FileID)
+				if err != nil {
+					logger.Error("failed to download voice message", "error", err, "file_id", msg.Voice.FileID)
+					return "", "", nil, err
+				}
+
+				recognizedText, err := b.speechKitClient.Recognize(ctx, audioData)
+				if err != nil {
+					logger.Error("failed to recognize speech", "error", err)
+					return "", "", nil, err
+				}
+
+				if recognizedText != "" {
+					// Build voice message content with proper prefix (handles forwarded messages)
+					prefix := msg.BuildPrefix(b.translator, b.cfg.Bot.Language)
+					voicePrefix := b.translator.Get(b.cfg.Bot.Language, "bot.voice_recognition_prefix")
+					voiceContent := fmt.Sprintf("%s: %s %s", prefix, voicePrefix, recognizedText)
+
+					if historyContentBuilder.Len() > 0 {
+						historyContentBuilder.WriteString("\n")
+					}
+					historyContentBuilder.WriteString(voiceContent)
+
+					// Add to raw query for RAG
+					if rawQueryBuilder.Len() > 0 {
+						rawQueryBuilder.WriteString("\n")
+					}
+					rawQueryBuilder.WriteString(voicePrefix + " " + recognizedText)
+
+					// Set fullMessageContent so the text part is added below
+					fullMessageContent = voiceContent
+				}
+			}
+		}
+
 		if fullMessageContent != "" {
 			textPart := openrouter.TextPart{Type: "text", Text: fullMessageContent}
 			partsForThisMessage = append([]interface{}{textPart}, partsForThisMessage...)

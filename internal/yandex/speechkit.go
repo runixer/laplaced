@@ -172,12 +172,8 @@ func (c *SpeechKitClient) Recognize(ctx context.Context, audioData []byte) (stri
 			if len(final.Alternatives) > 0 {
 				finalTexts = append(finalTexts, final.Alternatives[0].Text)
 			}
-		} else if partial := resp.GetPartial(); partial != nil {
-			if len(partial.Alternatives) > 0 {
-				// You can log partial results if needed
-				c.logger.Debug("Partial recognition result", "text", partial.Alternatives[0].Text)
-			}
 		}
+		// Partial results are ignored - we only use final results
 	}
 
 	fullResponse := strings.Join(finalTexts, " ")

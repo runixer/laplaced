@@ -265,10 +265,10 @@ func TestProcessMessageGroup_LLMContextNotCancelled(t *testing.T) {
 	llmContextMu.Unlock()
 }
 
-// TestHandleVoiceMessage_CompletesOnContextCancel verifies that voice message
+// TestProcessMessageGroup_VoiceCompletesOnContextCancel verifies that voice message
 // processing (download, speech recognition, LLM generation) completes even when
 // the parent context is cancelled. This is critical for graceful shutdown.
-func TestHandleVoiceMessage_CompletesOnContextCancel(t *testing.T) {
+func TestProcessMessageGroup_VoiceCompletesOnContextCancel(t *testing.T) {
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	mockAPI := new(MockBotAPI)
@@ -345,18 +345,7 @@ func TestHandleVoiceMessage_CompletesOnContextCancel(t *testing.T) {
 		sendMessageMu.Unlock()
 	}).Return(&telegram.Message{MessageID: 2}, nil)
 
-	fakeTextMessage := &telegram.Message{
-		MessageID: msg.MessageID,
-		From:      msg.From,
-		Chat:      msg.Chat,
-		Date:      msg.Date,
-		Text:      translator.Get("en", "bot.voice_recognition_prefix") + " " + recognizedText,
-	}
-	expectedHistoryContent := fakeTextMessage.BuildContent(translator, "en")
-
-	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{
-		{Role: "user", Content: expectedHistoryContent},
-	}, nil)
+	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
 	mockStore.On("AddMessageToHistory", userID, mock.Anything).Return(nil)
 	mockStore.On("UpdateStats", mock.Anything).Return(nil)
@@ -373,7 +362,11 @@ func TestHandleVoiceMessage_CompletesOnContextCancel(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		bot.handleVoiceMessage(ctx, msg, logger)
+		group := &MessageGroup{
+			Messages: []*telegram.Message{msg},
+			UserID:   userID,
+		}
+		bot.processMessageGroup(ctx, group)
 	}()
 
 	// Cancel context after download starts but before recognition completes
@@ -392,9 +385,9 @@ func TestHandleVoiceMessage_CompletesOnContextCancel(t *testing.T) {
 	mockORClient.AssertCalled(t, "CreateChatCompletion", mock.Anything, mock.Anything)
 }
 
-// TestHandleVoiceMessage_SpeechContextNotCancelled verifies that the context
+// TestProcessMessageGroup_VoiceSpeechContextNotCancelled verifies that the context
 // passed to speech recognition is not cancelled when parent context is cancelled.
-func TestHandleVoiceMessage_SpeechContextNotCancelled(t *testing.T) {
+func TestProcessMessageGroup_VoiceSpeechContextNotCancelled(t *testing.T) {
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	mockAPI := new(MockBotAPI)
@@ -466,18 +459,7 @@ func TestHandleVoiceMessage_SpeechContextNotCancelled(t *testing.T) {
 	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{MessageID: 2}, nil)
 
-	fakeTextMessage := &telegram.Message{
-		MessageID: msg.MessageID,
-		From:      msg.From,
-		Chat:      msg.Chat,
-		Date:      msg.Date,
-		Text:      translator.Get("en", "bot.voice_recognition_prefix") + " " + recognizedText,
-	}
-	expectedHistoryContent := fakeTextMessage.BuildContent(translator, "en")
-
-	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{
-		{Role: "user", Content: expectedHistoryContent},
-	}, nil)
+	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
 	mockStore.On("AddMessageToHistory", userID, mock.Anything).Return(nil)
 	mockStore.On("UpdateStats", mock.Anything).Return(nil)
@@ -493,7 +475,11 @@ func TestHandleVoiceMessage_SpeechContextNotCancelled(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		bot.handleVoiceMessage(ctx, msg, logger)
+		group := &MessageGroup{
+			Messages: []*telegram.Message{msg},
+			UserID:   userID,
+		}
+		bot.processMessageGroup(ctx, group)
 	}()
 
 	// Cancel parent context quickly
