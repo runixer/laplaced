@@ -216,6 +216,78 @@ func (m *MockOpenRouterClient) CreateEmbeddings(ctx context.Context, req openrou
 	return *args.Get(0).(*openrouter.EmbeddingResponse), args.Error(1)
 }
 
+func TestAddFactWithHistory(t *testing.T) {
+	tests := []struct {
+		name        string
+		debugMode   bool
+		addFactErr  error
+		wantHistory bool
+		wantErr     bool
+	}{
+		{
+			name:        "success with debug mode",
+			debugMode:   true,
+			addFactErr:  nil,
+			wantHistory: true,
+			wantErr:     false,
+		},
+		{
+			name:        "success without debug mode",
+			debugMode:   false,
+			addFactErr:  nil,
+			wantHistory: false,
+			wantErr:     false,
+		},
+		{
+			name:        "AddFact error",
+			debugMode:   true,
+			addFactErr:  assert.AnError,
+			wantHistory: false,
+			wantErr:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStore := new(MockStorage)
+			logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+			cfg := &config.Config{}
+			cfg.Server.DebugMode = tt.debugMode
+			translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+
+			svc := NewService(logger, cfg, mockStore, mockStore, mockStore, nil, translator)
+
+			fact := storage.Fact{
+				UserID:     123,
+				Entity:     "User",
+				Content:    "Test fact",
+				Category:   "test",
+				Relation:   "related_to",
+				Importance: 50,
+			}
+			topicID := int64(10)
+
+			mockStore.On("AddFact", mock.Anything).Return(int64(1), tt.addFactErr)
+			if tt.wantHistory {
+				mockStore.On("AddFactHistory", mock.MatchedBy(func(h storage.FactHistory) bool {
+					return h.FactID == 1 && h.Action == "add" && h.TopicID != nil && *h.TopicID == topicID
+				})).Return(nil)
+			}
+
+			id, err := svc.addFactWithHistory(fact, "test reason", &topicID, "input")
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Equal(t, int64(0), id)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, int64(1), id)
+			}
+			mockStore.AssertExpectations(t)
+		})
+	}
+}
+
 func TestProcessSession_AddFact_RecordsHistory(t *testing.T) {
 	// Arrange
 	mockStore := new(MockStorage)

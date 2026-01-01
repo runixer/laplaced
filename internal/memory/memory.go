@@ -442,6 +442,32 @@ func (s *Service) getEmbedding(ctx context.Context, text string) ([]float32, err
 	return resp.Data[0].Embedding, nil
 }
 
+// addFactWithHistory adds a fact and records history if debug mode is enabled.
+func (s *Service) addFactWithHistory(fact storage.Fact, reason string, topicID *int64, requestInput string) (int64, error) {
+	id, err := s.factRepo.AddFact(fact)
+	if err != nil {
+		return 0, err
+	}
+
+	if s.cfg.Server.DebugMode {
+		_ = s.factHistoryRepo.AddFactHistory(storage.FactHistory{
+			FactID:       id,
+			UserID:       fact.UserID,
+			Action:       "add",
+			NewContent:   fact.Content,
+			Reason:       reason,
+			Category:     fact.Category,
+			Entity:       fact.Entity,
+			Relation:     fact.Relation,
+			Importance:   fact.Importance,
+			TopicID:      topicID,
+			RequestInput: requestInput,
+		})
+	}
+
+	return id, nil
+}
+
 func (s *Service) deduplicateAndAddFact(ctx context.Context, fact storage.Fact, reason string, topicID int64, requestInput string) error {
 	var tID *int64
 	if topicID != 0 {
@@ -449,22 +475,7 @@ func (s *Service) deduplicateAndAddFact(ctx context.Context, fact storage.Fact, 
 	}
 
 	if s.vectorSearcher == nil {
-		id, err := s.factRepo.AddFact(fact)
-		if err == nil && s.cfg.Server.DebugMode {
-			_ = s.factHistoryRepo.AddFactHistory(storage.FactHistory{
-				FactID:       id,
-				UserID:       fact.UserID,
-				Action:       "add",
-				NewContent:   fact.Content,
-				Reason:       reason,
-				Category:     fact.Category,
-				Entity:       fact.Entity,
-				Relation:     fact.Relation,
-				Importance:   fact.Importance,
-				TopicID:      tID,
-				RequestInput: requestInput,
-			})
-		}
+		_, err := s.addFactWithHistory(fact, reason, tID, requestInput)
 		return err
 	}
 
@@ -472,42 +483,12 @@ func (s *Service) deduplicateAndAddFact(ctx context.Context, fact storage.Fact, 
 	similar, err := s.vectorSearcher.FindSimilarFacts(ctx, fact.UserID, fact.Embedding, 0.85)
 	if err != nil {
 		s.logger.Error("failed to search similar facts", "error", err)
-		id, err := s.factRepo.AddFact(fact)
-		if err == nil && s.cfg.Server.DebugMode {
-			_ = s.factHistoryRepo.AddFactHistory(storage.FactHistory{
-				FactID:       id,
-				UserID:       fact.UserID,
-				Action:       "add",
-				NewContent:   fact.Content,
-				Reason:       reason,
-				Category:     fact.Category,
-				Entity:       fact.Entity,
-				Relation:     fact.Relation,
-				Importance:   fact.Importance,
-				TopicID:      tID,
-				RequestInput: requestInput,
-			})
-		}
+		_, err := s.addFactWithHistory(fact, reason, tID, requestInput)
 		return err
 	}
 
 	if len(similar) == 0 {
-		id, err := s.factRepo.AddFact(fact)
-		if err == nil && s.cfg.Server.DebugMode {
-			_ = s.factHistoryRepo.AddFactHistory(storage.FactHistory{
-				FactID:       id,
-				UserID:       fact.UserID,
-				Action:       "add",
-				NewContent:   fact.Content,
-				Reason:       reason,
-				Category:     fact.Category,
-				Entity:       fact.Entity,
-				Relation:     fact.Relation,
-				Importance:   fact.Importance,
-				TopicID:      tID,
-				RequestInput: requestInput,
-			})
-		}
+		_, err := s.addFactWithHistory(fact, reason, tID, requestInput)
 		return err
 	}
 
@@ -515,22 +496,7 @@ func (s *Service) deduplicateAndAddFact(ctx context.Context, fact storage.Fact, 
 	action, targetID, newContent, err := s.arbitrateFact(ctx, fact, similar)
 	if err != nil {
 		s.logger.Error("arbitration failed", "error", err)
-		id, err := s.factRepo.AddFact(fact)
-		if err == nil && s.cfg.Server.DebugMode {
-			_ = s.factHistoryRepo.AddFactHistory(storage.FactHistory{
-				FactID:       id,
-				UserID:       fact.UserID,
-				Action:       "add",
-				NewContent:   fact.Content,
-				Reason:       reason,
-				Category:     fact.Category,
-				Entity:       fact.Entity,
-				Relation:     fact.Relation,
-				Importance:   fact.Importance,
-				TopicID:      tID,
-				RequestInput: requestInput,
-			})
-		}
+		_, err := s.addFactWithHistory(fact, reason, tID, requestInput)
 		return err
 	}
 
@@ -559,21 +525,7 @@ func (s *Service) deduplicateAndAddFact(ctx context.Context, fact storage.Fact, 
 		}
 		if targetFact == nil {
 			// Fallback if ID returned by LLM is weird, though unlikely if we passed it
-			id, err := s.factRepo.AddFact(fact)
-			if err == nil && s.cfg.Server.DebugMode {
-				_ = s.factHistoryRepo.AddFactHistory(storage.FactHistory{
-					FactID:       id,
-					UserID:       fact.UserID,
-					Action:       "add",
-					NewContent:   fact.Content,
-					Reason:       reason,
-					Category:     fact.Category,
-					Entity:       fact.Entity,
-					Importance:   fact.Importance,
-					TopicID:      tID,
-					RequestInput: requestInput,
-				})
-			}
+			_, err := s.addFactWithHistory(fact, reason, tID, requestInput)
 			return err
 		}
 
@@ -612,40 +564,10 @@ func (s *Service) deduplicateAndAddFact(ctx context.Context, fact storage.Fact, 
 		return nil
 
 	case "ADD":
-		id, err := s.factRepo.AddFact(fact)
-		if err == nil && s.cfg.Server.DebugMode {
-			_ = s.factHistoryRepo.AddFactHistory(storage.FactHistory{
-				FactID:       id,
-				UserID:       fact.UserID,
-				Action:       "add",
-				NewContent:   fact.Content,
-				Reason:       reason,
-				Category:     fact.Category,
-				Entity:       fact.Entity,
-				Relation:     fact.Relation,
-				Importance:   fact.Importance,
-				TopicID:      tID,
-				RequestInput: requestInput,
-			})
-		}
+		_, err := s.addFactWithHistory(fact, reason, tID, requestInput)
 		return err
 	default:
-		id, err := s.factRepo.AddFact(fact)
-		if err == nil && s.cfg.Server.DebugMode {
-			_ = s.factHistoryRepo.AddFactHistory(storage.FactHistory{
-				FactID:       id,
-				UserID:       fact.UserID,
-				Action:       "add",
-				NewContent:   fact.Content,
-				Reason:       reason,
-				Category:     fact.Category,
-				Entity:       fact.Entity,
-				Relation:     fact.Relation,
-				Importance:   fact.Importance,
-				TopicID:      tID,
-				RequestInput: requestInput,
-			})
-		}
+		_, err := s.addFactWithHistory(fact, reason, tID, requestInput)
 		return err
 	}
 }
