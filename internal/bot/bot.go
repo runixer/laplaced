@@ -677,6 +677,216 @@ func (b *Bot) getTieredCost(promptTokens, completionTokens int, logger *slog.Log
 	return totalCost
 }
 
+// memoryOpParams holds parsed parameters for a memory operation.
+type memoryOpParams struct {
+	Action     string
+	Entity     string
+	Content    string
+	Category   string
+	FactType   string
+	Reason     string
+	Importance int
+	FactID     int64
+}
+
+// parseMemoryOpParams extracts operation parameters from a map.
+func parseMemoryOpParams(params map[string]interface{}) memoryOpParams {
+	p := memoryOpParams{
+		Action:   params["action"].(string),
+		Entity:   "",
+		Content:  "",
+		Category: "",
+		FactType: "",
+		Reason:   "",
+	}
+	if v, ok := params["entity"].(string); ok {
+		p.Entity = v
+	}
+	if v, ok := params["content"].(string); ok {
+		p.Content = v
+	}
+	if v, ok := params["category"].(string); ok {
+		p.Category = v
+	}
+	if v, ok := params["type"].(string); ok {
+		p.FactType = v
+	}
+	if v, ok := params["reason"].(string); ok {
+		p.Reason = v
+	}
+	if v, ok := params["importance"].(float64); ok {
+		p.Importance = int(v)
+	}
+	if v, ok := params["fact_id"].(float64); ok {
+		p.FactID = int64(v)
+	}
+	return p
+}
+
+func (b *Bot) performAddFact(ctx context.Context, userID int64, p memoryOpParams) (string, error) {
+	if p.Content == "" {
+		return "Error: Content is required for adding a fact.", fmt.Errorf("missing content")
+	}
+
+	resp, err := b.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
+		Model: b.cfg.RAG.EmbeddingModel,
+		Input: []string{p.Content},
+	})
+	if err != nil || len(resp.Data) == 0 {
+		return "Error generating embedding.", err
+	}
+
+	// Apply defaults
+	entity := p.Entity
+	if entity == "" {
+		entity = "User"
+	}
+	category := p.Category
+	if category == "" {
+		category = "other"
+	}
+	factType := p.FactType
+	if factType == "" {
+		factType = "context"
+	}
+	importance := p.Importance
+	if importance == 0 {
+		importance = 50
+	}
+
+	fact := storage.Fact{
+		UserID:     userID,
+		Entity:     entity,
+		Content:    p.Content,
+		Type:       factType,
+		Importance: importance,
+		Embedding:  resp.Data[0].Embedding,
+		Relation:   "related_to",
+		Category:   category,
+		TopicID:    nil,
+	}
+
+	id, err := b.factRepo.AddFact(fact)
+	if err != nil {
+		return "Error adding fact.", err
+	}
+
+	_ = b.factHistoryRepo.AddFactHistory(storage.FactHistory{
+		FactID:     id,
+		UserID:     userID,
+		Action:     "add",
+		NewContent: p.Content,
+		Reason:     p.Reason,
+		Category:   category,
+		Entity:     entity,
+		Relation:   "related_to",
+		Importance: importance,
+		TopicID:    nil,
+	})
+
+	return "Fact added successfully.", nil
+}
+
+func (b *Bot) performDeleteFact(ctx context.Context, userID int64, p memoryOpParams) (string, error) {
+	if p.FactID == 0 {
+		return "Error: Fact ID is required for deletion.", fmt.Errorf("missing fact_id")
+	}
+
+	// Fetch old fact for history
+	oldFacts, _ := b.factRepo.GetFactsByIDs([]int64{p.FactID})
+	var oldContent, category, entity, relation string
+	var importance int
+	if len(oldFacts) > 0 {
+		oldContent = oldFacts[0].Content
+		category = oldFacts[0].Category
+		entity = oldFacts[0].Entity
+		relation = oldFacts[0].Relation
+		importance = oldFacts[0].Importance
+	}
+
+	if err := b.factRepo.DeleteFact(userID, p.FactID); err != nil {
+		return "Error deleting fact.", err
+	}
+
+	_ = b.factHistoryRepo.AddFactHistory(storage.FactHistory{
+		FactID:     p.FactID,
+		UserID:     userID,
+		Action:     "delete",
+		OldContent: oldContent,
+		Reason:     p.Reason,
+		Category:   category,
+		Entity:     entity,
+		Relation:   relation,
+		Importance: importance,
+		TopicID:    nil,
+	})
+
+	return "Fact deleted successfully.", nil
+}
+
+func (b *Bot) performUpdateFact(ctx context.Context, userID int64, p memoryOpParams) (string, error) {
+	if p.FactID == 0 {
+		return "Error: Fact ID is required for update.", fmt.Errorf("missing fact_id")
+	}
+
+	resp, err := b.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
+		Model: b.cfg.RAG.EmbeddingModel,
+		Input: []string{p.Content},
+	})
+	if err != nil || len(resp.Data) == 0 {
+		return "Error generating embedding.", err
+	}
+
+	// Apply defaults
+	factType := p.FactType
+	if factType == "" {
+		factType = "context"
+	}
+	importance := p.Importance
+	if importance == 0 {
+		importance = 50
+	}
+
+	// Fetch old fact for history
+	oldFacts, _ := b.factRepo.GetFactsByIDs([]int64{p.FactID})
+	var oldContent, category, entity, relation string
+	if len(oldFacts) > 0 {
+		oldContent = oldFacts[0].Content
+		category = oldFacts[0].Category
+		entity = oldFacts[0].Entity
+		relation = oldFacts[0].Relation
+	}
+
+	fact := storage.Fact{
+		ID:         p.FactID,
+		UserID:     userID,
+		Content:    p.Content,
+		Type:       factType,
+		Importance: importance,
+		Embedding:  resp.Data[0].Embedding,
+	}
+
+	if err := b.factRepo.UpdateFact(fact); err != nil {
+		return "Error updating fact.", err
+	}
+
+	_ = b.factHistoryRepo.AddFactHistory(storage.FactHistory{
+		FactID:     p.FactID,
+		UserID:     userID,
+		Action:     "update",
+		OldContent: oldContent,
+		NewContent: p.Content,
+		Reason:     p.Reason,
+		Category:   category,
+		Entity:     entity,
+		Relation:   relation,
+		Importance: importance,
+		TopicID:    nil,
+	})
+
+	return "Fact updated successfully.", nil
+}
+
 func (b *Bot) performManageMemory(ctx context.Context, userID int64, args map[string]interface{}) (string, error) {
 	// The tool receives a JSON string inside the `query` argument
 	query, ok := args["query"].(string)
@@ -707,196 +917,28 @@ func (b *Bot) performManageMemory(ctx context.Context, userID int64, args map[st
 	var errorCount int
 
 	for i, params := range operations {
-		action, _ := params["action"].(string)
-		entity, _ := params["entity"].(string)
-		content, _ := params["content"].(string)
-		category, _ := params["category"].(string)
-		factType, _ := params["type"].(string)
-		reason, _ := params["reason"].(string)
-
-		var importance int
-		if impFloat, ok := params["importance"].(float64); ok {
-			importance = int(impFloat)
-		}
-
-		var factID int64
-		if idFloat, ok := params["fact_id"].(float64); ok {
-			factID = int64(idFloat)
-		}
+		p := parseMemoryOpParams(params)
 
 		var result string
 		var err error
 
-		switch action {
+		switch p.Action {
 		case "add":
-			if content == "" {
-				result = "Error: Content is required for adding a fact."
-				err = fmt.Errorf("missing content")
-			} else {
-				resp, embErr := b.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-					Model: b.cfg.RAG.EmbeddingModel,
-					Input: []string{content},
-				})
-				if embErr != nil || len(resp.Data) == 0 {
-					result = "Error generating embedding."
-					err = embErr
-				} else {
-					if entity == "" {
-						entity = "User"
-					}
-					if category == "" {
-						category = "other"
-					}
-					if factType == "" {
-						factType = "context"
-					}
-					if importance == 0 {
-						importance = 50
-					}
-
-					fact := storage.Fact{
-						UserID:     userID,
-						Entity:     entity,
-						Content:    content,
-						Type:       factType,
-						Importance: importance,
-						Embedding:  resp.Data[0].Embedding,
-						Relation:   "related_to",
-						Category:   category,
-						TopicID:    nil, // Manual addition has no topic
-					}
-
-					id, addErr := b.factRepo.AddFact(fact)
-					if addErr != nil {
-						result = "Error adding fact."
-						err = addErr
-					} else {
-						_ = b.factHistoryRepo.AddFactHistory(storage.FactHistory{
-							FactID:     id,
-							UserID:     userID,
-							Action:     "add",
-							NewContent: content,
-							Reason:     reason,
-							Category:   category,
-							Entity:     entity,
-							Relation:   "related_to",
-							Importance: importance,
-							TopicID:    nil,
-						})
-						result = "Fact added successfully."
-					}
-				}
-			}
-
+			result, err = b.performAddFact(ctx, userID, p)
 		case "delete":
-			if factID == 0 {
-				result = "Error: Fact ID is required for deletion."
-				err = fmt.Errorf("missing fact_id")
-			} else {
-				// Fetch old fact for history
-				oldFacts, _ := b.factRepo.GetFactsByIDs([]int64{factID})
-				var oldContent string
-				var category, entity, relation string
-				var importance int
-				if len(oldFacts) > 0 {
-					oldContent = oldFacts[0].Content
-					category = oldFacts[0].Category
-					entity = oldFacts[0].Entity
-					relation = oldFacts[0].Relation
-					importance = oldFacts[0].Importance
-				}
-
-				if delErr := b.factRepo.DeleteFact(userID, factID); delErr != nil {
-					result = "Error deleting fact."
-					err = delErr
-				} else {
-					_ = b.factHistoryRepo.AddFactHistory(storage.FactHistory{
-						FactID:     factID,
-						UserID:     userID,
-						Action:     "delete",
-						OldContent: oldContent,
-						Reason:     reason,
-						Category:   category,
-						Entity:     entity,
-						Relation:   relation,
-						Importance: importance,
-						TopicID:    nil,
-					})
-					result = "Fact deleted successfully."
-				}
-			}
-
+			result, err = b.performDeleteFact(ctx, userID, p)
 		case "update":
-			if factID == 0 {
-				result = "Error: Fact ID is required for update."
-				err = fmt.Errorf("missing fact_id")
-			} else {
-				resp, embErr := b.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-					Model: b.cfg.RAG.EmbeddingModel,
-					Input: []string{content},
-				})
-				if embErr != nil || len(resp.Data) == 0 {
-					result = "Error generating embedding."
-					err = embErr
-				} else {
-					if factType == "" {
-						factType = "context"
-					}
-					if importance == 0 {
-						importance = 50
-					}
-
-					// Fetch old fact for history
-					oldFacts, _ := b.factRepo.GetFactsByIDs([]int64{factID})
-					var oldContent string
-					var category, entity, relation string
-					if len(oldFacts) > 0 {
-						oldContent = oldFacts[0].Content
-						category = oldFacts[0].Category
-						entity = oldFacts[0].Entity
-						relation = oldFacts[0].Relation
-					}
-
-					fact := storage.Fact{
-						ID:         factID,
-						UserID:     userID,
-						Content:    content,
-						Type:       factType,
-						Importance: importance,
-						Embedding:  resp.Data[0].Embedding,
-					}
-					if updErr := b.factRepo.UpdateFact(fact); updErr != nil {
-						result = "Error updating fact."
-						err = updErr
-					} else {
-						_ = b.factHistoryRepo.AddFactHistory(storage.FactHistory{
-							FactID:     factID,
-							UserID:     userID,
-							Action:     "update",
-							OldContent: oldContent,
-							NewContent: content,
-							Reason:     reason,
-							Category:   category,
-							Entity:     entity,
-							Relation:   relation,
-							Importance: importance,
-							TopicID:    nil,
-						})
-						result = "Fact updated successfully."
-					}
-				}
-			}
-
+			result, err = b.performUpdateFact(ctx, userID, p)
 		default:
-			result = fmt.Sprintf("Unknown action: %s", action)
+			result = fmt.Sprintf("Unknown action: %s", p.Action)
 			err = fmt.Errorf("unknown action")
 		}
 
 		if err != nil {
 			errorCount++
-			results = append(results, fmt.Sprintf("Op %d (%s): Failed - %s (%v)", i+1, action, result, err))
+			results = append(results, fmt.Sprintf("Op %d (%s): Failed - %s (%v)", i+1, p.Action, result, err))
 		} else {
-			results = append(results, fmt.Sprintf("Op %d (%s): Success", i+1, action))
+			results = append(results, fmt.Sprintf("Op %d (%s): Success", i+1, p.Action))
 		}
 	}
 

@@ -12,6 +12,67 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
+func TestParseMemoryOpParams(t *testing.T) {
+	tests := []struct {
+		name   string
+		params map[string]interface{}
+		want   memoryOpParams
+	}{
+		{
+			name: "all fields present",
+			params: map[string]interface{}{
+				"action":     "add",
+				"entity":     "User",
+				"content":    "Likes Go",
+				"category":   "tech",
+				"type":       "preference",
+				"reason":     "user said so",
+				"importance": float64(85),
+				"fact_id":    float64(42),
+			},
+			want: memoryOpParams{
+				Action:     "add",
+				Entity:     "User",
+				Content:    "Likes Go",
+				Category:   "tech",
+				FactType:   "preference",
+				Reason:     "user said so",
+				Importance: 85,
+				FactID:     42,
+			},
+		},
+		{
+			name: "minimal fields",
+			params: map[string]interface{}{
+				"action": "delete",
+			},
+			want: memoryOpParams{
+				Action: "delete",
+			},
+		},
+		{
+			name: "numeric fields as float64 from JSON",
+			params: map[string]interface{}{
+				"action":     "update",
+				"fact_id":    float64(123),
+				"importance": float64(50),
+			},
+			want: memoryOpParams{
+				Action:     "update",
+				FactID:     123,
+				Importance: 50,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseMemoryOpParams(tt.params)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestPerformManageMemory_Add(t *testing.T) {
 	// Setup
 	mockStore := new(MockStorage)
