@@ -39,12 +39,12 @@ type SpeechKitClient struct {
 }
 
 // NewSpeechKitClient creates a new SpeechKitClient.
-func NewSpeechKitClient(ctx context.Context, logger *slog.Logger, apiKey, folderID, language, audioFormat, sampleRateStr, target string, opts ...grpc.DialOption) (Client, error) {
+func NewSpeechKitClient(_ context.Context, logger *slog.Logger, apiKey, folderID, language, audioFormat, sampleRateStr, target string, opts ...grpc.DialOption) (Client, error) {
 	if len(opts) == 0 {
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(nil)))
 	}
 
-	conn, err := grpc.DialContext(ctx, target, opts...) //nolint:staticcheck // TODO: migrate to grpc.NewClient
+	conn, err := grpc.NewClient(target, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create grpc connection: %w", err)
 	}

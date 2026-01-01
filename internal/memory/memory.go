@@ -364,7 +364,7 @@ func (s *Service) applyUpdate(ctx context.Context, userID int64, update *MemoryU
 				if topicID != 0 {
 					tID = &topicID
 				}
-				_ = s.factHistoryRepo.AddFactHistory(storage.FactHistory{
+				if err := s.factHistoryRepo.AddFactHistory(storage.FactHistory{
 					FactID:       updated.ID,
 					UserID:       userID,
 					Action:       "update",
@@ -377,7 +377,9 @@ func (s *Service) applyUpdate(ctx context.Context, userID int64, update *MemoryU
 					Importance:   updated.Importance,
 					TopicID:      tID,
 					RequestInput: requestInput,
-				})
+				}); err != nil {
+					s.logger.Warn("failed to add fact history", "action", "update", "fact_id", updated.ID, "error", err)
+				}
 			}
 		}
 	}
@@ -408,7 +410,7 @@ func (s *Service) applyUpdate(ctx context.Context, userID int64, update *MemoryU
 				if topicID != 0 {
 					tID = &topicID
 				}
-				_ = s.factHistoryRepo.AddFactHistory(storage.FactHistory{
+				if err := s.factHistoryRepo.AddFactHistory(storage.FactHistory{
 					FactID:       removed.ID,
 					UserID:       userID,
 					Action:       "delete",
@@ -420,7 +422,9 @@ func (s *Service) applyUpdate(ctx context.Context, userID int64, update *MemoryU
 					Importance:   importance,
 					TopicID:      tID,
 					RequestInput: requestInput,
-				})
+				}); err != nil {
+					s.logger.Warn("failed to add fact history", "action", "delete", "fact_id", removed.ID, "error", err)
+				}
 			}
 		}
 	}
@@ -450,7 +454,7 @@ func (s *Service) addFactWithHistory(fact storage.Fact, reason string, topicID *
 	}
 
 	if s.cfg.Server.DebugMode {
-		_ = s.factHistoryRepo.AddFactHistory(storage.FactHistory{
+		if err := s.factHistoryRepo.AddFactHistory(storage.FactHistory{
 			FactID:       id,
 			UserID:       fact.UserID,
 			Action:       "add",
@@ -462,7 +466,9 @@ func (s *Service) addFactWithHistory(fact storage.Fact, reason string, topicID *
 			Importance:   fact.Importance,
 			TopicID:      topicID,
 			RequestInput: requestInput,
-		})
+		}); err != nil {
+			s.logger.Warn("failed to add fact history", "action", "add", "fact_id", id, "error", err)
+		}
 	}
 
 	return id, nil
@@ -546,7 +552,7 @@ func (s *Service) deduplicateAndAddFact(ctx context.Context, fact storage.Fact, 
 		}
 
 		if s.cfg.Server.DebugMode {
-			_ = s.factHistoryRepo.AddFactHistory(storage.FactHistory{
+			if err := s.factHistoryRepo.AddFactHistory(storage.FactHistory{
 				FactID:       targetFact.ID,
 				UserID:       fact.UserID,
 				Action:       "update",
@@ -559,7 +565,9 @@ func (s *Service) deduplicateAndAddFact(ctx context.Context, fact storage.Fact, 
 				Importance:   targetFact.Importance,
 				TopicID:      tID,
 				RequestInput: requestInput,
-			})
+			}); err != nil {
+				s.logger.Warn("failed to add fact history", "action", "merge", "fact_id", targetFact.ID, "error", err)
+			}
 		}
 		return nil
 

@@ -99,9 +99,10 @@ func (b *Bot) API() telegram.BotAPI {
 	return b.api
 }
 
-func (b *Bot) SetWebhook(webhookURL string) error {
+func (b *Bot) SetWebhook(webhookURL, secretToken string) error {
 	req := telegram.SetWebhookRequest{
-		URL: webhookURL,
+		URL:         webhookURL,
+		SecretToken: secretToken,
 	}
 	return b.api.SetWebhook(context.Background(), req)
 }

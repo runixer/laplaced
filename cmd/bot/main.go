@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -180,7 +182,7 @@ func main() {
 	defer b.Stop()
 
 	// Start web server for stats and webhooks
-	webServer, err := web.NewServer(logger, cfg, store, store, store, store, store, store, store, b, ragService)
+	webServer, err := web.NewServer(ctx, logger, cfg, store, store, store, store, store, store, store, b, ragService)
 	if err != nil {
 		logger.Error("failed to create web server", "error", err)
 		os.Exit(1)
@@ -200,9 +202,21 @@ func main() {
 	pollingDone := make(chan struct{})
 
 	if cfg.Telegram.WebhookURL != "" {
-		// Set webhook
-		webhookURL := cfg.Telegram.WebhookURL + "/telegram/" + b.API().GetToken()
-		if err := b.SetWebhook(webhookURL); err != nil {
+		// Derive webhook path and secret from bot token using SHA-256.
+		//
+		// Security notes:
+		// - We split the hash: first half for secret header, second half for URL path
+		// - Salt is intentionally NOT used: the bot token (~46 chars) is already
+		//   a high-entropy cryptographic secret, not a weak password
+		// - Brute-forcing SHA-256 of a 46+ char random token is computationally infeasible
+		// - Deterministic derivation ensures stable values across restarts
+		// - Path hash in logs is acceptable: without the secret header, requests get 403
+		hash := sha256.Sum256([]byte(cfg.Telegram.Token))
+		cfg.Telegram.WebhookPath = hex.EncodeToString(hash[16:])   // second half for URL path
+		cfg.Telegram.WebhookSecret = hex.EncodeToString(hash[:16]) // first half for secret header
+
+		webhookURL := cfg.Telegram.WebhookURL + "/telegram/" + cfg.Telegram.WebhookPath
+		if err := b.SetWebhook(webhookURL, cfg.Telegram.WebhookSecret); err != nil {
 			logger.Error("failed to set webhook", "error", err)
 			os.Exit(1)
 		}
@@ -212,7 +226,7 @@ func main() {
 		logger.Info("Webhook not set, using long polling.")
 
 		// Clear webhook first to ensure we can get updates
-		if err := b.SetWebhook(""); err != nil {
+		if err := b.SetWebhook("", ""); err != nil {
 			logger.Warn("failed to clear webhook", "error", err)
 		}
 

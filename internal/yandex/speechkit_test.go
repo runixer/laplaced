@@ -101,7 +101,7 @@ func TestSpeechKitClient_Recognize(t *testing.T) {
 		"ru-RU",
 		"",
 		"",
-		"bufnet",
+		"passthrough:///bufnet",
 		grpc.WithContextDialer(dialer),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
@@ -150,7 +150,7 @@ func TestSpeechKitClient_Recognize_EmptyResponse(t *testing.T) {
 		"ru-RU",
 		"",
 		"",
-		"bufnet",
+		"passthrough:///bufnet",
 		grpc.WithContextDialer(dialer),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
@@ -201,7 +201,7 @@ func TestSpeechKitClient_Recognize_Language(t *testing.T) {
 		"en-US",
 		"",
 		"",
-		"bufnet",
+		"passthrough:///bufnet",
 		grpc.WithContextDialer(dialer),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)

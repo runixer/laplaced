@@ -113,7 +113,8 @@ type SetMyCommandsRequest struct {
 
 // SetWebhookRequest represents the parameters for the setWebhook method.
 type SetWebhookRequest struct {
-	URL string `json:"url"`
+	URL         string `json:"url"`
+	SecretToken string `json:"secret_token,omitempty"`
 }
 
 // SendChatActionRequest represents the parameters for the sendChatAction method.

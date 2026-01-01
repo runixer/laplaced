@@ -9,8 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Switched from `math/rand` to `math/rand/v2` for better randomness in backoff jitter
+- Migrated from deprecated `grpc.DialContext` to `grpc.NewClient` in Yandex SpeechKit client
+
+### Security
+- Fixed password appearing in structured logs when auto-generated - now printed to stdout only
+- Added webhook secret token verification with auto-generation from bot token hash (zero-config protection against unauthorized requests)
+- Removed bot token from webhook URL path - now uses separate hash to prevent token leakage in logs
 
 ### Fixed
+- Fixed data race in web server: context now passed to constructor instead of being set in Start()
+- Fixed remaining ignored errors in fact history debug logging (4 additional locations)
 - Fixed potential race condition in `LoadNewVectors()` when multiple goroutines load vectors concurrently
 - Fixed untracked goroutines in RAG service (`LoadNewVectors`, `ReloadVectors`) - now properly tracked by WaitGroup for graceful shutdown
 - Fixed metrics update goroutine in web server not tracked by WaitGroup

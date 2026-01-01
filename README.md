@@ -55,9 +55,11 @@ Two modes available:
 - **Webhook** — lower latency, better for production
 
 ```bash
-# For webhook mode, set public URL:
-LAPLACED_TELEGRAM_WEBHOOK_URL=https://your-domain.com/webhook
+# For webhook mode, set base URL (path is auto-generated):
+LAPLACED_TELEGRAM_WEBHOOK_URL=https://your-domain.com
 ```
+
+Webhook path and secret are automatically derived from the bot token. Requests without a valid `X-Telegram-Bot-Api-Secret-Token` header are rejected.
 
 ## Voice Messages
 
@@ -77,8 +79,10 @@ There's a built-in web UI for debugging. **Disabled by default**.
 To enable:
 ```bash
 LAPLACED_WEB_ENABLED=true
-LAPLACED_WEB_PASSWORD=your_password  # if not set — random password is generated
+LAPLACED_WEB_PASSWORD=your_password
 ```
+
+If password is not set, a random one will be generated and printed to console at startup (not logged to files/aggregators for security).
 
 Useful for understanding how RAG works, inspecting memory, and debugging.
 

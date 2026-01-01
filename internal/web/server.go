@@ -117,7 +117,7 @@ type Server struct {
 	wg              sync.WaitGroup
 }
 
-func NewServer(logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, statsRepo storage.StatsRepository, logRepo storage.LogRepository, topicRepo storage.TopicRepository, msgRepo storage.MessageRepository, factHistoryRepo storage.FactHistoryRepository, bot Bot, rag *rag.Service) (*Server, error) {
+func NewServer(ctx context.Context, logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, statsRepo storage.StatsRepository, logRepo storage.LogRepository, topicRepo storage.TopicRepository, msgRepo storage.MessageRepository, factHistoryRepo storage.FactHistoryRepository, bot Bot, rag *rag.Service) (*Server, error) {
 	renderer, err := ui.NewRenderer()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize renderer: %w", err)
@@ -137,13 +137,11 @@ func NewServer(logger *slog.Logger, cfg *config.Config, factRepo storage.FactRep
 		logger:          logger.With("component", "web_server"),
 		renderer:        renderer,
 		statsCache:      newDashboardStatsCache(5 * time.Minute),
+		ctx:             ctx,
 	}, nil
 }
 
 func (s *Server) Start(ctx context.Context) error {
-	// Store context for webhook handler to use
-	s.ctx = ctx
-
 	// Check and generate password if needed
 	if s.cfg.Server.Auth.Enabled && s.cfg.Server.Auth.Password == "" {
 		bytes := make([]byte, 6) // 12 hex chars
@@ -151,7 +149,8 @@ func (s *Server) Start(ctx context.Context) error {
 			return fmt.Errorf("failed to generate random password: %w", err)
 		}
 		s.cfg.Server.Auth.Password = hex.EncodeToString(bytes)
-		s.logger.Warn("Web UI password not set, generated random password", "password", s.cfg.Server.Auth.Password)
+		fmt.Printf("\n⚠️  Web UI password not set, generated: %s\n\n", s.cfg.Server.Auth.Password)
+		s.logger.Info("Web UI password auto-generated (see console output)")
 	}
 
 	mux := http.NewServeMux()
@@ -179,7 +178,9 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Always register healthz and webhook
 	mux.HandleFunc("/healthz", s.healthzHandler)
-	mux.HandleFunc("/telegram/"+s.bot.API().GetToken(), s.webhookHandler)
+	if s.cfg.Telegram.WebhookPath != "" {
+		mux.HandleFunc("/telegram/"+s.cfg.Telegram.WebhookPath, s.webhookHandler)
+	}
 	mux.Handle("/metrics", promhttp.Handler())
 
 	// Wrap the mux with middlewares
@@ -241,6 +242,16 @@ func (s *Server) updateMetrics() {
 }
 
 func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
+	// Verify Telegram secret token if configured
+	if s.cfg.Telegram.WebhookSecret != "" {
+		token := r.Header.Get("X-Telegram-Bot-Api-Secret-Token")
+		if token != s.cfg.Telegram.WebhookSecret {
+			s.logger.Warn("Webhook request with invalid secret token", "remote_addr", r.RemoteAddr)
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+	}
+
 	// Limit request body to 10MB to prevent DoS
 	r.Body = http.MaxBytesReader(w, r.Body, 10*1024*1024)
 

@@ -14,7 +14,7 @@ server:
 # Telegram Bot Configuration
 telegram:
   token: "" # Set via LAPLACED_TELEGRAM_TOKEN
-  webhook_url: "" # Public URL for Telegram Webhook
+  webhook_url: "" # Public URL for Telegram Webhook (path and secret auto-generated from token)
   proxy_url: "" # Optional: "http://user:pass@host:port"
 
 # OpenRouter API Configuration

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -23,7 +24,7 @@ func TestInspectorHandler_NilParsedResults(t *testing.T) {
 	cfg.Server.DebugMode = true // Enable debug mode
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	// Mock data

@@ -89,9 +89,11 @@ type Config struct {
 		} `yaml:"auth"`
 	} `yaml:"server"`
 	Telegram struct {
-		Token      string `yaml:"token" env:"LAPLACED_TELEGRAM_TOKEN"`
-		WebhookURL string `yaml:"webhook_url" env:"LAPLACED_TELEGRAM_WEBHOOK_URL"`
-		ProxyURL   string `yaml:"proxy_url" env:"LAPLACED_TELEGRAM_PROXY_URL"`
+		Token         string `yaml:"token" env:"LAPLACED_TELEGRAM_TOKEN"`
+		WebhookURL    string `yaml:"webhook_url" env:"LAPLACED_TELEGRAM_WEBHOOK_URL"`
+		WebhookPath   string // Auto-generated from token hash (not configurable)
+		WebhookSecret string // Auto-generated from token hash (not configurable)
+		ProxyURL      string `yaml:"proxy_url" env:"LAPLACED_TELEGRAM_PROXY_URL"`
 	} `yaml:"telegram"`
 	OpenRouter OpenRouterConfig `yaml:"openrouter"`
 	RAG        RAGConfig        `yaml:"rag"`
@@ -180,13 +182,10 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Server auth requires username and password if enabled
+	// Server auth requires username if enabled (password is auto-generated if not set)
 	if c.Server.Auth.Enabled {
 		if c.Server.Auth.Username == "" {
 			errs = append(errs, errors.New("server.auth.username is required when server.auth.enabled is true"))
-		}
-		if c.Server.Auth.Password == "" {
-			errs = append(errs, errors.New("server.auth.password is required when server.auth.enabled is true"))
 		}
 	}
 

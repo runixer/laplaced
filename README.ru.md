@@ -55,9 +55,11 @@ LAPLACED_ALLOWED_USER_IDS=123456789,987654321
 - **Webhook** — меньше задержка, лучше для прода
 
 ```bash
-# Для webhook режима укажи публичный URL:
-LAPLACED_TELEGRAM_WEBHOOK_URL=https://your-domain.com/webhook
+# Для webhook режима укажи базовый URL (путь генерируется автоматически):
+LAPLACED_TELEGRAM_WEBHOOK_URL=https://your-domain.com
 ```
+
+Путь и секрет webhook генерируются автоматически из токена бота. Запросы без валидного заголовка `X-Telegram-Bot-Api-Secret-Token` отклоняются.
 
 ## Голосовые сообщения
 
@@ -77,8 +79,10 @@ LAPLACED_YANDEX_FOLDER_ID=твой_folder_id
 Чтобы включить:
 ```bash
 LAPLACED_WEB_ENABLED=true
-LAPLACED_WEB_PASSWORD=твой_пароль  # если не задан — сгенерируется случайный
+LAPLACED_WEB_PASSWORD=твой_пароль
 ```
+
+Если пароль не задан, сгенерируется случайный и выведется в консоль при запуске (в логи не пишется из соображений безопасности).
 
 Полезно для понимания как работает RAG, просмотра памяти и отладки.
 
