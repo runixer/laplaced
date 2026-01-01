@@ -205,6 +205,39 @@ EOF
 
 Project has `golangci-lint` pre-commit hook. If commit fails, fix lint errors and retry.
 
+## Changelog
+
+This project uses [Keep a Changelog](https://keepachangelog.com/) format.
+
+### When to Update
+
+Update `CHANGELOG.md` when:
+- Adding new features (### Added)
+- Changing existing functionality (### Changed)
+- Deprecating features (### Deprecated)
+- Removing features (### Removed)
+- Fixing bugs (### Fixed)
+- Addressing security issues (### Security)
+
+### Workflow
+
+1. Add changes to `[Unreleased]` section during development
+2. When releasing, move `[Unreleased]` content to new version section
+3. Update comparison links at the bottom
+
+### Release Process
+
+```bash
+# 1. Update CHANGELOG.md: move [Unreleased] to new version
+# 2. Commit changelog
+git commit -m "Release v0.1.x"
+
+# 3. Create and push tag
+git tag v0.1.x && git push && git push --tags
+```
+
+CI automatically extracts release notes from CHANGELOG.md for GitHub Releases.
+
 ## CI/CD
 
 GitHub Actions workflow (`.github/workflows/ci.yml`):
