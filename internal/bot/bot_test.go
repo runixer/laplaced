@@ -193,6 +193,11 @@ func (m *MockStorage) GetTopicsByIDs(ids []int64) ([]storage.Topic, error) {
 	return args.Get(0).([]storage.Topic), args.Error(1)
 }
 
+func (m *MockStorage) GetTopicsAfterID(minID int64) ([]storage.Topic, error) {
+	args := m.Called(minID)
+	return args.Get(0).([]storage.Topic), args.Error(1)
+}
+
 func (m *MockStorage) GetTopics(userID int64) ([]storage.Topic, error) {
 	args := m.Called(userID)
 	return args.Get(0).([]storage.Topic), args.Error(1)
@@ -283,6 +288,11 @@ func (m *MockStorage) UpdateFactTopic(oldTopicID, newTopicID int64) error {
 
 func (m *MockStorage) GetAllFacts() ([]storage.Fact, error) {
 	args := m.Called()
+	return args.Get(0).([]storage.Fact), args.Error(1)
+}
+
+func (m *MockStorage) GetFactsAfterID(minID int64) ([]storage.Fact, error) {
+	args := m.Called(minID)
 	return args.Get(0).([]storage.Fact), args.Error(1)
 }
 

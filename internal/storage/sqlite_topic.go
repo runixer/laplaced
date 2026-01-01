@@ -111,6 +111,32 @@ func (s *SQLiteStore) GetAllTopics() ([]Topic, error) {
 	return topics, nil
 }
 
+func (s *SQLiteStore) GetTopicsAfterID(minID int64) ([]Topic, error) {
+	query := "SELECT id, user_id, summary, start_msg_id, end_msg_id, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at FROM topics WHERE id > ? ORDER BY id ASC"
+	rows, err := s.db.Query(query, minID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var topics []Topic
+	for rows.Next() {
+		var t Topic
+		var embBytes []byte
+		if err := rows.Scan(&t.ID, &t.UserID, &t.Summary, &t.StartMsgID, &t.EndMsgID, &embBytes, &t.FactsExtracted, &t.IsConsolidated, &t.ConsolidationChecked, &t.CreatedAt); err != nil {
+			return nil, err
+		}
+		if len(embBytes) > 0 {
+			if err := json.Unmarshal(embBytes, &t.Embedding); err != nil {
+				s.logger.Warn("failed to unmarshal topic embedding", "id", t.ID, "error", err)
+				continue
+			}
+		}
+		topics = append(topics, t)
+	}
+	return topics, nil
+}
+
 func (s *SQLiteStore) GetTopicsByIDs(ids []int64) ([]Topic, error) {
 	if len(ids) == 0 {
 		return nil, nil
@@ -237,15 +263,13 @@ func (s *SQLiteStore) GetTopicsExtended(filter TopicFilter, limit, offset int, s
 		args = append(args, *filter.TopicID)
 	}
 
-	// For HasFacts, we need to check the count.
-	// We can do this in HAVING or WHERE with subquery.
-	// WHERE (SELECT COUNT(*) FROM structured_facts f WHERE f.topic_id = t.id) > 0
+	// For HasFacts, use EXISTS for efficient existence check (stops at first match)
 	if filter.HasFacts != nil {
-		op := ">"
-		if !*filter.HasFacts {
-			op = "="
+		if *filter.HasFacts {
+			whereClauses = append(whereClauses, "EXISTS (SELECT 1 FROM structured_facts f WHERE f.topic_id = t.id LIMIT 1)")
+		} else {
+			whereClauses = append(whereClauses, "NOT EXISTS (SELECT 1 FROM structured_facts f WHERE f.topic_id = t.id LIMIT 1)")
 		}
-		whereClauses = append(whereClauses, fmt.Sprintf("(SELECT COUNT(*) FROM structured_facts f WHERE f.topic_id = t.id) %s 0", op))
 	}
 
 	whereSQL := ""

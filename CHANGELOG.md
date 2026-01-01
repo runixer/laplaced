@@ -11,9 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added retry logic with exponential backoff to OpenRouter client (max 3 retries on 429/5xx)
 - Added configuration validation with clear error messages for required fields and value ranges
 - Added `GetTopicsByIDs()` method for efficient topic retrieval by IDs
+- Added incremental vector loading: `LoadNewVectors()` fetches only new topics/facts after initial load
+- Added dashboard stats caching with 5-minute TTL to reduce database load
 
 ### Changed
 - Optimized RAG retrieval: now fetches only matched topics instead of all topics
+- Optimized `HasFacts` filter: uses `EXISTS` subquery instead of `COUNT(*)` for faster execution
 
 ### Fixed
 - Fixed OpenRouter client returning nil instead of error on non-OK HTTP status

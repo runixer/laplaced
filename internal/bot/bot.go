@@ -472,6 +472,15 @@ func (b *Bot) deduplicateTopics(topics []rag.TopicSearchResult, recentHistory []
 	return filtered
 }
 
+// buildContext assembles the full context for LLM generation.
+//
+// REFACTORING NOTE: This function has high cyclomatic complexity (~34) but is intentionally
+// kept as a single function because:
+// 1. It's a linear pipeline (steps 0-6) where each step depends on previous results
+// 2. Three helpers are already extracted: formatCoreIdentityFacts, deduplicateTopics, filterShortMessages
+// 3. The remaining complexity comes from error handling (normal Go pattern)
+// 4. Splitting further would fragment understanding without improving testability
+// See CLAUDE.md "Refactoring & Cyclomatic Complexity" section for decision framework.
 func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageContent string, currentMessageRaw string, currentUserMessageParts []interface{}) ([]openrouter.Message, *rag.RetrievalDebugInfo, error) {
 	// 0. Get Session Memory (Short-Term Archive)
 	unprocessedHistory, err := b.msgRepo.GetUnprocessedMessages(userID)

@@ -41,6 +41,8 @@ type Service struct {
 	translator           *i18n.Translator
 	topicVectors         map[int64][]TopicVectorItem // UserID -> []TopicVectorItem
 	factVectors          map[int64][]FactVectorItem  // UserID -> []FactVectorItem
+	maxLoadedTopicID     int64                       // Track max loaded topic ID for incremental loading
+	maxLoadedFactID      int64                       // Track max loaded fact ID for incremental loading
 	mu                   sync.RWMutex
 	stopChan             chan struct{}
 	consolidationTrigger chan struct{}
@@ -108,13 +110,12 @@ func (s *Service) TriggerConsolidation() {
 }
 
 func (s *Service) ReloadVectors() error {
-	// Load Topics
+	// Full reload on startup - load all topics and facts
 	topics, err := s.topicRepo.GetAllTopics()
 	if err != nil {
 		return fmt.Errorf("load topics: %w", err)
 	}
 
-	// Load Facts
 	facts, err := s.factRepo.GetAllFacts()
 	if err != nil {
 		return fmt.Errorf("load facts: %w", err)
@@ -123,9 +124,11 @@ func (s *Service) ReloadVectors() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Reset maps to avoid duplicates on reload
+	// Reset maps for full reload
 	s.topicVectors = make(map[int64][]TopicVectorItem)
 	s.factVectors = make(map[int64][]FactVectorItem)
+	s.maxLoadedTopicID = 0
+	s.maxLoadedFactID = 0
 
 	tCount := 0
 	for _, t := range topics {
@@ -135,6 +138,9 @@ func (s *Service) ReloadVectors() error {
 				Embedding: t.Embedding,
 			})
 			tCount++
+			if t.ID > s.maxLoadedTopicID {
+				s.maxLoadedTopicID = t.ID
+			}
 		}
 	}
 
@@ -146,10 +152,74 @@ func (s *Service) ReloadVectors() error {
 				Embedding: f.Embedding,
 			})
 			fCount++
+			if f.ID > s.maxLoadedFactID {
+				s.maxLoadedFactID = f.ID
+			}
 		}
 	}
 
-	s.logger.Info("Loaded vectors", "topics", tCount, "facts", fCount)
+	s.logger.Info("Loaded vectors (full)", "topics", tCount, "facts", fCount)
+	return nil
+}
+
+// LoadNewVectors incrementally loads only new topics and facts since last load.
+func (s *Service) LoadNewVectors() error {
+	s.mu.RLock()
+	minTopicID := s.maxLoadedTopicID
+	minFactID := s.maxLoadedFactID
+	s.mu.RUnlock()
+
+	// Load only new topics
+	topics, err := s.topicRepo.GetTopicsAfterID(minTopicID)
+	if err != nil {
+		return fmt.Errorf("load new topics: %w", err)
+	}
+
+	// Load only new facts
+	facts, err := s.factRepo.GetFactsAfterID(minFactID)
+	if err != nil {
+		return fmt.Errorf("load new facts: %w", err)
+	}
+
+	// Early return if nothing new
+	if len(topics) == 0 && len(facts) == 0 {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tCount := 0
+	for _, t := range topics {
+		if len(t.Embedding) > 0 {
+			s.topicVectors[t.UserID] = append(s.topicVectors[t.UserID], TopicVectorItem{
+				TopicID:   t.ID,
+				Embedding: t.Embedding,
+			})
+			tCount++
+			if t.ID > s.maxLoadedTopicID {
+				s.maxLoadedTopicID = t.ID
+			}
+		}
+	}
+
+	fCount := 0
+	for _, f := range facts {
+		if len(f.Embedding) > 0 {
+			s.factVectors[f.UserID] = append(s.factVectors[f.UserID], FactVectorItem{
+				FactID:    f.ID,
+				Embedding: f.Embedding,
+			})
+			fCount++
+			if f.ID > s.maxLoadedFactID {
+				s.maxLoadedFactID = f.ID
+			}
+		}
+	}
+
+	if tCount > 0 || fCount > 0 {
+		s.logger.Info("Loaded vectors (incremental)", "new_topics", tCount, "new_facts", fCount)
+	}
 	return nil
 }
 
@@ -642,10 +712,10 @@ func (s *Service) processChunk(ctx context.Context, userID int64, chunk []storag
 		}
 	}
 
-	// Reload vectors
+	// Load new vectors (incremental)
 	go func() {
-		if err := s.ReloadVectors(); err != nil {
-			s.logger.Error("failed to reload vectors", "error", err)
+		if err := s.LoadNewVectors(); err != nil {
+			s.logger.Error("failed to load new vectors", "error", err)
 		}
 	}()
 

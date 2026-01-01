@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/runixer/laplaced/internal/config"
@@ -58,6 +59,46 @@ type Bot interface {
 	API() telegram.BotAPI
 }
 
+// dashboardStatsCache holds cached dashboard stats with TTL
+type dashboardStatsCache struct {
+	mu      sync.RWMutex
+	entries map[int64]*dashboardStatsCacheEntry
+	ttl     time.Duration
+}
+
+type dashboardStatsCacheEntry struct {
+	stats   *storage.DashboardStats
+	expires time.Time
+}
+
+func newDashboardStatsCache(ttl time.Duration) *dashboardStatsCache {
+	return &dashboardStatsCache{
+		entries: make(map[int64]*dashboardStatsCacheEntry),
+		ttl:     ttl,
+	}
+}
+
+func (c *dashboardStatsCache) Get(userID int64) (*storage.DashboardStats, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	entry, ok := c.entries[userID]
+	if !ok || time.Now().After(entry.expires) {
+		return nil, false
+	}
+	return entry.stats, true
+}
+
+func (c *dashboardStatsCache) Set(userID int64, stats *storage.DashboardStats) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.entries[userID] = &dashboardStatsCacheEntry{
+		stats:   stats,
+		expires: time.Now().Add(c.ttl),
+	}
+}
+
 type Server struct {
 	cfg             *config.Config
 	factRepo        storage.FactRepository
@@ -72,6 +113,7 @@ type Server struct {
 	logger          *slog.Logger
 	renderer        *ui.Renderer
 	ctx             context.Context // Server's parent context for webhook processing
+	statsCache      *dashboardStatsCache
 }
 
 func NewServer(logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, statsRepo storage.StatsRepository, logRepo storage.LogRepository, topicRepo storage.TopicRepository, msgRepo storage.MessageRepository, factHistoryRepo storage.FactHistoryRepository, bot Bot, rag *rag.Service) (*Server, error) {
@@ -93,6 +135,7 @@ func NewServer(logger *slog.Logger, cfg *config.Config, factRepo storage.FactRep
 		rag:             rag,
 		logger:          logger.With("component", "web_server"),
 		renderer:        renderer,
+		statsCache:      newDashboardStatsCache(5 * time.Minute),
 	}, nil
 }
 
@@ -250,11 +293,17 @@ func (s *Server) statsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dashboardStats, err := s.statsRepo.GetDashboardStats(pageData.SelectedUserID)
-	if err != nil {
-		s.logger.Error("failed to get dashboard stats", "error", err)
-		http.Error(w, "Failed to get dashboard stats", http.StatusInternalServerError)
-		return
+	// Try cache first
+	dashboardStats, ok := s.statsCache.Get(pageData.SelectedUserID)
+	if !ok {
+		var err error
+		dashboardStats, err = s.statsRepo.GetDashboardStats(pageData.SelectedUserID)
+		if err != nil {
+			s.logger.Error("failed to get dashboard stats", "error", err)
+			http.Error(w, "Failed to get dashboard stats", http.StatusInternalServerError)
+			return
+		}
+		s.statsCache.Set(pageData.SelectedUserID, dashboardStats)
 	}
 
 	// Convert map to slice for stable sorting

@@ -326,6 +326,8 @@ func (s *SQLiteStore) migrate() error {
 		if _, err := s.db.Exec("ALTER TABLE history ADD COLUMN topic_id INTEGER REFERENCES topics(id)"); err != nil {
 			return err
 		}
+		// PERF: This index is critical for GetTopicsExtended() which joins history to count messages per topic.
+		// Without it, queries with message_count sorting become O(n) table scans.
 		if _, err := s.db.Exec("CREATE INDEX IF NOT EXISTS idx_history_topic_id ON history(topic_id)"); err != nil {
 			return err
 		}

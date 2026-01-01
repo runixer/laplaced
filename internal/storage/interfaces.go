@@ -31,6 +31,7 @@ type TopicRepository interface {
 	DeleteTopicCascade(id int64) error
 	GetLastTopicEndMessageID(userID int64) (int64, error)
 	GetAllTopics() ([]Topic, error)
+	GetTopicsAfterID(minID int64) ([]Topic, error)
 	GetTopicsByIDs(ids []int64) ([]Topic, error)
 	GetTopics(userID int64) ([]Topic, error)
 	SetTopicFactsExtracted(topicID int64, extracted bool) error
@@ -46,6 +47,7 @@ type FactRepository interface {
 	GetFacts(userID int64) ([]Fact, error)
 	GetFactsByIDs(ids []int64) ([]Fact, error)
 	GetAllFacts() ([]Fact, error)
+	GetFactsAfterID(minID int64) ([]Fact, error)
 	GetFactStats() (FactStats, error)
 	UpdateFact(fact Fact) error
 	UpdateFactTopic(oldTopicID, newTopicID int64) error

@@ -78,9 +78,12 @@ func TestProcessChunk_HallucinatedIDs(t *testing.T) {
 	// Expect NO UpdateMessageTopic for stragglers
 	// mockStore.On("UpdateMessageTopic", ...).Return(...)
 
-	// Mock GetAllTopics/Facts for ReloadVectors (called in background)
+	// Mock GetAllTopics/Facts for ReloadVectors (initial load)
 	mockStore.On("GetAllTopics").Return([]storage.Topic{}, nil).Maybe()
 	mockStore.On("GetAllFacts").Return([]storage.Fact{}, nil).Maybe()
+	// Mock incremental loading methods (called after processChunk)
+	mockStore.On("GetTopicsAfterID", mock.Anything).Return([]storage.Topic{}, nil).Maybe()
+	mockStore.On("GetFactsAfterID", mock.Anything).Return([]storage.Fact{}, nil).Maybe()
 	// Mock AddRAGLog for topic extraction logging
 	mockStore.On("AddRAGLog", mock.Anything).Return(nil).Maybe()
 
@@ -163,12 +166,13 @@ func TestProcessChunk_ValidIDs(t *testing.T) {
 		return topic.StartMsgID == 100 && topic.EndMsgID == 102 && topic.Summary == "Valid Topic"
 	})).Return(int64(1), nil)
 
-	// Mock GetAllTopics/Facts for ReloadVectors (called in background)
-	// Since ReloadVectors runs in goroutine, we might miss it or it might race.
-	// But ForceProcessUser calls processChunk which calls ReloadVectors in goroutine.
-	// We can ignore it or mock it.
+	// Mock GetAllTopics/Facts for ReloadVectors (initial load - not called since we don't Start)
+	// But ForceProcessUser calls processChunk which calls LoadNewVectors in goroutine.
 	mockStore.On("GetAllTopics").Return([]storage.Topic{}, nil).Maybe()
 	mockStore.On("GetAllFacts").Return([]storage.Fact{}, nil).Maybe()
+	// Mock incremental loading methods (called after processChunk)
+	mockStore.On("GetTopicsAfterID", mock.Anything).Return([]storage.Topic{}, nil).Maybe()
+	mockStore.On("GetFactsAfterID", mock.Anything).Return([]storage.Fact{}, nil).Maybe()
 	// Mock AddRAGLog for topic extraction logging
 	mockStore.On("AddRAGLog", mock.Anything).Return(nil).Maybe()
 

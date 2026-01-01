@@ -110,6 +110,13 @@ func (m *MockStorage) GetTopicsByIDs(ids []int64) ([]storage.Topic, error) {
 	args := m.Called(ids)
 	return args.Get(0).([]storage.Topic), args.Error(1)
 }
+func (m *MockStorage) GetTopicsAfterID(minID int64) ([]storage.Topic, error) {
+	args := m.Called(minID)
+	if args.Get(0) == nil {
+		return []storage.Topic{}, args.Error(1)
+	}
+	return args.Get(0).([]storage.Topic), args.Error(1)
+}
 func (m *MockStorage) GetTopics(userID int64) ([]storage.Topic, error) {
 	args := m.Called(userID)
 	return args.Get(0).([]storage.Topic), args.Error(1)
@@ -191,6 +198,13 @@ func (m *MockStorage) GetAllFacts() ([]storage.Fact, error) {
 	// Ah, I see I reverted `GetAllFacts` in a previous step to `return args.Get...`.
 	// Let's add the nil check back properly.
 	args := m.Called()
+	if args.Get(0) == nil {
+		return []storage.Fact{}, args.Error(1)
+	}
+	return args.Get(0).([]storage.Fact), args.Error(1)
+}
+func (m *MockStorage) GetFactsAfterID(minID int64) ([]storage.Fact, error) {
+	args := m.Called(minID)
 	if args.Get(0) == nil {
 		return []storage.Fact{}, args.Error(1)
 	}

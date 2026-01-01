@@ -68,6 +68,32 @@ func (s *SQLiteStore) GetAllFacts() ([]Fact, error) {
 	return facts, nil
 }
 
+func (s *SQLiteStore) GetFactsAfterID(minID int64) ([]Fact, error) {
+	query := "SELECT id, user_id, entity, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE id > ? ORDER BY id ASC"
+	rows, err := s.db.Query(query, minID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var facts []Fact
+	for rows.Next() {
+		var f Fact
+		var embBytes []byte
+		if err := rows.Scan(&f.ID, &f.UserID, &f.Entity, &f.Relation, &f.Category, &f.Content, &f.Type, &f.Importance, &embBytes, &f.TopicID, &f.CreatedAt, &f.LastUpdated); err != nil {
+			return nil, err
+		}
+		if len(embBytes) > 0 {
+			if err := json.Unmarshal(embBytes, &f.Embedding); err != nil {
+				s.logger.Warn("failed to unmarshal fact embedding", "id", f.ID, "error", err)
+				continue
+			}
+		}
+		facts = append(facts, f)
+	}
+	return facts, nil
+}
+
 func (s *SQLiteStore) GetFactStats() (FactStats, error) {
 	stats := FactStats{
 		CountByType: make(map[string]int),
