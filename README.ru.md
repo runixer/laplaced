@@ -1,6 +1,6 @@
 # Laplaced
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/runixer/laplaced)](https://goreportcard.com/report/github.com/runixer/laplaced)
+[![Go Report Card](https://goreportcard.com/badge/github.com/runixer/laplaced?v=1)](https://goreportcard.com/report/github.com/runixer/laplaced)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 [English](README.md) | Русский
