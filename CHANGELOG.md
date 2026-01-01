@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Fixed "context canceled" warnings for typing action by using detached context with timeout
 - Fixed bot token leaking in error log messages - now sanitized as `[REDACTED]`
+- Fixed file downloader missing HTTP timeout and context support
 
 ### Security
 - Fixed potential Slowloris attack vector by adding `ReadHeaderTimeout` to HTTP server

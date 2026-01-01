@@ -5,8 +5,10 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // FileDownloader defines an interface for downloading files from Telegram.
@@ -23,18 +25,38 @@ type HTTPFileDownloader struct {
 }
 
 // NewHTTPFileDownloader creates a new HTTPFileDownloader.
+//
+// HTTP client configured with:
+// - 60s timeout for large file downloads
+// - DisableKeepAlives to avoid connection pool issues
+// - Reasonable timeouts for dial/TLS/headers
 func NewHTTPFileDownloader(api BotAPI, fileBaseURL string) *HTTPFileDownloader {
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 0,
+		}).DialContext,
+		ForceAttemptHTTP2:     false,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+		DisableKeepAlives:     true,
+	}
+
 	return &HTTPFileDownloader{
-		api:         api,
-		httpClient:  &http.Client{},
+		api: api,
+		httpClient: &http.Client{
+			Timeout:   60 * time.Second, // Longer timeout for file downloads
+			Transport: transport,
+		},
 		fileBaseURL: fileBaseURL,
 	}
 }
 
 // DownloadFile downloads a file from Telegram.
 func (d *HTTPFileDownloader) DownloadFile(ctx context.Context, fileID string) ([]byte, error) {
-	req := GetFileRequest{FileID: fileID}
-	fileInfo, err := d.api.GetFile(ctx, req)
+	getFileReq := GetFileRequest{FileID: fileID}
+	fileInfo, err := d.api.GetFile(ctx, getFileReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get file info: %w", err)
 	}
@@ -42,7 +64,12 @@ func (d *HTTPFileDownloader) DownloadFile(ctx context.Context, fileID string) ([
 	token := d.api.GetToken()
 	fileURL := fmt.Sprintf("%s/file/bot%s/%s", d.fileBaseURL, token, fileInfo.FilePath)
 
-	resp, err := d.httpClient.Get(fileURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := d.httpClient.Do(req)
 	if err != nil {
 		// Sanitize error to remove bot token from URL in error messages
 		sanitized := strings.ReplaceAll(err.Error(), token, "[REDACTED]")
