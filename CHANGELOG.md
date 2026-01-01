@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 - Removed dead code: unused `processSingleMessage()` function and its test
+- Removed `cmd/import_history` and `cmd/reset_user` CLI utilities (to be replaced by web UI)
 
 ## [0.2.0] - 2026-01-01
 
