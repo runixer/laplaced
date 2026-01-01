@@ -331,22 +331,27 @@ func (b *Bot) sendResponses(ctx context.Context, chatID int64, responses []teleg
 		if _, err := b.api.SendMessage(ctx, resp); err != nil {
 			logger.Error("failed to send message", "error", err, "chunk_index", i)
 
+			// Use a fresh context with timeout for retry operations
+			// This ensures retries complete even if the original context was cancelled
+			retryCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+
 			if strings.Contains(err.Error(), "can't parse entities") {
 				logger.Warn("retrying to send message without MarkdownV2 due to parsing error")
 				resp.ParseMode = ""
-				if _, sendErr := b.api.SendMessage(context.Background(), resp); sendErr != nil {
+				if _, sendErr := b.api.SendMessage(retryCtx, resp); sendErr != nil {
 					logger.Error("failed to send raw text message", "error", sendErr)
 					errorMsg := telegram.SendMessageRequest{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.generic_error")}
-					if _, finalErr := b.api.SendMessage(context.Background(), errorMsg); finalErr != nil {
+					if _, finalErr := b.api.SendMessage(retryCtx, errorMsg); finalErr != nil {
 						logger.Error("failed to send generic error message", "error", finalErr)
 					}
 				}
 			} else {
 				errorMsg := telegram.SendMessageRequest{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.generic_error")}
-				if _, sendErr := b.api.SendMessage(context.Background(), errorMsg); sendErr != nil {
+				if _, sendErr := b.api.SendMessage(retryCtx, errorMsg); sendErr != nil {
 					logger.Error("failed to send generic error message", "error", sendErr)
 				}
 			}
+			cancel()
 			return
 		}
 	}

@@ -181,7 +181,7 @@ func main() {
 		defer close(srvDone)
 		if err := webServer.Start(ctx); err != nil {
 			logger.Error("web server failed", "error", err)
-			os.Exit(1)
+			cancel() // Trigger graceful shutdown instead of os.Exit
 		}
 	}()
 

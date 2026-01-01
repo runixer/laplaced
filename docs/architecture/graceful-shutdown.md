@@ -234,6 +234,40 @@ func (b *Bot) sendAction(ctx context.Context, chatID int64, action string) {
 }
 ```
 
+### 6. Retry отправки сообщений использует bounded context
+
+**Проблема:** При ошибке отправки сообщения (например, ошибка парсинга MarkdownV2) нужен retry. Если использовать `context.Background()`, retry может зависнуть навсегда.
+
+**Решение:**
+```go
+// bot.go - sendResponses()
+if _, err := b.api.SendMessage(ctx, resp); err != nil {
+    // Создаём новый контекст с таймаутом для retry
+    // Не используем оригинальный ctx — он может быть уже отменён
+    retryCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancel()
+
+    // Retry с новым контекстом
+    b.api.SendMessage(retryCtx, resp)
+}
+```
+
+### 7. Web server использует cancel() вместо os.Exit()
+
+**Проблема:** Если web server падает (например, порт занят), вызов `os.Exit(1)` убивает процесс без выполнения deferred функций (закрытие БД, остановка RAG).
+
+**Решение:**
+```go
+// main.go
+go func() {
+    defer close(srvDone)
+    if err := webServer.Start(ctx); err != nil {
+        logger.Error("web server failed", "error", err)
+        cancel() // Запускает graceful shutdown вместо os.Exit(1)
+    }
+}()
+```
+
 ## Что происходит с сообщениями
 
 | Момент отправки | Long Polling | Webhook |

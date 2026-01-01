@@ -347,10 +347,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 
 	if resp.StatusCode != http.StatusOK {
 		c.logger.Error("OpenRouter returned non-OK status", "status", resp.Status, "body", string(responseBody))
-		// Attempt to decode into the standard error structure, but don't fail if it doesn't match.
-		// The raw body is already logged.
-		_ = json.NewDecoder(bytes.NewBuffer(responseBody)).Decode(&ChatCompletionResponse{})
-		return ChatCompletionResponse{}, nil
+		return ChatCompletionResponse{}, fmt.Errorf("openrouter API error: %s", resp.Status)
 	}
 
 	var chatResp ChatCompletionResponse
