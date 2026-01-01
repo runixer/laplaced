@@ -51,7 +51,10 @@ type Bot struct {
 
 func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRepo storage.UserRepository, msgRepo storage.MessageRepository, statsRepo storage.StatsRepository, logRepo storage.LogRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, orClient openrouter.Client, speechKitClient yandex.Client, ragService *rag.Service, translator *i18n.Translator) (*Bot, error) {
 	botLogger := logger.With("component", "bot")
-	downloader := telegram.NewHTTPFileDownloader(api, "https://api.telegram.org")
+	downloader, err := telegram.NewHTTPFileDownloader(api, "https://api.telegram.org", cfg.Telegram.ProxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create file downloader: %w", err)
+	}
 
 	b := &Bot{
 		api:             api,

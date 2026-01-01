@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -30,7 +31,8 @@ type HTTPFileDownloader struct {
 // - 60s timeout for large file downloads
 // - DisableKeepAlives to avoid connection pool issues
 // - Reasonable timeouts for dial/TLS/headers
-func NewHTTPFileDownloader(api BotAPI, fileBaseURL string) *HTTPFileDownloader {
+// - Proxy support (uses proxyURL if provided, otherwise falls back to environment)
+func NewHTTPFileDownloader(api BotAPI, fileBaseURL, proxyURL string) (*HTTPFileDownloader, error) {
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
@@ -43,6 +45,14 @@ func NewHTTPFileDownloader(api BotAPI, fileBaseURL string) *HTTPFileDownloader {
 		DisableKeepAlives:     true,
 	}
 
+	if proxyURL != "" {
+		proxy, err := url.Parse(proxyURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse proxy URL: %w", err)
+		}
+		transport.Proxy = http.ProxyURL(proxy)
+	}
+
 	return &HTTPFileDownloader{
 		api: api,
 		httpClient: &http.Client{
@@ -50,7 +60,7 @@ func NewHTTPFileDownloader(api BotAPI, fileBaseURL string) *HTTPFileDownloader {
 			Transport: transport,
 		},
 		fileBaseURL: fileBaseURL,
-	}
+	}, nil
 }
 
 // DownloadFile downloads a file from Telegram.
