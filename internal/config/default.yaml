@@ -80,7 +80,9 @@ bot:
   #   Override system prompt here...
   # system_prompt_extra: "Additional instructions appended to the system prompt."
   turn_wait_duration: "2s"
-  # allowed_user_ids: [] # List of Telegram User IDs allowed to use the bot. Set via LAPLACED_ALLOWED_USER_IDS=123,456 or in config.yml
+  # allowed_user_ids: [] # Telegram User IDs allowed to use the bot.
+  #                      # ⚠️ If empty, bot will REJECT ALL messages!
+  #                      # Set via LAPLACED_ALLOWED_USER_IDS=123,456 or in config.yaml
 
 # Database Configuration
 database:

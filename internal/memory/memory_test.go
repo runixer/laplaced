@@ -212,6 +212,16 @@ type MockOpenRouterClient struct {
 	mock.Mock
 }
 
+// MockVectorSearcher
+type MockVectorSearcher struct {
+	mock.Mock
+}
+
+func (m *MockVectorSearcher) FindSimilarFacts(ctx context.Context, userID int64, embedding []float32, threshold float32) ([]storage.Fact, error) {
+	args := m.Called(ctx, userID, embedding, threshold)
+	return args.Get(0).([]storage.Fact), args.Error(1)
+}
+
 func (m *MockOpenRouterClient) CreateChatCompletion(ctx context.Context, req openrouter.ChatCompletionRequest) (openrouter.ChatCompletionResponse, error) {
 	args := m.Called(ctx, req)
 	if args.Get(0) == nil {
@@ -551,4 +561,475 @@ func TestProcessSession_RemoveFact_RecordsHistory(t *testing.T) {
 	// Assert
 	assert.NoError(t, err)
 	mockStore.AssertExpectations(t)
+}
+
+func TestSetVectorSearcher(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	cfg := &config.Config{}
+	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+	svc := NewService(logger, cfg, nil, nil, nil, nil, translator)
+
+	assert.Nil(t, svc.vectorSearcher)
+
+	mockVS := new(MockVectorSearcher)
+	svc.SetVectorSearcher(mockVS)
+
+	assert.NotNil(t, svc.vectorSearcher)
+	assert.Equal(t, mockVS, svc.vectorSearcher)
+}
+
+func TestDeduplicateAndAddFact_NoVectorSearcher(t *testing.T) {
+	mockStore := new(MockStorage)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	cfg := &config.Config{}
+	cfg.Server.DebugMode = false
+	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+
+	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, nil, translator)
+
+	fact := storage.Fact{
+		UserID:    123,
+		Content:   "Test fact",
+		Embedding: []float32{0.1, 0.2},
+	}
+
+	mockStore.On("AddFact", mock.Anything).Return(int64(1), nil)
+
+	err := svc.deduplicateAndAddFact(context.Background(), fact, "test reason", 10, "input")
+
+	assert.NoError(t, err)
+	mockStore.AssertExpectations(t)
+}
+
+func TestDeduplicateAndAddFact_NoSimilarFacts(t *testing.T) {
+	mockStore := new(MockStorage)
+	mockVS := new(MockVectorSearcher)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	cfg := &config.Config{}
+	cfg.Server.DebugMode = false
+	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+
+	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, nil, translator)
+	svc.SetVectorSearcher(mockVS)
+
+	fact := storage.Fact{
+		UserID:    123,
+		Content:   "Test fact",
+		Embedding: []float32{0.1, 0.2},
+	}
+
+	mockVS.On("FindSimilarFacts", mock.Anything, int64(123), mock.Anything, float32(0.85)).Return([]storage.Fact{}, nil)
+	mockStore.On("AddFact", mock.Anything).Return(int64(1), nil)
+
+	err := svc.deduplicateAndAddFact(context.Background(), fact, "test reason", 10, "input")
+
+	assert.NoError(t, err)
+	mockStore.AssertExpectations(t)
+	mockVS.AssertExpectations(t)
+}
+
+func TestDeduplicateAndAddFact_SimilarFactsIgnore(t *testing.T) {
+	mockStore := new(MockStorage)
+	mockVS := new(MockVectorSearcher)
+	mockOR := new(MockOpenRouterClient)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	cfg := &config.Config{}
+	cfg.Server.DebugMode = false
+	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+
+	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
+	svc.SetVectorSearcher(mockVS)
+
+	fact := storage.Fact{
+		UserID:    123,
+		Content:   "User likes coffee",
+		Embedding: []float32{0.1, 0.2},
+	}
+
+	existingFact := storage.Fact{
+		ID:        1,
+		UserID:    123,
+		Content:   "User likes coffee in the morning",
+		Embedding: []float32{0.1, 0.2},
+		CreatedAt: time.Now(),
+	}
+
+	mockVS.On("FindSimilarFacts", mock.Anything, int64(123), mock.Anything, float32(0.85)).Return([]storage.Fact{existingFact}, nil)
+
+	// Mock arbitration response - IGNORE
+	arbitrationResp := `{"action": "IGNORE"}`
+	resp := openrouter.ChatCompletionResponse{}
+	respJSON := map[string]interface{}{
+		"choices": []map[string]interface{}{
+			{"message": map[string]interface{}{"role": "assistant", "content": arbitrationResp}},
+		},
+	}
+	respBytes, _ := json.Marshal(respJSON)
+	_ = json.Unmarshal(respBytes, &resp)
+
+	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(&resp, nil)
+	mockStore.On("UpdateFact", mock.Anything).Return(nil) // For updating LastUpdated
+
+	err := svc.deduplicateAndAddFact(context.Background(), fact, "test reason", 10, "input")
+
+	assert.NoError(t, err)
+	mockStore.AssertExpectations(t)
+	mockVS.AssertExpectations(t)
+}
+
+func TestDeduplicateAndAddFact_SimilarFactsMerge(t *testing.T) {
+	mockStore := new(MockStorage)
+	mockVS := new(MockVectorSearcher)
+	mockOR := new(MockOpenRouterClient)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	cfg := &config.Config{}
+	cfg.Server.DebugMode = true
+	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+
+	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
+	svc.SetVectorSearcher(mockVS)
+
+	fact := storage.Fact{
+		UserID:    123,
+		Content:   "User likes iced coffee",
+		Embedding: []float32{0.1, 0.2},
+	}
+
+	existingFact := storage.Fact{
+		ID:        1,
+		UserID:    123,
+		Content:   "User likes coffee",
+		Embedding: []float32{0.1, 0.2},
+		CreatedAt: time.Now(),
+		Category:  "preference",
+		Entity:    "User",
+		Relation:  "likes",
+	}
+
+	mockVS.On("FindSimilarFacts", mock.Anything, int64(123), mock.Anything, float32(0.85)).Return([]storage.Fact{existingFact}, nil)
+
+	// Mock arbitration response - MERGE
+	arbitrationResp := `{"action": "MERGE", "target_id": 1, "new_content": "User likes coffee, especially iced"}`
+	resp := openrouter.ChatCompletionResponse{}
+	respJSON := map[string]interface{}{
+		"choices": []map[string]interface{}{
+			{"message": map[string]interface{}{"role": "assistant", "content": arbitrationResp}},
+		},
+	}
+	respBytes, _ := json.Marshal(respJSON)
+	_ = json.Unmarshal(respBytes, &resp)
+
+	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(&resp, nil)
+
+	// Mock embedding for merged content
+	embResp := openrouter.EmbeddingResponse{
+		Data: []openrouter.EmbeddingObject{{Embedding: []float32{0.3, 0.4}}},
+	}
+	mockOR.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(&embResp, nil)
+
+	mockStore.On("UpdateFact", mock.Anything).Return(nil)
+	mockStore.On("AddFactHistory", mock.MatchedBy(func(h storage.FactHistory) bool {
+		return h.FactID == 1 && h.Action == "update" && h.NewContent == "User likes coffee, especially iced"
+	})).Return(nil)
+
+	err := svc.deduplicateAndAddFact(context.Background(), fact, "test reason", 10, "input")
+
+	assert.NoError(t, err)
+	mockStore.AssertExpectations(t)
+	mockVS.AssertExpectations(t)
+}
+
+func TestDeduplicateAndAddFact_SimilarFactsAdd(t *testing.T) {
+	mockStore := new(MockStorage)
+	mockVS := new(MockVectorSearcher)
+	mockOR := new(MockOpenRouterClient)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	cfg := &config.Config{}
+	cfg.Server.DebugMode = false
+	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+
+	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
+	svc.SetVectorSearcher(mockVS)
+
+	fact := storage.Fact{
+		UserID:    123,
+		Content:   "User works at Google",
+		Embedding: []float32{0.1, 0.2},
+	}
+
+	existingFact := storage.Fact{
+		ID:        1,
+		UserID:    123,
+		Content:   "User likes coffee",
+		Embedding: []float32{0.5, 0.6},
+		CreatedAt: time.Now(),
+	}
+
+	mockVS.On("FindSimilarFacts", mock.Anything, int64(123), mock.Anything, float32(0.85)).Return([]storage.Fact{existingFact}, nil)
+
+	// Mock arbitration response - ADD (facts are different)
+	arbitrationResp := `{"action": "ADD"}`
+	resp := openrouter.ChatCompletionResponse{}
+	respJSON := map[string]interface{}{
+		"choices": []map[string]interface{}{
+			{"message": map[string]interface{}{"role": "assistant", "content": arbitrationResp}},
+		},
+	}
+	respBytes, _ := json.Marshal(respJSON)
+	_ = json.Unmarshal(respBytes, &resp)
+
+	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(&resp, nil)
+	mockStore.On("AddFact", mock.Anything).Return(int64(2), nil)
+
+	err := svc.deduplicateAndAddFact(context.Background(), fact, "test reason", 10, "input")
+
+	assert.NoError(t, err)
+	mockStore.AssertExpectations(t)
+	mockVS.AssertExpectations(t)
+}
+
+func TestDeduplicateAndAddFact_VectorSearchError(t *testing.T) {
+	mockStore := new(MockStorage)
+	mockVS := new(MockVectorSearcher)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	cfg := &config.Config{}
+	cfg.Server.DebugMode = false
+	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+
+	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, nil, translator)
+	svc.SetVectorSearcher(mockVS)
+
+	fact := storage.Fact{
+		UserID:    123,
+		Content:   "Test fact",
+		Embedding: []float32{0.1, 0.2},
+	}
+
+	mockVS.On("FindSimilarFacts", mock.Anything, int64(123), mock.Anything, float32(0.85)).Return([]storage.Fact{}, assert.AnError)
+	mockStore.On("AddFact", mock.Anything).Return(int64(1), nil) // Fallback to add
+
+	err := svc.deduplicateAndAddFact(context.Background(), fact, "test reason", 10, "input")
+
+	assert.NoError(t, err)
+	mockStore.AssertExpectations(t)
+	mockVS.AssertExpectations(t)
+}
+
+func TestArbitrateFact(t *testing.T) {
+	tests := []struct {
+		name            string
+		llmResponse     string
+		expectedAction  string
+		expectedID      int64
+		expectedContent string
+	}{
+		{
+			name:            "IGNORE action",
+			llmResponse:     `{"action": "IGNORE"}`,
+			expectedAction:  "IGNORE",
+			expectedID:      0,
+			expectedContent: "",
+		},
+		{
+			name:            "REPLACE action",
+			llmResponse:     `{"action": "REPLACE", "target_id": 1, "new_content": "Updated content"}`,
+			expectedAction:  "REPLACE",
+			expectedID:      1,
+			expectedContent: "Updated content",
+		},
+		{
+			name:            "MERGE action",
+			llmResponse:     `{"action": "MERGE", "target_id": 2, "new_content": "Merged content"}`,
+			expectedAction:  "MERGE",
+			expectedID:      2,
+			expectedContent: "Merged content",
+		},
+		{
+			name:            "ADD action",
+			llmResponse:     `{"action": "ADD"}`,
+			expectedAction:  "ADD",
+			expectedID:      0,
+			expectedContent: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockOR := new(MockOpenRouterClient)
+			logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+			cfg := &config.Config{}
+			translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+
+			svc := NewService(logger, cfg, nil, nil, nil, mockOR, translator)
+
+			newFact := storage.Fact{
+				UserID:    123,
+				Content:   "New fact content",
+				Embedding: []float32{0.1, 0.2},
+			}
+
+			existingFacts := []storage.Fact{
+				{ID: 1, Content: "Existing fact 1", CreatedAt: time.Now()},
+				{ID: 2, Content: "Existing fact 2", CreatedAt: time.Now()},
+			}
+
+			resp := openrouter.ChatCompletionResponse{}
+			respJSON := map[string]interface{}{
+				"choices": []map[string]interface{}{
+					{"message": map[string]interface{}{"role": "assistant", "content": tt.llmResponse}},
+				},
+			}
+			respBytes, _ := json.Marshal(respJSON)
+			_ = json.Unmarshal(respBytes, &resp)
+
+			mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(&resp, nil)
+
+			action, targetID, newContent, err := svc.arbitrateFact(context.Background(), newFact, existingFacts)
+
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedAction, action)
+			assert.Equal(t, tt.expectedID, targetID)
+			assert.Equal(t, tt.expectedContent, newContent)
+		})
+	}
+}
+
+func TestArbitrateFact_EmptyResponse(t *testing.T) {
+	mockOR := new(MockOpenRouterClient)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	cfg := &config.Config{}
+	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+
+	svc := NewService(logger, cfg, nil, nil, nil, mockOR, translator)
+
+	newFact := storage.Fact{Content: "Test"}
+	existingFacts := []storage.Fact{{ID: 1, Content: "Existing", CreatedAt: time.Now()}}
+
+	resp := openrouter.ChatCompletionResponse{} // Empty choices
+	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(&resp, nil)
+
+	_, _, _, err := svc.arbitrateFact(context.Background(), newFact, existingFacts)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "empty response")
+}
+
+func TestArbitrateFact_LLMError(t *testing.T) {
+	mockOR := new(MockOpenRouterClient)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	cfg := &config.Config{}
+	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+
+	svc := NewService(logger, cfg, nil, nil, nil, mockOR, translator)
+
+	newFact := storage.Fact{Content: "Test"}
+	existingFacts := []storage.Fact{{ID: 1, Content: "Existing", CreatedAt: time.Now()}}
+
+	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(nil, assert.AnError)
+
+	_, _, _, err := svc.arbitrateFact(context.Background(), newFact, existingFacts)
+
+	assert.Error(t, err)
+}
+
+func TestDeduplicateAndAddFact_ReplaceTargetNotFound(t *testing.T) {
+	mockStore := new(MockStorage)
+	mockVS := new(MockVectorSearcher)
+	mockOR := new(MockOpenRouterClient)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	cfg := &config.Config{}
+	cfg.Server.DebugMode = false
+	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+
+	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
+	svc.SetVectorSearcher(mockVS)
+
+	fact := storage.Fact{
+		UserID:    123,
+		Content:   "New fact",
+		Embedding: []float32{0.1, 0.2},
+	}
+
+	existingFact := storage.Fact{
+		ID:        1,
+		UserID:    123,
+		Content:   "Existing fact",
+		Embedding: []float32{0.1, 0.2},
+		CreatedAt: time.Now(),
+	}
+
+	mockVS.On("FindSimilarFacts", mock.Anything, int64(123), mock.Anything, float32(0.85)).Return([]storage.Fact{existingFact}, nil)
+
+	// Mock arbitration response - REPLACE with wrong target_id
+	arbitrationResp := `{"action": "REPLACE", "target_id": 999, "new_content": "Merged"}`
+	resp := openrouter.ChatCompletionResponse{}
+	respJSON := map[string]interface{}{
+		"choices": []map[string]interface{}{
+			{"message": map[string]interface{}{"role": "assistant", "content": arbitrationResp}},
+		},
+	}
+	respBytes, _ := json.Marshal(respJSON)
+	_ = json.Unmarshal(respBytes, &resp)
+
+	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(&resp, nil)
+	mockStore.On("AddFact", mock.Anything).Return(int64(2), nil) // Fallback to add
+
+	err := svc.deduplicateAndAddFact(context.Background(), fact, "test reason", 10, "input")
+
+	assert.NoError(t, err)
+	mockStore.AssertExpectations(t)
+}
+
+func TestGetEmbedding(t *testing.T) {
+	mockOR := new(MockOpenRouterClient)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	cfg := &config.Config{}
+	cfg.RAG.EmbeddingModel = "test-model"
+	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+
+	svc := NewService(logger, cfg, nil, nil, nil, mockOR, translator)
+
+	embResp := openrouter.EmbeddingResponse{
+		Data: []openrouter.EmbeddingObject{{Embedding: []float32{0.1, 0.2, 0.3}}},
+	}
+	mockOR.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req openrouter.EmbeddingRequest) bool {
+		return req.Model == "test-model" && len(req.Input) == 1 && req.Input[0] == "test text"
+	})).Return(&embResp, nil)
+
+	emb, err := svc.getEmbedding(context.Background(), "test text")
+
+	assert.NoError(t, err)
+	assert.Equal(t, []float32{0.1, 0.2, 0.3}, emb)
+}
+
+func TestGetEmbedding_EmptyResponse(t *testing.T) {
+	mockOR := new(MockOpenRouterClient)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	cfg := &config.Config{}
+	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+
+	svc := NewService(logger, cfg, nil, nil, nil, mockOR, translator)
+
+	embResp := openrouter.EmbeddingResponse{Data: []openrouter.EmbeddingObject{}}
+	mockOR.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(&embResp, nil)
+
+	_, err := svc.getEmbedding(context.Background(), "test text")
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no embedding returned")
+}
+
+func TestGetEmbedding_Error(t *testing.T) {
+	mockOR := new(MockOpenRouterClient)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	cfg := &config.Config{}
+	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+
+	svc := NewService(logger, cfg, nil, nil, nil, mockOR, translator)
+
+	mockOR.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(nil, assert.AnError)
+
+	_, err := svc.getEmbedding(context.Background(), "test text")
+
+	assert.Error(t, err)
 }

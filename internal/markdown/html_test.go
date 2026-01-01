@@ -425,3 +425,35 @@ Risk   : High</pre>`,
 		})
 	}
 }
+
+func TestAdditionalMarkdownElements(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Autolink URL",
+			input:    "<https://example.com>",
+			expected: "<a href=\"https://example.com\">https://example.com</a>",
+		},
+		{
+			name:     "Autolink email",
+			input:    "<user@example.com>",
+			expected: "<a href=\"user@example.com\">user@example.com</a>",
+		},
+		{
+			name:     "Indented code block",
+			input:    "Normal text\n\n    code line 1\n    code line 2",
+			expected: "Normal text\n\n<pre><code>code line 1\ncode line 2\n</code></pre>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ToHTML(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

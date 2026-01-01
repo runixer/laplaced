@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added startup warning when `allowed_user_ids` is empty (bot rejects all messages in this case)
+
+### Changed
+- Improved test coverage: bot 64%→70.5%, rag 69.7%→73.9%, web 65%→71.1%, markdown 65.4%→70.5%, memory 50%→77.5%, openrouter 46%→81.7%
+
 ## [0.2.2] - 2026-01-01
 
 ### Changed

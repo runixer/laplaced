@@ -84,6 +84,11 @@ func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRe
 		return nil, fmt.Errorf("failed to set bot commands: %w", err)
 	}
 
+	// Warn if no users are allowed - bot will reject all messages
+	if len(cfg.Bot.AllowedUserIDs) == 0 {
+		botLogger.Warn("allowed_user_ids is empty - bot will reject ALL messages. Add user IDs to allow access.")
+	}
+
 	return b, nil
 }
 

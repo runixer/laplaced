@@ -44,8 +44,10 @@ Key variables:
 ```bash
 LAPLACED_TELEGRAM_TOKEN=your_bot_token
 LAPLACED_OPENROUTER_API_KEY=your_api_key
-LAPLACED_ALLOWED_USER_IDS=123456789,987654321
+LAPLACED_ALLOWED_USER_IDS=123456789,987654321  # ⚠️ Required! Empty = reject all
 ```
+
+> **Note:** `LAPLACED_ALLOWED_USER_IDS` must contain at least one user ID. If empty, the bot will reject all messages.
 
 ## Telegram Modes
 

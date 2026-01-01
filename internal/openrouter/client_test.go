@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -306,4 +309,308 @@ func TestFilterReasoningForLog(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+// timeoutError implements net.Error for testing
+type timeoutError struct{}
+
+func (e *timeoutError) Error() string   { return "timeout" }
+func (e *timeoutError) Timeout() bool   { return true }
+func (e *timeoutError) Temporary() bool { return true }
+
+func TestIsRetryableError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "nil error",
+			err:      nil,
+			expected: false,
+		},
+		{
+			name:     "generic error",
+			err:      errors.New("some error"),
+			expected: false,
+		},
+		{
+			name:     "timeout error",
+			err:      &timeoutError{},
+			expected: true,
+		},
+		{
+			name: "net.OpError",
+			err: &net.OpError{
+				Op:  "dial",
+				Net: "tcp",
+				Err: errors.New("connection refused"),
+			},
+			expected: true,
+		},
+		{
+			name:     "wrapped timeout error",
+			err:      errors.New("wrapped: " + (&timeoutError{}).Error()),
+			expected: false, // Simple wrapping doesn't preserve the type
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isRetryableError(tt.err))
+		})
+	}
+}
+
+func TestCalculateBackoff(t *testing.T) {
+	tests := []struct {
+		name      string
+		attempt   int
+		minExpect time.Duration
+		maxExpect time.Duration
+	}{
+		{
+			name:      "attempt 0",
+			attempt:   0,
+			minExpect: 800 * time.Millisecond,  // 1s - 20% jitter
+			maxExpect: 1200 * time.Millisecond, // 1s + 20% jitter
+		},
+		{
+			name:      "attempt 1",
+			attempt:   1,
+			minExpect: 1600 * time.Millisecond, // 2s - 20% jitter
+			maxExpect: 2400 * time.Millisecond, // 2s + 20% jitter
+		},
+		{
+			name:      "attempt 2",
+			attempt:   2,
+			minExpect: 3200 * time.Millisecond, // 4s - 20% jitter
+			maxExpect: 4800 * time.Millisecond, // 4s + 20% jitter
+		},
+		{
+			name:      "attempt 10 (capped at maxDelay)",
+			attempt:   10,
+			minExpect: 24 * time.Second, // 30s - 20% jitter
+			maxExpect: 36 * time.Second, // 30s + 20% jitter
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Run multiple times to account for jitter
+			for i := 0; i < 10; i++ {
+				result := calculateBackoff(tt.attempt)
+				assert.GreaterOrEqual(t, result, tt.minExpect, "backoff should be >= min")
+				assert.LessOrEqual(t, result, tt.maxExpect, "backoff should be <= max")
+			}
+		})
+	}
+}
+
+func TestCreateEmbeddings(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "POST", r.Method)
+		assert.Equal(t, "/api/v1/embeddings", r.URL.Path)
+		assert.Equal(t, "Bearer test_api_key", r.Header.Get("Authorization"))
+
+		// Parse request
+		var req EmbeddingRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		assert.NoError(t, err)
+		assert.Equal(t, "text-embedding-model", req.Model)
+		assert.Len(t, req.Input, 2)
+
+		// Send response
+		w.Header().Set("Content-Type", "application/json")
+		resp := EmbeddingResponse{
+			Object: "list",
+			Data: []EmbeddingObject{
+				{Object: "embedding", Embedding: []float32{0.1, 0.2, 0.3}, Index: 0},
+				{Object: "embedding", Embedding: []float32{0.4, 0.5, 0.6}, Index: 1},
+			},
+			Model: "text-embedding-model",
+			Usage: struct {
+				PromptTokens int `json:"prompt_tokens"`
+				TotalTokens  int `json:"total_tokens"`
+			}{PromptTokens: 10, TotalTokens: 10},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	assert.NoError(t, err)
+
+	req := EmbeddingRequest{
+		Model: "text-embedding-model",
+		Input: []string{"hello world", "test input"},
+	}
+
+	resp, err := client.CreateEmbeddings(context.Background(), req)
+	assert.NoError(t, err)
+	assert.Equal(t, "list", resp.Object)
+	assert.Len(t, resp.Data, 2)
+	assert.Equal(t, []float32{0.1, 0.2, 0.3}, resp.Data[0].Embedding)
+	assert.Equal(t, []float32{0.4, 0.5, 0.6}, resp.Data[1].Embedding)
+}
+
+func TestCreateEmbeddingsRetry(t *testing.T) {
+	attempts := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error": "service unavailable"}`))
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		resp := EmbeddingResponse{
+			Object: "list",
+			Data: []EmbeddingObject{
+				{Object: "embedding", Embedding: []float32{0.1, 0.2}, Index: 0},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	assert.NoError(t, err)
+
+	req := EmbeddingRequest{
+		Model: "text-embedding-model",
+		Input: []string{"test"},
+	}
+
+	resp, err := client.CreateEmbeddings(context.Background(), req)
+	assert.NoError(t, err)
+	assert.Equal(t, 3, attempts)
+	assert.Len(t, resp.Data, 1)
+}
+
+func TestCreateEmbeddingsEmptyResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		resp := EmbeddingResponse{
+			Object: "list",
+			Data:   []EmbeddingObject{}, // Empty data
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	assert.NoError(t, err)
+
+	req := EmbeddingRequest{
+		Model: "text-embedding-model",
+		Input: []string{"test"},
+	}
+
+	resp, err := client.CreateEmbeddings(context.Background(), req)
+	assert.NoError(t, err)
+	assert.Empty(t, resp.Data)
+	// Should log warning about empty data
+	assert.Contains(t, logBuf.String(), "NO DATA")
+}
+
+func TestCreateEmbeddingsNonRetryableError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error": "bad request"}`))
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	assert.NoError(t, err)
+
+	req := EmbeddingRequest{
+		Model: "text-embedding-model",
+		Input: []string{"test"},
+	}
+
+	_, err = client.CreateEmbeddings(context.Background(), req)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "400")
+}
+
+func TestNewClientWithProxy(t *testing.T) {
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	// Test with valid proxy URL
+	client, err := NewClientWithBaseURL(logger, "test_key", "http://user:pass@proxy.example.com:8080", "https://api.example.com")
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+
+	// Should log with masked password (URL-encoded as %2A%2A%2A%2A%2A)
+	logOutput := logBuf.String()
+	assert.Contains(t, logOutput, "Using proxy")
+	// Password is masked with ***** which gets URL-encoded
+	assert.True(t, bytes.Contains(logBuf.Bytes(), []byte("*****")) || bytes.Contains(logBuf.Bytes(), []byte("%2A%2A%2A%2A%2A")), "password should be masked")
+	assert.NotContains(t, logOutput, ":pass@")
+}
+
+func TestNewClientWithInvalidProxy(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+
+	// Test with invalid proxy URL
+	_, err := NewClientWithBaseURL(logger, "test_key", "://invalid", "https://api.example.com")
+	assert.Error(t, err)
+}
+
+func TestCreateChatCompletionContextCanceled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Simulate slow response
+		time.Sleep(100 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	assert.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	req := ChatCompletionRequest{
+		Model:    "test_model",
+		Messages: []Message{{Role: "user", Content: "Hello"}},
+	}
+
+	_, err = client.CreateChatCompletion(ctx, req)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestCreateEmbeddingsContextCanceled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	assert.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	req := EmbeddingRequest{
+		Model: "text-embedding-model",
+		Input: []string{"test"},
+	}
+
+	_, err = client.CreateEmbeddings(ctx, req)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
 }

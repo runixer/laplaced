@@ -44,8 +44,10 @@ go run cmd/bot/main.go --config /path/to/config.yaml
 ```bash
 LAPLACED_TELEGRAM_TOKEN=токен_бота
 LAPLACED_OPENROUTER_API_KEY=ключ_api
-LAPLACED_ALLOWED_USER_IDS=123456789,987654321
+LAPLACED_ALLOWED_USER_IDS=123456789,987654321  # ⚠️ Обязательно! Пустой = отклонять всех
 ```
+
+> **Важно:** `LAPLACED_ALLOWED_USER_IDS` должен содержать хотя бы один ID пользователя. Если список пуст, бот будет отклонять все сообщения.
 
 ## Режимы Telegram
 
