@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"html"
 	"log/slog"
-	"math/rand"
+	"math/rand/v2"
 	"strings"
 
 	"github.com/runixer/laplaced/internal/config"
@@ -42,7 +42,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 
 	// React to the message with a certain probability
 	if rand.Float32() < 0.1 { // 10% chance
-		reaction := availableReactions[rand.Intn(len(availableReactions))]
+		reaction := availableReactions[rand.IntN(len(availableReactions))]
 		reactionReq := telegram.SetMessageReactionRequest{
 			ChatID:    chatID,
 			MessageID: lastMsg.MessageID,

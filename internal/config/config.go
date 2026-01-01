@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/ilyakaznacheev/cleanenv"
 	"gopkg.in/yaml.v3"
@@ -213,6 +214,25 @@ func (c *Config) Validate() error {
 		}
 		if c.RAG.MaxChunkSize <= 0 {
 			errs = append(errs, fmt.Errorf("rag.max_chunk_size must be positive, got %d", c.RAG.MaxChunkSize))
+		}
+
+		// Duration format validation
+		if c.RAG.BackfillInterval != "" {
+			if _, err := time.ParseDuration(c.RAG.BackfillInterval); err != nil {
+				errs = append(errs, fmt.Errorf("rag.backfill_interval: invalid duration format %q: %w", c.RAG.BackfillInterval, err))
+			}
+		}
+		if c.RAG.ChunkInterval != "" {
+			if _, err := time.ParseDuration(c.RAG.ChunkInterval); err != nil {
+				errs = append(errs, fmt.Errorf("rag.chunk_interval: invalid duration format %q: %w", c.RAG.ChunkInterval, err))
+			}
+		}
+	}
+
+	// Bot duration validation
+	if c.Bot.TurnWaitDuration != "" {
+		if _, err := time.ParseDuration(c.Bot.TurnWaitDuration); err != nil {
+			errs = append(errs, fmt.Errorf("bot.turn_wait_duration: invalid duration format %q: %w", c.Bot.TurnWaitDuration, err))
 		}
 	}
 

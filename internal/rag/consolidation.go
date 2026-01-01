@@ -67,7 +67,9 @@ func (s *Service) processConsolidation(ctx context.Context) {
 				} else {
 					s.logger.Info("Merged topics", "t1", candidate.Topic1.ID, "t2", candidate.Topic2.ID, "new_summary", newSummary)
 					// Reload vectors after successful merge
+					s.wg.Add(1)
 					go func() {
+						defer s.wg.Done()
 						if err := s.ReloadVectors(); err != nil {
 							s.logger.Error("failed to reload vectors after merge", "error", err)
 						}

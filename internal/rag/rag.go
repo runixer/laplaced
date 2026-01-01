@@ -189,6 +189,12 @@ func (s *Service) LoadNewVectors() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Check if another goroutine already loaded these vectors while we were fetching
+	if minTopicID < s.maxLoadedTopicID || minFactID < s.maxLoadedFactID {
+		s.logger.Debug("Skipping incremental load - already loaded by another goroutine")
+		return nil
+	}
+
 	tCount := 0
 	for _, t := range topics {
 		if len(t.Embedding) > 0 {
@@ -713,7 +719,9 @@ func (s *Service) processChunk(ctx context.Context, userID int64, chunk []storag
 	}
 
 	// Load new vectors (incremental)
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
 		if err := s.LoadNewVectors(); err != nil {
 			s.logger.Error("failed to load new vectors", "error", err)
 		}

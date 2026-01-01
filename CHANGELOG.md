@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Switched from `math/rand` to `math/rand/v2` for better randomness in backoff jitter
+
+### Fixed
+- Fixed potential race condition in `LoadNewVectors()` when multiple goroutines load vectors concurrently
+- Fixed untracked goroutines in RAG service (`LoadNewVectors`, `ReloadVectors`) - now properly tracked by WaitGroup for graceful shutdown
+- Fixed metrics update goroutine in web server not tracked by WaitGroup
+- Fixed missing duration format validation in config (`turn_wait_duration`, `backfill_interval`, `chunk_interval`)
+
 ## [0.2.1] - 2026-01-01
 
 ### Added

@@ -114,6 +114,7 @@ type Server struct {
 	renderer        *ui.Renderer
 	ctx             context.Context // Server's parent context for webhook processing
 	statsCache      *dashboardStatsCache
+	wg              sync.WaitGroup
 }
 
 func NewServer(logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, statsRepo storage.StatsRepository, logRepo storage.LogRepository, topicRepo storage.TopicRepository, msgRepo storage.MessageRepository, factHistoryRepo storage.FactHistoryRepository, bot Bot, rag *rag.Service) (*Server, error) {
@@ -201,7 +202,9 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}()
 
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
 		for {
@@ -219,6 +222,7 @@ func (s *Server) Start(ctx context.Context) error {
 	if err != http.ErrServerClosed {
 		return err
 	}
+	s.wg.Wait() // Wait for background goroutines to finish
 	return nil
 }
 

@@ -14,7 +14,7 @@ linters-settings:
       # SQL with parameterized queries (?) is safe
       - G201  # SQL string formatting
       - G202  # SQL string concatenation
-      # math/rand is fine for non-crypto (emoji reactions)
+      # math/rand/v2 is fine for non-crypto (emoji reactions, backoff jitter)
       - G404
 
   gocritic:
