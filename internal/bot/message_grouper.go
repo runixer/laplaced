@@ -20,22 +20,64 @@ type MessageGroup struct {
 // MessageGrouper handles the grouping of incoming messages from users.
 type MessageGrouper struct {
 	mu           sync.Mutex
+	wg           sync.WaitGroup // tracks active processGroup operations
 	groups       map[int64]*MessageGroup
 	bot          *Bot
 	logger       *slog.Logger
 	turnWait     time.Duration
 	onGroupReady func(ctx context.Context, group *MessageGroup)
+	parentCtx    context.Context
+	parentCancel context.CancelFunc
 }
 
 // NewMessageGrouper creates a new MessageGrouper.
 func NewMessageGrouper(b *Bot, logger *slog.Logger, turnWait time.Duration, onGroupReady func(ctx context.Context, group *MessageGroup)) *MessageGrouper {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &MessageGrouper{
 		groups:       make(map[int64]*MessageGroup),
 		bot:          b,
 		logger:       logger.With(slog.String("component", "message_grouper")),
 		turnWait:     turnWait,
 		onGroupReady: onGroupReady,
+		parentCtx:    ctx,
+		parentCancel: cancel,
 	}
+}
+
+// Stop cancels all pending message groups and their timers.
+// Should be called during graceful shutdown.
+func (mg *MessageGrouper) Stop() {
+	mg.logger.Info("Stopping message grouper...")
+
+	// Cancel the parent context - this will cancel all child contexts
+	mg.parentCancel()
+
+	mg.mu.Lock()
+	// Stop all pending timers
+	for userID, group := range mg.groups {
+		if group.Timer != nil {
+			// Timer.Stop returns true if the timer was stopped before firing
+			// In that case, the callback won't run, so we need to call wg.Done()
+			if group.Timer.Stop() {
+				mg.wg.Done()
+				mg.logger.Debug("stopped pending timer for user", slog.Int64("user_id", userID))
+			} else {
+				mg.logger.Debug("timer already fired for user", slog.Int64("user_id", userID))
+			}
+		}
+		if group.CancelFunc != nil {
+			group.CancelFunc()
+		}
+	}
+
+	// Clear the groups map
+	mg.groups = make(map[int64]*MessageGroup)
+	mg.mu.Unlock()
+
+	// Wait for all active processGroup operations to complete
+	mg.logger.Info("Waiting for active message processing to complete...")
+	mg.wg.Wait()
+	mg.logger.Info("Message grouper stopped")
 }
 
 // AddMessage adds a new message to a user's group.
@@ -57,7 +99,11 @@ func (mg *MessageGrouper) AddMessage(msg *telegram.Message) {
 	} else {
 		// If a group exists, cancel the previous timer and any ongoing processing.
 		if group.Timer != nil {
-			group.Timer.Stop()
+			// Timer.Stop returns true if the timer was stopped before firing
+			// In that case, the callback won't run, so we need to call wg.Done()
+			if group.Timer.Stop() {
+				mg.wg.Done()
+			}
 		}
 		if group.CancelFunc != nil {
 			group.CancelFunc()
@@ -68,12 +114,16 @@ func (mg *MessageGrouper) AddMessage(msg *telegram.Message) {
 	group.Messages = append(group.Messages, msg)
 	mg.logger.Debug("added message to group", slog.Int64("user_id", userID), slog.Int("message_id", msg.MessageID))
 
-	// Create a new context for this processing cycle.
-	ctx, cancel := context.WithCancel(context.Background())
+	// Create a new context derived from parent context.
+	// This ensures child contexts are cancelled when Stop() is called.
+	ctx, cancel := context.WithCancel(mg.parentCtx)
 	group.CancelFunc = cancel
 
 	// Reset the timer.
+	// Add to WaitGroup BEFORE starting timer to ensure proper shutdown ordering
+	mg.wg.Add(1)
 	group.Timer = time.AfterFunc(mg.turnWait, func() {
+		defer mg.wg.Done()
 		mg.processGroup(ctx, userID)
 	})
 }

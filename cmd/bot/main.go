@@ -188,6 +188,9 @@ func main() {
 
 	logger.Info("Starting Laplaced", "version", Version)
 
+	// Channel to wait for polling goroutine (only used in long polling mode)
+	pollingDone := make(chan struct{})
+
 	if cfg.Telegram.WebhookURL != "" {
 		// Set webhook
 		webhookURL := cfg.Telegram.WebhookURL + "/telegram/" + b.API().GetToken()
@@ -196,6 +199,7 @@ func main() {
 			os.Exit(1)
 		}
 		logger.Info("Webhook set", "url", cfg.Telegram.WebhookURL)
+		close(pollingDone) // No polling, close immediately
 	} else {
 		logger.Info("Webhook not set, using long polling.")
 
@@ -205,10 +209,12 @@ func main() {
 		}
 
 		go func() {
+			defer close(pollingDone)
 			offset := 0
 			for {
 				select {
 				case <-ctx.Done():
+					logger.Info("Polling goroutine received shutdown signal")
 					return
 				default:
 					updates, err := b.API().GetUpdates(ctx, telegram.GetUpdatesRequest{
@@ -230,7 +236,7 @@ func main() {
 							offset = update.UpdateID + 1
 						}
 						// Process in a separate goroutine to not block polling
-						go b.ProcessUpdate(ctx, update, "long_polling")
+						b.ProcessUpdateAsync(ctx, update, "long_polling")
 					}
 				}
 			}
@@ -240,6 +246,11 @@ func main() {
 	<-ctx.Done()
 	logger.Info("Shutting down...")
 
+	// Wait for polling goroutine to stop
+	<-pollingDone
+	logger.Info("Polling stopped")
+
 	// Wait for web server to stop
 	<-srvDone
+	logger.Info("Web server stopped")
 }

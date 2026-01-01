@@ -107,9 +107,15 @@ func (b *Bot) SetWebhook(webhookURL string) error {
 }
 
 func (b *Bot) Stop() {
+	b.logger.Info("Stopping bot...")
+
+	// First, stop the message grouper to prevent new processing
+	b.messageGrouper.Stop()
+
+	// Then wait for active handlers to finish
 	b.logger.Info("Waiting for active bot handlers to finish...")
 	b.wg.Wait()
-	b.logger.Info("Bot handlers finished.")
+	b.logger.Info("Bot stopped.")
 }
 
 func (b *Bot) HandleUpdate(ctx context.Context, rawUpdate json.RawMessage, remoteAddr string) {
@@ -121,10 +127,28 @@ func (b *Bot) HandleUpdate(ctx context.Context, rawUpdate json.RawMessage, remot
 	b.ProcessUpdate(ctx, &update, remoteAddr)
 }
 
-func (b *Bot) ProcessUpdate(ctx context.Context, update *telegram.Update, source string) {
+// HandleUpdateAsync starts processing a raw update in a goroutine.
+// It properly handles WaitGroup to ensure graceful shutdown.
+// Used by webhook handler.
+func (b *Bot) HandleUpdateAsync(ctx context.Context, rawUpdate json.RawMessage, remoteAddr string) {
 	b.wg.Add(1)
-	defer b.wg.Done()
+	go func() {
+		defer b.wg.Done()
+		b.HandleUpdate(ctx, rawUpdate, remoteAddr)
+	}()
+}
 
+// ProcessUpdateAsync starts processing an update in a goroutine.
+// It properly handles WaitGroup to ensure graceful shutdown.
+func (b *Bot) ProcessUpdateAsync(ctx context.Context, update *telegram.Update, source string) {
+	b.wg.Add(1)
+	go func() {
+		defer b.wg.Done()
+		b.ProcessUpdate(ctx, update, source)
+	}()
+}
+
+func (b *Bot) ProcessUpdate(ctx context.Context, update *telegram.Update, source string) {
 	if update.Message == nil {
 		return
 	}
@@ -409,8 +433,8 @@ func (b *Bot) handleVoiceMessage(ctx context.Context, msg *telegram.Message, log
 		return
 	}
 
-	speechCtx := context.Background()
-	recognizedText, err := b.speechKitClient.Recognize(speechCtx, audioData)
+	// Use the passed context for speech recognition to support cancellation
+	recognizedText, err := b.speechKitClient.Recognize(ctx, audioData)
 	if err != nil {
 		logger.Error("failed to recognize speech", "error", err)
 		b.sendResponses(ctx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
@@ -431,11 +455,12 @@ func (b *Bot) handleVoiceMessage(ctx context.Context, msg *telegram.Message, log
 	}
 
 	// For voice messages, we create a temporary group with just this message
+	// Use the passed context to support cancellation during LLM generation
 	group := &MessageGroup{
 		Messages: []*telegram.Message{fakeTextMessage},
 		UserID:   userID,
 	}
-	b.processMessageGroup(context.Background(), group)
+	b.processMessageGroup(ctx, group)
 }
 
 // formatCoreIdentityFacts formats core identity facts into a string for the system prompt.

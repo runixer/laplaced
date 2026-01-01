@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed bot token leaking in error log messages - now sanitized as `[REDACTED]`
 - Fixed file downloader missing HTTP timeout and context support
 - Fixed file downloader not using configured proxy (was only using environment variables)
+- Fixed graceful shutdown: MessageGrouper now properly waits for active downloads to complete
+- Fixed race condition in ProcessUpdate with WaitGroup.Add() inside goroutine
+- Fixed MessageGrouper not tracking active processing with WaitGroup
+- Fixed voice message handler using `context.Background()` - now properly supports cancellation
+- Fixed webhook handler not tracking goroutines with WaitGroup - now uses `HandleUpdateAsync` for proper shutdown
+- Fixed LLM responses not being sent during graceful shutdown - now uses non-cancellable context for generation
 
 ### Security
 - Fixed potential Slowloris attack vector by adding `ReadHeaderTimeout` to HTTP server

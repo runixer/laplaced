@@ -52,15 +52,9 @@ func init() {
 	prometheus.MustRegister(ragLatency)
 }
 
-// UpdateHandler defines an interface for handling Telegram updates.
-type UpdateHandler interface {
-	HandleUpdate(ctx context.Context, update json.RawMessage, remoteAddr string)
-	API() telegram.BotAPI
-}
-
 // Bot is an interface that abstracts the bot's functionality needed by the web server.
 type Bot interface {
-	HandleUpdate(ctx context.Context, update json.RawMessage, remoteAddr string)
+	HandleUpdateAsync(ctx context.Context, update json.RawMessage, remoteAddr string)
 	API() telegram.BotAPI
 }
 
@@ -77,6 +71,7 @@ type Server struct {
 	rag             *rag.Service
 	logger          *slog.Logger
 	renderer        *ui.Renderer
+	ctx             context.Context // Server's parent context for webhook processing
 }
 
 func NewServer(logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, statsRepo storage.StatsRepository, logRepo storage.LogRepository, topicRepo storage.TopicRepository, msgRepo storage.MessageRepository, factHistoryRepo storage.FactHistoryRepository, bot Bot, rag *rag.Service) (*Server, error) {
@@ -102,6 +97,9 @@ func NewServer(logger *slog.Logger, cfg *config.Config, factRepo storage.FactRep
 }
 
 func (s *Server) Start(ctx context.Context) error {
+	// Store context for webhook handler to use
+	s.ctx = ctx
+
 	// Check and generate password if needed
 	if s.cfg.Server.Auth.Enabled && s.cfg.Server.Auth.Password == "" {
 		bytes := make([]byte, 6) // 12 hex chars
@@ -214,8 +212,10 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 	// Acknowledge the update immediately to prevent Telegram from resending it.
 	w.WriteHeader(http.StatusOK)
 
-	// Process the update in a separate goroutine.
-	go s.bot.HandleUpdate(context.Background(), json.RawMessage(body), r.RemoteAddr)
+	// Process the update asynchronously with proper shutdown tracking.
+	// Use server's context (not request context) so processing continues after handler returns.
+	// HandleUpdateAsync uses the bot's WaitGroup to ensure graceful shutdown.
+	s.bot.HandleUpdateAsync(s.ctx, json.RawMessage(body), r.RemoteAddr)
 }
 
 func (s *Server) getCommonData(r *http.Request) (ui.PageData, error) {

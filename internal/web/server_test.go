@@ -329,7 +329,7 @@ func (m *MockBot) API() telegram.BotAPI {
 	return args.Get(0).(telegram.BotAPI)
 }
 
-func (m *MockBot) HandleUpdate(ctx context.Context, update json.RawMessage, remoteAddr string) {
+func (m *MockBot) HandleUpdateAsync(ctx context.Context, update json.RawMessage, remoteAddr string) {
 	m.Called(ctx, update, remoteAddr)
 }
 
@@ -408,7 +408,12 @@ func TestWebhookHandler(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	// We need to match the raw json.RawMessage
-	mockBot.On("HandleUpdate", mock.Anything, json.RawMessage(body), mock.Anything).Return()
+	mockBot.On("HandleUpdateAsync", mock.Anything, json.RawMessage(body), mock.Anything).Return()
+
+	// Start the server context so the handler can use it
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server.ctx = ctx
 
 	rr := httptest.NewRecorder()
 	handler := http.HandlerFunc(server.webhookHandler)
@@ -418,12 +423,7 @@ func TestWebhookHandler(t *testing.T) {
 
 	// Assert
 	assert.Equal(t, http.StatusOK, rr.Code)
-
-	// Since the handler now runs in a goroutine, we need to wait a bit.
-	// In a more complex scenario, we might use channels or waitgroups.
-	time.Sleep(10 * time.Millisecond)
-
-	mockBot.AssertCalled(t, "HandleUpdate", mock.Anything, json.RawMessage(body), mock.Anything)
+	mockBot.AssertCalled(t, "HandleUpdateAsync", mock.Anything, json.RawMessage(body), mock.Anything)
 }
 
 func TestWebhookHandler_TooLarge(t *testing.T) {
@@ -449,7 +449,7 @@ func TestWebhookHandler_TooLarge(t *testing.T) {
 
 	// Assert
 	assert.Equal(t, http.StatusRequestEntityTooLarge, rr.Code)
-	mockBot.AssertNotCalled(t, "HandleUpdate", mock.Anything, mock.Anything, mock.Anything)
+	mockBot.AssertNotCalled(t, "HandleUpdateAsync", mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestServerRouting_CorrectPath(t *testing.T) {
@@ -473,7 +473,7 @@ func TestServerRouting_CorrectPath(t *testing.T) {
 
 	updateJSON := `{"update_id":1}`
 	body := []byte(updateJSON)
-	mockBot.On("HandleUpdate", mock.Anything, json.RawMessage(body), mock.Anything).Return()
+	mockBot.On("HandleUpdateAsync", mock.Anything, json.RawMessage(body), mock.Anything).Return()
 
 	// Act
 	resp, err := http.Post(testServer.URL+"/telegram/"+token, "application/json", bytes.NewBuffer(body))
@@ -513,11 +513,13 @@ func TestServerRouting_IncorrectPath(t *testing.T) {
 	// Assert
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
-	mockBot.AssertNotCalled(t, "HandleUpdate", mock.Anything, mock.Anything)
+	mockBot.AssertNotCalled(t, "HandleUpdateAsync", mock.Anything, mock.Anything, mock.Anything)
 }
 
 // buildTestHandler is a helper to create a handler with all routes for testing.
 func (s *Server) buildTestHandler(token string) http.Handler {
+	// Initialize context for webhook handler
+	s.ctx = context.Background()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ui/stats", s.statsHandler)
 	mux.HandleFunc("/healthz", s.healthzHandler)
