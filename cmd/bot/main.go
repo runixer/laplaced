@@ -61,9 +61,13 @@ func runHealthcheck(configPath string) int {
 }
 
 func main() {
+	// Set up JSON logging early (before config load) with default INFO level.
+	// Will be reconfigured with correct level after config is loaded.
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+
 	// Load .env file if it exists
 	if err := godotenv.Load(); err != nil {
-		slog.Warn("No .env file found or failed to load, relying on environment variables")
+		slog.Debug("No .env file found or failed to load, relying on environment variables")
 	}
 
 	configPath := flag.String("config", "configs/config.yaml", "path to config file")

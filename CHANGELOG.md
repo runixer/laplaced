@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed `goto` statement in i18n package, using simpler control flow
 
 ### Fixed
+- Fixed early startup logs using text format instead of JSON (now JSON from first line)
 - Fixed OpenRouter client returning nil instead of error on non-OK HTTP status
 - Fixed `sendResponses()` retry logic using unbounded `context.Background()` - now uses 30s timeout
 - Fixed web server calling `os.Exit(1)` on failure - now triggers graceful shutdown via `cancel()`
