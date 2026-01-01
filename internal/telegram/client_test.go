@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -286,4 +287,49 @@ func TestGetUpdates(t *testing.T) {
 	assert.Len(t, updates, 1)
 	assert.Equal(t, 10, updates[0].UpdateID)
 	assert.Equal(t, "Hello", updates[0].Message.Text)
+}
+
+func TestSanitizeError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		token    string
+		expected string
+	}{
+		{
+			name:     "nil error",
+			err:      nil,
+			token:    "secret-token",
+			expected: "",
+		},
+		{
+			name:     "empty token",
+			err:      assert.AnError,
+			token:    "",
+			expected: assert.AnError.Error(),
+		},
+		{
+			name:     "error with token in URL",
+			err:      fmt.Errorf(`Post "https://api.telegram.org/bot123456:ABC-DEF/sendChatAction": context canceled`),
+			token:    "123456:ABC-DEF",
+			expected: `Post "https://api.telegram.org/bot[REDACTED]/sendChatAction": context canceled`,
+		},
+		{
+			name:     "error without token",
+			err:      fmt.Errorf("connection refused"),
+			token:    "secret-token",
+			expected: "connection refused",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := sanitizeError(tt.err, tt.token)
+			if tt.err == nil {
+				assert.Nil(t, result)
+			} else {
+				assert.Equal(t, tt.expected, result.Error())
+			}
+		})
+	}
 }

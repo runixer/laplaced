@@ -200,7 +200,20 @@ func (b *Bot) sendAction(ctx context.Context, chatID int64, messageThreadID int,
 }
 
 func (b *Bot) sendTypingActionLoop(ctx context.Context, chatID int64, messageThreadID int) {
-	b.sendAction(ctx, chatID, messageThreadID, "typing")
+	// Use detached context with timeout for action requests.
+	// This prevents "context canceled" errors when the parent context is canceled
+	// while an HTTP request is in progress. The typing indicator is automatically
+	// cleared by Telegram when the bot sends a message, so we don't need to
+	// explicitly cancel ongoing requests.
+	const actionTimeout = 5 * time.Second
+
+	sendTyping := func() {
+		actionCtx, cancel := context.WithTimeout(context.Background(), actionTimeout)
+		defer cancel()
+		b.sendAction(actionCtx, chatID, messageThreadID, "typing")
+	}
+
+	sendTyping()
 
 	ticker := time.NewTicker(4 * time.Second)
 	defer ticker.Stop()
@@ -210,7 +223,7 @@ func (b *Bot) sendTypingActionLoop(ctx context.Context, chatID int64, messageThr
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			b.sendAction(ctx, chatID, messageThreadID, "typing")
+			sendTyping()
 		}
 	}
 }

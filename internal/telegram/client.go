@@ -175,7 +175,8 @@ func (c *Client) makeRequest(ctx context.Context, method string, params interfac
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			lastErr = fmt.Errorf("failed to perform request: %w", err)
+			// Sanitize error to remove bot token from URL in error messages
+			lastErr = fmt.Errorf("failed to perform request: %w", sanitizeError(err, c.token))
 			// Only retry on network errors, not on context cancellation
 			if ctx.Err() != nil {
 				duration := time.Since(startTime).Seconds()
@@ -230,6 +231,16 @@ func isTimeoutError(err error) bool {
 	return strings.Contains(errStr, "timeout") ||
 		strings.Contains(errStr, "deadline exceeded") ||
 		strings.Contains(errStr, "context canceled")
+}
+
+// sanitizeError removes sensitive information (bot token) from error messages.
+// The token appears in URLs like: https://api.telegram.org/bot<TOKEN>/method
+func sanitizeError(err error, token string) error {
+	if err == nil || token == "" {
+		return err
+	}
+	sanitized := strings.ReplaceAll(err.Error(), token, "[REDACTED]")
+	return fmt.Errorf("%s", sanitized)
 }
 
 // SendMessage sends a text message.
@@ -340,7 +351,8 @@ func (c *Client) GetUpdates(ctx context.Context, req GetUpdatesRequest) ([]Updat
 			recordRequestDuration(method, statusError, duration)
 			recordError(method, errorTypeNetwork)
 		}
-		return nil, fmt.Errorf("failed to perform request: %w", err)
+		// Sanitize error to remove bot token from URL in error messages
+		return nil, fmt.Errorf("failed to perform request: %w", sanitizeError(err, c.token))
 	}
 	defer resp.Body.Close()
 

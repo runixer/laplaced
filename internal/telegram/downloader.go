@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // FileDownloader defines an interface for downloading files from Telegram.
@@ -38,11 +39,14 @@ func (d *HTTPFileDownloader) DownloadFile(ctx context.Context, fileID string) ([
 		return nil, fmt.Errorf("failed to get file info: %w", err)
 	}
 
-	fileURL := fmt.Sprintf("%s/file/bot%s/%s", d.fileBaseURL, d.api.GetToken(), fileInfo.FilePath)
+	token := d.api.GetToken()
+	fileURL := fmt.Sprintf("%s/file/bot%s/%s", d.fileBaseURL, token, fileInfo.FilePath)
 
 	resp, err := d.httpClient.Get(fileURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to download file: %w", err)
+		// Sanitize error to remove bot token from URL in error messages
+		sanitized := strings.ReplaceAll(err.Error(), token, "[REDACTED]")
+		return nil, fmt.Errorf("failed to download file: %s", sanitized)
 	}
 	defer resp.Body.Close()
 
