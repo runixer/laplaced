@@ -9,6 +9,26 @@ import (
 	"github.com/runixer/laplaced/internal/storage"
 )
 
+// extractMessageContent extracts text content from openrouter.Message.Content,
+// handling both string and []interface{} (multipart) formats.
+func extractMessageContent(content interface{}) string {
+	if str, ok := content.(string); ok {
+		return str
+	}
+	if parts, ok := content.([]interface{}); ok {
+		var result string
+		for _, p := range parts {
+			if pm, ok := p.(map[string]interface{}); ok {
+				if txt, ok := pm["text"].(string); ok {
+					result += txt
+				}
+			}
+		}
+		return result
+	}
+	return ""
+}
+
 func ParseRAGLog(l storage.RAGLog) RAGLogView {
 	view := RAGLogView{RAGLog: l}
 
@@ -94,19 +114,7 @@ func ParseRAGLog(l storage.RAGLog) RAGLogView {
 
 		isRAG := false
 		if msg.Role == "user" {
-			contentStr := ""
-			if str, ok := msg.Content.(string); ok {
-				contentStr = str
-			} else if parts, ok := msg.Content.([]interface{}); ok {
-				for _, p := range parts {
-					if pm, ok := p.(map[string]interface{}); ok {
-						if txt, ok := pm["text"].(string); ok {
-							contentStr += txt
-						}
-					}
-				}
-			}
-
+			contentStr := extractMessageContent(msg.Content)
 			for _, h := range ragHeaders {
 				if strings.Contains(contentStr, h) {
 					isRAG = true
@@ -141,17 +149,7 @@ func ParseRAGLog(l storage.RAGLog) RAGLogView {
 
 	histLen := 0
 	for _, m := range history {
-		if str, ok := m.Content.(string); ok {
-			histLen += len(str)
-		} else if parts, ok := m.Content.([]interface{}); ok {
-			for _, p := range parts {
-				if pm, ok := p.(map[string]interface{}); ok {
-					if txt, ok := pm["text"].(string); ok {
-						histLen += len(txt)
-					}
-				}
-			}
-		}
+		histLen += len(extractMessageContent(m.Content))
 	}
 
 	total := sPromptLen + uFactsLen + eFactsLen + ragLen + histLen

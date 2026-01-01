@@ -8,6 +8,68 @@ import (
 	"github.com/runixer/laplaced/internal/storage"
 )
 
+func TestExtractMessageContent(t *testing.T) {
+	tests := []struct {
+		name    string
+		content interface{}
+		want    string
+	}{
+		{
+			name:    "nil content",
+			content: nil,
+			want:    "",
+		},
+		{
+			name:    "string content",
+			content: "Hello world",
+			want:    "Hello world",
+		},
+		{
+			name:    "empty string",
+			content: "",
+			want:    "",
+		},
+		{
+			name: "multipart with single text",
+			content: []interface{}{
+				map[string]interface{}{"type": "text", "text": "Hello"},
+			},
+			want: "Hello",
+		},
+		{
+			name: "multipart with multiple texts",
+			content: []interface{}{
+				map[string]interface{}{"type": "text", "text": "Hello "},
+				map[string]interface{}{"type": "text", "text": "world"},
+			},
+			want: "Hello world",
+		},
+		{
+			name: "multipart with mixed types",
+			content: []interface{}{
+				map[string]interface{}{"type": "text", "text": "Check this: "},
+				map[string]interface{}{"type": "image_url", "url": "http://example.com/img.png"},
+				map[string]interface{}{"type": "text", "text": "cool image"},
+			},
+			want: "Check this: cool image",
+		},
+		{
+			name:    "unsupported type",
+			content: 12345,
+			want:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractMessageContent(tt.content)
+			if got != tt.want {
+				t.Errorf("extractMessageContent() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseRAGLog(t *testing.T) {
 	// Prepare test data
 	systemPrompt := `Some system instructions.
