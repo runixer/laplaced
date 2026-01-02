@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Laplaced is a Telegram bot written in Go, powered by Google Gemini via OpenRouter. It features:
 - Long-term memory using RAG (Retrieval-Augmented Generation)
-- Voice recognition via Yandex SpeechKit
+- Native voice message understanding (Gemini multimodal)
 - Image/PDF analysis
-- Web dashboard for statistics
+- Web dashboard for statistics and debugging
 
 ## Build & Run Commands
 
@@ -41,7 +41,7 @@ internal/
   memory/                # Facts extraction, topic processing, long-term memory
   openrouter/            # LLM client (Gemini/OpenRouter API)
   telegram/              # Telegram API client wrapper
-  yandex/                # Yandex SpeechKit client for voice
+  yandex/                # Yandex SpeechKit client (legacy, unused)
   web/                   # HTTP server for dashboard and webhooks
   i18n/                  # Localization (en/ru)
   markdown/              # Markdown processing
@@ -169,10 +169,18 @@ Key env vars:
 - `LAPLACED_OPENROUTER_API_KEY` - LLM API key
 - `LAPLACED_ALLOWED_USER_IDS` - Comma-separated Telegram user IDs
 
-## Language
+## Language & Prompts
 
 Default language is configurable via `bot.language` in config. Supported: `en`, `ru`.
-Translation files in `locales/` directory.
+
+Translation and prompt files: `internal/i18n/locales/{en,ru}.yaml`
+
+Key prompt sections in locale files:
+- `bot.system_prompt` — main LLM system prompt
+- `bot.voice_instruction` — instructions for voice message handling
+- `memory.system_prompt` — fact extraction (archivist) prompt
+- `memory.consolidation_prompt` — deduplication prompt
+- `rag.*` — topic extraction and enrichment prompts
 
 ## Git Workflow
 
@@ -233,16 +241,59 @@ Update `CHANGELOG.md` when:
 
 ### Release Process
 
-```bash
-# 1. Update CHANGELOG.md: move [Unreleased] to new version
-# 2. Commit changelog
-git commit -m "Release v0.1.x"
+**IMPORTANT: Before any release, remind the user to test on dev environment!**
 
-# 3. Create and push tag
-git tag v0.1.x && git push && git push --tags
-```
+1. **Test on dev** (see [Pre-release Testing](#pre-release-testing) below)
+2. Update CHANGELOG.md: move `[Unreleased]` to new version
+3. Commit: `git commit -m "Release vX.Y.Z"`
+4. Tag and push: `git tag vX.Y.Z && git push && git push --tags`
+5. Wait for GitHub CI to complete
+6. Deploy via Gitea MCP (see `.claude/deploy.md`)
 
 CI automatically extracts release notes from CHANGELOG.md for GitHub Releases.
+
+## Pre-release Testing
+
+**Always test changes on dev before release.** Ask the user to test and suggest specific test cases.
+
+### Dev Environment
+
+- Run locally: `go run cmd/bot/main.go`
+- Logs: save to `logs/` directory for review
+
+### Test Cases by Change Type
+
+**Prompt changes (i18n/locales/*.yaml):**
+- Voice messages: send voice, check transcription quote format (`> 🎤`)
+- Forwarded voice: forward voice from another user, check attribution
+- Memory extraction: chat, then force-process session, verify facts in DB
+- RAG: ask about past conversations, verify context retrieval
+
+**Bot logic changes (internal/bot/):**
+- Message grouping: send multiple messages quickly
+- Image/PDF: send files for analysis
+- Error handling: test edge cases (empty messages, large files)
+
+**Memory/RAG changes:**
+- Fact extraction: verify new facts appear correctly
+- Deduplication: check similar facts aren't duplicated
+- Topic creation: verify session archival works
+
+**Metrics changes:**
+- Check Grafana dashboard after test messages
+- Verify new metrics appear with correct labels
+
+### Suggesting Test Cases
+
+When preparing a release, proactively suggest test cases to the user:
+```
+Before release, please test on dev:
+1. [specific test based on changes]
+2. [another test]
+...
+
+Run the bot locally and verify. I'll wait.
+```
 
 ## CI/CD
 
@@ -256,8 +307,11 @@ Docker image: `ghcr.io/runixer/laplaced:latest`
 # Check CI status
 gh run list
 
-# Create release
-git tag v0.1.x && git push --tags
+# Watch specific run
+gh run watch <run_id> --exit-status
 ```
 
-@.claude/deploy.md
+## Related Documentation
+
+- @.claude/deploy.md — Production deployment via Gitea
+- @.claude/observability.md — Grafana dashboards, VictoriaMetrics, metrics reference
