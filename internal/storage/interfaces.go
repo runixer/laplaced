@@ -49,6 +49,7 @@ type FactRepository interface {
 	GetAllFacts() ([]Fact, error)
 	GetFactsAfterID(minID int64) ([]Fact, error)
 	GetFactStats() (FactStats, error)
+	GetFactStatsByUser(userID int64) (FactStats, error)
 	UpdateFact(fact Fact) error
 	UpdateFactTopic(oldTopicID, newTopicID int64) error
 	DeleteFact(userID, id int64) error

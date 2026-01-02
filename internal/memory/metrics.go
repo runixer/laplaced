@@ -70,27 +70,17 @@ var (
 		},
 	)
 
-	// factsTotal показывает текущее количество фактов.
-	// Labels:
-	//   - type: тип факта (identity, context, status)
-	factsTotal = promauto.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: metricsNamespace,
-			Subsystem: "memory",
-			Name:      "facts_total",
-			Help:      "Current number of facts by type",
-		},
-		[]string{"type"},
-	)
-
 	// topicsTotal показывает текущее количество топиков.
-	topicsTotal = promauto.NewGauge(
+	// Labels:
+	//   - user_id: идентификатор пользователя
+	topicsTotal = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metricsNamespace,
 			Subsystem: "memory",
 			Name:      "topics_total",
-			Help:      "Current total number of topics",
+			Help:      "Current total number of topics per user",
 		},
+		[]string{"user_id"},
 	)
 )
 
@@ -134,14 +124,7 @@ func RecordTopicProcessing(durationSeconds float64) {
 	topicProcessingDuration.Observe(durationSeconds)
 }
 
-// UpdateFactsTotal обновляет gauge количества фактов по типам.
-func UpdateFactsTotal(identity, context, status int) {
-	factsTotal.WithLabelValues("identity").Set(float64(identity))
-	factsTotal.WithLabelValues("context").Set(float64(context))
-	factsTotal.WithLabelValues("status").Set(float64(status))
-}
-
-// SetTopicsTotal устанавливает общее количество топиков.
-func SetTopicsTotal(count int) {
-	topicsTotal.Set(float64(count))
+// SetTopicsTotal устанавливает количество топиков для пользователя.
+func SetTopicsTotal(userID int64, count int) {
+	topicsTotal.WithLabelValues(formatUserID(userID)).Set(float64(count))
 }

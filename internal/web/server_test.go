@@ -312,6 +312,11 @@ func (m *MockStorage) GetFactStats() (storage.FactStats, error) {
 	return args.Get(0).(storage.FactStats), args.Error(1)
 }
 
+func (m *MockStorage) GetFactStatsByUser(userID int64) (storage.FactStats, error) {
+	args := m.Called(userID)
+	return args.Get(0).(storage.FactStats), args.Error(1)
+}
+
 func (m *MockStorage) GetFacts(userID int64) ([]storage.Fact, error) {
 	args := m.Called(userID)
 	if args.Get(0) == nil {
@@ -677,19 +682,33 @@ func TestUpdateMetrics(t *testing.T) {
 	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
-	stats := storage.FactStats{
-		CountByType: map[string]int{
-			"identity": 10,
-			"context":  5,
-		},
-		AvgAgeDays: 2.5,
+	// Mock users
+	users := []storage.User{
+		{ID: 123, Username: "user1"},
+		{ID: 456, Username: "user2"},
 	}
+	mockStorage.On("GetAllUsers").Return(users, nil)
 
-	mockStorage.On("GetFactStats").Return(stats, nil)
-	mockStorage.On("GetTopicsExtended", storage.TopicFilter{}, 1, 0, "", "").Return(storage.TopicResult{TotalCount: 42}, nil)
+	// Mock per-user stats
+	stats1 := storage.FactStats{
+		CountByType: map[string]int{"identity": 10, "context": 5},
+		AvgAgeDays:  2.5,
+	}
+	stats2 := storage.FactStats{
+		CountByType: map[string]int{"identity": 3},
+		AvgAgeDays:  1.0,
+	}
+	mockStorage.On("GetFactStatsByUser", int64(123)).Return(stats1, nil)
+	mockStorage.On("GetFactStatsByUser", int64(456)).Return(stats2, nil)
+
+	// Mock per-user topics count
+	mockStorage.On("GetTopicsExtended", storage.TopicFilter{UserID: 123}, 1, 0, "", "").Return(storage.TopicResult{TotalCount: 42}, nil)
+	mockStorage.On("GetTopicsExtended", storage.TopicFilter{UserID: 456}, 1, 0, "", "").Return(storage.TopicResult{TotalCount: 10}, nil)
+
+	// Mock active sessions
 	mockBot.On("GetActiveSessions").Return([]rag.ActiveSessionInfo{
-		{UserID: 1, MessageCount: 5},
-		{UserID: 2, MessageCount: 3},
+		{UserID: 123, MessageCount: 5},
+		{UserID: 456, MessageCount: 3},
 	}, nil)
 
 	// Act

@@ -34,17 +34,18 @@ var (
 			Namespace: metricsNamespace,
 			Subsystem: "memory",
 			Name:      "facts_count",
-			Help:      "Total number of facts in memory",
+			Help:      "Total number of facts in memory per user and type",
 		},
-		[]string{"type"},
+		[]string{"user_id", "type"},
 	)
-	memoryStaleness = prometheus.NewGauge(
+	memoryStaleness = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metricsNamespace,
 			Subsystem: "memory",
 			Name:      "staleness_days",
-			Help:      "Average age of facts in days",
+			Help:      "Average age of facts in days per user",
 		},
+		[]string{"user_id"},
 	)
 	ragLatency = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
@@ -275,20 +276,9 @@ func (s *Server) Start(ctx context.Context) error {
 }
 
 func (s *Server) updateMetrics() {
-	if s.factRepo == nil {
+	if s.factRepo == nil || s.userRepo == nil {
 		return
 	}
-	stats, err := s.factRepo.GetFactStats()
-	if err != nil {
-		s.logger.Error("failed to get facts stats for metrics", "error", err)
-		return
-	}
-
-	for t, count := range stats.CountByType {
-		memoryFactsCount.WithLabelValues(t).Set(float64(count))
-	}
-
-	memoryStaleness.Set(stats.AvgAgeDays)
 
 	// Update active sessions count (unprocessed messages waiting for archival)
 	if s.bot != nil {
@@ -300,13 +290,37 @@ func (s *Server) updateMetrics() {
 		}
 	}
 
-	// Update topics count
-	if s.topicRepo != nil {
-		topicResult, err := s.topicRepo.GetTopicsExtended(storage.TopicFilter{}, 1, 0, "", "")
+	// Get all users for per-user metrics
+	users, err := s.userRepo.GetAllUsers()
+	if err != nil {
+		s.logger.Error("failed to get users for metrics", "error", err)
+		return
+	}
+
+	// Update facts count and staleness per user
+	for _, user := range users {
+		userIDStr := fmt.Sprintf("%d", user.ID)
+		stats, err := s.factRepo.GetFactStatsByUser(user.ID)
 		if err != nil {
-			s.logger.Error("failed to get topics count for metrics", "error", err)
-		} else {
-			memory.SetTopicsTotal(topicResult.TotalCount)
+			s.logger.Error("failed to get facts stats for user", "user_id", user.ID, "error", err)
+			continue
+		}
+		for t, count := range stats.CountByType {
+			memoryFactsCount.WithLabelValues(userIDStr, t).Set(float64(count))
+		}
+		memoryStaleness.WithLabelValues(userIDStr).Set(stats.AvgAgeDays)
+	}
+
+	// Update topics count per user
+	if s.topicRepo != nil {
+		for _, user := range users {
+			filter := storage.TopicFilter{UserID: user.ID}
+			topicResult, err := s.topicRepo.GetTopicsExtended(filter, 1, 0, "", "")
+			if err != nil {
+				s.logger.Error("failed to get topics count for user", "user_id", user.ID, "error", err)
+				continue
+			}
+			memory.SetTopicsTotal(user.ID, topicResult.TotalCount)
 		}
 	}
 }

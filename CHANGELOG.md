@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Fixed missing `user_id` label on `laplaced_memory_topics_total` metric (missed in v0.3.3)
+- Fixed missing `user_id` label on `laplaced_memory_facts_count` and `laplaced_memory_staleness_days` metrics
+- Removed dead code: unused `factsTotal` gauge and `UpdateFactsTotal` function in memory/metrics.go
+
 ## [0.3.4] - 2026-01-02
 
 ### Changed

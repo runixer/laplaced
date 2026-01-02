@@ -166,6 +166,10 @@ func (m *MockStorage) GetFactStats() (storage.FactStats, error) {
 	args := m.Called()
 	return args.Get(0).(storage.FactStats), args.Error(1)
 }
+func (m *MockStorage) GetFactStatsByUser(userID int64) (storage.FactStats, error) {
+	args := m.Called(userID)
+	return args.Get(0).(storage.FactStats), args.Error(1)
+}
 func (m *MockStorage) UpdateFact(fact storage.Fact) error {
 	args := m.Called(fact)
 	return args.Error(0)

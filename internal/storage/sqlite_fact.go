@@ -129,6 +129,39 @@ func (s *SQLiteStore) GetFactStats() (FactStats, error) {
 	return stats, nil
 }
 
+func (s *SQLiteStore) GetFactStatsByUser(userID int64) (FactStats, error) {
+	stats := FactStats{
+		CountByType: make(map[string]int),
+	}
+
+	// 1. Count by type for this user
+	rows, err := s.db.Query("SELECT type, COUNT(*) FROM structured_facts WHERE user_id = ? GROUP BY type", userID)
+	if err != nil {
+		return stats, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var t string
+		var count int
+		if err := rows.Scan(&t, &count); err != nil {
+			return stats, err
+		}
+		stats.CountByType[t] = count
+	}
+
+	// 2. Average Age for this user
+	var avgAgeDays sql.NullFloat64
+	err = s.db.QueryRow("SELECT AVG(julianday('now') - julianday(last_updated)) FROM structured_facts WHERE user_id = ?", userID).Scan(&avgAgeDays)
+	if err != nil {
+		return stats, err
+	}
+	if avgAgeDays.Valid {
+		stats.AvgAgeDays = avgAgeDays.Float64
+	}
+
+	return stats, nil
+}
+
 func (s *SQLiteStore) UpdateFact(fact Fact) error {
 	if fact.LastUpdated.IsZero() {
 		fact.LastUpdated = time.Now()
