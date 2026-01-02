@@ -69,6 +69,13 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
+// Flush implements http.Flusher for SSE support.
+func (rw *responseWriter) Flush() {
+	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
 // metricsMiddleware записывает метрики для HTTP запросов.
 // handlerName используется как label для идентификации endpoint'а.
 func metricsMiddleware(handlerName string, next http.HandlerFunc) http.HandlerFunc {
