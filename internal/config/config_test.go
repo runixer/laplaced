@@ -275,6 +275,15 @@ func TestValidate(t *testing.T) {
 			errContains: "rag.max_context_messages must be positive",
 		},
 		{
+			name: "max profile facts non-positive",
+			modify: func(c *Config) {
+				c.RAG.Enabled = true
+				c.RAG.MaxProfileFacts = 0
+			},
+			wantErr:     true,
+			errContains: "rag.max_profile_facts must be positive",
+		},
+		{
 			name: "rag disabled skips rag validation",
 			modify: func(c *Config) {
 				c.RAG.Enabled = false

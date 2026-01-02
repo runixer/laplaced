@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `laplaced_vector_search_vectors_scanned` - vectors per search
   - `laplaced_vector_index_size` - current index size
   - `laplaced_vector_index_memory_bytes` - estimated memory usage
+- Added `rag.max_profile_facts` config option (default: 50) - previously hardcoded limit for user profile facts
 
 ### Changed
 - Improved test coverage: rag 67%→75.5%, web 57%→70.9%, bot 67%→68.1%

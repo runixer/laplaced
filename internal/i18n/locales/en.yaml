@@ -128,8 +128,8 @@ memory:
   facts_others_header: "=== ENVIRONMENT FACTS ==="
   system_prompt: |
     You are a long-term memory archivist. Your task is to maintain a CONCISE and UP-TO-DATE user profile (User).
-    
-    CURRENT DATE: %s
+
+    CURRENT DATE: %[1]s
 
     MEMORY LAYERS (Type):
     1. 'identity' (Eternal, Imp: 90-100): Name, family, profession, character traits.
@@ -147,21 +147,21 @@ memory:
     8. FORBIDDEN: Do not merge facts from different categories (e.g., 'work' and 'health') into one entry. This breaks search.
 
     LIMITS:
-    - Target number of facts about 'User': ~50 (Current: %d).
-    - Target number of OTHER personalities: ~30 (Current: %d).
+    - Target number of facts about 'User': ~%[2]d (Current: %[3]d).
+    - Target number of OTHER personalities: ~30 (Current: %[4]d).
     - Keep facts about OTHER people (family, colleagues) separate. Try to create ONE rich card per person.
-    - ATTENTION: If facts about 'User' > 50, you MUST start AGGRESSIVELY MERGING (updated) or DELETING (removed) least important ones (status/context).
+    - ATTENTION: If facts about 'User' > %[2]d, you MUST start AGGRESSIVELY MERGING (updated) or DELETING (removed) least important ones (status/context).
     - Do not delete important facts (identity/bio) to save space, but try to formulate them as concisely as possible.
     - If the number of other personalities > 30, delete the least important ones.
-    
+
     USER FACTS:
-    %s
+    %[5]s
 
     OTHER PEOPLE FACTS:
-    %s
+    %[6]s
 
     DIALOGUE:
-    %s
+    %[7]s
 
   consolidation_prompt: |
     You are a knowledge base manager.

@@ -41,6 +41,7 @@ rag:
   topic_model: "google/gemini-3-flash-preview"
   
   max_context_messages: 50      # Short-term memory size
+  max_profile_facts: 50         # Max facts about user in profile
   retrieved_messages_count: 20  # How many historical messages to inject
   retrieved_topics_count: 5     # How many topics to inject
   similarity_threshold: 0.5     # Cosine similarity threshold

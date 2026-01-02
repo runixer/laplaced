@@ -61,6 +61,7 @@ type RAGConfig struct {
 	SummaryModel                     string  `yaml:"summary_model"`
 	QueryModel                       string  `yaml:"query_model"`
 	MaxContextMessages               int     `yaml:"max_context_messages"`
+	MaxProfileFacts                  int     `yaml:"max_profile_facts"`
 	RetrievedMessagesCount           int     `yaml:"retrieved_messages_count"`
 	RetrievedTopicsCount             int     `yaml:"retrieved_topics_count"`
 	SimilarityThreshold              float64 `yaml:"similarity_threshold"`
@@ -204,6 +205,9 @@ func (c *Config) Validate() error {
 		// Positive integers
 		if c.RAG.MaxContextMessages <= 0 {
 			errs = append(errs, fmt.Errorf("rag.max_context_messages must be positive, got %d", c.RAG.MaxContextMessages))
+		}
+		if c.RAG.MaxProfileFacts <= 0 {
+			errs = append(errs, fmt.Errorf("rag.max_profile_facts must be positive, got %d", c.RAG.MaxProfileFacts))
 		}
 		if c.RAG.RetrievedMessagesCount <= 0 {
 			errs = append(errs, fmt.Errorf("rag.retrieved_messages_count must be positive, got %d", c.RAG.RetrievedMessagesCount))

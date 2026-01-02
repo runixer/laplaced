@@ -282,10 +282,10 @@ func (s *Service) extractMemoryUpdate(ctx context.Context, session []storage.Mes
 		"additionalProperties": false,
 	}
 
-	prompt := s.translator.Get(s.cfg.Bot.Language, "memory.system_prompt", currentDate, len(userFacts), len(otherFacts), string(userFactsJSON), string(otherFactsJSON), sb.String())
-
-	if len(userFacts) > 50 {
-		warning := fmt.Sprintf("\n\nCRITICAL WARNING: You have %d facts about User. The limit is 50. You MUST delete or consolidate at least %d facts in this turn to reduce the count.", len(userFacts), len(userFacts)-50+1)
+	maxFacts := s.cfg.RAG.MaxProfileFacts
+	prompt := s.translator.Get(s.cfg.Bot.Language, "memory.system_prompt", currentDate, maxFacts, len(userFacts), len(otherFacts), string(userFactsJSON), string(otherFactsJSON), sb.String())
+	if len(userFacts) > maxFacts {
+		warning := fmt.Sprintf("\n\nCRITICAL WARNING: You have %d facts about User. The limit is %d. You MUST delete or consolidate at least %d facts in this turn to reduce the count.", len(userFacts), maxFacts, len(userFacts)-maxFacts+1)
 		prompt += warning
 	}
 
