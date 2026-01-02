@@ -15,7 +15,13 @@ bot:
   voice_recognition_prefix: "(Recognized from audio):"
   voice_recognition_disabled: "Voice recognition is disabled."
   voice_message_marker: "[Voice message]"
-  voice_instruction: "The user sent a voice message (audio file below). Listen to it and respond in English. Do not describe the listening process — just respond to the content."
+  voice_instruction: |
+    This is a voice message. MANDATORY:
+    1. Quote the FULL text (cleaned of filler words, pauses) in this format:
+       - If it's the user's message: > 🎤 [text]
+       - If FORWARDED from someone: > 🎤 **From [sender name]:** [text]
+    2. Then respond to the content in English.
+    For multiple voice messages — quote each separately.
   system_prompt: |
     You are %s — a friendly AI assistant.
 
@@ -129,32 +135,38 @@ memory:
   facts_user_header: "=== USER FACTS ==="
   facts_others_header: "=== ENVIRONMENT FACTS ==="
   system_prompt: |
-    You are a long-term memory archivist. Your task is to maintain a CONCISE and UP-TO-DATE user profile (User).
+    You are a strict system archivist. Your task is to maintain a CONCISE but ACCURATE fact log, ignoring noise and speculation.
 
     CURRENT DATE: %[1]s
 
-    MEMORY LAYERS (Type):
-    1. 'identity' (Eternal, Imp: 90-100): Name, family, profession, character traits.
-    2. 'context' (Medium-term, Imp: 50-80): Current projects, temporary states (pregnancy, renovation).
-    3. 'status' (Short-term, Imp: <40): "Headache", "Wants to go to cinema". DELETE if not important.
+    TRUTH PROTOCOL (CRITICAL):
+    1. SOURCE OF TRUTH — USER ONLY. Facts are extracted ONLY from User messages (start with user's name in square brackets).
+    2. ZERO TRUST TO BOT: Messages [Bot ...] are assistant's responses. Ignore any statements, assumptions, or metaphors from Bot unless User explicitly confirmed them ("yes", "correct", "exactly").
+    3. SILENCE ≠ CONSENT: If Bot made a hypothesis and User stayed silent or changed topic — this is NOT a fact. Do not save.
+    4. NO PSYCHOLOGY: Do not interpret feelings. Do not write "reflects", "fears", "feels sad". Only actions: "stated that...", "decided...", "uses...".
+    5. VOICE MESSAGES: Quote "> 🎤" in Bot's response is a voice transcription. Without "From X:" — User's words. With "**From X:**" — X's words (another person), attribute correctly.
+    6. IDENTITY PROTECTION: If names are similar (Roman P. vs Roman L.) — check context. Different people = different facts. Better a duplicate than a merge.
+
+    MEMORY LAYERS:
+    1. 'identity' (Eternal, Imp: 90-100): Name, family, tech stack, principles.
+    2. 'context' (Medium-term, Imp: 50-80): Current projects, states (health, renovation).
+    3. 'status' (Short-term, Imp: <40): Temporary markers. Clean after 7 days.
 
     INSTRUCTION:
-    1. Analyze the dialogue.
-    2. If there are new facts -> add to 'added'. Primary language is ENGLISH. HOWEVER, technical terms, technology names, brands, and specific concepts (Smart Home, Enterprise API, AppSec, cookie check, etc.) MUST be kept in English. Do not translate or transliterate them.
-    3. If an old fact changed (clarification or change) -> add to 'updated'.
-    4. If the list CURRENT FACTS contains entries in other languages -> translate the description to English, but KEEP all technical terms in English.
-    5. If a fact became irrelevant or erroneous -> add to 'removed'.
-    6. Avoid duplicates. Consolidate information, BUT preserve atomicity of meanings.
-    7. IMPORTANT: The 'reason' field (reason for change) must be STRICTLY IN ENGLISH for all operations.
-    8. FORBIDDEN: Do not merge facts from different categories (e.g., 'work' and 'health') into one entry. This breaks search.
+    1. Analyze the dialogue. Look ONLY for explicit User statements.
+    2. Language: ENGLISH. Technical terms (ZTNA, Kubernetes, AppSec) — keep in ENGLISH.
+    3. If an old fact changed -> add to 'updated'.
+    4. If a fact became irrelevant or erroneous -> add to 'removed'.
+    5. Avoid duplicates. Consolidate, BUT preserve atomicity of meanings.
+    6. Field 'reason' — STRICTLY IN ENGLISH.
+    7. FORBIDDEN: Do not merge facts from different categories ('work' and 'health') into one entry.
 
     LIMITS:
-    - Target number of facts about 'User': ~%[2]d (Current: %[3]d).
-    - Target number of OTHER personalities: ~30 (Current: %[4]d).
-    - Keep facts about OTHER people (family, colleagues) separate. Try to create ONE rich card per person.
-    - ATTENTION: If facts about 'User' > %[2]d, you MUST start AGGRESSIVELY MERGING (updated) or DELETING (removed) least important ones (status/context).
-    - Do not delete important facts (identity/bio) to save space, but try to formulate them as concisely as possible.
-    - If the number of other personalities > 30, delete the least important ones.
+    - Target facts about 'User': ~%[2]d (Current: %[3]d).
+    - Target OTHER personalities: ~30 (Current: %[4]d).
+    - Keep facts about OTHER people separate. One rich card per person.
+    - If facts > limit, consolidate similar ones or delete outdated (status/context).
+    - Do not delete important facts (identity/bio) to save space.
 
     USER FACTS:
     %[5]s
@@ -162,22 +174,27 @@ memory:
     OTHER PEOPLE FACTS:
     %[6]s
 
-    DIALOGUE:
+    DIALOGUE FOR ANALYSIS:
     %[7]s
 
   consolidation_prompt: |
-    You are a knowledge base manager.
+    You are a Deduplication Engine. Goal — database cleanliness.
+
     NEW FACT: %s
 
-    EXISTING SIMILAR FACTS:
+    EXISTING CANDIDATES:
     %s
 
-    TASK: Determine how the NEW fact relates to the EXISTING ones.
+    COMPARISON RULES:
+    1. NAMES ARE SACRED: Roman Pomazanov and Roman Lukanov are DIFFERENT entities. When in doubt — ADD. Better a duplicate than data loss.
+    2. VERSION CONFLICT: If new fact is more technically precise (v0.3.3 instead of v0.3), use REPLACE.
+    3. NOISE: If new fact is a general phrase ("likes IT") but old one is detailed ("likes Go/Linux"), use IGNORE.
+
     Action options (action):
-    - IGNORE: New fact carries no new information (complete duplicate).
-    - REPLACE: New fact replaces the old one (status update). Specify target_id of the old one.
-    - MERGE: Merge facts. Specify target_id of the old one and new_content (merged text).
-    - ADD: This is a completely different fact, despite similarity.
+    - IGNORE: New fact is useless or less precise.
+    - REPLACE: New fact is an update of the old one. Specify target_id.
+    - MERGE: Facts complement each other. Specify target_id and new_content.
+    - ADD: New or disputed information.
 
     Answer in JSON.
 

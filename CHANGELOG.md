@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-01-03
+
+### Changed
+- **Improved memory extraction prompts** to prevent fact pollution:
+  - Added "Zero Trust to Bot" protocol — facts extracted only from User messages, not Bot speculation
+  - Added "Silence ≠ Consent" rule — Bot's unanswered hypotheses are not saved as facts
+  - Added "No Psychology" rule — no interpretation of feelings, only actions
+  - Added "Identity Protection" — prevents merging people with similar names (e.g., Roman P. vs Roman L.)
+  - Removed aggressive consolidation instruction that caused data loss
+- **Voice messages now quote full transcription** in Bot's response:
+  - LLM must quote cleaned voice content with `> 🎤` prefix
+  - Forwarded voice messages attributed as `> 🎤 **From [sender]:** [text]`
+  - Enables archivist and RAG to work with voice message content
+
 ### Added
 - Added storage metrics for database observability:
   - `laplaced_storage_size_bytes` - total database file size
@@ -243,7 +257,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker and docker-compose deployment
 - Configuration via YAML and environment variables
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.3.4...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.3.5...HEAD
+[0.3.5]: https://github.com/runixer/laplaced/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/runixer/laplaced/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/runixer/laplaced/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/runixer/laplaced/compare/v0.3.1...v0.3.2
