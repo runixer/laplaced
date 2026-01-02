@@ -23,16 +23,16 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		return
 	}
 
+	lastMsg := group.Messages[len(group.Messages)-1]
+	user := lastMsg.From
+
 	// Track processing time and success for metrics
 	startTime := time.Now()
 	success := false
 	defer func() {
 		duration := time.Since(startTime).Seconds()
-		RecordMessageProcessing(duration, success)
+		RecordMessageProcessing(user.ID, duration, success)
 	}()
-
-	lastMsg := group.Messages[len(group.Messages)-1]
-	user := lastMsg.From
 	logger := b.logger.With(
 		"user_id", user.ID,
 		"username", user.Username,
@@ -124,6 +124,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 			Messages: orMessages,
 			Plugins:  plugins,
 			Tools:    tools,
+			UserID:   user.ID,
 		}
 
 		resp, err := b.orClient.CreateChatCompletion(shutdownSafeCtx, req)

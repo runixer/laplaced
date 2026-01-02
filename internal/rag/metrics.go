@@ -1,6 +1,8 @@
 package rag
 
 import (
+	"strconv"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -80,6 +82,7 @@ var (
 
 	// vectorSearchDuration измеряет время vector search (cosine similarity).
 	// Labels:
+	//   - user_id: идентификатор пользователя
 	//   - type: тип поиска (topics, facts)
 	vectorSearchDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -90,11 +93,12 @@ var (
 			// Buckets для in-memory cosine: 1ms - 500ms
 			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5},
 		},
-		[]string{"type"},
+		[]string{"user_id", "type"},
 	)
 
 	// vectorSearchVectorsScanned отслеживает количество просканированных векторов.
 	// Labels:
+	//   - user_id: идентификатор пользователя
 	//   - type: тип поиска (topics, facts)
 	vectorSearchVectorsScanned = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -105,7 +109,7 @@ var (
 			// Buckets для количества векторов: 10 - 100K
 			Buckets: []float64{10, 50, 100, 500, 1000, 5000, 10000, 50000, 100000},
 		},
-		[]string{"type"},
+		[]string{"user_id", "type"},
 	)
 
 	// === Vector Index State Metrics ===
@@ -138,6 +142,7 @@ var (
 
 	// ragRetrievalTotal считает результаты RAG retrieval.
 	// Labels:
+	//   - user_id: идентификатор пользователя
 	//   - result: результат (hit, miss)
 	// hit = нашли релевантный контекст, miss = контекст пустой
 	ragRetrievalTotal = promauto.NewCounterVec(
@@ -147,7 +152,24 @@ var (
 			Name:      "retrieval_total",
 			Help:      "Total number of RAG retrieval operations",
 		},
-		[]string{"result"},
+		[]string{"user_id", "result"},
+	)
+
+	// ragCandidatesTotal считает количество кандидатов до фильтрации.
+	// Labels:
+	//   - user_id: идентификатор пользователя
+	//   - type: тип кандидатов (topics, facts)
+	// Используется для сравнения "до/после" reranker
+	ragCandidatesTotal = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: "rag",
+			Name:      "candidates",
+			Help:      "Number of candidates from vector search before filtering",
+			// Buckets: 0 - 100 кандидатов
+			Buckets: []float64{0, 1, 5, 10, 20, 30, 50, 75, 100},
+		},
+		[]string{"user_id", "type"},
 	)
 )
 
@@ -172,6 +194,11 @@ const (
 // Размер embedding в байтах (3072 dimensions × 4 bytes per float32)
 const embeddingMemoryBytes = 3072 * 4
 
+// formatUserID converts user ID to string for metric labels.
+func formatUserID(userID int64) string {
+	return strconv.FormatInt(userID, 10)
+}
+
 // RecordEmbeddingRequest записывает метрики embedding запроса.
 func RecordEmbeddingRequest(model string, durationSeconds float64, success bool, tokens int, cost *float64) {
 	status := statusSuccess
@@ -192,9 +219,10 @@ func RecordEmbeddingRequest(model string, durationSeconds float64, success bool,
 }
 
 // RecordVectorSearch записывает метрики vector search.
-func RecordVectorSearch(searchType string, durationSeconds float64, vectorsScanned int) {
-	vectorSearchDuration.WithLabelValues(searchType).Observe(durationSeconds)
-	vectorSearchVectorsScanned.WithLabelValues(searchType).Observe(float64(vectorsScanned))
+func RecordVectorSearch(userID int64, searchType string, durationSeconds float64, vectorsScanned int) {
+	uid := formatUserID(userID)
+	vectorSearchDuration.WithLabelValues(uid, searchType).Observe(durationSeconds)
+	vectorSearchVectorsScanned.WithLabelValues(uid, searchType).Observe(float64(vectorsScanned))
 }
 
 // UpdateVectorIndexMetrics обновляет метрики размера индекса.
@@ -208,10 +236,17 @@ func UpdateVectorIndexMetrics(topicsCount, factsCount int) {
 }
 
 // RecordRAGRetrieval записывает результат RAG retrieval.
-func RecordRAGRetrieval(hasContext bool) {
+func RecordRAGRetrieval(userID int64, hasContext bool) {
+	uid := formatUserID(userID)
 	if hasContext {
-		ragRetrievalTotal.WithLabelValues(resultHit).Inc()
+		ragRetrievalTotal.WithLabelValues(uid, resultHit).Inc()
 	} else {
-		ragRetrievalTotal.WithLabelValues(resultMiss).Inc()
+		ragRetrievalTotal.WithLabelValues(uid, resultMiss).Inc()
 	}
+}
+
+// RecordRAGCandidates записывает количество кандидатов до фильтрации.
+func RecordRAGCandidates(userID int64, searchType string, count int) {
+	uid := formatUserID(userID)
+	ragCandidatesTotal.WithLabelValues(uid, searchType).Observe(float64(count))
 }

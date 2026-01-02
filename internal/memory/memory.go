@@ -138,7 +138,7 @@ func (s *Service) ProcessSessionWithStats(ctx context.Context, userID int64, mes
 	}
 
 	// 2. Prepare prompt
-	update, requestInput, extractUsage, err := s.extractMemoryUpdate(ctx, messages, facts, referenceDate, user)
+	update, requestInput, extractUsage, err := s.extractMemoryUpdate(ctx, userID, messages, facts, referenceDate, user)
 	if err != nil {
 		return FactStats{}, fmt.Errorf("failed to extract memory update: %w", err)
 	}
@@ -155,7 +155,7 @@ func (s *Service) ProcessSessionWithStats(ctx context.Context, userID int64, mes
 	return stats, nil
 }
 
-func (s *Service) extractMemoryUpdate(ctx context.Context, session []storage.Message, facts []storage.Fact, referenceDate time.Time, user *storage.User) (*MemoryUpdate, string, chatUsage, error) {
+func (s *Service) extractMemoryUpdate(ctx context.Context, userID int64, session []storage.Message, facts []storage.Fact, referenceDate time.Time, user *storage.User) (*MemoryUpdate, string, chatUsage, error) {
 	startTime := time.Now()
 	defer func() {
 		RecordMemoryExtraction(time.Since(startTime).Seconds())
@@ -309,6 +309,7 @@ func (s *Service) extractMemoryUpdate(ctx context.Context, session []storage.Mes
 				Schema: schema,
 			},
 		},
+		UserID: userID,
 	}
 
 	resp, err := s.orClient.CreateChatCompletion(ctx, req)
@@ -369,7 +370,7 @@ func (s *Service) applyUpdateWithStats(ctx context.Context, userID int64, update
 			s.logger.Error("failed to process fact addition", "error", err)
 		} else {
 			stats.Created++
-			RecordFactOperation(OperationAdd)
+			RecordFactOperation(userID, OperationAdd)
 		}
 	}
 
@@ -423,7 +424,7 @@ func (s *Service) applyUpdateWithStats(ctx context.Context, userID int64, update
 			s.logger.Error("failed to update fact", "error", err)
 		} else {
 			stats.Updated++
-			RecordFactOperation(OperationUpdate)
+			RecordFactOperation(userID, OperationUpdate)
 			s.logger.Info("Fact updated", "id", updated.ID)
 			if s.cfg.Server.DebugMode {
 				var tID *int64
@@ -471,7 +472,7 @@ func (s *Service) applyUpdateWithStats(ctx context.Context, userID int64, update
 			s.logger.Error("failed to delete fact", "error", err)
 		} else {
 			stats.Deleted++
-			RecordFactOperation(OperationDelete)
+			RecordFactOperation(userID, OperationDelete)
 			s.logger.Info("Fact removed", "id", removed.ID)
 			if s.cfg.Server.DebugMode {
 				var tID *int64
@@ -593,7 +594,7 @@ func (s *Service) deduplicateAndAddFact(ctx context.Context, fact storage.Fact, 
 
 	switch action {
 	case "IGNORE":
-		RecordDedupDecision(DecisionIgnore)
+		RecordDedupDecision(fact.UserID, DecisionIgnore)
 		s.logger.Info("Fact ignored as duplicate", "content", fact.Content)
 		// Update LastUpdated of the most similar fact to keep it fresh
 		if len(similar) > 0 {
@@ -606,9 +607,9 @@ func (s *Service) deduplicateAndAddFact(ctx context.Context, fact storage.Fact, 
 		return nil
 	case "REPLACE", "MERGE":
 		if action == "REPLACE" {
-			RecordDedupDecision(DecisionReplace)
+			RecordDedupDecision(fact.UserID, DecisionReplace)
 		} else {
-			RecordDedupDecision(DecisionMerge)
+			RecordDedupDecision(fact.UserID, DecisionMerge)
 		}
 		s.logger.Info("Fact merged/replaced", "action", action, "target_id", targetID)
 
@@ -663,11 +664,11 @@ func (s *Service) deduplicateAndAddFact(ctx context.Context, fact storage.Fact, 
 		return nil
 
 	case "ADD":
-		RecordDedupDecision(DecisionAdd)
+		RecordDedupDecision(fact.UserID, DecisionAdd)
 		_, err := s.addFactWithHistory(fact, reason, tID, requestInput)
 		return err
 	default:
-		RecordDedupDecision(DecisionAdd)
+		RecordDedupDecision(fact.UserID, DecisionAdd)
 		_, err := s.addFactWithHistory(fact, reason, tID, requestInput)
 		return err
 	}
@@ -712,6 +713,7 @@ func (s *Service) arbitrateFact(ctx context.Context, newFact storage.Fact, exist
 				Schema: schema,
 			},
 		},
+		UserID: newFact.UserID,
 	}
 
 	resp, err := s.orClient.CreateChatCompletion(ctx, req)

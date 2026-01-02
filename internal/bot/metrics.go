@@ -1,6 +1,8 @@
 package bot
 
 import (
+	"strconv"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -27,7 +29,9 @@ var (
 
 	// messageProcessingDuration измеряет end-to-end время обработки сообщения.
 	// От получения сообщения до отправки ответа.
-	messageProcessingDuration = promauto.NewHistogram(
+	// Labels:
+	//   - user_id: идентификатор пользователя
+	messageProcessingDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: metricsNamespace,
 			Subsystem: "bot",
@@ -36,10 +40,12 @@ var (
 			// Buckets для типичных времён обработки: 0.5s - 30s
 			Buckets: []float64{0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30},
 		},
+		[]string{"user_id"},
 	)
 
 	// messagesProcessedTotal считает количество обработанных сообщений.
 	// Labels:
+	//   - user_id: идентификатор пользователя
 	//   - status: результат (success, error)
 	messagesProcessedTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
@@ -48,7 +54,7 @@ var (
 			Name:      "messages_processed_total",
 			Help:      "Total number of processed messages",
 		},
-		[]string{"status"},
+		[]string{"user_id", "status"},
 	)
 
 	// contextTokens отслеживает размер контекста в токенах.
@@ -63,12 +69,40 @@ var (
 			Buckets: []float64{1000, 2000, 5000, 10000, 20000, 30000, 50000, 75000, 100000},
 		},
 	)
+
+	// contextTokensBySource отслеживает токены по источнику контекста.
+	// Labels:
+	//   - source: profile, topics, session
+	// Помогает понять распределение контекста между источниками.
+	contextTokensBySource = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: metricsNamespace,
+			Subsystem: "bot",
+			Name:      "context_tokens_by_source",
+			Help:      "Approximate number of tokens in context by source",
+			// Buckets для каждого источника: 100 - 50K tokens
+			Buckets: []float64{100, 500, 1000, 2000, 5000, 10000, 20000, 30000, 50000},
+		},
+		[]string{"source"},
+	)
 )
 
 const (
 	statusSuccess = "success"
 	statusError   = "error"
 )
+
+// Context source types
+const (
+	ContextSourceProfile = "profile"
+	ContextSourceTopics  = "topics"
+	ContextSourceSession = "session"
+)
+
+// formatUserID converts user ID to string for metric labels.
+func formatUserID(userID int64) string {
+	return strconv.FormatInt(userID, 10)
+}
 
 // SetActiveSessions устанавливает текущее количество активных сессий.
 func SetActiveSessions(count int) {
@@ -86,17 +120,23 @@ func DecActiveSessions() {
 }
 
 // RecordMessageProcessing записывает метрики обработки сообщения.
-func RecordMessageProcessing(durationSeconds float64, success bool) {
-	messageProcessingDuration.Observe(durationSeconds)
+func RecordMessageProcessing(userID int64, durationSeconds float64, success bool) {
+	uid := formatUserID(userID)
+	messageProcessingDuration.WithLabelValues(uid).Observe(durationSeconds)
 
 	status := statusSuccess
 	if !success {
 		status = statusError
 	}
-	messagesProcessedTotal.WithLabelValues(status).Inc()
+	messagesProcessedTotal.WithLabelValues(uid, status).Inc()
 }
 
 // RecordContextTokens записывает размер контекста в токенах.
 func RecordContextTokens(tokens int) {
 	contextTokens.Observe(float64(tokens))
+}
+
+// RecordContextTokensBySource записывает токены по источнику контекста.
+func RecordContextTokensBySource(source string, tokens int) {
+	contextTokensBySource.WithLabelValues(source).Observe(float64(tokens))
 }

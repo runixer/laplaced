@@ -635,6 +635,7 @@ func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageCont
 	}
 
 	// Add Recent History
+	var sessionChars int
 	for i, hMsg := range recentHistory {
 		// If this is the last message (current request) and we have RAG context, inject it before
 		if i == len(recentHistory)-1 && ragContextMsg != nil {
@@ -649,7 +650,29 @@ func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageCont
 				openrouter.TextPart{Type: "text", Text: hMsg.Content},
 			}
 		}
+		sessionChars += len(hMsg.Content)
 		orMessages = append(orMessages, openrouter.Message{Role: hMsg.Role, Content: contentParts})
+	}
+
+	// Record context tokens by source (approximate: 1 token ≈ 4 characters)
+	if len(memoryBankFormatted) > 0 {
+		RecordContextTokensBySource(ContextSourceProfile, len(memoryBankFormatted)/4)
+	}
+	if ragContextMsg != nil {
+		ragText := ""
+		if parts, ok := ragContextMsg.Content.([]interface{}); ok {
+			for _, part := range parts {
+				if tp, ok := part.(openrouter.TextPart); ok {
+					ragText += tp.Text
+				}
+			}
+		}
+		if len(ragText) > 0 {
+			RecordContextTokensBySource(ContextSourceTopics, len(ragText)/4)
+		}
+	}
+	if sessionChars > 0 {
+		RecordContextTokensBySource(ContextSourceSession, sessionChars/4)
 	}
 
 	return orMessages, debugInfo, nil

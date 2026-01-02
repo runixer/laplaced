@@ -1188,7 +1188,7 @@ func TestEnrichQuery(t *testing.T) {
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
 
-		result, prompt, tokens, err := svc.enrichQuery(context.Background(), "test query", nil)
+		result, prompt, tokens, err := svc.enrichQuery(context.Background(), int64(123), "test query", nil)
 
 		assert.NoError(t, err)
 		assert.Equal(t, "test query", result)
@@ -1220,7 +1220,7 @@ func TestEnrichQuery(t *testing.T) {
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
 
-		_, _, _, err := svc.enrichQuery(context.Background(), "test query", nil)
+		_, _, _, err := svc.enrichQuery(context.Background(), int64(123), "test query", nil)
 
 		assert.Error(t, err)
 	})
@@ -1258,7 +1258,7 @@ func TestEnrichQuery(t *testing.T) {
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
 
-		_, _, _, err := svc.enrichQuery(context.Background(), "test query", nil)
+		_, _, _, err := svc.enrichQuery(context.Background(), int64(123), "test query", nil)
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "empty response")
@@ -1318,7 +1318,7 @@ func TestEnrichQuery(t *testing.T) {
 			{Role: "assistant", Content: "Hi there"},
 		}
 
-		result, _, tokens, err := svc.enrichQuery(context.Background(), "test query", history)
+		result, _, tokens, err := svc.enrichQuery(context.Background(), int64(123), "test query", history)
 
 		assert.NoError(t, err)
 		assert.Equal(t, "enriched search terms", result)
@@ -1376,7 +1376,7 @@ func TestEnrichQuery(t *testing.T) {
 			{Role: "user", Content: longContent},
 		}
 
-		_, _, _, err := svc.enrichQuery(context.Background(), "test query", history)
+		_, _, _, err := svc.enrichQuery(context.Background(), int64(123), "test query", history)
 
 		assert.NoError(t, err)
 		// The prompt should contain truncated content with "..."

@@ -1,6 +1,8 @@
 package openrouter
 
 import (
+	"strconv"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -47,6 +49,7 @@ var (
 
 	// llmTokensTotal считает использованные токены.
 	// Labels:
+	//   - user_id: идентификатор пользователя
 	//   - model: название модели
 	//   - type: тип токенов (prompt, completion)
 	llmTokensTotal = promauto.NewCounterVec(
@@ -56,11 +59,12 @@ var (
 			Name:      "tokens_total",
 			Help:      "Total number of tokens used for LLM requests",
 		},
-		[]string{"model", "type"},
+		[]string{"user_id", "model", "type"},
 	)
 
 	// llmCostTotal отслеживает кумулятивную стоимость LLM запросов (USD).
 	// Labels:
+	//   - user_id: идентификатор пользователя
 	//   - model: название модели
 	llmCostTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
@@ -69,7 +73,7 @@ var (
 			Name:      "cost_usd_total",
 			Help:      "Total cost of LLM API requests in USD",
 		},
-		[]string{"model"},
+		[]string{"user_id", "model"},
 	)
 
 	// llmRetriesTotal считает количество retry-попыток.
@@ -93,25 +97,31 @@ const (
 	tokenTypeCompl  = "completion"
 )
 
+// formatUserID converts user ID to string for metric labels.
+func formatUserID(userID int64) string {
+	return strconv.FormatInt(userID, 10)
+}
+
 // RecordLLMRequest записывает метрики LLM запроса.
-func RecordLLMRequest(model string, durationSeconds float64, success bool, promptTokens, completionTokens int, cost *float64) {
+func RecordLLMRequest(userID int64, model string, durationSeconds float64, success bool, promptTokens, completionTokens int, cost *float64) {
 	status := statusSuccess
 	if !success {
 		status = statusError
 	}
 
+	uid := formatUserID(userID)
 	llmRequestDuration.WithLabelValues(model, status).Observe(durationSeconds)
 	llmRequestsTotal.WithLabelValues(model, status).Inc()
 
 	if success {
 		if promptTokens > 0 {
-			llmTokensTotal.WithLabelValues(model, tokenTypePrompt).Add(float64(promptTokens))
+			llmTokensTotal.WithLabelValues(uid, model, tokenTypePrompt).Add(float64(promptTokens))
 		}
 		if completionTokens > 0 {
-			llmTokensTotal.WithLabelValues(model, tokenTypeCompl).Add(float64(completionTokens))
+			llmTokensTotal.WithLabelValues(uid, model, tokenTypeCompl).Add(float64(completionTokens))
 		}
 		if cost != nil && *cost > 0 {
-			llmCostTotal.WithLabelValues(model).Add(*cost)
+			llmCostTotal.WithLabelValues(uid, model).Add(*cost)
 		}
 	}
 }

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-01-02
+
+### Added
+- Added `user_id` label to all Prometheus metrics for per-user tracking:
+  - RAG: `laplaced_vector_search_duration_seconds`, `laplaced_vector_search_vectors_scanned`, `laplaced_rag_retrieval_total`
+  - Bot: `laplaced_bot_message_processing_duration_seconds`, `laplaced_bot_messages_processed_total`
+  - Memory: `laplaced_memory_fact_operations_total`, `laplaced_memory_dedup_decisions_total`
+  - LLM: `laplaced_llm_tokens_total`, `laplaced_llm_cost_usd_total`
+- Added `laplaced_rag_candidates` histogram metric to track candidates before filtering
+- Added `laplaced_bot_context_tokens_by_source{source}` histogram metric to track context tokens by source (profile, topics, session)
+
 ## [0.3.2] - 2026-01-02
 
 ### Fixed
@@ -195,7 +206,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker and docker-compose deployment
 - Configuration via YAML and environment variables
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/runixer/laplaced/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/runixer/laplaced/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/runixer/laplaced/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/runixer/laplaced/compare/v0.2.2...v0.3.0

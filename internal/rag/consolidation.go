@@ -142,6 +142,7 @@ func (s *Service) verifyMerge(ctx context.Context, candidate storage.MergeCandid
 			{Role: "user", Content: prompt},
 		},
 		ResponseFormat: map[string]interface{}{"type": "json_object"},
+		UserID:         candidate.Topic1.UserID,
 	})
 	if err != nil {
 		return false, "", UsageInfo{}, err

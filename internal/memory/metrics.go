@@ -1,6 +1,8 @@
 package memory
 
 import (
+	"strconv"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -18,6 +20,7 @@ const metricsNamespace = "laplaced"
 var (
 	// factOperationsTotal считает операции с фактами.
 	// Labels:
+	//   - user_id: идентификатор пользователя
 	//   - operation: тип операции (add, update, delete)
 	factOperationsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
@@ -26,11 +29,12 @@ var (
 			Name:      "fact_operations_total",
 			Help:      "Total number of fact operations",
 		},
-		[]string{"operation"},
+		[]string{"user_id", "operation"},
 	)
 
 	// dedupDecisionsTotal считает решения дедупликации.
 	// Labels:
+	//   - user_id: идентификатор пользователя
 	//   - decision: решение (ignore, merge, replace, add)
 	dedupDecisionsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
@@ -39,7 +43,7 @@ var (
 			Name:      "dedup_decisions_total",
 			Help:      "Total number of deduplication decisions",
 		},
-		[]string{"decision"},
+		[]string{"user_id", "decision"},
 	)
 
 	// memoryExtractionDuration измеряет время извлечения фактов из сообщений.
@@ -105,14 +109,19 @@ const (
 	DecisionAdd     = "add"
 )
 
+// formatUserID converts user ID to string for metric labels.
+func formatUserID(userID int64) string {
+	return strconv.FormatInt(userID, 10)
+}
+
 // RecordFactOperation записывает операцию с фактом.
-func RecordFactOperation(operation string) {
-	factOperationsTotal.WithLabelValues(operation).Inc()
+func RecordFactOperation(userID int64, operation string) {
+	factOperationsTotal.WithLabelValues(formatUserID(userID), operation).Inc()
 }
 
 // RecordDedupDecision записывает решение дедупликации.
-func RecordDedupDecision(decision string) {
-	dedupDecisionsTotal.WithLabelValues(decision).Inc()
+func RecordDedupDecision(userID int64, decision string) {
+	dedupDecisionsTotal.WithLabelValues(formatUserID(userID), decision).Inc()
 }
 
 // RecordMemoryExtraction записывает время извлечения фактов.

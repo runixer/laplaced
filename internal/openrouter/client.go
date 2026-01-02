@@ -184,6 +184,9 @@ type ChatCompletionRequest struct {
 	Tools          []Tool      `json:"tools,omitempty"`
 	ToolChoice     any         `json:"tool_choice,omitempty"`
 	ResponseFormat interface{} `json:"response_format,omitempty"`
+
+	// UserID is used for metrics tracking only, not sent to API
+	UserID int64 `json:"-"`
 }
 
 type JSONSchema struct {
@@ -444,14 +447,14 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 
 		// Non-retryable error or max retries reached
 		c.logger.Error("OpenRouter returned non-OK status", "status", resp.Status, "body", string(responseBody))
-		RecordLLMRequest(req.Model, time.Since(startTime).Seconds(), false, 0, 0, nil)
+		RecordLLMRequest(req.UserID, req.Model, time.Since(startTime).Seconds(), false, 0, 0, nil)
 		return ChatCompletionResponse{}, fmt.Errorf("openrouter API error: %s", resp.Status)
 	}
 
 	var chatResp ChatCompletionResponse
 	if err := json.NewDecoder(bytes.NewBuffer(responseBody)).Decode(&chatResp); err != nil {
 		c.logger.Error("Failed to decode OpenRouter response", "error", err, "body_length", len(responseBody))
-		RecordLLMRequest(req.Model, time.Since(startTime).Seconds(), false, 0, 0, nil)
+		RecordLLMRequest(req.UserID, req.Model, time.Since(startTime).Seconds(), false, 0, 0, nil)
 		return ChatCompletionResponse{}, err
 	}
 
@@ -475,7 +478,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 
 	// Record success metrics
 	duration := time.Since(startTime).Seconds()
-	RecordLLMRequest(req.Model, duration, true, chatResp.Usage.PromptTokens, chatResp.Usage.CompletionTokens, chatResp.Usage.Cost)
+	RecordLLMRequest(req.UserID, req.Model, duration, true, chatResp.Usage.PromptTokens, chatResp.Usage.CompletionTokens, chatResp.Usage.Cost)
 
 	return chatResp, nil
 }

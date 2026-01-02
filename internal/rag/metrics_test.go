@@ -70,20 +70,62 @@ func TestRecordEmbeddingRequest_ZeroCost(t *testing.T) {
 func TestRecordVectorSearch(t *testing.T) {
 	tests := []struct {
 		name           string
+		userID         int64
 		searchType     string
 		duration       float64
 		vectorsScanned int
 	}{
-		{"topics search", searchTypeTopics, 0.01, 100},
-		{"facts search", searchTypeFacts, 0.005, 50},
-		{"empty search", searchTypeTopics, 0.001, 0},
+		{"topics search", 123, searchTypeTopics, 0.01, 100},
+		{"facts search", 456, searchTypeFacts, 0.005, 50},
+		{"empty search", 789, searchTypeTopics, 0.001, 0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Should not panic
 			assert.NotPanics(t, func() {
-				RecordVectorSearch(tt.searchType, tt.duration, tt.vectorsScanned)
+				RecordVectorSearch(tt.userID, tt.searchType, tt.duration, tt.vectorsScanned)
+			})
+		})
+	}
+}
+
+func TestRecordRAGRetrieval(t *testing.T) {
+	tests := []struct {
+		name       string
+		userID     int64
+		hasContext bool
+		expected   string
+	}{
+		{"hit", 123, true, resultHit},
+		{"miss", 456, false, resultMiss},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				RecordRAGRetrieval(tt.userID, tt.hasContext)
+			})
+		})
+	}
+}
+
+func TestRecordRAGCandidates(t *testing.T) {
+	tests := []struct {
+		name       string
+		userID     int64
+		searchType string
+		count      int
+	}{
+		{"topics candidates", 123, searchTypeTopics, 25},
+		{"facts candidates", 456, searchTypeFacts, 10},
+		{"zero candidates", 789, searchTypeTopics, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				RecordRAGCandidates(tt.userID, tt.searchType, tt.count)
 			})
 		})
 	}
@@ -129,6 +171,8 @@ func TestMetricsRegistration(t *testing.T) {
 		"laplaced_vector_search_vectors_scanned",
 		"laplaced_vector_index_size",
 		"laplaced_vector_index_memory_bytes",
+		"laplaced_rag_retrieval_total",
+		"laplaced_rag_candidates",
 	}
 
 	// Collect all metric names from default registry
@@ -152,7 +196,9 @@ func TestMetricsHelp(t *testing.T) {
 
 	for _, mf := range mfs {
 		name := mf.GetName()
-		if strings.HasPrefix(name, "laplaced_embedding_") || strings.HasPrefix(name, "laplaced_vector_") {
+		if strings.HasPrefix(name, "laplaced_embedding_") ||
+			strings.HasPrefix(name, "laplaced_vector_") ||
+			strings.HasPrefix(name, "laplaced_rag_") {
 			assert.NotEmpty(t, mf.GetHelp(), "metric %s should have help text", name)
 		}
 	}
@@ -165,5 +211,26 @@ func TestConstants(t *testing.T) {
 	assert.Equal(t, "error", statusError)
 	assert.Equal(t, "topics", searchTypeTopics)
 	assert.Equal(t, "facts", searchTypeFacts)
+	assert.Equal(t, "hit", resultHit)
+	assert.Equal(t, "miss", resultMiss)
 	assert.Equal(t, 3072*4, embeddingMemoryBytes)
+}
+
+func TestFormatUserID(t *testing.T) {
+	tests := []struct {
+		userID   int64
+		expected string
+	}{
+		{0, "0"},
+		{123, "123"},
+		{-1, "-1"},
+		{9223372036854775807, "9223372036854775807"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			result := formatUserID(tt.userID)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }

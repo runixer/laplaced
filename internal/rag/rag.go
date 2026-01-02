@@ -365,7 +365,7 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		var err error
 		var prompt string
 		var tokens int
-		enrichedQuery, prompt, tokens, err = s.enrichQuery(ctx, query, opts.History)
+		enrichedQuery, prompt, tokens, err = s.enrichQuery(ctx, userID, query, opts.History)
 		debugInfo.EnrichmentPrompt = prompt
 		debugInfo.EnrichmentTokens = tokens
 
@@ -420,7 +420,8 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		}
 	}
 	s.mu.RUnlock()
-	RecordVectorSearch(searchTypeTopics, time.Since(searchStart).Seconds(), vectorsScanned)
+	RecordVectorSearch(userID, searchTypeTopics, time.Since(searchStart).Seconds(), vectorsScanned)
+	RecordRAGCandidates(userID, searchTypeTopics, len(matches))
 
 	sort.Slice(matches, func(i, j int) bool {
 		return matches[i].score > matches[j].score
@@ -492,7 +493,7 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 	debugInfo.Results = results
 
 	// Record RAG retrieval result (hit if we found context, miss otherwise)
-	RecordRAGRetrieval(len(results) > 0)
+	RecordRAGRetrieval(userID, len(results) > 0)
 
 	return results, debugInfo, nil
 }
@@ -812,7 +813,7 @@ func (s *Service) processChunkWithStats(ctx context.Context, userID int64, chunk
 	s.logger.Info("Processing chunk with stats", "user_id", userID, "count", len(chunk))
 
 	// 1. Extract Topics
-	topics, topicUsage, err := s.extractTopics(ctx, chunk)
+	topics, topicUsage, err := s.extractTopics(ctx, userID, chunk)
 	if err != nil {
 		return nil, fmt.Errorf("extract topics: %w", err)
 	}
@@ -1088,7 +1089,7 @@ func (s *Service) processChunk(ctx context.Context, userID int64, chunk []storag
 	s.logger.Info("Processing chunk", "user_id", userID, "count", len(chunk), "start", chunk[0].ID, "end", chunk[len(chunk)-1].ID)
 
 	// 1. Extract Topics (Wait for completion)
-	topics, _, err := s.extractTopics(ctx, chunk)
+	topics, _, err := s.extractTopics(ctx, userID, chunk)
 	if err != nil {
 		return fmt.Errorf("extract topics: %w", err)
 	}
@@ -1347,7 +1348,8 @@ func (s *Service) RetrieveFacts(ctx context.Context, userID int64, query string)
 		}
 	}
 	s.mu.RUnlock()
-	RecordVectorSearch(searchTypeFacts, time.Since(searchStart).Seconds(), vectorsScanned)
+	RecordVectorSearch(userID, searchTypeFacts, time.Since(searchStart).Seconds(), vectorsScanned)
+	RecordRAGCandidates(userID, searchTypeFacts, len(matches))
 
 	sort.Slice(matches, func(i, j int) bool {
 		return matches[i].score > matches[j].score
@@ -1397,7 +1399,8 @@ func (s *Service) FindSimilarFacts(ctx context.Context, userID int64, embedding 
 		}
 	}
 	s.mu.RUnlock()
-	RecordVectorSearch(searchTypeFacts, time.Since(searchStart).Seconds(), vectorsScanned)
+	RecordVectorSearch(userID, searchTypeFacts, time.Since(searchStart).Seconds(), vectorsScanned)
+	RecordRAGCandidates(userID, searchTypeFacts, len(matches))
 
 	sort.Slice(matches, func(i, j int) bool {
 		return matches[i].score > matches[j].score
@@ -1419,7 +1422,7 @@ func (s *Service) FindSimilarFacts(ctx context.Context, userID int64, embedding 
 	return s.factRepo.GetFactsByIDs(ids)
 }
 
-func (s *Service) extractTopics(ctx context.Context, chunk []storage.Message) ([]ExtractedTopic, UsageInfo, error) {
+func (s *Service) extractTopics(ctx context.Context, userID int64, chunk []storage.Message) ([]ExtractedTopic, UsageInfo, error) {
 	// Prepare JSON
 	type MsgItem struct {
 		ID      int64  `json:"id"`
@@ -1494,6 +1497,7 @@ func (s *Service) extractTopics(ctx context.Context, chunk []storage.Message) ([
 			{Role: "user", Content: fullPrompt},
 		},
 		ResponseFormat: schema,
+		UserID:         userID,
 	})
 	if err != nil {
 		return nil, UsageInfo{}, err
@@ -1543,7 +1547,7 @@ func (s *Service) extractTopics(ctx context.Context, chunk []storage.Message) ([
 	return result.Topics, usage, nil
 }
 
-func (s *Service) enrichQuery(ctx context.Context, query string, history []storage.Message) (string, string, int, error) {
+func (s *Service) enrichQuery(ctx context.Context, userID int64, query string, history []storage.Message) (string, string, int, error) {
 	model := s.cfg.RAG.QueryModel
 	if model == "" {
 		return query, "", 0, nil
@@ -1571,6 +1575,7 @@ func (s *Service) enrichQuery(ctx context.Context, query string, history []stora
 		Messages: []openrouter.Message{
 			{Role: "user", Content: prompt},
 		},
+		UserID: userID,
 	})
 	if err != nil {
 		return "", prompt, 0, err
