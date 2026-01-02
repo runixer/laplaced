@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-01-02
+
 ### Added
 - Added startup warning when `allowed_user_ids` is empty (bot rejects all messages in this case)
 - Added Session Inspector in web UI: view active sessions with user name, message count, timestamps (local timezone), countdown timer until auto-processing, and context size
@@ -49,11 +51,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `rag.max_profile_facts` config option (default: 50) - previously hardcoded limit for user profile facts
 
 ### Changed
-- Improved test coverage: rag 67%→75.5%, web 57%→70.9%, bot 67%→68.1%
+- Improved test coverage: rag 76.8%, web 69.5%, bot 66.2%, memory 76.7%, all packages 66%+
 - Renamed all Prometheus metrics to use `laplaced_` namespace for consistency
   - `telegram_api_*` → `laplaced_telegram_*`
   - `memory_*` → `laplaced_memory_*`
   - `rag_*` → `laplaced_rag_*`
+
+### Fixed
+- Fixed SSE endpoints returning 500 when wrapped with metrics middleware (responseWriter now implements http.Flusher)
 
 ## [0.2.2] - 2026-01-01
 
@@ -172,7 +177,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker and docker-compose deployment
 - Configuration via YAML and environment variables
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/runixer/laplaced/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/runixer/laplaced/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/runixer/laplaced/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/runixer/laplaced/compare/v0.1.3...v0.2.0
