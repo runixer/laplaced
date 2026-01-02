@@ -686,12 +686,17 @@ func TestUpdateMetrics(t *testing.T) {
 	}
 
 	mockStorage.On("GetFactStats").Return(stats, nil)
+	mockBot.On("GetActiveSessions").Return([]rag.ActiveSessionInfo{
+		{UserID: 1, MessageCount: 5},
+		{UserID: 2, MessageCount: 3},
+	}, nil)
 
 	// Act
 	server.updateMetrics()
 
 	// Assert
 	mockStorage.AssertExpectations(t)
+	mockBot.AssertExpectations(t)
 }
 
 func TestGetClientIP(t *testing.T) {

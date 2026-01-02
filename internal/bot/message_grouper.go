@@ -121,7 +121,9 @@ func (mg *MessageGrouper) AddMessage(msg *telegram.Message) {
 		}
 		mg.groups[userID] = group
 		mg.logger.Debug("created new message group", slog.Int64("user_id", userID))
-	} else {
+	}
+
+	if ok {
 		// If a group exists, cancel the previous timer and any ongoing processing.
 		if group.Timer != nil {
 			// Timer.Stop returns true if the timer was stopped before firing

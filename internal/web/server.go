@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/runixer/laplaced/internal/bot"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
@@ -287,6 +288,16 @@ func (s *Server) updateMetrics() {
 	}
 
 	memoryStaleness.Set(stats.AvgAgeDays)
+
+	// Update active sessions count (unprocessed messages waiting for archival)
+	if s.bot != nil {
+		sessions, err := s.bot.GetActiveSessions()
+		if err != nil {
+			s.logger.Error("failed to get active sessions for metrics", "error", err)
+		} else {
+			bot.SetActiveSessions(len(sessions))
+		}
+	}
 }
 
 func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
