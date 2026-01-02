@@ -15,9 +15,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Chat UI with message history
   - Debug panel: timing breakdown (total, embedding, search, LLM), token usage, cost, context preview
   - Option to save messages to real history (checkbox, enabled by default)
+- Added Prometheus metrics for embedding observability:
+  - `laplaced_embedding_request_duration_seconds` - embedding API latency
+  - `laplaced_embedding_requests_total` - request counter with status
+  - `laplaced_embedding_tokens_total` - token usage
+  - `laplaced_embedding_cost_usd_total` - cumulative cost tracking
+  - `laplaced_vector_search_duration_seconds` - vector search latency
+  - `laplaced_vector_search_vectors_scanned` - vectors per search
+  - `laplaced_vector_index_size` - current index size
+  - `laplaced_vector_index_memory_bytes` - estimated memory usage
 
 ### Changed
 - Improved test coverage: rag 67%→75.5%, web 57%→70.9%, bot 67%→68.1%
+- Renamed all Prometheus metrics to use `laplaced_` namespace for consistency
+  - `telegram_api_*` → `laplaced_telegram_*`
+  - `memory_*` → `laplaced_memory_*`
+  - `rag_*` → `laplaced_rag_*`
 
 ## [0.2.2] - 2026-01-01
 

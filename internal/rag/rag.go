@@ -235,6 +235,7 @@ func (s *Service) ReloadVectors() error {
 	}
 
 	s.logger.Info("Loaded vectors (full)", "topics", tCount, "facts", fCount)
+	UpdateVectorIndexMetrics(tCount, fCount)
 	return nil
 }
 
@@ -301,6 +302,16 @@ func (s *Service) LoadNewVectors() error {
 
 	if tCount > 0 || fCount > 0 {
 		s.logger.Info("Loaded vectors (incremental)", "new_topics", tCount, "new_facts", fCount)
+		// Calculate total counts for metrics
+		totalTopics := 0
+		for _, vectors := range s.topicVectors {
+			totalTopics += len(vectors)
+		}
+		totalFacts := 0
+		for _, vectors := range s.factVectors {
+			totalFacts += len(vectors)
+		}
+		UpdateVectorIndexMetrics(totalTopics, totalFacts)
 	}
 	return nil
 }
@@ -368,19 +379,25 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 	debugInfo.EnrichedQuery = enrichedQuery
 
 	// Embedding for query
+	embeddingStart := time.Now()
 	resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
 		Model: s.cfg.RAG.EmbeddingModel,
 		Input: []string{enrichedQuery},
 	})
+	embeddingDuration := time.Since(embeddingStart).Seconds()
 	if err != nil {
+		RecordEmbeddingRequest(s.cfg.RAG.EmbeddingModel, embeddingDuration, false, 0, nil)
 		return nil, debugInfo, err
 	}
 	if len(resp.Data) == 0 {
+		RecordEmbeddingRequest(s.cfg.RAG.EmbeddingModel, embeddingDuration, false, 0, nil)
 		return nil, debugInfo, fmt.Errorf("no embedding returned")
 	}
+	RecordEmbeddingRequest(s.cfg.RAG.EmbeddingModel, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
 	qVec := resp.Data[0].Embedding
 
 	// Search topics
+	searchStart := time.Now()
 	s.mu.RLock()
 	type match struct {
 		topicID int64
@@ -388,6 +405,7 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 	}
 	var matches []match
 	userVectors := s.topicVectors[userID]
+	vectorsScanned := len(userVectors)
 	// Use a minimal safety threshold to avoid complete garbage, but much lower than strict content matching
 	minSafetyThreshold := s.cfg.RAG.MinSafetyThreshold
 	if minSafetyThreshold == 0 {
@@ -402,6 +420,7 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		}
 	}
 	s.mu.RUnlock()
+	RecordVectorSearch(searchTypeTopics, time.Since(searchStart).Seconds(), vectorsScanned)
 
 	sort.Slice(matches, func(i, j int) bool {
 		return matches[i].score > matches[j].score
@@ -847,13 +866,17 @@ func (s *Service) processChunkWithStats(ctx context.Context, userID int64, chunk
 	}
 
 	if len(embeddingInputs) > 0 {
+		embeddingStart := time.Now()
 		resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
 			Model: s.cfg.RAG.EmbeddingModel,
 			Input: embeddingInputs,
 		})
+		embeddingDuration := time.Since(embeddingStart).Seconds()
 		if err != nil {
+			RecordEmbeddingRequest(s.cfg.RAG.EmbeddingModel, embeddingDuration, false, 0, nil)
 			return nil, fmt.Errorf("create embeddings: %w", err)
 		}
+		RecordEmbeddingRequest(s.cfg.RAG.EmbeddingModel, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
 		stats.AddEmbeddingUsage(resp.Usage.TotalTokens, resp.Usage.Cost)
 
 		if len(resp.Data) != len(validTopics) {
@@ -1138,14 +1161,18 @@ func (s *Service) processChunk(ctx context.Context, userID int64, chunk []storag
 	}
 
 	if len(embeddingInputs) > 0 {
+		embeddingStart := time.Now()
 		resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
 			Model: s.cfg.RAG.EmbeddingModel,
 			Input: embeddingInputs,
 		})
+		embeddingDuration := time.Since(embeddingStart).Seconds()
 		if err != nil {
+			RecordEmbeddingRequest(s.cfg.RAG.EmbeddingModel, embeddingDuration, false, 0, nil)
 			s.logger.Error("failed to create embeddings for topics", "error", err)
 			return fmt.Errorf("create embeddings: %w", err)
 		}
+		RecordEmbeddingRequest(s.cfg.RAG.EmbeddingModel, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
 
 		if len(resp.Data) != len(validTopics) {
 			s.logger.Error("embedding count mismatch", "expected", len(validTopics), "got", len(resp.Data))
@@ -1278,18 +1305,24 @@ func (s *Service) RetrieveFacts(ctx context.Context, userID int64, query string)
 	}
 
 	// Embedding for query
+	embeddingStart := time.Now()
 	resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
 		Model: s.cfg.RAG.EmbeddingModel,
 		Input: []string{query},
 	})
+	embeddingDuration := time.Since(embeddingStart).Seconds()
 	if err != nil {
+		RecordEmbeddingRequest(s.cfg.RAG.EmbeddingModel, embeddingDuration, false, 0, nil)
 		return nil, err
 	}
 	if len(resp.Data) == 0 {
+		RecordEmbeddingRequest(s.cfg.RAG.EmbeddingModel, embeddingDuration, false, 0, nil)
 		return nil, fmt.Errorf("no embedding returned")
 	}
+	RecordEmbeddingRequest(s.cfg.RAG.EmbeddingModel, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
 	qVec := resp.Data[0].Embedding
 
+	searchStart := time.Now()
 	s.mu.RLock()
 	type match struct {
 		factID int64
@@ -1297,6 +1330,7 @@ func (s *Service) RetrieveFacts(ctx context.Context, userID int64, query string)
 	}
 	var matches []match
 	userVectors := s.factVectors[userID]
+	vectorsScanned := len(userVectors)
 	minSafetyThreshold := s.cfg.RAG.MinSafetyThreshold
 	if minSafetyThreshold == 0 {
 		minSafetyThreshold = 0.1
@@ -1309,6 +1343,7 @@ func (s *Service) RetrieveFacts(ctx context.Context, userID int64, query string)
 		}
 	}
 	s.mu.RUnlock()
+	RecordVectorSearch(searchTypeFacts, time.Since(searchStart).Seconds(), vectorsScanned)
 
 	sort.Slice(matches, func(i, j int) bool {
 		return matches[i].score > matches[j].score
@@ -1340,10 +1375,11 @@ func (s *Service) RetrieveFacts(ctx context.Context, userID int64, query string)
 }
 
 func (s *Service) FindSimilarFacts(ctx context.Context, userID int64, embedding []float32, threshold float32) ([]storage.Fact, error) {
+	searchStart := time.Now()
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 
 	userVectors := s.factVectors[userID]
+	vectorsScanned := len(userVectors)
 	type match struct {
 		factID int64
 		score  float32
@@ -1356,6 +1392,8 @@ func (s *Service) FindSimilarFacts(ctx context.Context, userID int64, embedding 
 			matches = append(matches, match{factID: item.FactID, score: score})
 		}
 	}
+	s.mu.RUnlock()
+	RecordVectorSearch(searchTypeFacts, time.Since(searchStart).Seconds(), vectorsScanned)
 
 	sort.Slice(matches, func(i, j int) bool {
 		return matches[i].score > matches[j].score

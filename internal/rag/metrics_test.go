@@ -1,0 +1,169 @@
+package rag
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/stretchr/testify/assert"
+)
+
+func TestRecordEmbeddingRequest_Success(t *testing.T) {
+	model := "test-model-success"
+
+	cost := 0.001
+	RecordEmbeddingRequest(model, 0.5, true, 100, &cost)
+
+	// Verify counter was incremented
+	requests := testutil.ToFloat64(embeddingRequestsTotal.WithLabelValues(model, statusSuccess))
+	assert.GreaterOrEqual(t, requests, float64(1))
+
+	// Verify tokens were recorded
+	tokens := testutil.ToFloat64(embeddingTokensTotal.WithLabelValues(model))
+	assert.GreaterOrEqual(t, tokens, float64(100))
+
+	// Verify cost was recorded
+	costTotal := testutil.ToFloat64(embeddingCostTotal.WithLabelValues(model))
+	assert.GreaterOrEqual(t, costTotal, 0.001)
+}
+
+func TestRecordEmbeddingRequest_Error(t *testing.T) {
+	model := "test-model-error"
+
+	RecordEmbeddingRequest(model, 0.1, false, 0, nil)
+
+	// Verify error counter was incremented
+	requests := testutil.ToFloat64(embeddingRequestsTotal.WithLabelValues(model, statusError))
+	assert.Equal(t, float64(1), requests)
+
+	// Verify tokens were NOT recorded on error
+	tokens := testutil.ToFloat64(embeddingTokensTotal.WithLabelValues(model))
+	assert.Equal(t, float64(0), tokens)
+}
+
+func TestRecordEmbeddingRequest_NilCost(t *testing.T) {
+	model := "test-model-nil-cost"
+
+	RecordEmbeddingRequest(model, 0.2, true, 50, nil)
+
+	// Should not panic with nil cost
+	tokens := testutil.ToFloat64(embeddingTokensTotal.WithLabelValues(model))
+	assert.Equal(t, float64(50), tokens)
+
+	// Cost should be zero (not incremented)
+	costTotal := testutil.ToFloat64(embeddingCostTotal.WithLabelValues(model))
+	assert.Equal(t, float64(0), costTotal)
+}
+
+func TestRecordEmbeddingRequest_ZeroCost(t *testing.T) {
+	model := "test-model-zero-cost"
+
+	zeroCost := 0.0
+	RecordEmbeddingRequest(model, 0.2, true, 50, &zeroCost)
+
+	// Zero cost should not be recorded
+	costTotal := testutil.ToFloat64(embeddingCostTotal.WithLabelValues(model))
+	assert.Equal(t, float64(0), costTotal)
+}
+
+func TestRecordVectorSearch(t *testing.T) {
+	tests := []struct {
+		name           string
+		searchType     string
+		duration       float64
+		vectorsScanned int
+	}{
+		{"topics search", searchTypeTopics, 0.01, 100},
+		{"facts search", searchTypeFacts, 0.005, 50},
+		{"empty search", searchTypeTopics, 0.001, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Should not panic
+			assert.NotPanics(t, func() {
+				RecordVectorSearch(tt.searchType, tt.duration, tt.vectorsScanned)
+			})
+		})
+	}
+}
+
+func TestUpdateVectorIndexMetrics(t *testing.T) {
+	UpdateVectorIndexMetrics(1000, 500)
+
+	// Verify topics gauge
+	topicsSize := testutil.ToFloat64(vectorIndexSize.WithLabelValues(searchTypeTopics))
+	assert.Equal(t, float64(1000), topicsSize)
+
+	// Verify facts gauge
+	factsSize := testutil.ToFloat64(vectorIndexSize.WithLabelValues(searchTypeFacts))
+	assert.Equal(t, float64(500), factsSize)
+
+	// Verify memory calculation (size × 3072 × 4 bytes)
+	topicsMemory := testutil.ToFloat64(vectorIndexMemoryBytes.WithLabelValues(searchTypeTopics))
+	assert.Equal(t, float64(1000*embeddingMemoryBytes), topicsMemory)
+
+	factsMemory := testutil.ToFloat64(vectorIndexMemoryBytes.WithLabelValues(searchTypeFacts))
+	assert.Equal(t, float64(500*embeddingMemoryBytes), factsMemory)
+}
+
+func TestUpdateVectorIndexMetrics_Zero(t *testing.T) {
+	UpdateVectorIndexMetrics(0, 0)
+
+	topicsSize := testutil.ToFloat64(vectorIndexSize.WithLabelValues(searchTypeTopics))
+	assert.Equal(t, float64(0), topicsSize)
+
+	topicsMemory := testutil.ToFloat64(vectorIndexMemoryBytes.WithLabelValues(searchTypeTopics))
+	assert.Equal(t, float64(0), topicsMemory)
+}
+
+func TestMetricsRegistration(t *testing.T) {
+	// Verify all metrics are registered with correct names
+	metrics := []string{
+		"laplaced_embedding_request_duration_seconds",
+		"laplaced_embedding_requests_total",
+		"laplaced_embedding_tokens_total",
+		"laplaced_embedding_cost_usd_total",
+		"laplaced_vector_search_duration_seconds",
+		"laplaced_vector_search_vectors_scanned",
+		"laplaced_vector_index_size",
+		"laplaced_vector_index_memory_bytes",
+	}
+
+	// Collect all metric names from default registry
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	assert.NoError(t, err)
+
+	registeredNames := make(map[string]bool)
+	for _, mf := range mfs {
+		registeredNames[mf.GetName()] = true
+	}
+
+	for _, name := range metrics {
+		assert.True(t, registeredNames[name], "metric %s should be registered", name)
+	}
+}
+
+func TestMetricsHelp(t *testing.T) {
+	// Verify metrics have proper help text
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	assert.NoError(t, err)
+
+	for _, mf := range mfs {
+		name := mf.GetName()
+		if strings.HasPrefix(name, "laplaced_embedding_") || strings.HasPrefix(name, "laplaced_vector_") {
+			assert.NotEmpty(t, mf.GetHelp(), "metric %s should have help text", name)
+		}
+	}
+}
+
+func TestConstants(t *testing.T) {
+	// Verify constants are set correctly
+	assert.Equal(t, "laplaced", namespace)
+	assert.Equal(t, "success", statusSuccess)
+	assert.Equal(t, "error", statusError)
+	assert.Equal(t, "topics", searchTypeTopics)
+	assert.Equal(t, "facts", searchTypeFacts)
+	assert.Equal(t, 3072*4, embeddingMemoryBytes)
+}

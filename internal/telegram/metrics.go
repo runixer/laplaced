@@ -13,6 +13,8 @@ import (
 // - Количество retry-попыток (счётчик)
 // - Текущее состояние long polling (gauge)
 
+const metricsNamespace = "laplaced"
+
 var (
 	// telegramRequestDuration измеряет время выполнения запросов к Telegram API.
 	// Labels:
@@ -20,8 +22,8 @@ var (
 	//   - status: результат запроса (success, error, timeout, retry)
 	telegramRequestDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: "telegram",
-			Subsystem: "api",
+			Namespace: metricsNamespace,
+			Subsystem: "telegram",
 			Name:      "request_duration_seconds",
 			Help:      "Duration of Telegram API requests in seconds",
 			// Buckets оптимизированы для типичных времён ответа Telegram API:
@@ -38,8 +40,8 @@ var (
 	//   - status: результат (success, error, timeout)
 	telegramRequestsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "telegram",
-			Subsystem: "api",
+			Namespace: metricsNamespace,
+			Subsystem: "telegram",
 			Name:      "requests_total",
 			Help:      "Total number of Telegram API requests",
 		},
@@ -51,8 +53,8 @@ var (
 	//   - method: название API-метода
 	telegramRetriesTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "telegram",
-			Subsystem: "api",
+			Namespace: metricsNamespace,
+			Subsystem: "telegram",
 			Name:      "retries_total",
 			Help:      "Total number of retry attempts for Telegram API requests",
 		},
@@ -65,8 +67,8 @@ var (
 	//   - error_type: тип ошибки (network, timeout, api_error, decode_error)
 	telegramErrorsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "telegram",
-			Subsystem: "api",
+			Namespace: metricsNamespace,
+			Subsystem: "telegram",
 			Name:      "errors_total",
 			Help:      "Total number of errors by type",
 		},
@@ -77,8 +79,8 @@ var (
 	// Значение 1 = активен, 0 = неактивен
 	telegramLongPollingActive = promauto.NewGauge(
 		prometheus.GaugeOpts{
-			Namespace: "telegram",
-			Subsystem: "api",
+			Namespace: metricsNamespace,
+			Subsystem: "telegram",
 			Name:      "long_polling_active",
 			Help:      "Whether long polling is currently active (1 = active, 0 = inactive)",
 		},
@@ -87,8 +89,8 @@ var (
 	// telegramLongPollingUpdates считает количество полученных updates.
 	telegramLongPollingUpdates = promauto.NewCounter(
 		prometheus.CounterOpts{
-			Namespace: "telegram",
-			Subsystem: "api",
+			Namespace: metricsNamespace,
+			Subsystem: "telegram",
 			Name:      "long_polling_updates_total",
 			Help:      "Total number of updates received via long polling",
 		},

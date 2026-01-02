@@ -24,25 +24,33 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+const metricsNamespace = "laplaced"
+
 var (
 	memoryFactsCount = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "memory_facts_count",
-			Help: "Total number of facts in memory",
+			Namespace: metricsNamespace,
+			Subsystem: "memory",
+			Name:      "facts_count",
+			Help:      "Total number of facts in memory",
 		},
 		[]string{"type"},
 	)
 	memoryStaleness = prometheus.NewGauge(
 		prometheus.GaugeOpts{
-			Name: "memory_staleness_days",
-			Help: "Average age of facts in days",
+			Namespace: metricsNamespace,
+			Subsystem: "memory",
+			Name:      "staleness_days",
+			Help:      "Average age of facts in days",
 		},
 	)
 	ragLatency = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
-			Name:    "rag_latency_seconds",
-			Help:    "Latency of RAG operations",
-			Buckets: prometheus.DefBuckets,
+			Namespace: metricsNamespace,
+			Subsystem: "rag",
+			Name:      "latency_seconds",
+			Help:      "Latency of RAG operations",
+			Buckets:   prometheus.DefBuckets,
 		},
 	)
 )
