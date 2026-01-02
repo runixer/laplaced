@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added startup warning when `allowed_user_ids` is empty (bot rejects all messages in this case)
 - Added Session Inspector in web UI: view active sessions with user name, message count, timestamps (local timezone), countdown timer until auto-processing, and context size
 - Added "Force Process" with real-time progress bar via SSE, showing detailed results: topics extracted/merged, facts created/updated/deleted, API usage (tokens and cost)
+- Added Debug Chat interface (`/ui/debug/chat`): test bot pipeline without Telegram
+  - Chat UI with message history
+  - Debug panel: timing breakdown (total, embedding, search, LLM), token usage, cost, context preview
+  - Option to save messages to real history (checkbox, enabled by default)
 
 ### Changed
 - Improved test coverage: rag 67%→75.5%, web 57%→70.9%, bot 67%→68.1%

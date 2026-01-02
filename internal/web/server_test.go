@@ -370,6 +370,14 @@ func (m *MockBot) ForceCloseSessionWithProgress(ctx context.Context, userID int6
 	return args.Get(0).(*rag.ProcessingStats), args.Error(1)
 }
 
+func (m *MockBot) SendTestMessage(ctx context.Context, userID int64, text string, saveToHistory bool) (*rag.TestMessageResult, error) {
+	args := m.Called(ctx, userID, text, saveToHistory)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*rag.TestMessageResult), args.Error(1)
+}
+
 func TestStatsHandler(t *testing.T) {
 	// Arrange
 	mockStorage := new(MockStorage)
@@ -1025,4 +1033,143 @@ func TestSessionsHandler_GET_CommonDataError(t *testing.T) {
 	handler.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
+func TestDebugChatHandler_GET(t *testing.T) {
+	mockBot := new(MockBot)
+	mockStorage := new(MockStorage)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	assert.NoError(t, err)
+
+	// Mock common data
+	users := []storage.User{{ID: 123, FirstName: "Test", LastName: "User"}}
+	mockStorage.On("GetAllUsers").Return(users, nil)
+	mockStorage.On("GetUnprocessedMessages", int64(123)).Return([]storage.Message{
+		{Role: "user", Content: "Hello", CreatedAt: time.Now()},
+		{Role: "assistant", Content: "Hi!", CreatedAt: time.Now()},
+	}, nil)
+
+	req, err := http.NewRequest("GET", "/ui/debug/chat?user_id=123", nil)
+	assert.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.debugChatHandler)
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "Test Chat")
+	mockStorage.AssertExpectations(t)
+}
+
+func TestDebugChatSendHandler_POST_Success(t *testing.T) {
+	mockBot := new(MockBot)
+	mockStorage := new(MockStorage)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	assert.NoError(t, err)
+
+	// Mock bot.SendTestMessage
+	cost := 0.0045
+	mockBot.On("SendTestMessage", mock.Anything, int64(123), "Hello bot", true).Return(&rag.TestMessageResult{
+		Response:         "Hello! How can I help?",
+		TimingTotal:      2300 * time.Millisecond,
+		TimingEmbedding:  45 * time.Millisecond,
+		TimingSearch:     23 * time.Millisecond,
+		TimingLLM:        2100 * time.Millisecond,
+		PromptTokens:     1100,
+		CompletionTokens: 147,
+		TotalCost:        cost,
+		TopicsMatched:    5,
+		FactsInjected:    3,
+		ContextPreview:   "System: You are...",
+	}, nil)
+
+	body := `{"user_id": 123, "message": "Hello bot", "save_to_history": true}`
+	req, err := http.NewRequest("POST", "/ui/debug/chat/send", bytes.NewBufferString(body))
+	assert.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.debugChatSendHandler)
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	var response map[string]interface{}
+	err = json.Unmarshal(rr.Body.Bytes(), &response)
+	assert.NoError(t, err)
+	assert.Equal(t, "Hello! How can I help?", response["response"])
+	assert.NotNil(t, response["timing"])
+	assert.NotNil(t, response["tokens"])
+	assert.NotNil(t, response["context"])
+
+	mockBot.AssertExpectations(t)
+}
+
+func TestDebugChatSendHandler_POST_InvalidJSON(t *testing.T) {
+	mockBot := new(MockBot)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	assert.NoError(t, err)
+
+	body := `{invalid json}`
+	req, err := http.NewRequest("POST", "/ui/debug/chat/send", bytes.NewBufferString(body))
+	assert.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.debugChatSendHandler)
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestDebugChatSendHandler_POST_BotError(t *testing.T) {
+	mockBot := new(MockBot)
+	mockStorage := new(MockStorage)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	assert.NoError(t, err)
+
+	// Mock bot.SendTestMessage returning error
+	mockBot.On("SendTestMessage", mock.Anything, int64(123), "Hello", true).Return(nil, assert.AnError)
+
+	body := `{"user_id": 123, "message": "Hello", "save_to_history": true}`
+	req, err := http.NewRequest("POST", "/ui/debug/chat/send", bytes.NewBufferString(body))
+	assert.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.debugChatSendHandler)
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	mockBot.AssertExpectations(t)
+}
+
+func TestDebugChatSendHandler_MethodNotAllowed(t *testing.T) {
+	mockBot := new(MockBot)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	assert.NoError(t, err)
+
+	req, err := http.NewRequest("GET", "/ui/debug/chat/send", nil)
+	assert.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.debugChatSendHandler)
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)
 }

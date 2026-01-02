@@ -979,3 +979,226 @@ func (b *Bot) performManageMemory(ctx context.Context, userID int64, args map[st
 	}
 	return fmt.Sprintf("Successfully processed %d operations:\n%s", len(operations), finalResult), nil
 }
+
+// SendTestMessage sends a test message through the bot pipeline without Telegram.
+// It returns detailed metrics for debugging purposes.
+func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, saveToHistory bool) (*rag.TestMessageResult, error) {
+	startTotal := time.Now()
+	logger := b.logger.With("user_id", userID, "test_message", true)
+
+	result := &rag.TestMessageResult{}
+
+	// Save user message to history if requested
+	if saveToHistory {
+		if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "user", Content: text}); err != nil {
+			logger.Error("failed to add message to history", "error", err)
+			return nil, fmt.Errorf("failed to save message: %w", err)
+		}
+	}
+
+	// Build context with timing
+	startContext := time.Now()
+	currentUserMessageContent := []interface{}{
+		openrouter.TextPart{Type: "text", Text: text},
+	}
+	orMessages, ragInfo, err := b.buildContext(ctx, userID, text, text, currentUserMessageContent)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build context: %w", err)
+	}
+	contextDuration := time.Since(startContext)
+
+	// Extract timing breakdown from RAG info
+	if ragInfo != nil {
+		result.RAGDebugInfo = ragInfo
+		result.TopicsMatched = len(ragInfo.Results)
+
+		// Count facts from results
+		for _, topicRes := range ragInfo.Results {
+			result.FactsInjected += len(topicRes.Messages)
+		}
+	}
+
+	// Estimate embedding and search time from context building
+	// (in reality these happen inside buildContext via ragService.Retrieve)
+	result.TimingEmbedding = contextDuration / 3 // rough estimate
+	result.TimingSearch = contextDuration / 3    // rough estimate
+
+	// Generate context preview (first 500 chars)
+	if len(orMessages) > 0 {
+		contextBytes, _ := json.Marshal(orMessages)
+		preview := string(contextBytes)
+		if len(preview) > 500 {
+			preview = preview[:500] + "..."
+		}
+		result.ContextPreview = preview
+	}
+
+	// Call LLM with timing
+	startLLM := time.Now()
+
+	var plugins []openrouter.Plugin
+	if b.cfg.OpenRouter.PDFParserEngine != "" {
+		plugins = append(plugins, openrouter.Plugin{
+			ID: "file-parser",
+			PDF: openrouter.PDFConfig{
+				Engine: b.cfg.OpenRouter.PDFParserEngine,
+			},
+		})
+	}
+
+	tools := b.getTools()
+	totalPromptTokens := 0
+	totalCompletionTokens := 0
+	var finalResponse string
+	toolIterations := 0
+	const maxToolIterations = 10
+
+	for {
+		if toolIterations >= maxToolIterations {
+			logger.Warn("max tool iterations reached", "iterations", toolIterations)
+			break
+		}
+		toolIterations++
+
+		req := openrouter.ChatCompletionRequest{
+			Model:    b.cfg.OpenRouter.Model,
+			Messages: orMessages,
+			Plugins:  plugins,
+			Tools:    tools,
+		}
+
+		resp, err := b.orClient.CreateChatCompletion(ctx, req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get completion: %w", err)
+		}
+
+		if len(resp.Choices) == 0 {
+			return nil, fmt.Errorf("empty response from OpenRouter")
+		}
+
+		totalPromptTokens += resp.Usage.PromptTokens
+		totalCompletionTokens += resp.Usage.CompletionTokens
+
+		choice := resp.Choices[0].Message
+
+		// Handle tool calls
+		if len(choice.ToolCalls) > 0 {
+			logger.Info("Model requested tool calls", "count", len(choice.ToolCalls))
+
+			var content interface{} = choice.Content
+			if choice.Content == "" {
+				content = nil
+			}
+
+			orMessages = append(orMessages, openrouter.Message{
+				Role:             "assistant",
+				Content:          content,
+				ToolCalls:        choice.ToolCalls,
+				ReasoningDetails: choice.ReasoningDetails,
+			})
+
+			// Execute tool calls (without Telegram actions)
+			toolMessages := b.executeToolCallsForTest(ctx, userID, choice.ToolCalls, logger)
+			orMessages = append(orMessages, toolMessages...)
+			continue
+		}
+
+		finalResponse = choice.Content
+		break
+	}
+
+	result.TimingLLM = time.Since(startLLM)
+
+	if strings.TrimSpace(finalResponse) == "" {
+		finalResponse = b.translator.Get(b.cfg.Bot.Language, "bot.empty_response")
+	}
+
+	result.Response = finalResponse
+	result.PromptTokens = totalPromptTokens
+	result.CompletionTokens = totalCompletionTokens
+	result.TotalCost = b.getTieredCost(totalPromptTokens, totalCompletionTokens, logger)
+	result.TimingTotal = time.Since(startTotal)
+
+	// Save assistant response to history if requested
+	if saveToHistory {
+		if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "assistant", Content: finalResponse}); err != nil {
+			logger.Error("failed to add assistant message to history", "error", err)
+		}
+
+		// Record metrics
+		b.recordMetrics(userID, totalPromptTokens, totalCompletionTokens, ragInfo, orMessages, finalResponse, logger)
+	}
+
+	return result, nil
+}
+
+// executeToolCallsForTest executes tool calls without Telegram-specific actions.
+func (b *Bot) executeToolCallsForTest(ctx context.Context, userID int64, toolCalls []openrouter.ToolCall, logger *slog.Logger) []openrouter.Message {
+	var toolMessages []openrouter.Message
+
+	for _, toolCall := range toolCalls {
+		var matchedTool *config.ToolConfig
+		for _, t := range b.cfg.Tools {
+			if t.Name == toolCall.Function.Name {
+				matchedTool = &t
+				break
+			}
+		}
+
+		if matchedTool != nil {
+			var args map[string]interface{}
+			if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+				logger.Error("failed to parse tool arguments", "error", err, "tool", matchedTool.Name)
+				toolMessages = append(toolMessages, openrouter.Message{
+					Role:       "tool",
+					Content:    fmt.Sprintf("Error parsing arguments: %v", err),
+					ToolCallID: toolCall.ID,
+				})
+				continue
+			}
+
+			var toolResult string
+			var err error
+
+			query, ok := args["query"].(string)
+			if !ok {
+				err = fmt.Errorf("query argument missing or not a string")
+			} else {
+				switch matchedTool.Name {
+				case "memory_search":
+					logger.Info("Executing RAG tool", "tool", matchedTool.Name, "query", query)
+					toolResult, err = b.performRAGTool(ctx, userID, query)
+				case "manage_memory":
+					logger.Info("Executing Manage Memory tool", "tool", matchedTool.Name)
+					toolResult, err = b.performManageMemory(ctx, userID, args)
+				default:
+					logger.Info("Executing model tool", "tool", matchedTool.Name, "model", matchedTool.Model, "query", query)
+					toolResult, err = b.performModelTool(ctx, matchedTool.Model, query)
+				}
+			}
+
+			if err != nil {
+				logger.Error("tool execution failed", "error", err, "tool", matchedTool.Name)
+				toolMessages = append(toolMessages, openrouter.Message{
+					Role:       "tool",
+					Content:    fmt.Sprintf("Tool execution failed: %v", err),
+					ToolCallID: toolCall.ID,
+				})
+			} else {
+				toolMessages = append(toolMessages, openrouter.Message{
+					Role:       "tool",
+					Content:    toolResult,
+					ToolCallID: toolCall.ID,
+				})
+			}
+		} else {
+			logger.Warn("Unknown tool called", "tool_name", toolCall.Function.Name)
+			toolMessages = append(toolMessages, openrouter.Message{
+				Role:       "tool",
+				Content:    fmt.Sprintf("Error: Unknown tool '%s'", toolCall.Function.Name),
+				ToolCallID: toolCall.ID,
+			})
+		}
+	}
+	return toolMessages
+}

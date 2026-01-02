@@ -14,6 +14,7 @@ import (
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
 
@@ -226,6 +227,14 @@ func (m *MockStorage) SetTopicFactsExtracted(topicID int64, extracted bool) erro
 func (m *MockStorage) SetTopicConsolidationChecked(topicID int64, checked bool) error {
 	args := m.Called(topicID, checked)
 	return args.Error(0)
+}
+
+func (m *MockStorage) GetMergeCandidates(userID int64) ([]storage.MergeCandidate, error) {
+	args := m.Called(userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.MergeCandidate), args.Error(1)
 }
 
 func (m *MockStorage) GetMessagesInRange(ctx context.Context, userID int64, startID, endID int64) ([]storage.Message, error) {
@@ -1611,4 +1620,246 @@ func TestSendResponses_OtherError_SendGenericError(t *testing.T) {
 	bot.sendResponses(context.Background(), chatID, responses, logger)
 
 	mockAPI.AssertExpectations(t)
+}
+
+func TestSendTestMessage_Success(t *testing.T) {
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	mockAPI := new(MockBotAPI)
+	mockStore := new(MockStorage)
+	mockORClient := new(MockOpenRouterClient)
+
+	cfg := &config.Config{
+		Bot: config.BotConfig{
+			SystemPrompt: "Test prompt",
+			Language:     "en",
+		},
+		OpenRouter: config.OpenRouterConfig{
+			Model: "test-model",
+		},
+		RAG: config.RAGConfig{
+			Enabled: false, // Disable RAG for testing
+		},
+	}
+
+	// Create a minimal RAG service with RAG disabled
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+
+	bot := &Bot{
+		api:             mockAPI,
+		userRepo:        mockStore,
+		msgRepo:         mockStore,
+		statsRepo:       mockStore,
+		logRepo:         mockStore,
+		factRepo:        mockStore,
+		factHistoryRepo: mockStore,
+		orClient:        mockORClient,
+		ragService:      ragService,
+		cfg:             cfg,
+		logger:          logger,
+		translator:      translator,
+	}
+
+	userID := int64(123)
+	testMessage := "Hello, bot!"
+
+	// Mock storage calls
+	mockStore.On("AddMessageToHistory", userID, mock.MatchedBy(func(msg storage.Message) bool {
+		return msg.Role == "user" && msg.Content == testMessage
+	})).Return(nil)
+	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{
+		{Role: "user", Content: testMessage},
+	}, nil)
+	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
+	mockStore.On("AddMessageToHistory", userID, mock.MatchedBy(func(msg storage.Message) bool {
+		return msg.Role == "assistant"
+	})).Return(nil)
+	mockStore.On("AddStat", mock.Anything).Return(nil)
+
+	// Mock LLM call
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(openrouter.ChatCompletionResponse{
+		Choices: []struct {
+			Message struct {
+				Role             string                `json:"role"`
+				Content          string                `json:"content"`
+				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
+			} `json:"message"`
+		}{
+			{Message: struct {
+				Role             string                `json:"role"`
+				Content          string                `json:"content"`
+				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
+			}{Role: "assistant", Content: "Hello! How can I help you?"}},
+		},
+		Usage: struct {
+			PromptTokens     int      `json:"prompt_tokens"`
+			CompletionTokens int      `json:"completion_tokens"`
+			TotalTokens      int      `json:"total_tokens"`
+			Cost             *float64 `json:"cost,omitempty"`
+		}{
+			PromptTokens:     100,
+			CompletionTokens: 20,
+		},
+	}, nil)
+
+	result, err := bot.SendTestMessage(context.Background(), userID, testMessage, true)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, "Hello! How can I help you?", result.Response)
+	assert.Equal(t, 100, result.PromptTokens)
+	assert.Equal(t, 20, result.CompletionTokens)
+	assert.GreaterOrEqual(t, result.TimingTotal.Nanoseconds(), int64(0))
+	assert.Equal(t, 0, result.TopicsMatched) // RAG disabled
+	assert.Equal(t, 0, result.FactsInjected) // RAG disabled
+
+	mockStore.AssertExpectations(t)
+	mockORClient.AssertExpectations(t)
+}
+
+func TestSendTestMessage_SaveToHistoryFalse(t *testing.T) {
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	mockAPI := new(MockBotAPI)
+	mockStore := new(MockStorage)
+	mockORClient := new(MockOpenRouterClient)
+
+	cfg := &config.Config{
+		Bot: config.BotConfig{
+			SystemPrompt: "Test prompt",
+			Language:     "en",
+		},
+		OpenRouter: config.OpenRouterConfig{
+			Model: "test-model",
+		},
+		RAG: config.RAGConfig{
+			Enabled: false,
+		},
+	}
+
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+
+	bot := &Bot{
+		api:             mockAPI,
+		userRepo:        mockStore,
+		msgRepo:         mockStore,
+		statsRepo:       mockStore,
+		logRepo:         mockStore,
+		factRepo:        mockStore,
+		factHistoryRepo: mockStore,
+		orClient:        mockORClient,
+		ragService:      ragService,
+		cfg:             cfg,
+		logger:          logger,
+		translator:      translator,
+	}
+
+	userID := int64(123)
+	testMessage := "Hello, bot!"
+
+	// When saveToHistory is false, AddMessageToHistory should NOT be called
+	// But we still need to mock the context building calls
+	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
+	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
+
+	// Mock LLM call
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(openrouter.ChatCompletionResponse{
+		Choices: []struct {
+			Message struct {
+				Role             string                `json:"role"`
+				Content          string                `json:"content"`
+				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
+			} `json:"message"`
+		}{
+			{Message: struct {
+				Role             string                `json:"role"`
+				Content          string                `json:"content"`
+				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
+			}{Role: "assistant", Content: "Response without history"}},
+		},
+		Usage: struct {
+			PromptTokens     int      `json:"prompt_tokens"`
+			CompletionTokens int      `json:"completion_tokens"`
+			TotalTokens      int      `json:"total_tokens"`
+			Cost             *float64 `json:"cost,omitempty"`
+		}{
+			PromptTokens:     50,
+			CompletionTokens: 10,
+		},
+	}, nil)
+
+	result, err := bot.SendTestMessage(context.Background(), userID, testMessage, false)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, "Response without history", result.Response)
+
+	// Verify AddMessageToHistory was NOT called
+	mockStore.AssertNotCalled(t, "AddMessageToHistory", mock.Anything, mock.Anything)
+	mockStore.AssertNotCalled(t, "AddStat", mock.Anything)
+	mockStore.AssertNotCalled(t, "AddRAGLog", mock.Anything)
+}
+
+func TestSendTestMessage_OpenRouterError(t *testing.T) {
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	mockAPI := new(MockBotAPI)
+	mockStore := new(MockStorage)
+	mockORClient := new(MockOpenRouterClient)
+
+	cfg := &config.Config{
+		Bot: config.BotConfig{
+			SystemPrompt: "Test prompt",
+			Language:     "en",
+		},
+		OpenRouter: config.OpenRouterConfig{
+			Model: "test-model",
+		},
+		RAG: config.RAGConfig{
+			Enabled: false,
+		},
+	}
+
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+
+	bot := &Bot{
+		api:             mockAPI,
+		userRepo:        mockStore,
+		msgRepo:         mockStore,
+		statsRepo:       mockStore,
+		logRepo:         mockStore,
+		factRepo:        mockStore,
+		factHistoryRepo: mockStore,
+		orClient:        mockORClient,
+		ragService:      ragService,
+		cfg:             cfg,
+		logger:          logger,
+		translator:      translator,
+	}
+
+	userID := int64(123)
+	testMessage := "Hello, bot!"
+
+	// Mock storage calls
+	mockStore.On("AddMessageToHistory", userID, mock.Anything).Return(nil)
+	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{
+		{Role: "user", Content: testMessage},
+	}, nil)
+	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
+
+	// Mock LLM call to return error
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
+		openrouter.ChatCompletionResponse{},
+		fmt.Errorf("API rate limit exceeded"),
+	)
+
+	result, err := bot.SendTestMessage(context.Background(), userID, testMessage, true)
+
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "failed to get completion")
 }

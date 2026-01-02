@@ -87,6 +87,23 @@ type ProgressEvent struct {
 // ProgressCallback is called during processing to report progress.
 type ProgressCallback func(event ProgressEvent)
 
+// TestMessageResult contains the result of a test message sent through the bot pipeline.
+// Used by the debug chat interface to display detailed metrics.
+type TestMessageResult struct {
+	Response         string
+	TimingTotal      time.Duration
+	TimingEmbedding  time.Duration
+	TimingSearch     time.Duration
+	TimingLLM        time.Duration
+	PromptTokens     int
+	CompletionTokens int
+	TotalCost        float64
+	TopicsMatched    int
+	FactsInjected    int
+	ContextPreview   string
+	RAGDebugInfo     *RetrievalDebugInfo
+}
+
 type Service struct {
 	logger               *slog.Logger
 	cfg                  *config.Config

@@ -86,6 +86,7 @@ type BotInterface interface {
 	GetActiveSessions() ([]rag.ActiveSessionInfo, error)
 	ForceCloseSession(ctx context.Context, userID int64) (int, error)
 	ForceCloseSessionWithProgress(ctx context.Context, userID int64, onProgress rag.ProgressCallback) (*rag.ProcessingStats, error)
+	SendTestMessage(ctx context.Context, userID int64, text string, saveToHistory bool) (*rag.TestMessageResult, error)
 }
 
 // dashboardStatsCache holds cached dashboard stats with TTL
@@ -192,6 +193,8 @@ func (s *Server) Start(ctx context.Context) error {
 		mux.HandleFunc("/ui/debug/topics", s.topicDebugHandler)
 		mux.HandleFunc("/ui/debug/sessions", s.sessionsHandler)
 		mux.HandleFunc("/ui/debug/sessions/process", s.sessionsProcessSSEHandler)
+		mux.HandleFunc("/ui/debug/chat", s.debugChatHandler)
+		mux.HandleFunc("/ui/debug/chat/send", s.debugChatSendHandler)
 		mux.HandleFunc("/ui/topics", s.topicsHandler)
 		mux.HandleFunc("/ui/facts", s.factsHandler)
 		mux.HandleFunc("/ui/facts/history", s.factsHistoryHandler)
@@ -1001,4 +1004,120 @@ func (s *Server) basicAuthMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// debugChatHandler handles GET /ui/debug/chat - renders the chat page with message history.
+func (s *Server) debugChatHandler(w http.ResponseWriter, r *http.Request) {
+	pageData, err := s.getCommonData(r)
+	if err != nil {
+		s.logger.Error("failed to get common data", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	// Get recent messages for selected user
+	var messages []storage.Message
+	if pageData.SelectedUserID > 0 {
+		messages, err = s.msgRepo.GetUnprocessedMessages(pageData.SelectedUserID)
+		if err != nil {
+			s.logger.Error("failed to get messages", "error", err)
+		}
+	}
+
+	data := struct {
+		ui.PageData
+		Messages []storage.Message
+	}{
+		PageData: pageData,
+		Messages: messages,
+	}
+
+	_ = s.renderer.Render(w, "debug_chat.html", data, ui.GetFuncMap())
+}
+
+// debugChatSendRequest is the request body for POST /ui/debug/chat/send.
+type debugChatSendRequest struct {
+	UserID        int64  `json:"user_id"`
+	Message       string `json:"message"`
+	SaveToHistory bool   `json:"save_to_history"`
+}
+
+// debugChatSendResponse is the response body for POST /ui/debug/chat/send.
+type debugChatSendResponse struct {
+	Response string `json:"response"`
+	Timing   struct {
+		TotalMs     int64 `json:"total_ms"`
+		EmbeddingMs int64 `json:"embedding_ms"`
+		SearchMs    int64 `json:"search_ms"`
+		LLMMs       int64 `json:"llm_ms"`
+	} `json:"timing"`
+	Tokens struct {
+		Prompt     int `json:"prompt"`
+		Completion int `json:"completion"`
+	} `json:"tokens"`
+	CostUSD float64 `json:"cost_usd"`
+	Context struct {
+		TopicsMatched int    `json:"topics_matched"`
+		FactsInjected int    `json:"facts_injected"`
+		Preview       string `json:"preview"`
+	} `json:"context"`
+	Error string `json:"error,omitempty"`
+}
+
+// debugChatSendHandler handles POST /ui/debug/chat/send - sends a test message and returns metrics.
+func (s *Server) debugChatSendHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req debugChatSendRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(debugChatSendResponse{Error: "Invalid JSON: " + err.Error()})
+		return
+	}
+
+	if req.UserID == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(debugChatSendResponse{Error: "user_id is required"})
+		return
+	}
+
+	if strings.TrimSpace(req.Message) == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(debugChatSendResponse{Error: "message is required"})
+		return
+	}
+
+	// Call bot's SendTestMessage
+	result, err := s.bot.SendTestMessage(r.Context(), req.UserID, req.Message, req.SaveToHistory)
+	if err != nil {
+		s.logger.Error("SendTestMessage failed", "error", err, "user_id", req.UserID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(debugChatSendResponse{Error: err.Error()})
+		return
+	}
+
+	// Build response
+	resp := debugChatSendResponse{
+		Response: result.Response,
+		CostUSD:  result.TotalCost,
+	}
+	resp.Timing.TotalMs = result.TimingTotal.Milliseconds()
+	resp.Timing.EmbeddingMs = result.TimingEmbedding.Milliseconds()
+	resp.Timing.SearchMs = result.TimingSearch.Milliseconds()
+	resp.Timing.LLMMs = result.TimingLLM.Milliseconds()
+	resp.Tokens.Prompt = result.PromptTokens
+	resp.Tokens.Completion = result.CompletionTokens
+	resp.Context.TopicsMatched = result.TopicsMatched
+	resp.Context.FactsInjected = result.FactsInjected
+	resp.Context.Preview = result.ContextPreview
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }
