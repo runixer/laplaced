@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Voice messages now use native Gemini audio understanding** instead of Yandex SpeechKit transcription
+  - Audio is sent directly to the LLM as base64-encoded OGG Opus
+  - Supports any language Gemini understands (not limited to Russian)
+  - No external speech recognition service required
+  - Yandex SpeechKit integration is now optional/unused
+  - Includes explicit instruction for LLM to respond in configured language and avoid reasoning leakage
+
 ### Added
 - Added `laplaced_build_info{version, go_version}` metric for version tracking in Grafana
 

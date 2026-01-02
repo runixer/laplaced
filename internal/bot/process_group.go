@@ -291,44 +291,57 @@ func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logge
 			}
 		}
 
-		// Handle voice messages - transcribe and add to content
+		// Handle voice messages - send audio directly to LLM (Gemini supports native audio)
 		if msg.Voice != nil {
-			if b.speechKitClient == nil {
-				logger.Info("speechkit client is disabled, skipping voice message transcription")
-			} else {
-				audioData, err := b.downloader.DownloadFile(ctx, msg.Voice.FileID)
-				if err != nil {
-					logger.Error("failed to download voice message", "error", err, "file_id", msg.Voice.FileID)
-					return "", "", nil, err
-				}
-
-				recognizedText, err := b.speechKitClient.Recognize(ctx, audioData)
-				if err != nil {
-					logger.Error("failed to recognize speech", "error", err)
-					return "", "", nil, err
-				}
-
-				if recognizedText != "" {
-					// Build voice message content with proper prefix (handles forwarded messages)
-					prefix := msg.BuildPrefix(b.translator, b.cfg.Bot.Language)
-					voicePrefix := b.translator.Get(b.cfg.Bot.Language, "bot.voice_recognition_prefix")
-					voiceContent := fmt.Sprintf("%s: %s %s", prefix, voicePrefix, recognizedText)
-
-					if historyContentBuilder.Len() > 0 {
-						historyContentBuilder.WriteString("\n")
-					}
-					historyContentBuilder.WriteString(voiceContent)
-
-					// Add to raw query for RAG
-					if rawQueryBuilder.Len() > 0 {
-						rawQueryBuilder.WriteString("\n")
-					}
-					rawQueryBuilder.WriteString(voicePrefix + " " + recognizedText)
-
-					// Set fullMessageContent so the text part is added below
-					fullMessageContent = voiceContent
-				}
+			base64Audio, err := b.downloader.DownloadFileAsBase64(ctx, msg.Voice.FileID)
+			if err != nil {
+				logger.Error("failed to download voice message", "error", err, "file_id", msg.Voice.FileID)
+				return "", "", nil, err
 			}
+
+			// Telegram sends voice messages as OGG Opus, which Gemini supports natively
+			mimeType := msg.Voice.MimeType
+			if mimeType == "" {
+				mimeType = "audio/ogg"
+			}
+
+			// Add explicit instruction for the LLM about the audio, including forwarding info if present
+			prefix := msg.BuildPrefix(b.translator, b.cfg.Bot.Language)
+			audioInstruction := b.translator.Get(b.cfg.Bot.Language, "bot.voice_instruction")
+			fullInstruction := fmt.Sprintf("%s: %s", prefix, audioInstruction)
+			partsForThisMessage = append(partsForThisMessage, openrouter.TextPart{
+				Type: "text",
+				Text: fullInstruction,
+			})
+
+			partsForThisMessage = append(partsForThisMessage, openrouter.FilePart{
+				Type: "file",
+				File: openrouter.File{
+					FileName: "voice.ogg",
+					FileData: fmt.Sprintf("data:%s;base64,%s", mimeType, base64Audio),
+				},
+			})
+
+			// Add placeholder to history for context (LLM will understand the audio directly)
+			voiceMarker := b.translator.Get(b.cfg.Bot.Language, "bot.voice_message_marker")
+			voiceContent := fmt.Sprintf("%s: %s", prefix, voiceMarker)
+
+			if historyContentBuilder.Len() > 0 {
+				historyContentBuilder.WriteString("\n")
+			}
+			historyContentBuilder.WriteString(voiceContent)
+
+			// For RAG, just note that there was a voice message
+			if rawQueryBuilder.Len() > 0 {
+				rawQueryBuilder.WriteString("\n")
+			}
+			rawQueryBuilder.WriteString(voiceMarker)
+
+			logger.Info("added voice message as native audio",
+				"file_id", msg.Voice.FileID,
+				"duration", msg.Voice.Duration,
+				"mime_type", mimeType,
+			)
 		}
 
 		if fullMessageContent != "" {

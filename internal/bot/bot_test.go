@@ -386,6 +386,8 @@ telegram:
   forwarded_from: "[Переслано от %s пользователем %s в %s]"
 bot:
   voice_recognition_prefix: "(Распознано из аудио):"
+  voice_message_marker: "[Voice message]"
+  voice_instruction: "The user sent a voice message (audio file below). Listen to it and respond in English. Do not describe the listening process — just respond to the content."
   system_prompt: "System"
 memory:
   facts_user_header: "=== Facts about User ==="
@@ -1106,7 +1108,7 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 }
 
 // TestProcessMessageGroup_VoiceMessage tests that voice messages are properly
-// transcribed and processed when going through the message grouper.
+// sent as native audio to the LLM (Gemini supports audio directly).
 func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -1114,7 +1116,6 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 	mockStore := new(MockStorage)
 	mockORClient := new(MockOpenRouterClient)
 	mockDownloader := new(MockFileDownloader)
-	mockSpeechKit := new(MockYandexClient)
 
 	cfg := &config.Config{
 		Bot: config.BotConfig{
@@ -1136,7 +1137,6 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
 		downloader:      mockDownloader,
-		speechKitClient: mockSpeechKit,
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
@@ -1147,25 +1147,23 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 	chatID := int64(456)
 	now := int(time.Now().Unix())
 	voiceFileID := "voice_file_id_789"
-	voiceData := []byte("fake_voice_data")
-	recognizedText := "Hello world"
+	voiceBase64 := "ZmFrZV92b2ljZV9kYXRh" // base64 of "fake_voice_data"
 
 	msg := &telegram.Message{
 		MessageID: 1,
 		From:      &telegram.User{ID: userID, FirstName: "User", Username: "testuser"},
 		Chat:      &telegram.Chat{ID: chatID},
 		Date:      now,
-		Voice:     &telegram.Voice{FileID: voiceFileID},
+		Voice:     &telegram.Voice{FileID: voiceFileID, MimeType: "audio/ogg"},
 	}
 
-	// Mock expectations
-	mockDownloader.On("DownloadFile", mock.Anything, voiceFileID).Return(voiceData, nil)
-	mockSpeechKit.On("Recognize", mock.Anything, voiceData).Return(recognizedText, nil)
+	// Mock expectations - now uses DownloadFileAsBase64 for native audio
+	mockDownloader.On("DownloadFileAsBase64", mock.Anything, voiceFileID).Return(voiceBase64, nil)
 
-	// Build expected content: "[User (@testuser) (time)]: (Распознано из аудио): Hello world"
-	voicePrefix := translator.Get("en", "bot.voice_recognition_prefix")
+	// Build expected content with voice marker
+	voiceMarker := translator.Get("en", "bot.voice_message_marker")
 	prefix := msg.BuildPrefix(translator, "en")
-	expectedHistoryContent := fmt.Sprintf("%s: %s %s", prefix, voicePrefix, recognizedText)
+	expectedHistoryContent := fmt.Sprintf("%s: %s", prefix, voiceMarker)
 
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{
 		{Role: "user", Content: expectedHistoryContent},
@@ -1218,20 +1216,28 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 	bot.processMessageGroup(context.Background(), group)
 
 	// Assertions
-	mockDownloader.AssertCalled(t, "DownloadFile", mock.Anything, voiceFileID)
-	mockSpeechKit.AssertCalled(t, "Recognize", mock.Anything, voiceData)
+	mockDownloader.AssertCalled(t, "DownloadFileAsBase64", mock.Anything, voiceFileID)
 	mockORClient.AssertCalled(t, "CreateChatCompletion", mock.Anything, mock.Anything)
 
 	assert.Len(t, capturedRequest.Messages, 2) // System + User
 	userContent := capturedRequest.Messages[1].Content
 	contentParts, ok := userContent.([]interface{})
 	assert.True(t, ok)
-	assert.Len(t, contentParts, 1)
+	assert.Len(t, contentParts, 2) // TextPart (instruction) + FilePart (audio)
 
+	// Verify voice instruction is sent as TextPart
 	textPart, ok := contentParts[0].(openrouter.TextPart)
-	assert.True(t, ok)
-	assert.Contains(t, textPart.Text, voicePrefix)
-	assert.Contains(t, textPart.Text, recognizedText)
+	assert.True(t, ok, "expected TextPart for voice instruction")
+	assert.Equal(t, "text", textPart.Type)
+	assert.Contains(t, textPart.Text, "voice message")
+
+	// Verify audio is sent as FilePart
+	filePart, ok := contentParts[1].(openrouter.FilePart)
+	assert.True(t, ok, "expected FilePart for voice message")
+	assert.Equal(t, "file", filePart.Type)
+	assert.Equal(t, "voice.ogg", filePart.File.FileName)
+	assert.Contains(t, filePart.File.FileData, "data:audio/ogg;base64,")
+	assert.Contains(t, filePart.File.FileData, voiceBase64)
 }
 
 func TestProcessUpdate(t *testing.T) {

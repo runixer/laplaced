@@ -14,6 +14,8 @@ bot:
   generic_error: "Oops, something went wrong. I couldn't send the answer. Please try repeating your request a bit later."
   voice_recognition_prefix: "(Recognized from audio):"
   voice_recognition_disabled: "Voice recognition is disabled."
+  voice_message_marker: "[Voice message]"
+  voice_instruction: "The user sent a voice message (audio file below). Listen to it and respond in English. Do not describe the listening process — just respond to the content."
   system_prompt: |
     You are %s — a friendly AI assistant.
 
