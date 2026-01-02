@@ -45,9 +45,10 @@ func TestCreateChatCompletion(t *testing.T) {
 				},
 			},
 			Usage: struct {
-				PromptTokens     int `json:"prompt_tokens"`
-				CompletionTokens int `json:"completion_tokens"`
-				TotalTokens      int `json:"total_tokens"`
+				PromptTokens     int      `json:"prompt_tokens"`
+				CompletionTokens int      `json:"completion_tokens"`
+				TotalTokens      int      `json:"total_tokens"`
+				Cost             *float64 `json:"cost,omitempty"`
 			}{PromptTokens: 100, CompletionTokens: 23, TotalTokens: 123},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
@@ -106,9 +107,10 @@ func TestCreateChatCompletionLogging(t *testing.T) {
 				},
 			},
 			Usage: struct {
-				PromptTokens     int `json:"prompt_tokens"`
-				CompletionTokens int `json:"completion_tokens"`
-				TotalTokens      int `json:"total_tokens"`
+				PromptTokens     int      `json:"prompt_tokens"`
+				CompletionTokens int      `json:"completion_tokens"`
+				TotalTokens      int      `json:"total_tokens"`
+				Cost             *float64 `json:"cost,omitempty"`
 			}{PromptTokens: 2, CompletionTokens: 3, TotalTokens: 5},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
@@ -430,8 +432,9 @@ func TestCreateEmbeddings(t *testing.T) {
 			},
 			Model: "text-embedding-model",
 			Usage: struct {
-				PromptTokens int `json:"prompt_tokens"`
-				TotalTokens  int `json:"total_tokens"`
+				PromptTokens int      `json:"prompt_tokens"`
+				TotalTokens  int      `json:"total_tokens"`
+				Cost         *float64 `json:"cost,omitempty"`
 			}{PromptTokens: 10, TotalTokens: 10},
 		}
 		_ = json.NewEncoder(w).Encode(resp)

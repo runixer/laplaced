@@ -996,7 +996,7 @@ func TestGetEmbedding(t *testing.T) {
 		return req.Model == "test-model" && len(req.Input) == 1 && req.Input[0] == "test text"
 	})).Return(&embResp, nil)
 
-	emb, err := svc.getEmbedding(context.Background(), "test text")
+	emb, _, err := svc.getEmbedding(context.Background(), "test text")
 
 	assert.NoError(t, err)
 	assert.Equal(t, []float32{0.1, 0.2, 0.3}, emb)
@@ -1013,7 +1013,7 @@ func TestGetEmbedding_EmptyResponse(t *testing.T) {
 	embResp := openrouter.EmbeddingResponse{Data: []openrouter.EmbeddingObject{}}
 	mockOR.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(&embResp, nil)
 
-	_, err := svc.getEmbedding(context.Background(), "test text")
+	_, _, err := svc.getEmbedding(context.Background(), "test text")
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no embedding returned")
@@ -1029,7 +1029,7 @@ func TestGetEmbedding_Error(t *testing.T) {
 
 	mockOR.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(nil, assert.AnError)
 
-	_, err := svc.getEmbedding(context.Background(), "test text")
+	_, _, err := svc.getEmbedding(context.Background(), "test text")
 
 	assert.Error(t, err)
 }

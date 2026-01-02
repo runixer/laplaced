@@ -114,6 +114,11 @@ func (b *Bot) ForceCloseSession(ctx context.Context, userID int64) (int, error) 
 	return b.ragService.ForceProcessUser(ctx, userID)
 }
 
+// ForceCloseSessionWithProgress immediately processes unprocessed messages with progress reporting.
+func (b *Bot) ForceCloseSessionWithProgress(ctx context.Context, userID int64, onProgress rag.ProgressCallback) (*rag.ProcessingStats, error) {
+	return b.ragService.ForceProcessUserWithProgress(ctx, userID, onProgress)
+}
+
 func (b *Bot) SetWebhook(webhookURL, secretToken string) error {
 	req := telegram.SetWebhookRequest{
 		URL:         webhookURL,

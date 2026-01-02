@@ -69,7 +69,48 @@ type MemoryUpdate struct {
 	} `json:"removed"`
 }
 
+// FactStats contains statistics about fact processing.
+type FactStats struct {
+	Created int
+	Updated int
+	Deleted int
+	// Usage tracking from API calls
+	PromptTokens     int
+	CompletionTokens int
+	EmbeddingTokens  int
+	Cost             *float64
+}
+
+// AddChatUsage adds usage from a chat completion response.
+func (s *FactStats) AddChatUsage(promptTokens, completionTokens int, cost *float64) {
+	s.PromptTokens += promptTokens
+	s.CompletionTokens += completionTokens
+	if cost != nil {
+		if s.Cost == nil {
+			s.Cost = new(float64)
+		}
+		*s.Cost += *cost
+	}
+}
+
+// AddEmbeddingUsage adds usage from an embedding response.
+func (s *FactStats) AddEmbeddingUsage(tokens int, cost *float64) {
+	s.EmbeddingTokens += tokens
+	if cost != nil {
+		if s.Cost == nil {
+			s.Cost = new(float64)
+		}
+		*s.Cost += *cost
+	}
+}
+
 func (s *Service) ProcessSession(ctx context.Context, userID int64, messages []storage.Message, referenceDate time.Time, topicID int64) error {
+	_, err := s.ProcessSessionWithStats(ctx, userID, messages, referenceDate, topicID)
+	return err
+}
+
+// ProcessSessionWithStats processes a session and returns statistics about fact changes.
+func (s *Service) ProcessSessionWithStats(ctx context.Context, userID int64, messages []storage.Message, referenceDate time.Time, topicID int64) (FactStats, error) {
 	// Set a timeout to prevent hanging indefinitely if the model is slow or unresponsive
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
@@ -79,7 +120,7 @@ func (s *Service) ProcessSession(ctx context.Context, userID int64, messages []s
 	// 1. Load current facts
 	facts, err := s.factRepo.GetFacts(userID)
 	if err != nil {
-		return fmt.Errorf("failed to get facts: %w", err)
+		return FactStats{}, fmt.Errorf("failed to get facts: %w", err)
 	}
 
 	// Fetch user info for formatting
@@ -97,20 +138,24 @@ func (s *Service) ProcessSession(ctx context.Context, userID int64, messages []s
 	}
 
 	// 2. Prepare prompt
-	update, requestInput, err := s.extractMemoryUpdate(ctx, messages, facts, referenceDate, user)
+	update, requestInput, extractUsage, err := s.extractMemoryUpdate(ctx, messages, facts, referenceDate, user)
 	if err != nil {
-		return fmt.Errorf("failed to extract memory update: %w", err)
+		return FactStats{}, fmt.Errorf("failed to extract memory update: %w", err)
 	}
 
-	// 3. Apply updates
-	if err := s.applyUpdate(ctx, userID, update, facts, referenceDate, topicID, requestInput); err != nil {
-		return fmt.Errorf("failed to apply memory update: %w", err)
+	// 3. Apply updates and collect stats
+	stats, err := s.applyUpdateWithStats(ctx, userID, update, facts, referenceDate, topicID, requestInput)
+	if err != nil {
+		return FactStats{}, fmt.Errorf("failed to apply memory update: %w", err)
 	}
 
-	return nil
+	// Add LLM usage from extraction call
+	stats.AddChatUsage(extractUsage.PromptTokens, extractUsage.CompletionTokens, extractUsage.Cost)
+
+	return stats, nil
 }
 
-func (s *Service) extractMemoryUpdate(ctx context.Context, session []storage.Message, facts []storage.Fact, referenceDate time.Time, user *storage.User) (*MemoryUpdate, string, error) {
+func (s *Service) extractMemoryUpdate(ctx context.Context, session []storage.Message, facts []storage.Fact, referenceDate time.Time, user *storage.User) (*MemoryUpdate, string, chatUsage, error) {
 	var sb strings.Builder
 	for _, msg := range session {
 		if msg.Role == "user" {
@@ -263,25 +308,34 @@ func (s *Service) extractMemoryUpdate(ctx context.Context, session []storage.Mes
 
 	resp, err := s.orClient.CreateChatCompletion(ctx, req)
 	if err != nil {
-		return nil, fullRequest, err
+		return nil, fullRequest, chatUsage{}, err
+	}
+
+	usage := chatUsage{
+		PromptTokens:     resp.Usage.PromptTokens,
+		CompletionTokens: resp.Usage.CompletionTokens,
+		Cost:             resp.Usage.Cost,
 	}
 
 	if len(resp.Choices) == 0 {
-		return nil, fullRequest, fmt.Errorf("empty response")
+		return nil, fullRequest, usage, fmt.Errorf("empty response")
 	}
 
 	var update MemoryUpdate
 	if err := json.Unmarshal([]byte(resp.Choices[0].Message.Content), &update); err != nil {
-		return nil, fullRequest, fmt.Errorf("failed to parse response: %w", err)
+		return nil, fullRequest, usage, fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	return &update, fullRequest, nil
+	return &update, fullRequest, usage, nil
 }
 
-func (s *Service) applyUpdate(ctx context.Context, userID int64, update *MemoryUpdate, currentFacts []storage.Fact, referenceDate time.Time, topicID int64, requestInput string) error {
+func (s *Service) applyUpdateWithStats(ctx context.Context, userID int64, update *MemoryUpdate, currentFacts []storage.Fact, referenceDate time.Time, topicID int64, requestInput string) (FactStats, error) {
+	var stats FactStats
+
 	// Handle Added
 	for _, added := range update.Added {
-		emb, err := s.getEmbedding(ctx, added.Content)
+		emb, embUsage, err := s.getEmbedding(ctx, added.Content)
+		stats.AddEmbeddingUsage(embUsage.Tokens, embUsage.Cost)
 		if err != nil {
 			s.logger.Error("failed to get embedding", "error", err)
 			continue
@@ -308,6 +362,8 @@ func (s *Service) applyUpdate(ctx context.Context, userID int64, update *MemoryU
 
 		if err := s.deduplicateAndAddFact(ctx, fact, added.Reason, topicID, requestInput); err != nil {
 			s.logger.Error("failed to process fact addition", "error", err)
+		} else {
+			stats.Created++
 		}
 	}
 
@@ -331,7 +387,9 @@ func (s *Service) applyUpdate(ctx context.Context, userID int64, update *MemoryU
 		var emb []float32
 		if updated.Content != existingFact.Content {
 			var err error
-			emb, err = s.getEmbedding(ctx, updated.Content)
+			var embUsage embeddingUsage
+			emb, embUsage, err = s.getEmbedding(ctx, updated.Content)
+			stats.AddEmbeddingUsage(embUsage.Tokens, embUsage.Cost)
 			if err != nil {
 				s.logger.Error("failed to get embedding for update", "error", err)
 				continue
@@ -358,6 +416,7 @@ func (s *Service) applyUpdate(ctx context.Context, userID int64, update *MemoryU
 		if err := s.factRepo.UpdateFact(fact); err != nil {
 			s.logger.Error("failed to update fact", "error", err)
 		} else {
+			stats.Updated++
 			s.logger.Info("Fact updated", "id", updated.ID)
 			if s.cfg.Server.DebugMode {
 				var tID *int64
@@ -404,6 +463,7 @@ func (s *Service) applyUpdate(ctx context.Context, userID int64, update *MemoryU
 		if err := s.factRepo.DeleteFact(userID, removed.ID); err != nil {
 			s.logger.Error("failed to delete fact", "error", err)
 		} else {
+			stats.Deleted++
 			s.logger.Info("Fact removed", "id", removed.ID)
 			if s.cfg.Server.DebugMode {
 				var tID *int64
@@ -429,21 +489,38 @@ func (s *Service) applyUpdate(ctx context.Context, userID int64, update *MemoryU
 		}
 	}
 
-	return nil
+	return stats, nil
 }
 
-func (s *Service) getEmbedding(ctx context.Context, text string) ([]float32, error) {
+// chatUsage holds usage info from chat completion call.
+type chatUsage struct {
+	PromptTokens     int
+	CompletionTokens int
+	Cost             *float64
+}
+
+// embeddingUsage holds usage info from embedding call.
+type embeddingUsage struct {
+	Tokens int
+	Cost   *float64
+}
+
+func (s *Service) getEmbedding(ctx context.Context, text string) ([]float32, embeddingUsage, error) {
 	resp, err := s.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
 		Model: s.cfg.RAG.EmbeddingModel,
 		Input: []string{text},
 	})
 	if err != nil {
-		return nil, err
+		return nil, embeddingUsage{}, err
+	}
+	usage := embeddingUsage{
+		Tokens: resp.Usage.TotalTokens,
+		Cost:   resp.Usage.Cost,
 	}
 	if len(resp.Data) == 0 {
-		return nil, fmt.Errorf("no embedding returned")
+		return nil, usage, fmt.Errorf("no embedding returned")
 	}
-	return resp.Data[0].Embedding, nil
+	return resp.Data[0].Embedding, usage, nil
 }
 
 // addFactWithHistory adds a fact and records history if debug mode is enabled.
@@ -541,7 +618,7 @@ func (s *Service) deduplicateAndAddFact(ctx context.Context, fact storage.Fact, 
 
 		// Re-embed if content changed
 		if action == "MERGE" || newContent != targetFact.Content {
-			emb, err := s.getEmbedding(ctx, newContent)
+			emb, _, err := s.getEmbedding(ctx, newContent)
 			if err == nil {
 				targetFact.Embedding = emb
 			}

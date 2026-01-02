@@ -8,18 +8,138 @@
     .session-card:hover {
         background: #e9ecef;
     }
+    .session-card.processing {
+        border-left-color: #ffc107;
+        opacity: 0.7;
+    }
     .badge-messages {
         background-color: #198754;
+    }
+    .badge-context {
+        background-color: #6c757d;
     }
     .session-empty {
         text-align: center;
         padding: 3rem;
         color: #6c757d;
     }
+    .countdown {
+        font-weight: 500;
+        color: #0d6efd;
+    }
+    .countdown.soon {
+        color: #dc3545;
+    }
+    /* Modal styles */
+    .modal-backdrop {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        display: none;
+        z-index: 1000;
+    }
+    .modal-content {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: white;
+        padding: 2rem;
+        border-radius: 8px;
+        min-width: 400px;
+        max-width: 500px;
+        z-index: 1001;
+    }
+    .progress-container {
+        margin: 1.5rem 0;
+    }
+    .progress-bar-wrapper {
+        background: #e9ecef;
+        border-radius: 4px;
+        height: 24px;
+        overflow: hidden;
+    }
+    .progress-bar-fill {
+        background: linear-gradient(90deg, #0d6efd, #6610f2);
+        height: 100%;
+        width: 0%;
+        transition: width 0.3s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 12px;
+    }
+    .progress-bar-fill.indeterminate {
+        width: 100%;
+        background: linear-gradient(90deg, #0d6efd 25%, #6610f2 50%, #0d6efd 75%);
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+    }
+    @keyframes shimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+    }
+    .stage-indicator {
+        font-size: 0.9rem;
+        color: #6c757d;
+        margin-bottom: 0.5rem;
+    }
+    .stats-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem;
+        margin-top: 1rem;
+    }
+    .stat-item {
+        background: #f8f9fa;
+        padding: 0.75rem;
+        border-radius: 4px;
+        text-align: center;
+    }
+    .stat-value {
+        font-size: 1.5rem;
+        font-weight: bold;
+        color: #0d6efd;
+    }
+    .stat-label {
+        font-size: 0.75rem;
+        color: #6c757d;
+        text-transform: uppercase;
+    }
+    .result-success {
+        color: #198754;
+    }
+    .result-error {
+        color: #dc3545;
+    }
 </style>
 {{end}}
 
 {{define "content"}}
+<!-- Processing Modal -->
+<div id="processingModal" class="modal-backdrop">
+    <div class="modal-content">
+        <h5 id="modalTitle">Processing Session</h5>
+        <div class="progress-container">
+            <div class="stage-indicator" id="stageText">Initializing...</div>
+            <div class="progress-bar-wrapper">
+                <div class="progress-bar-fill indeterminate" id="progressBar"></div>
+            </div>
+        </div>
+        <div id="resultsContainer" style="display: none;">
+            <h6>Results:</h6>
+            <div class="stats-grid" id="statsGrid"></div>
+        </div>
+        <div class="text-end mt-3">
+            <button id="closeModalBtn" class="btn btn-secondary" style="display: none;" onclick="closeModal()">Close</button>
+        </div>
+    </div>
+</div>
+
 <div class="row mb-4">
     <div class="col-12">
         <div class="d-flex justify-content-between align-items-center">
@@ -35,28 +155,32 @@
 </div>
 
 {{if .Data}}
-<div class="row">
+<div class="row" id="sessionsContainer">
     {{range .Data}}
-    <div class="col-md-6 col-lg-4 mb-3">
+    <div class="col-md-6 col-lg-4 mb-3" id="session-{{.UserID}}">
         <div class="card session-card h-100">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-start mb-2">
-                    <h6 class="card-title mb-0">User ID: {{.UserID}}</h6>
-                    <span class="badge badge-messages">{{.MessageCount}} msg</span>
+                    <div>
+                        <h6 class="card-title mb-0">{{.UserName}}</h6>
+                        <small class="text-muted">ID: {{.UserID}}</small>
+                    </div>
+                    <div class="text-end">
+                        <span class="badge badge-messages">{{.MessageCount}} msg</span>
+                        <br>
+                        <span class="badge badge-context mt-1">{{.ContextSize}} chars</span>
+                    </div>
                 </div>
-                <div class="small text-muted">
-                    <div><strong>First message:</strong> {{.FirstMessage}}</div>
-                    <div><strong>Last message:</strong> {{.LastMessage}}</div>
-                    <div><strong>Duration:</strong> {{.Duration}}</div>
+                <div class="small text-muted mt-2">
+                    <div><strong>First message:</strong> <span class="local-time" data-iso="{{.FirstMessageISO}}"></span></div>
+                    <div><strong>Last message:</strong> <span class="local-time" data-iso="{{.LastMessageISO}}"></span></div>
+                    <div><strong>Auto-process in:</strong> <span class="countdown" data-process-at="{{.ProcessAtISO}}"></span></div>
                 </div>
             </div>
             <div class="card-footer bg-transparent border-top-0">
-                <form method="POST" action="/ui/debug/sessions" onsubmit="return confirm('Force close this session? All unprocessed messages will be converted to topics immediately.');">
-                    <input type="hidden" name="user_id" value="{{.UserID}}">
-                    <button type="submit" class="btn btn-warning btn-sm w-100">
-                        Force Process
-                    </button>
-                </form>
+                <button type="button" class="btn btn-warning btn-sm w-100" onclick="processSession({{.UserID}}, '{{.UserName}}')">
+                    Force Process
+                </button>
             </div>
         </div>
     </div>
@@ -90,9 +214,209 @@
 
 {{define "scripts"}}
 <script>
-// Auto-refresh every 30 seconds
-setTimeout(function() {
+// Format ISO timestamps to local time
+function formatLocalTime(isoString) {
+    const date = new Date(isoString);
+    return date.toLocaleString(undefined, {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+}
+
+// Format countdown duration
+function formatCountdown(ms) {
+    if (ms <= 0) return 'now';
+
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+
+    if (hours > 0) {
+        const remainingMinutes = minutes % 60;
+        return hours + 'h ' + remainingMinutes + 'm';
+    } else if (minutes > 0) {
+        const remainingSeconds = seconds % 60;
+        return minutes + 'm ' + remainingSeconds + 's';
+    } else {
+        return seconds + 's';
+    }
+}
+
+// Update all local times
+document.querySelectorAll('.local-time').forEach(function(el) {
+    const iso = el.getAttribute('data-iso');
+    if (iso) {
+        el.textContent = formatLocalTime(iso);
+    }
+});
+
+// Update countdown timers
+function updateCountdowns() {
+    const now = Date.now();
+    document.querySelectorAll('.countdown').forEach(function(el) {
+        const processAt = new Date(el.getAttribute('data-process-at')).getTime();
+        const remaining = processAt - now;
+
+        el.textContent = formatCountdown(remaining);
+
+        if (remaining < 30 * 60 * 1000) {
+            el.classList.add('soon');
+        } else {
+            el.classList.remove('soon');
+        }
+
+        if (remaining <= 0) {
+            location.reload();
+        }
+    });
+}
+
+updateCountdowns();
+setInterval(updateCountdowns, 1000);
+
+// Modal functions
+let autoRefreshTimeout = null;
+
+function showModal() {
+    document.getElementById('processingModal').style.display = 'block';
+    document.getElementById('closeModalBtn').style.display = 'none';
+    document.getElementById('resultsContainer').style.display = 'none';
+    document.getElementById('progressBar').className = 'progress-bar-fill indeterminate';
+    document.getElementById('progressBar').style.width = '100%';
+    document.getElementById('progressBar').textContent = '';
+
+    // Clear any pending auto-refresh
+    if (autoRefreshTimeout) {
+        clearTimeout(autoRefreshTimeout);
+    }
+}
+
+function closeModal() {
+    document.getElementById('processingModal').style.display = 'none';
     location.reload();
-}, 30000);
+}
+
+function updateProgress(event) {
+    const stageText = document.getElementById('stageText');
+    const progressBar = document.getElementById('progressBar');
+    const resultsContainer = document.getElementById('resultsContainer');
+    const closeBtn = document.getElementById('closeModalBtn');
+    const statsGrid = document.getElementById('statsGrid');
+    const modalTitle = document.getElementById('modalTitle');
+
+    stageText.textContent = event.message || 'Processing...';
+
+    if (event.complete) {
+        progressBar.className = 'progress-bar-fill';
+        progressBar.style.width = '100%';
+
+        if (event.stage === 'error') {
+            progressBar.style.background = '#dc3545';
+            modalTitle.innerHTML = '<span class="result-error">Processing Failed</span>';
+        } else {
+            progressBar.style.background = '#198754';
+            modalTitle.innerHTML = '<span class="result-success">Processing Complete</span>';
+        }
+
+        if (event.stats) {
+            const totalTokens = (event.stats.prompt_tokens || 0) + (event.stats.completion_tokens || 0) + (event.stats.embedding_tokens || 0);
+            const cost = event.stats.total_cost ? ('$' + event.stats.total_cost.toFixed(4)) : '-';
+            statsGrid.innerHTML = `
+                <div class="stat-item">
+                    <div class="stat-value">${event.stats.messages_processed || 0}</div>
+                    <div class="stat-label">Messages</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value">${event.stats.topics_extracted || 0}</div>
+                    <div class="stat-label">Topics</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value">${event.stats.topics_merged || 0}</div>
+                    <div class="stat-label">Merged</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" style="color: #198754;">${event.stats.facts_created || 0}</div>
+                    <div class="stat-label">Facts +</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" style="color: #0d6efd;">${event.stats.facts_updated || 0}</div>
+                    <div class="stat-label">Facts ~</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" style="color: #dc3545;">${event.stats.facts_deleted || 0}</div>
+                    <div class="stat-label">Facts -</div>
+                </div>
+                <div class="stat-item" style="grid-column: span 2;">
+                    <div class="stat-value" style="font-size: 1rem;">${totalTokens.toLocaleString()} tokens</div>
+                    <div class="stat-label">API Usage (prompt: ${(event.stats.prompt_tokens || 0).toLocaleString()}, completion: ${(event.stats.completion_tokens || 0).toLocaleString()}, embedding: ${(event.stats.embedding_tokens || 0).toLocaleString()})</div>
+                </div>
+                <div class="stat-item" style="grid-column: span 2;">
+                    <div class="stat-value" style="font-size: 1.25rem; color: #6c757d;">${cost}</div>
+                    <div class="stat-label">Estimated Cost</div>
+                </div>
+            `;
+            resultsContainer.style.display = 'block';
+        }
+
+        closeBtn.style.display = 'inline-block';
+    } else if (event.total > 0) {
+        progressBar.className = 'progress-bar-fill';
+        const percent = Math.round((event.current / event.total) * 100);
+        progressBar.style.width = percent + '%';
+        progressBar.textContent = percent + '%';
+    }
+}
+
+function processSession(userId, userName) {
+    if (!confirm('Process session for ' + userName + '?\n\nThis will extract topics and facts from unprocessed messages.')) {
+        return;
+    }
+
+    // Mark card as processing
+    const card = document.getElementById('session-' + userId);
+    if (card) {
+        card.querySelector('.session-card').classList.add('processing');
+        card.querySelector('button').disabled = true;
+    }
+
+    document.getElementById('modalTitle').textContent = 'Processing: ' + userName;
+    showModal();
+
+    const eventSource = new EventSource('/ui/debug/sessions/process?user_id=' + userId);
+
+    eventSource.onmessage = function(e) {
+        try {
+            const event = JSON.parse(e.data);
+            updateProgress(event);
+
+            if (event.complete) {
+                eventSource.close();
+            }
+        } catch (err) {
+            console.error('Failed to parse event:', err);
+        }
+    };
+
+    eventSource.onerror = function(e) {
+        console.error('SSE error:', e);
+        eventSource.close();
+        updateProgress({
+            stage: 'error',
+            complete: true,
+            message: 'Connection lost. Processing may still be in progress.'
+        });
+    };
+}
+
+// Auto-refresh every 60 seconds (longer since we have live updates now)
+setTimeout(function() {
+    if (document.getElementById('processingModal').style.display !== 'block') {
+        location.reload();
+    }
+}, 60000);
 </script>
 {{end}}

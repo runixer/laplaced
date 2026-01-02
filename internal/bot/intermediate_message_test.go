@@ -130,9 +130,10 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 			}},
 		},
 		Usage: struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
+			PromptTokens     int      `json:"prompt_tokens"`
+			CompletionTokens int      `json:"completion_tokens"`
+			TotalTokens      int      `json:"total_tokens"`
+			Cost             *float64 `json:"cost,omitempty"`
 		}{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 	}, nil).Once()
 
@@ -160,9 +161,10 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 			}},
 		},
 		Usage: struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
+			PromptTokens     int      `json:"prompt_tokens"`
+			CompletionTokens int      `json:"completion_tokens"`
+			TotalTokens      int      `json:"total_tokens"`
+			Cost             *float64 `json:"cost,omitempty"`
 		}{PromptTokens: 5, CompletionTokens: 10, TotalTokens: 15},
 	}, nil).Once()
 
@@ -191,9 +193,10 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 			}},
 		},
 		Usage: struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
+			PromptTokens     int      `json:"prompt_tokens"`
+			CompletionTokens int      `json:"completion_tokens"`
+			TotalTokens      int      `json:"total_tokens"`
+			Cost             *float64 `json:"cost,omitempty"`
 		}{PromptTokens: 20, CompletionTokens: 10, TotalTokens: 30},
 	}, nil).Once()
 

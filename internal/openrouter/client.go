@@ -214,9 +214,10 @@ type ChatCompletionResponse struct {
 		} `json:"message"`
 	} `json:"choices"`
 	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
+		PromptTokens     int      `json:"prompt_tokens"`
+		CompletionTokens int      `json:"completion_tokens"`
+		TotalTokens      int      `json:"total_tokens"`
+		Cost             *float64 `json:"cost,omitempty"` // Cost in USD from OpenRouter
 	} `json:"usage"`
 }
 
@@ -237,8 +238,9 @@ type EmbeddingResponse struct {
 	Data   []EmbeddingObject `json:"data"`
 	Model  string            `json:"model"`
 	Usage  struct {
-		PromptTokens int `json:"prompt_tokens"`
-		TotalTokens  int `json:"total_tokens"`
+		PromptTokens int      `json:"prompt_tokens"`
+		TotalTokens  int      `json:"total_tokens"`
+		Cost         *float64 `json:"cost,omitempty"` // Cost in USD from OpenRouter
 	} `json:"usage"`
 }
 
@@ -463,6 +465,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		"prompt_tokens", chatResp.Usage.PromptTokens,
 		"completion_tokens", chatResp.Usage.CompletionTokens,
 		"total_tokens", chatResp.Usage.TotalTokens,
+		"cost", chatResp.Usage.Cost,
 	)
 
 	return chatResp, nil

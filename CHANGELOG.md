@@ -9,9 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Added startup warning when `allowed_user_ids` is empty (bot rejects all messages in this case)
+- Added Session Inspector in web UI: view active sessions with user name, message count, timestamps (local timezone), countdown timer until auto-processing, and context size
+- Added "Force Process" with real-time progress bar via SSE, showing detailed results: topics extracted/merged, facts created/updated/deleted, API usage (tokens and cost)
 
 ### Changed
-- Improved test coverage: bot 64%→70.5%, rag 69.7%→73.9%, web 65%→71.1%, markdown 65.4%→70.5%, memory 50%→77.5%, openrouter 46%→81.7%
+- Improved test coverage: rag 67%→75.5%, web 57%→70.9%, bot 67%→68.1%
 
 ## [0.2.2] - 2026-01-01
 

@@ -28,6 +28,65 @@ type FactVectorItem struct {
 	Embedding []float32
 }
 
+// ProcessingStats contains detailed statistics about session processing.
+type ProcessingStats struct {
+	MessagesProcessed int `json:"messages_processed"`
+	TopicsExtracted   int `json:"topics_extracted"`
+	TopicsMerged      int `json:"topics_merged"`
+	FactsCreated      int `json:"facts_created"`
+	FactsUpdated      int `json:"facts_updated"`
+	FactsDeleted      int `json:"facts_deleted"`
+	// Usage stats from API calls
+	PromptTokens     int      `json:"prompt_tokens"`
+	CompletionTokens int      `json:"completion_tokens"`
+	EmbeddingTokens  int      `json:"embedding_tokens"`
+	TotalCost        *float64 `json:"total_cost,omitempty"` // Cost in USD
+}
+
+// AddChatUsage adds usage from a chat completion response.
+func (s *ProcessingStats) AddChatUsage(promptTokens, completionTokens int, cost *float64) {
+	s.PromptTokens += promptTokens
+	s.CompletionTokens += completionTokens
+	if cost != nil {
+		if s.TotalCost == nil {
+			s.TotalCost = new(float64)
+		}
+		*s.TotalCost += *cost
+	}
+}
+
+// AddEmbeddingUsage adds usage from an embedding response.
+func (s *ProcessingStats) AddEmbeddingUsage(tokens int, cost *float64) {
+	s.EmbeddingTokens += tokens
+	if cost != nil {
+		if s.TotalCost == nil {
+			s.TotalCost = new(float64)
+		}
+		*s.TotalCost += *cost
+	}
+}
+
+// UsageInfo holds usage data from a single API call.
+type UsageInfo struct {
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+	Cost             *float64
+}
+
+// ProgressEvent represents a progress update during processing.
+type ProgressEvent struct {
+	Stage    string           `json:"stage"`           // "topics", "consolidation", "facts"
+	Current  int              `json:"current"`         // Current item being processed
+	Total    int              `json:"total"`           // Total items to process
+	Message  string           `json:"message"`         // Human-readable status message
+	Complete bool             `json:"complete"`        // True when processing is complete
+	Stats    *ProcessingStats `json:"stats,omitempty"` // Final stats when complete
+}
+
+// ProgressCallback is called during processing to report progress.
+type ProgressCallback func(event ProgressEvent)
+
 type Service struct {
 	logger               *slog.Logger
 	cfg                  *config.Config
@@ -553,12 +612,352 @@ func (s *Service) ForceProcessUser(ctx context.Context, userID int64) (int, erro
 	return processedCount, nil
 }
 
+// ForceProcessUserWithProgress processes all unprocessed messages for a user with progress reporting.
+// Unlike ForceProcessUser, this runs consolidation and fact extraction synchronously.
+func (s *Service) ForceProcessUserWithProgress(ctx context.Context, userID int64, onProgress ProgressCallback) (*ProcessingStats, error) {
+	stats := &ProcessingStats{}
+
+	// 1. Fetch unprocessed messages
+	messages, err := s.msgRepo.GetUnprocessedMessages(userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch unprocessed messages: %w", err)
+	}
+
+	if len(messages) == 0 {
+		onProgress(ProgressEvent{
+			Stage:    "complete",
+			Complete: true,
+			Message:  "No messages to process",
+			Stats:    stats,
+		})
+		return stats, nil
+	}
+
+	stats.MessagesProcessed = len(messages)
+
+	// 2. Extract topics
+	onProgress(ProgressEvent{
+		Stage:   "topics",
+		Current: 0,
+		Total:   1,
+		Message: "Extracting topics from messages...",
+	})
+
+	topicIDs, err := s.processChunkWithStats(ctx, userID, messages, stats)
+	if err != nil {
+		return stats, fmt.Errorf("failed to extract topics: %w", err)
+	}
+	stats.TopicsExtracted = len(topicIDs)
+
+	onProgress(ProgressEvent{
+		Stage:   "topics",
+		Current: 1,
+		Total:   1,
+		Message: fmt.Sprintf("Extracted %d topics", len(topicIDs)),
+	})
+
+	// 3. Run consolidation synchronously
+	onProgress(ProgressEvent{
+		Stage:   "consolidation",
+		Current: 0,
+		Total:   1,
+		Message: "Checking for similar topics to merge...",
+	})
+
+	mergeCount := s.runConsolidationSync(ctx, userID, topicIDs, stats)
+	stats.TopicsMerged = mergeCount
+
+	onProgress(ProgressEvent{
+		Stage:   "consolidation",
+		Current: 1,
+		Total:   1,
+		Message: fmt.Sprintf("Merged %d topics", mergeCount),
+	})
+
+	// 4. Process facts for new topics
+	// Re-fetch topics that weren't merged and need fact extraction
+	pendingTopics, err := s.topicRepo.GetTopicsPendingFacts(userID)
+	if err != nil {
+		s.logger.Error("failed to get pending topics", "error", err)
+	}
+
+	// Filter to only include topics we just created (that are in topicIDs)
+	topicIDSet := make(map[int64]bool)
+	for _, id := range topicIDs {
+		topicIDSet[id] = true
+	}
+
+	var toProcess []storage.Topic
+	for _, t := range pendingTopics {
+		if topicIDSet[t.ID] && t.ConsolidationChecked {
+			toProcess = append(toProcess, t)
+		}
+	}
+
+	if len(toProcess) > 0 {
+		onProgress(ProgressEvent{
+			Stage:   "facts",
+			Current: 0,
+			Total:   len(toProcess),
+			Message: fmt.Sprintf("Extracting facts from %d topics...", len(toProcess)),
+		})
+
+		for i, topic := range toProcess {
+			onProgress(ProgressEvent{
+				Stage:   "facts",
+				Current: i,
+				Total:   len(toProcess),
+				Message: fmt.Sprintf("Processing topic %d/%d...", i+1, len(toProcess)),
+			})
+
+			msgs, err := s.msgRepo.GetMessagesInRange(ctx, userID, topic.StartMsgID, topic.EndMsgID)
+			if err != nil {
+				s.logger.Error("failed to get messages for topic", "topic_id", topic.ID, "error", err)
+				continue
+			}
+
+			if len(msgs) == 0 {
+				_ = s.topicRepo.SetTopicFactsExtracted(topic.ID, true)
+				continue
+			}
+
+			factStats, err := s.memoryService.ProcessSessionWithStats(ctx, userID, msgs, topic.CreatedAt, topic.ID)
+			if err != nil {
+				s.logger.Error("failed to process facts", "topic_id", topic.ID, "error", err)
+				continue
+			}
+
+			stats.FactsCreated += factStats.Created
+			stats.FactsUpdated += factStats.Updated
+			stats.FactsDeleted += factStats.Deleted
+			// Aggregate usage from fact extraction (cost is aggregated, tokens counted separately)
+			stats.PromptTokens += factStats.PromptTokens
+			stats.CompletionTokens += factStats.CompletionTokens
+			stats.EmbeddingTokens += factStats.EmbeddingTokens
+			if factStats.Cost != nil {
+				if stats.TotalCost == nil {
+					stats.TotalCost = new(float64)
+				}
+				*stats.TotalCost += *factStats.Cost
+			}
+
+			_ = s.topicRepo.SetTopicFactsExtracted(topic.ID, true)
+		}
+
+		onProgress(ProgressEvent{
+			Stage:   "facts",
+			Current: len(toProcess),
+			Total:   len(toProcess),
+			Message: fmt.Sprintf("Processed facts: %d created, %d updated, %d deleted",
+				stats.FactsCreated, stats.FactsUpdated, stats.FactsDeleted),
+		})
+	}
+
+	// Final progress
+	onProgress(ProgressEvent{
+		Stage:    "complete",
+		Complete: true,
+		Message:  "Processing complete",
+		Stats:    stats,
+	})
+
+	return stats, nil
+}
+
+// processChunkWithStats processes a chunk and returns the created topic IDs.
+func (s *Service) processChunkWithStats(ctx context.Context, userID int64, chunk []storage.Message, stats *ProcessingStats) ([]int64, error) {
+	if len(chunk) == 0 {
+		return nil, nil
+	}
+	s.logger.Info("Processing chunk with stats", "user_id", userID, "count", len(chunk))
+
+	// 1. Extract Topics
+	topics, topicUsage, err := s.extractTopics(ctx, chunk)
+	if err != nil {
+		return nil, fmt.Errorf("extract topics: %w", err)
+	}
+	stats.AddChatUsage(topicUsage.PromptTokens, topicUsage.CompletionTokens, topicUsage.Cost)
+
+	// 2. Validate Coverage
+	chunkStartID, chunkEndID := findChunkBounds(chunk)
+	referenceDate := chunk[len(chunk)-1].CreatedAt
+
+	var validTopics []ExtractedTopic
+	for _, t := range topics {
+		if t.StartMsgID < chunkStartID {
+			t.StartMsgID = chunkStartID
+		}
+		if t.EndMsgID > chunkEndID {
+			t.EndMsgID = chunkEndID
+		}
+		if t.StartMsgID > t.EndMsgID {
+			continue
+		}
+
+		var foundMessages []storage.Message
+		for _, msg := range chunk {
+			if msg.ID >= t.StartMsgID && msg.ID <= t.EndMsgID {
+				foundMessages = append(foundMessages, msg)
+			}
+		}
+
+		if len(foundMessages) == 0 {
+			continue
+		}
+
+		t.StartMsgID, t.EndMsgID = findChunkBounds(foundMessages)
+		validTopics = append(validTopics, t)
+	}
+
+	stragglerIDs := findStragglers(chunk, validTopics)
+	if len(stragglerIDs) > 0 {
+		return nil, fmt.Errorf("topic extraction incomplete: %d messages not covered", len(stragglerIDs))
+	}
+
+	// 3. Vectorize and Save Topics
+	var topicIDs []int64
+	var embeddingInputs []string
+
+	for _, t := range validTopics {
+		var contentBuilder strings.Builder
+		for _, msg := range chunk {
+			if msg.ID >= t.StartMsgID && msg.ID <= t.EndMsgID {
+				contentBuilder.WriteString(fmt.Sprintf("[%s]: %s\n", msg.Role, msg.Content))
+			}
+		}
+		embeddingInput := fmt.Sprintf("Topic Summary: %s\n\nConversation Log:\n%s", t.Summary, contentBuilder.String())
+		embeddingInputs = append(embeddingInputs, embeddingInput)
+	}
+
+	if len(embeddingInputs) > 0 {
+		resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
+			Model: s.cfg.RAG.EmbeddingModel,
+			Input: embeddingInputs,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create embeddings: %w", err)
+		}
+		stats.AddEmbeddingUsage(resp.Usage.TotalTokens, resp.Usage.Cost)
+
+		if len(resp.Data) != len(validTopics) {
+			return nil, fmt.Errorf("embedding count mismatch")
+		}
+
+		sort.Slice(resp.Data, func(i, j int) bool {
+			return resp.Data[i].Index < resp.Data[j].Index
+		})
+
+		for i, t := range validTopics {
+			topic := storage.Topic{
+				UserID:         userID,
+				Summary:        t.Summary,
+				StartMsgID:     t.StartMsgID,
+				EndMsgID:       t.EndMsgID,
+				Embedding:      resp.Data[i].Embedding,
+				CreatedAt:      referenceDate,
+				FactsExtracted: false,
+			}
+
+			id, err := s.topicRepo.AddTopic(topic)
+			if err != nil {
+				s.logger.Error("failed to save topic", "error", err)
+				continue
+			}
+			topicIDs = append(topicIDs, id)
+		}
+	}
+
+	// Load new vectors synchronously
+	if err := s.LoadNewVectors(); err != nil {
+		s.logger.Error("failed to load new vectors", "error", err)
+	}
+
+	return topicIDs, nil
+}
+
+// runConsolidationSync runs consolidation for specific topics and returns merge count.
+func (s *Service) runConsolidationSync(ctx context.Context, userID int64, topicIDs []int64, stats *ProcessingStats) int {
+	mergeCount := 0
+
+	for {
+		candidates, err := s.findMergeCandidates(userID)
+		if err != nil {
+			s.logger.Error("failed to find merge candidates", "error", err)
+			break
+		}
+
+		// Filter to candidates involving our topics
+		var relevantCandidates []storage.MergeCandidate
+		topicIDSet := make(map[int64]bool)
+		for _, id := range topicIDs {
+			topicIDSet[id] = true
+		}
+
+		for _, c := range candidates {
+			if topicIDSet[c.Topic1.ID] || topicIDSet[c.Topic2.ID] {
+				relevantCandidates = append(relevantCandidates, c)
+			}
+		}
+
+		if len(relevantCandidates) == 0 {
+			break
+		}
+
+		merged := false
+		for _, candidate := range relevantCandidates {
+			if ctx.Err() != nil {
+				return mergeCount
+			}
+
+			shouldMerge, newSummary, verifyUsage, err := s.verifyMerge(ctx, candidate)
+			stats.AddChatUsage(verifyUsage.PromptTokens, verifyUsage.CompletionTokens, verifyUsage.Cost)
+			if err != nil {
+				s.logger.Error("failed to verify merge", "error", err)
+				continue
+			}
+
+			if shouldMerge {
+				mergeUsage, err := s.mergeTopics(ctx, candidate, newSummary)
+				stats.AddEmbeddingUsage(mergeUsage.TotalTokens, mergeUsage.Cost)
+				if err != nil {
+					s.logger.Error("failed to merge topics", "error", err)
+				} else {
+					mergeCount++
+					merged = true
+					s.logger.Info("Merged topics (sync)", "t1", candidate.Topic1.ID, "t2", candidate.Topic2.ID)
+					// Reload vectors after merge
+					if err := s.ReloadVectors(); err != nil {
+						s.logger.Error("failed to reload vectors", "error", err)
+					}
+					break // Refresh candidates
+				}
+			} else {
+				if err := s.topicRepo.SetTopicConsolidationChecked(candidate.Topic1.ID, true); err != nil {
+					s.logger.Error("failed to mark topic checked", "id", candidate.Topic1.ID, "error", err)
+				}
+			}
+		}
+
+		if !merged {
+			break
+		}
+	}
+
+	// Mark remaining topics as consolidation checked
+	for _, id := range topicIDs {
+		_ = s.topicRepo.SetTopicConsolidationChecked(id, true)
+	}
+
+	return mergeCount
+}
+
 // ActiveSessionInfo contains information about unprocessed messages for a user.
 type ActiveSessionInfo struct {
 	UserID           int64
 	MessageCount     int
 	FirstMessageTime time.Time
 	LastMessageTime  time.Time
+	ContextSize      int // Total characters in session messages
 }
 
 // GetActiveSessions returns information about unprocessed messages (active sessions) for all users.
@@ -577,11 +976,18 @@ func (s *Service) GetActiveSessions() ([]ActiveSessionInfo, error) {
 			continue
 		}
 
+		// Calculate total context size
+		contextSize := 0
+		for _, msg := range messages {
+			contextSize += len(msg.Content)
+		}
+
 		sessions = append(sessions, ActiveSessionInfo{
 			UserID:           userID,
 			MessageCount:     len(messages),
 			FirstMessageTime: messages[0].CreatedAt,
 			LastMessageTime:  messages[len(messages)-1].CreatedAt,
+			ContextSize:      contextSize,
 		})
 	}
 
@@ -638,7 +1044,7 @@ func (s *Service) processChunk(ctx context.Context, userID int64, chunk []storag
 	s.logger.Info("Processing chunk", "user_id", userID, "count", len(chunk), "start", chunk[0].ID, "end", chunk[len(chunk)-1].ID)
 
 	// 1. Extract Topics (Wait for completion)
-	topics, err := s.extractTopics(ctx, chunk)
+	topics, _, err := s.extractTopics(ctx, chunk)
 	if err != nil {
 		return fmt.Errorf("extract topics: %w", err)
 	}
@@ -954,7 +1360,7 @@ func (s *Service) FindSimilarFacts(ctx context.Context, userID int64, embedding 
 	return s.factRepo.GetFactsByIDs(ids)
 }
 
-func (s *Service) extractTopics(ctx context.Context, chunk []storage.Message) ([]ExtractedTopic, error) {
+func (s *Service) extractTopics(ctx context.Context, chunk []storage.Message) ([]ExtractedTopic, UsageInfo, error) {
 	// Prepare JSON
 	type MsgItem struct {
 		ID      int64  `json:"id"`
@@ -1031,11 +1437,18 @@ func (s *Service) extractTopics(ctx context.Context, chunk []storage.Message) ([
 		ResponseFormat: schema,
 	})
 	if err != nil {
-		return nil, err
+		return nil, UsageInfo{}, err
+	}
+
+	usage := UsageInfo{
+		PromptTokens:     resp.Usage.PromptTokens,
+		CompletionTokens: resp.Usage.CompletionTokens,
+		TotalTokens:      resp.Usage.TotalTokens,
+		Cost:             resp.Usage.Cost,
 	}
 
 	if len(resp.Choices) == 0 {
-		return nil, fmt.Errorf("empty response")
+		return nil, usage, fmt.Errorf("empty response")
 	}
 
 	content := resp.Choices[0].Message.Content
@@ -1065,10 +1478,10 @@ func (s *Service) extractTopics(ctx context.Context, chunk []storage.Message) ([
 		Topics []ExtractedTopic `json:"topics"`
 	}
 	if err := json.Unmarshal([]byte(content), &result); err != nil {
-		return nil, fmt.Errorf("json parse error: %w. Content: %s", err, content)
+		return nil, usage, fmt.Errorf("json parse error: %w. Content: %s", err, content)
 	}
 
-	return result.Topics, nil
+	return result.Topics, usage, nil
 }
 
 func (s *Service) enrichQuery(ctx context.Context, query string, history []storage.Message) (string, string, int, error) {

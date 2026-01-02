@@ -85,6 +85,7 @@ type BotInterface interface {
 	API() telegram.BotAPI
 	GetActiveSessions() ([]rag.ActiveSessionInfo, error)
 	ForceCloseSession(ctx context.Context, userID int64) (int, error)
+	ForceCloseSessionWithProgress(ctx context.Context, userID int64, onProgress rag.ProgressCallback) (*rag.ProcessingStats, error)
 }
 
 // dashboardStatsCache holds cached dashboard stats with TTL
@@ -190,6 +191,7 @@ func (s *Server) Start(ctx context.Context) error {
 		mux.HandleFunc("/ui/debug/rag", s.debugRAGHandler)
 		mux.HandleFunc("/ui/debug/topics", s.topicDebugHandler)
 		mux.HandleFunc("/ui/debug/sessions", s.sessionsHandler)
+		mux.HandleFunc("/ui/debug/sessions/process", s.sessionsProcessSSEHandler)
 		mux.HandleFunc("/ui/topics", s.topicsHandler)
 		mux.HandleFunc("/ui/facts", s.factsHandler)
 		mux.HandleFunc("/ui/facts/history", s.factsHistoryHandler)
@@ -830,22 +832,54 @@ func (s *Server) sessionsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Build user lookup map from pageData.Users
+	userMap := make(map[int64]storage.User)
+	for _, u := range pageData.Users {
+		userMap[u.ID] = u
+	}
+
+	// Get chunk interval for countdown calculation
+	chunkInterval := 5 * time.Hour // default
+	if s.cfg.RAG.ChunkInterval != "" {
+		if parsed, err := time.ParseDuration(s.cfg.RAG.ChunkInterval); err == nil {
+			chunkInterval = parsed
+		}
+	}
+
 	type sessionDisplayData struct {
-		UserID       int64
-		MessageCount int
-		FirstMessage string
-		LastMessage  string
-		Duration     string
+		UserID          int64
+		UserName        string
+		MessageCount    int
+		FirstMessageISO string // ISO 8601 for JS parsing
+		LastMessageISO  string
+		ProcessAtISO    string // When session will be auto-processed
+		ContextSize     int    // Characters in session
 	}
 
 	displaySessions := make([]sessionDisplayData, 0, len(sessions))
 	for _, sess := range sessions {
+		userName := fmt.Sprintf("User %d", sess.UserID)
+		if u, ok := userMap[sess.UserID]; ok {
+			if u.FirstName != "" {
+				userName = u.FirstName
+				if u.LastName != "" {
+					userName += " " + u.LastName
+				}
+			} else if u.Username != "" {
+				userName = "@" + u.Username
+			}
+		}
+
+		processAt := sess.LastMessageTime.Add(chunkInterval)
+
 		displaySessions = append(displaySessions, sessionDisplayData{
-			UserID:       sess.UserID,
-			MessageCount: sess.MessageCount,
-			FirstMessage: sess.FirstMessageTime.Format("2006-01-02 15:04:05"),
-			LastMessage:  sess.LastMessageTime.Format("2006-01-02 15:04:05"),
-			Duration:     time.Since(sess.FirstMessageTime).Round(time.Minute).String(),
+			UserID:          sess.UserID,
+			UserName:        userName,
+			MessageCount:    sess.MessageCount,
+			FirstMessageISO: sess.FirstMessageTime.UTC().Format(time.RFC3339),
+			LastMessageISO:  sess.LastMessageTime.UTC().Format(time.RFC3339),
+			ProcessAtISO:    processAt.UTC().Format(time.RFC3339),
+			ContextSize:     sess.ContextSize,
 		})
 	}
 
@@ -854,6 +888,66 @@ func (s *Server) sessionsHandler(w http.ResponseWriter, r *http.Request) {
 	if err := s.renderer.Render(w, "sessions.html", pageData, ui.GetFuncMap()); err != nil {
 		s.logger.Error("failed to render template", "error", err)
 		http.Error(w, "Failed to render template", http.StatusInternalServerError)
+	}
+}
+
+// sessionsProcessSSEHandler handles SSE streaming of session processing progress.
+func (s *Server) sessionsProcessSSEHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userIDStr := r.URL.Query().Get("user_id")
+	var userID int64
+	if _, err := fmt.Sscanf(userIDStr, "%d", &userID); err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	// Set SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "SSE not supported", http.StatusInternalServerError)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+	defer cancel()
+
+	// Create progress callback that sends SSE events
+	onProgress := func(event rag.ProgressEvent) {
+		data, err := json.Marshal(event)
+		if err != nil {
+			s.logger.Error("failed to marshal progress event", "error", err)
+			return
+		}
+
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}
+
+	// Process with progress
+	stats, err := s.bot.ForceCloseSessionWithProgress(ctx, userID, onProgress)
+	if err != nil {
+		s.logger.Error("Failed to process session", "user_id", userID, "error", err)
+		// Send error event
+		errorEvent := rag.ProgressEvent{
+			Stage:    "error",
+			Complete: true,
+			Message:  fmt.Sprintf("Error: %s", err.Error()),
+		}
+		if stats != nil {
+			errorEvent.Stats = stats
+		}
+		data, _ := json.Marshal(errorEvent)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
 	}
 }
 

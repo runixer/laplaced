@@ -503,9 +503,10 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 			}{Role: "assistant", Content: "Test response"}},
 		},
 		Usage: struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
+			PromptTokens     int      `json:"prompt_tokens"`
+			CompletionTokens int      `json:"completion_tokens"`
+			TotalTokens      int      `json:"total_tokens"`
+			Cost             *float64 `json:"cost,omitempty"`
 		}{TotalTokens: 10},
 	}, nil)
 
@@ -635,9 +636,10 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 			}{Role: "assistant", Content: "Test response"}},
 		},
 		Usage: struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
+			PromptTokens     int      `json:"prompt_tokens"`
+			CompletionTokens int      `json:"completion_tokens"`
+			TotalTokens      int      `json:"total_tokens"`
+			Cost             *float64 `json:"cost,omitempty"`
 		}{TotalTokens: 10},
 	}, nil)
 
@@ -771,9 +773,10 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 			}{Role: "assistant", Content: "Test response"}},
 		},
 		Usage: struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
+			PromptTokens     int      `json:"prompt_tokens"`
+			CompletionTokens int      `json:"completion_tokens"`
+			TotalTokens      int      `json:"total_tokens"`
+			Cost             *float64 `json:"cost,omitempty"`
 		}{TotalTokens: 10},
 	}, nil)
 
@@ -908,9 +911,10 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 			}{Role: "assistant", Content: "Test response"}},
 		},
 		Usage: struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
+			PromptTokens     int      `json:"prompt_tokens"`
+			CompletionTokens int      `json:"completion_tokens"`
+			TotalTokens      int      `json:"total_tokens"`
+			Cost             *float64 `json:"cost,omitempty"`
 		}{TotalTokens: 10},
 	}, nil)
 
@@ -1054,9 +1058,10 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 			}{Role: "assistant", Content: "Test response"}},
 		},
 		Usage: struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
+			PromptTokens     int      `json:"prompt_tokens"`
+			CompletionTokens int      `json:"completion_tokens"`
+			TotalTokens      int      `json:"total_tokens"`
+			Cost             *float64 `json:"cost,omitempty"`
 		}{TotalTokens: 10},
 	}, nil)
 
@@ -1189,9 +1194,10 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 			}{Role: "assistant", Content: "Test response"}},
 		},
 		Usage: struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
+			PromptTokens     int      `json:"prompt_tokens"`
+			CompletionTokens int      `json:"completion_tokens"`
+			TotalTokens      int      `json:"total_tokens"`
+			Cost             *float64 `json:"cost,omitempty"`
 		}{TotalTokens: 10},
 	}, nil)
 
@@ -1469,9 +1475,10 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 			}{Role: "assistant", Content: "You said hello."}},
 		},
 		Usage: struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
+			PromptTokens     int      `json:"prompt_tokens"`
+			CompletionTokens int      `json:"completion_tokens"`
+			TotalTokens      int      `json:"total_tokens"`
+			Cost             *float64 `json:"cost,omitempty"`
 		}{TotalTokens: 100},
 	}, nil)
 
@@ -1512,4 +1519,96 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 			assert.Equal(t, hMsg.Content, historicalContent.Text)
 		}
 	}
+}
+
+func TestSendResponses_Success(t *testing.T) {
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	mockAPI := new(MockBotAPI)
+	cfg := &config.Config{}
+
+	bot := &Bot{
+		api:        mockAPI,
+		cfg:        cfg,
+		logger:     logger,
+		translator: translator,
+	}
+
+	chatID := int64(123)
+	responses := []telegram.SendMessageRequest{
+		{ChatID: chatID, Text: "Hello", ParseMode: "MarkdownV2"},
+		{ChatID: chatID, Text: "World", ParseMode: "MarkdownV2"},
+	}
+
+	mockAPI.On("SendMessage", mock.Anything, responses[0]).Return(&telegram.Message{}, nil)
+	mockAPI.On("SendMessage", mock.Anything, responses[1]).Return(&telegram.Message{}, nil)
+
+	bot.sendResponses(context.Background(), chatID, responses, logger)
+
+	mockAPI.AssertExpectations(t)
+}
+
+func TestSendResponses_ParseError_RetrySuccess(t *testing.T) {
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	mockAPI := new(MockBotAPI)
+	cfg := &config.Config{
+		Bot: config.BotConfig{Language: "en"},
+	}
+
+	bot := &Bot{
+		api:        mockAPI,
+		cfg:        cfg,
+		logger:     logger,
+		translator: translator,
+	}
+
+	chatID := int64(123)
+	responses := []telegram.SendMessageRequest{
+		{ChatID: chatID, Text: "Hello *broken* markdown", ParseMode: "MarkdownV2"},
+	}
+
+	// First call fails with parse error
+	mockAPI.On("SendMessage", mock.Anything, responses[0]).Return(nil, fmt.Errorf("can't parse entities")).Once()
+
+	// Retry without ParseMode should succeed
+	retryReq := telegram.SendMessageRequest{ChatID: chatID, Text: "Hello *broken* markdown", ParseMode: ""}
+	mockAPI.On("SendMessage", mock.Anything, retryReq).Return(&telegram.Message{}, nil).Once()
+
+	bot.sendResponses(context.Background(), chatID, responses, logger)
+
+	mockAPI.AssertExpectations(t)
+}
+
+func TestSendResponses_OtherError_SendGenericError(t *testing.T) {
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	mockAPI := new(MockBotAPI)
+	cfg := &config.Config{
+		Bot: config.BotConfig{Language: "en"},
+	}
+
+	bot := &Bot{
+		api:        mockAPI,
+		cfg:        cfg,
+		logger:     logger,
+		translator: translator,
+	}
+
+	chatID := int64(123)
+	responses := []telegram.SendMessageRequest{
+		{ChatID: chatID, Text: "Hello", ParseMode: "MarkdownV2"},
+	}
+
+	// First call fails with network error
+	mockAPI.On("SendMessage", mock.Anything, responses[0]).Return(nil, fmt.Errorf("network error")).Once()
+
+	// Send generic error message
+	mockAPI.On("SendMessage", mock.Anything, mock.MatchedBy(func(req telegram.SendMessageRequest) bool {
+		return req.ChatID == chatID && req.Text == translator.Get("en", "bot.generic_error")
+	})).Return(&telegram.Message{}, nil).Once()
+
+	bot.sendResponses(context.Background(), chatID, responses, logger)
+
+	mockAPI.AssertExpectations(t)
 }

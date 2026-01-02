@@ -362,6 +362,14 @@ func (m *MockBot) ForceCloseSession(ctx context.Context, userID int64) (int, err
 	return args.Int(0), args.Error(1)
 }
 
+func (m *MockBot) ForceCloseSessionWithProgress(ctx context.Context, userID int64, onProgress rag.ProgressCallback) (*rag.ProcessingStats, error) {
+	args := m.Called(ctx, userID, onProgress)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*rag.ProcessingStats), args.Error(1)
+}
+
 func TestStatsHandler(t *testing.T) {
 	// Arrange
 	mockStorage := new(MockStorage)
@@ -740,4 +748,281 @@ func TestGetClientIP(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestSessionsHandler_POST_InvalidForm(t *testing.T) {
+	mockBot := new(MockBot)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	assert.NoError(t, err)
+
+	// POST with invalid user_id
+	req, err := http.NewRequest("POST", "/ui/debug/sessions", bytes.NewBufferString("user_id=invalid"))
+	assert.NoError(t, err)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.sessionsHandler)
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestSessionsHandler_POST_Success(t *testing.T) {
+	mockBot := new(MockBot)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	assert.NoError(t, err)
+
+	mockBot.On("ForceCloseSession", mock.Anything, int64(123)).Return(5, nil)
+
+	req, err := http.NewRequest("POST", "/ui/debug/sessions", bytes.NewBufferString("user_id=123"))
+	assert.NoError(t, err)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.sessionsHandler)
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
+	assert.Equal(t, "/ui/debug/sessions", rr.Header().Get("Location"))
+	mockBot.AssertExpectations(t)
+}
+
+func TestSessionsHandler_GET_Error(t *testing.T) {
+	mockBot := new(MockBot)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	assert.NoError(t, err)
+
+	mockBot.On("GetActiveSessions").Return(nil, assert.AnError)
+
+	req, err := http.NewRequest("GET", "/ui/debug/sessions", nil)
+	assert.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.sessionsHandler)
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	mockBot.AssertExpectations(t)
+}
+
+func TestSessionsProcessSSEHandler_MethodNotAllowed(t *testing.T) {
+	mockBot := new(MockBot)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	assert.NoError(t, err)
+
+	req, err := http.NewRequest("POST", "/ui/debug/sessions/process", nil)
+	assert.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.sessionsProcessSSEHandler)
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)
+}
+
+func TestSessionsProcessSSEHandler_InvalidUserID(t *testing.T) {
+	mockBot := new(MockBot)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	assert.NoError(t, err)
+
+	req, err := http.NewRequest("GET", "/ui/debug/sessions/process?user_id=invalid", nil)
+	assert.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.sessionsProcessSSEHandler)
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestWebhookHandler_InvalidSecret(t *testing.T) {
+	mockBot := new(MockBot)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	cfg.Telegram.WebhookSecret = "my-secret-token"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	assert.NoError(t, err)
+
+	updateJSON := `{"update_id":1,"message":{"text":"hello"}}`
+	body := []byte(updateJSON)
+	req, err := http.NewRequest("POST", "/telegram/webhook", bytes.NewBuffer(body))
+	assert.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "wrong-token")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server.ctx = ctx
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.webhookHandler)
+
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+	mockBot.AssertNotCalled(t, "HandleUpdateAsync", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestWebhookHandler_ValidSecret(t *testing.T) {
+	mockBot := new(MockBot)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	cfg.Telegram.WebhookSecret = "my-secret-token"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	assert.NoError(t, err)
+
+	updateJSON := `{"update_id":1,"message":{"text":"hello"}}`
+	body := []byte(updateJSON)
+	req, err := http.NewRequest("POST", "/telegram/webhook", bytes.NewBuffer(body))
+	assert.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "my-secret-token")
+
+	mockBot.On("HandleUpdateAsync", mock.Anything, json.RawMessage(body), mock.Anything).Return()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server.ctx = ctx
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.webhookHandler)
+
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	mockBot.AssertCalled(t, "HandleUpdateAsync", mock.Anything, json.RawMessage(body), mock.Anything)
+}
+
+func TestSessionsHandler_GET_Success(t *testing.T) {
+	mockBot := new(MockBot)
+	mockStorage := new(MockStorage)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	cfg.RAG.ChunkInterval = "4h"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	assert.NoError(t, err)
+
+	now := time.Now()
+	sessions := []rag.ActiveSessionInfo{
+		{
+			UserID:           123,
+			MessageCount:     5,
+			FirstMessageTime: now.Add(-time.Hour),
+			LastMessageTime:  now,
+			ContextSize:      1000,
+		},
+	}
+	mockBot.On("GetActiveSessions").Return(sessions, nil)
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123, FirstName: "Test", LastName: "User"}}, nil)
+
+	req, err := http.NewRequest("GET", "/ui/debug/sessions", nil)
+	assert.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.sessionsHandler)
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "Test User")
+	mockBot.AssertExpectations(t)
+	mockStorage.AssertExpectations(t)
+}
+
+func TestSessionsHandler_POST_ForceCloseError(t *testing.T) {
+	mockBot := new(MockBot)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	assert.NoError(t, err)
+
+	mockBot.On("ForceCloseSession", mock.Anything, int64(123)).Return(0, assert.AnError)
+
+	req, err := http.NewRequest("POST", "/ui/debug/sessions", bytes.NewBufferString("user_id=123"))
+	assert.NoError(t, err)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.sessionsHandler)
+	handler.ServeHTTP(rr, req)
+
+	// Should redirect even on error
+	assert.Equal(t, http.StatusSeeOther, rr.Code)
+	mockBot.AssertExpectations(t)
+}
+
+func TestSessionsHandler_GET_UsernameOnly(t *testing.T) {
+	mockBot := new(MockBot)
+	mockStorage := new(MockStorage)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	assert.NoError(t, err)
+
+	now := time.Now()
+	sessions := []rag.ActiveSessionInfo{
+		{
+			UserID:           123,
+			MessageCount:     5,
+			FirstMessageTime: now.Add(-time.Hour),
+			LastMessageTime:  now,
+			ContextSize:      1000,
+		},
+	}
+	mockBot.On("GetActiveSessions").Return(sessions, nil)
+	// User has only Username, no FirstName
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123, Username: "testuser"}}, nil)
+
+	req, err := http.NewRequest("GET", "/ui/debug/sessions", nil)
+	assert.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.sessionsHandler)
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "@testuser")
+	mockBot.AssertExpectations(t)
+}
+
+func TestSessionsHandler_GET_CommonDataError(t *testing.T) {
+	mockBot := new(MockBot)
+	mockStorage := new(MockStorage)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	assert.NoError(t, err)
+
+	sessions := []rag.ActiveSessionInfo{}
+	mockBot.On("GetActiveSessions").Return(sessions, nil)
+	mockStorage.On("GetAllUsers").Return(nil, assert.AnError)
+
+	req, err := http.NewRequest("GET", "/ui/debug/sessions", nil)
+	assert.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.sessionsHandler)
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 }

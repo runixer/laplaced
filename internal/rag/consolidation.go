@@ -55,14 +55,14 @@ func (s *Service) processConsolidation(ctx context.Context) {
 			}
 
 			// Verify with LLM
-			shouldMerge, newSummary, err := s.verifyMerge(ctx, candidate)
+			shouldMerge, newSummary, _, err := s.verifyMerge(ctx, candidate)
 			if err != nil {
 				s.logger.Error("failed to verify merge", "error", err)
 				continue
 			}
 
 			if shouldMerge {
-				if err := s.mergeTopics(ctx, candidate, newSummary); err != nil {
+				if _, err := s.mergeTopics(ctx, candidate, newSummary); err != nil {
 					s.logger.Error("failed to merge topics", "error", err)
 				} else {
 					s.logger.Info("Merged topics", "t1", candidate.Topic1.ID, "t2", candidate.Topic2.ID, "new_summary", newSummary)
@@ -127,7 +127,7 @@ func (s *Service) findMergeCandidates(userID int64) ([]storage.MergeCandidate, e
 	return filteredCandidates, nil
 }
 
-func (s *Service) verifyMerge(ctx context.Context, candidate storage.MergeCandidate) (bool, string, error) {
+func (s *Service) verifyMerge(ctx context.Context, candidate storage.MergeCandidate) (bool, string, UsageInfo, error) {
 	promptTmpl := s.translator.Get(s.cfg.Bot.Language, "rag.topic_consolidation_prompt")
 	prompt := fmt.Sprintf(promptTmpl, candidate.Topic1.Summary, candidate.Topic2.Summary)
 
@@ -144,11 +144,18 @@ func (s *Service) verifyMerge(ctx context.Context, candidate storage.MergeCandid
 		ResponseFormat: map[string]interface{}{"type": "json_object"},
 	})
 	if err != nil {
-		return false, "", err
+		return false, "", UsageInfo{}, err
+	}
+
+	usage := UsageInfo{
+		PromptTokens:     resp.Usage.PromptTokens,
+		CompletionTokens: resp.Usage.CompletionTokens,
+		TotalTokens:      resp.Usage.TotalTokens,
+		Cost:             resp.Usage.Cost,
 	}
 
 	if len(resp.Choices) == 0 {
-		return false, "", fmt.Errorf("empty response")
+		return false, "", usage, fmt.Errorf("empty response")
 	}
 
 	var result struct {
@@ -156,13 +163,13 @@ func (s *Service) verifyMerge(ctx context.Context, candidate storage.MergeCandid
 		NewSummary  string `json:"new_summary"`
 	}
 	if err := json.Unmarshal([]byte(resp.Choices[0].Message.Content), &result); err != nil {
-		return false, "", err
+		return false, "", usage, err
 	}
 
-	return result.ShouldMerge, result.NewSummary, nil
+	return result.ShouldMerge, result.NewSummary, usage, nil
 }
 
-func (s *Service) mergeTopics(ctx context.Context, candidate storage.MergeCandidate, newSummary string) error {
+func (s *Service) mergeTopics(ctx context.Context, candidate storage.MergeCandidate, newSummary string) (UsageInfo, error) {
 	// 1. Create new topic
 	// We need to combine embeddings? No, we re-embed.
 	// But we need the content to re-embed.
@@ -172,7 +179,7 @@ func (s *Service) mergeTopics(ctx context.Context, candidate storage.MergeCandid
 	// Fetch all messages
 	msgs, err := s.msgRepo.GetMessagesInRange(ctx, candidate.Topic1.UserID, candidate.Topic1.StartMsgID, candidate.Topic2.EndMsgID)
 	if err != nil {
-		return err
+		return UsageInfo{}, err
 	}
 
 	// Filter messages that belong to T1 or T2 (or are in between)
@@ -191,10 +198,14 @@ func (s *Service) mergeTopics(ctx context.Context, candidate storage.MergeCandid
 		Input: []string{embeddingInput},
 	})
 	if err != nil {
-		return err
+		return UsageInfo{}, err
+	}
+	usage := UsageInfo{
+		TotalTokens: resp.Usage.TotalTokens,
+		Cost:        resp.Usage.Cost,
 	}
 	if len(resp.Data) == 0 {
-		return fmt.Errorf("no embedding returned")
+		return usage, fmt.Errorf("no embedding returned")
 	}
 
 	newTopic := storage.Topic{
@@ -214,7 +225,7 @@ func (s *Service) mergeTopics(ctx context.Context, candidate storage.MergeCandid
 	// 1. Add new topic
 	newTopicID, err := s.topicRepo.AddTopic(newTopic)
 	if err != nil {
-		return err
+		return usage, err
 	}
 
 	// 2. Update references
@@ -244,5 +255,5 @@ func (s *Service) mergeTopics(ctx context.Context, candidate storage.MergeCandid
 		s.logger.Error("failed to delete topic 2", "id", candidate.Topic2.ID, "error", err)
 	}
 
-	return nil
+	return usage, nil
 }
