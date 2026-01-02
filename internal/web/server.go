@@ -245,6 +245,9 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}()
 
+	// Update metrics immediately on startup, then periodically
+	s.updateMetrics()
+
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -270,6 +273,9 @@ func (s *Server) Start(ctx context.Context) error {
 }
 
 func (s *Server) updateMetrics() {
+	if s.factRepo == nil {
+		return
+	}
 	stats, err := s.factRepo.GetFactStats()
 	if err != nil {
 		s.logger.Error("failed to get facts stats for metrics", "error", err)

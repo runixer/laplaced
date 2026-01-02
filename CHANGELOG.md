@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-01-02
+
+### Added
+- Added Grafana dashboard (`grafana/dashboards/laplaced-bot.json`) with 35 panels:
+  - Overview: active sessions, messages/hour, error rate, uptime, facts/topics count
+  - Latency: message processing p50/p95/p99, LLM duration, embedding & vector search
+  - Cost: LLM/embedding cost (24h), cost/message, monthly projection, cost over time
+  - Memory Health: facts by type, fact operations, growth trends, context tokens, RAG hit/miss
+  - Capacity Planning: vector index size, memory usage, goroutines, open FDs, trends
+
+### Fixed
+- Fixed `laplaced_memory_facts_count` metric not populated until 1 hour after startup (now updates immediately)
+
 ## [0.3.0] - 2026-01-02
 
 ### Added
@@ -177,7 +190,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker and docker-compose deployment
 - Configuration via YAML and environment variables
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/runixer/laplaced/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/runixer/laplaced/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/runixer/laplaced/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/runixer/laplaced/compare/v0.2.0...v0.2.1
