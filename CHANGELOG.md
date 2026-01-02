@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added storage metrics for database observability:
+  - `laplaced_storage_size_bytes` - total database file size
+  - `laplaced_storage_table_bytes{table}` - per-table size via SQLite dbstat
+  - `laplaced_storage_cleanup_deleted_total{table}` - count of deleted rows during cleanup
+  - `laplaced_storage_cleanup_duration_seconds{table}` - cleanup operation duration
+- Added automatic retention cleanup (runs hourly with metrics update):
+  - `fact_history`: keeps 100 most recent records per user
+  - `rag_logs`: keeps 20 most recent records per user
+  - Reclaims ~263 MB (54% of DB) on first run for existing installations
+
 ### Fixed
 - Fixed missing `user_id` label on `laplaced_memory_topics_total` metric (missed in v0.3.3)
 - Fixed missing `user_id` label on `laplaced_memory_facts_count` and `laplaced_memory_staleness_days` metrics

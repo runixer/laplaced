@@ -160,14 +160,22 @@ type Storage interface {
 	MemoryBankRepository
 	FactRepository
 	FactHistoryRepository
+	MaintenanceRepository
 }
 
 type SQLiteStore struct {
 	db     *sql.DB
 	logger *slog.Logger
+	dbPath string // Original path without query params, for file size check
 }
 
 func NewSQLiteStore(logger *slog.Logger, path string) (*SQLiteStore, error) {
+	// Save original path for file operations (before adding query params)
+	originalPath := path
+	if idx := strings.Index(path, "?"); idx != -1 {
+		originalPath = path[:idx]
+	}
+
 	// Add connection parameters for better concurrency
 	if !strings.Contains(path, "?") {
 		path += "?"
@@ -190,7 +198,7 @@ func NewSQLiteStore(logger *slog.Logger, path string) (*SQLiteStore, error) {
 		return nil, err
 	}
 
-	return &SQLiteStore{db: db, logger: logger}, nil
+	return &SQLiteStore{db: db, logger: logger, dbPath: originalPath}, nil
 }
 
 func (s *SQLiteStore) Init() error {

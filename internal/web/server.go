@@ -149,6 +149,7 @@ type Server struct {
 	topicRepo       storage.TopicRepository
 	msgRepo         storage.MessageRepository
 	factHistoryRepo storage.FactHistoryRepository
+	maintenanceRepo storage.MaintenanceRepository
 	bot             BotInterface
 	rag             *rag.Service
 	logger          *slog.Logger
@@ -158,7 +159,7 @@ type Server struct {
 	wg              sync.WaitGroup
 }
 
-func NewServer(ctx context.Context, logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, statsRepo storage.StatsRepository, logRepo storage.LogRepository, topicRepo storage.TopicRepository, msgRepo storage.MessageRepository, factHistoryRepo storage.FactHistoryRepository, bot BotInterface, rag *rag.Service) (*Server, error) {
+func NewServer(ctx context.Context, logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, statsRepo storage.StatsRepository, logRepo storage.LogRepository, topicRepo storage.TopicRepository, msgRepo storage.MessageRepository, factHistoryRepo storage.FactHistoryRepository, maintenanceRepo storage.MaintenanceRepository, bot BotInterface, rag *rag.Service) (*Server, error) {
 	renderer, err := ui.NewRenderer()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize renderer: %w", err)
@@ -173,6 +174,7 @@ func NewServer(ctx context.Context, logger *slog.Logger, cfg *config.Config, fac
 		topicRepo:       topicRepo,
 		msgRepo:         msgRepo,
 		factHistoryRepo: factHistoryRepo,
+		maintenanceRepo: maintenanceRepo,
 		bot:             bot,
 		rag:             rag,
 		logger:          logger.With("component", "web_server"),
@@ -321,6 +323,64 @@ func (s *Server) updateMetrics() {
 				continue
 			}
 			memory.SetTopicsTotal(user.ID, topicResult.TotalCount)
+		}
+	}
+
+	// Update storage metrics and run cleanup
+	if s.maintenanceRepo != nil {
+		s.updateStorageMetrics()
+		s.runCleanup()
+	}
+}
+
+// updateStorageMetrics updates database size metrics.
+func (s *Server) updateStorageMetrics() {
+	// Total DB size
+	dbSize, err := s.maintenanceRepo.GetDBSize()
+	if err != nil {
+		s.logger.Error("failed to get DB size", "error", err)
+	} else {
+		storage.SetStorageSize(dbSize)
+	}
+
+	// Per-table sizes
+	tableSizes, err := s.maintenanceRepo.GetTableSizes()
+	if err != nil {
+		s.logger.Error("failed to get table sizes", "error", err)
+	} else {
+		for _, ts := range tableSizes {
+			storage.SetTableSize(ts.Name, ts.Bytes)
+		}
+	}
+}
+
+// runCleanup performs periodic cleanup of old records.
+func (s *Server) runCleanup() {
+	// Cleanup fact_history: keep 100 per user
+	start := time.Now()
+	deleted, err := s.maintenanceRepo.CleanupFactHistory(100)
+	duration := time.Since(start).Seconds()
+	if err != nil {
+		s.logger.Error("failed to cleanup fact_history", "error", err)
+	} else {
+		storage.RecordCleanupDuration("fact_history", duration)
+		if deleted > 0 {
+			storage.RecordCleanupDeleted("fact_history", deleted)
+			s.logger.Info("cleaned up fact_history", "deleted", deleted, "duration_s", duration)
+		}
+	}
+
+	// Cleanup rag_logs: keep 20 per user
+	start = time.Now()
+	deleted, err = s.maintenanceRepo.CleanupRagLogs(20)
+	duration = time.Since(start).Seconds()
+	if err != nil {
+		s.logger.Error("failed to cleanup rag_logs", "error", err)
+	} else {
+		storage.RecordCleanupDuration("rag_logs", duration)
+		if deleted > 0 {
+			storage.RecordCleanupDeleted("rag_logs", deleted)
+			s.logger.Info("cleaned up rag_logs", "deleted", deleted, "duration_s", duration)
 		}
 	}
 }

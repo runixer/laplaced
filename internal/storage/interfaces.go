@@ -82,3 +82,11 @@ type MemoryBankRepository interface {
 	GetMemoryBank(userID int64) (string, error)
 	UpdateMemoryBank(userID int64, content string) error
 }
+
+// MaintenanceRepository handles database maintenance operations.
+type MaintenanceRepository interface {
+	GetDBSize() (int64, error)
+	GetTableSizes() ([]TableSize, error)
+	CleanupFactHistory(keepPerUser int) (int64, error)
+	CleanupRagLogs(keepPerUser int) (int64, error)
+}

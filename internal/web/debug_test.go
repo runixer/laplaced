@@ -26,7 +26,7 @@ func TestInspectorHandler_NilParsedResults(t *testing.T) {
 	cfg.Server.DebugMode = true // Enable debug mode
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	// Mock data
@@ -65,7 +65,7 @@ func TestDebugRAGHandler_GET(t *testing.T) {
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	// RAG is nil for GET - it doesn't use RAG service
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123, Username: "testuser"}}, nil)
@@ -91,7 +91,7 @@ func TestTopicDebugHandler(t *testing.T) {
 	cfg.Server.DebugMode = true
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	// ContextUsed contains JSON with message IDs, LLMResponse contains topics
@@ -129,7 +129,7 @@ func TestTopicDebugHandler_Pagination(t *testing.T) {
 	cfg.Server.DebugMode = true
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	mockStorage.On("GetAllUsers").Return([]storage.User{}, nil)
@@ -155,7 +155,7 @@ func TestFactsHandler(t *testing.T) {
 	cfg.Server.DebugMode = true
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	facts := []storage.Fact{
@@ -188,7 +188,7 @@ func TestFactsHandler_WithUserID(t *testing.T) {
 	cfg.Server.DebugMode = true
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	facts := []storage.Fact{
@@ -219,7 +219,7 @@ func TestFactsHandler_SortByImportance(t *testing.T) {
 	cfg.Server.DebugMode = true
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	now := time.Now()
@@ -257,7 +257,7 @@ func TestInspectorHandler_WithUserID(t *testing.T) {
 	cfg.Server.DebugMode = true
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	logs := []storage.RAGLog{
@@ -290,7 +290,7 @@ func TestTopicsHandler_WithFilters(t *testing.T) {
 	cfg.Server.DebugMode = true
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	hasFacts := true
@@ -334,7 +334,7 @@ func TestTopicsHandler_Pagination(t *testing.T) {
 	cfg.Server.DebugMode = true
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	result := storage.TopicResult{
@@ -371,7 +371,7 @@ func TestTopicsHandler_NegativePage(t *testing.T) {
 	cfg.Server.DebugMode = true
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	result := storage.TopicResult{
@@ -409,7 +409,7 @@ func TestTopicDebugHandler_NegativePage(t *testing.T) {
 	cfg.Server.DebugMode = true
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	// Negative page should be treated as page 1 (offset 0)
@@ -436,7 +436,7 @@ func TestFactsHistoryHandler_WithFilters(t *testing.T) {
 	cfg.Server.DebugMode = true
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	result := storage.FactHistoryResult{
@@ -475,7 +475,7 @@ func TestFactsHistoryHandler_Pagination(t *testing.T) {
 	cfg.Server.DebugMode = true
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	result := storage.FactHistoryResult{
@@ -511,7 +511,7 @@ func TestTopicsHandler_WithSearch(t *testing.T) {
 	cfg.Server.DebugMode = true
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	topicID := int64(42)
@@ -553,7 +553,7 @@ func TestStatsHandler_MultiUser(t *testing.T) {
 	cfg.Server.DebugMode = true
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	stats := map[int64]storage.Stat{
@@ -590,7 +590,7 @@ func TestStatsHandler_WithUserFilter(t *testing.T) {
 	cfg.Server.DebugMode = true
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	stats := map[int64]storage.Stat{
@@ -626,7 +626,7 @@ func TestFactsHandler_Error(t *testing.T) {
 	cfg.Server.DebugMode = true
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	mockStorage.On("GetAllUsers").Return([]storage.User{}, nil)
@@ -652,7 +652,7 @@ func TestInspectorHandler_Error(t *testing.T) {
 	cfg.Server.DebugMode = true
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	mockStorage.On("GetAllUsers").Return([]storage.User{}, nil)
@@ -678,7 +678,7 @@ func TestTopicsHandler_Error(t *testing.T) {
 	cfg.Server.DebugMode = true
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	mockStorage.On("GetAllUsers").Return([]storage.User{}, nil)
@@ -710,7 +710,7 @@ func TestStatsHandler_Error(t *testing.T) {
 	cfg.Server.DebugMode = true
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	mockStorage.On("GetAllUsers").Return([]storage.User{}, nil)
