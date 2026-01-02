@@ -19,6 +19,7 @@ const metricsNamespace = "laplaced"
 var (
 	// llmRequestDuration измеряет время выполнения LLM запросов.
 	// Labels:
+	//   - user_id: идентификатор пользователя
 	//   - model: название модели
 	//   - status: результат (success, error)
 	llmRequestDuration = promauto.NewHistogramVec(
@@ -30,11 +31,12 @@ var (
 			// Buckets для типичных времён LLM: 0.5s - 60s
 			Buckets: []float64{0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30, 45, 60},
 		},
-		[]string{"model", "status"},
+		[]string{"user_id", "model", "status"},
 	)
 
 	// llmRequestsTotal считает количество LLM запросов.
 	// Labels:
+	//   - user_id: идентификатор пользователя
 	//   - model: название модели
 	//   - status: результат (success, error)
 	llmRequestsTotal = promauto.NewCounterVec(
@@ -44,7 +46,7 @@ var (
 			Name:      "requests_total",
 			Help:      "Total number of LLM API requests",
 		},
-		[]string{"model", "status"},
+		[]string{"user_id", "model", "status"},
 	)
 
 	// llmTokensTotal считает использованные токены.
@@ -110,8 +112,8 @@ func RecordLLMRequest(userID int64, model string, durationSeconds float64, succe
 	}
 
 	uid := formatUserID(userID)
-	llmRequestDuration.WithLabelValues(model, status).Observe(durationSeconds)
-	llmRequestsTotal.WithLabelValues(model, status).Inc()
+	llmRequestDuration.WithLabelValues(uid, model, status).Observe(durationSeconds)
+	llmRequestsTotal.WithLabelValues(uid, model, status).Inc()
 
 	if success {
 		if promptTokens > 0 {

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -25,9 +26,24 @@ import (
 	"github.com/runixer/laplaced/internal/yandex"
 
 	"github.com/joho/godotenv"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 var Version = "dev"
+
+var buildInfo = promauto.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Namespace: "laplaced",
+		Name:      "build_info",
+		Help:      "Build information with version and Go runtime details",
+	},
+	[]string{"version", "go_version"},
+)
+
+func init() {
+	buildInfo.WithLabelValues(Version, runtime.Version()).Set(1)
+}
 
 func runHealthcheck(configPath string) int {
 	// Try to load config to get the port

@@ -24,6 +24,7 @@ var (
 
 	// embeddingRequestDuration измеряет время генерации embeddings через OpenRouter API.
 	// Labels:
+	//   - user_id: идентификатор пользователя
 	//   - model: название модели (google/gemini-embedding-001)
 	//   - status: результат запроса (success, error)
 	embeddingRequestDuration = promauto.NewHistogramVec(
@@ -35,11 +36,12 @@ var (
 			// Buckets для типичных времён embedding API: 100ms - 5s
 			Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 3, 5},
 		},
-		[]string{"model", "status"},
+		[]string{"user_id", "model", "status"},
 	)
 
 	// embeddingRequestsTotal считает общее количество embedding запросов.
 	// Labels:
+	//   - user_id: идентификатор пользователя
 	//   - model: название модели
 	//   - status: результат (success, error)
 	embeddingRequestsTotal = promauto.NewCounterVec(
@@ -49,11 +51,12 @@ var (
 			Name:      "requests_total",
 			Help:      "Total number of embedding API requests",
 		},
-		[]string{"model", "status"},
+		[]string{"user_id", "model", "status"},
 	)
 
 	// embeddingTokensTotal считает использованные токены.
 	// Labels:
+	//   - user_id: идентификатор пользователя
 	//   - model: название модели
 	embeddingTokensTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
@@ -62,11 +65,12 @@ var (
 			Name:      "tokens_total",
 			Help:      "Total number of tokens used for embeddings",
 		},
-		[]string{"model"},
+		[]string{"user_id", "model"},
 	)
 
 	// embeddingCostTotal отслеживает кумулятивную стоимость embedding API (USD).
 	// Labels:
+	//   - user_id: идентификатор пользователя
 	//   - model: название модели
 	embeddingCostTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
@@ -75,7 +79,7 @@ var (
 			Name:      "cost_usd_total",
 			Help:      "Total cost of embedding API requests in USD",
 		},
-		[]string{"model"},
+		[]string{"user_id", "model"},
 	)
 
 	// === Vector Search Metrics ===
@@ -200,21 +204,22 @@ func formatUserID(userID int64) string {
 }
 
 // RecordEmbeddingRequest записывает метрики embedding запроса.
-func RecordEmbeddingRequest(model string, durationSeconds float64, success bool, tokens int, cost *float64) {
+func RecordEmbeddingRequest(userID int64, model string, durationSeconds float64, success bool, tokens int, cost *float64) {
 	status := statusSuccess
 	if !success {
 		status = statusError
 	}
 
-	embeddingRequestDuration.WithLabelValues(model, status).Observe(durationSeconds)
-	embeddingRequestsTotal.WithLabelValues(model, status).Inc()
+	uid := formatUserID(userID)
+	embeddingRequestDuration.WithLabelValues(uid, model, status).Observe(durationSeconds)
+	embeddingRequestsTotal.WithLabelValues(uid, model, status).Inc()
 
 	if success && tokens > 0 {
-		embeddingTokensTotal.WithLabelValues(model).Add(float64(tokens))
+		embeddingTokensTotal.WithLabelValues(uid, model).Add(float64(tokens))
 	}
 
 	if success && cost != nil && *cost > 0 {
-		embeddingCostTotal.WithLabelValues(model).Add(*cost)
+		embeddingCostTotal.WithLabelValues(uid, model).Add(*cost)
 	}
 }
 

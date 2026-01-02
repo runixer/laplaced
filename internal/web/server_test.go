@@ -686,6 +686,7 @@ func TestUpdateMetrics(t *testing.T) {
 	}
 
 	mockStorage.On("GetFactStats").Return(stats, nil)
+	mockStorage.On("GetTopicsExtended", storage.TopicFilter{}, 1, 0, "", "").Return(storage.TopicResult{TotalCount: 42}, nil)
 	mockBot.On("GetActiveSessions").Return([]rag.ActiveSessionInfo{
 		{UserID: 1, MessageCount: 5},
 		{UserID: 2, MessageCount: 3},

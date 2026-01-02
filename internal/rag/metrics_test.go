@@ -10,60 +10,68 @@ import (
 )
 
 func TestRecordEmbeddingRequest_Success(t *testing.T) {
+	userID := int64(12345)
 	model := "test-model-success"
+	uid := formatUserID(userID)
 
 	cost := 0.001
-	RecordEmbeddingRequest(model, 0.5, true, 100, &cost)
+	RecordEmbeddingRequest(userID, model, 0.5, true, 100, &cost)
 
 	// Verify counter was incremented
-	requests := testutil.ToFloat64(embeddingRequestsTotal.WithLabelValues(model, statusSuccess))
+	requests := testutil.ToFloat64(embeddingRequestsTotal.WithLabelValues(uid, model, statusSuccess))
 	assert.GreaterOrEqual(t, requests, float64(1))
 
 	// Verify tokens were recorded
-	tokens := testutil.ToFloat64(embeddingTokensTotal.WithLabelValues(model))
+	tokens := testutil.ToFloat64(embeddingTokensTotal.WithLabelValues(uid, model))
 	assert.GreaterOrEqual(t, tokens, float64(100))
 
 	// Verify cost was recorded
-	costTotal := testutil.ToFloat64(embeddingCostTotal.WithLabelValues(model))
+	costTotal := testutil.ToFloat64(embeddingCostTotal.WithLabelValues(uid, model))
 	assert.GreaterOrEqual(t, costTotal, 0.001)
 }
 
 func TestRecordEmbeddingRequest_Error(t *testing.T) {
+	userID := int64(22222)
 	model := "test-model-error"
+	uid := formatUserID(userID)
 
-	RecordEmbeddingRequest(model, 0.1, false, 0, nil)
+	RecordEmbeddingRequest(userID, model, 0.1, false, 0, nil)
 
 	// Verify error counter was incremented
-	requests := testutil.ToFloat64(embeddingRequestsTotal.WithLabelValues(model, statusError))
+	requests := testutil.ToFloat64(embeddingRequestsTotal.WithLabelValues(uid, model, statusError))
 	assert.Equal(t, float64(1), requests)
 
 	// Verify tokens were NOT recorded on error
-	tokens := testutil.ToFloat64(embeddingTokensTotal.WithLabelValues(model))
+	tokens := testutil.ToFloat64(embeddingTokensTotal.WithLabelValues(uid, model))
 	assert.Equal(t, float64(0), tokens)
 }
 
 func TestRecordEmbeddingRequest_NilCost(t *testing.T) {
+	userID := int64(33333)
 	model := "test-model-nil-cost"
+	uid := formatUserID(userID)
 
-	RecordEmbeddingRequest(model, 0.2, true, 50, nil)
+	RecordEmbeddingRequest(userID, model, 0.2, true, 50, nil)
 
 	// Should not panic with nil cost
-	tokens := testutil.ToFloat64(embeddingTokensTotal.WithLabelValues(model))
+	tokens := testutil.ToFloat64(embeddingTokensTotal.WithLabelValues(uid, model))
 	assert.Equal(t, float64(50), tokens)
 
 	// Cost should be zero (not incremented)
-	costTotal := testutil.ToFloat64(embeddingCostTotal.WithLabelValues(model))
+	costTotal := testutil.ToFloat64(embeddingCostTotal.WithLabelValues(uid, model))
 	assert.Equal(t, float64(0), costTotal)
 }
 
 func TestRecordEmbeddingRequest_ZeroCost(t *testing.T) {
+	userID := int64(44444)
 	model := "test-model-zero-cost"
+	uid := formatUserID(userID)
 
 	zeroCost := 0.0
-	RecordEmbeddingRequest(model, 0.2, true, 50, &zeroCost)
+	RecordEmbeddingRequest(userID, model, 0.2, true, 50, &zeroCost)
 
 	// Zero cost should not be recorded
-	costTotal := testutil.ToFloat64(embeddingCostTotal.WithLabelValues(model))
+	costTotal := testutil.ToFloat64(embeddingCostTotal.WithLabelValues(uid, model))
 	assert.Equal(t, float64(0), costTotal)
 }
 

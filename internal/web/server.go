@@ -16,6 +16,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/bot"
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/memory"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
@@ -296,6 +297,16 @@ func (s *Server) updateMetrics() {
 			s.logger.Error("failed to get active sessions for metrics", "error", err)
 		} else {
 			bot.SetActiveSessions(len(sessions))
+		}
+	}
+
+	// Update topics count
+	if s.topicRepo != nil {
+		topicResult, err := s.topicRepo.GetTopicsExtended(storage.TopicFilter{}, 1, 0, "", "")
+		if err != nil {
+			s.logger.Error("failed to get topics count for metrics", "error", err)
+		} else {
+			memory.SetTopicsTotal(topicResult.TotalCount)
 		}
 	}
 }
