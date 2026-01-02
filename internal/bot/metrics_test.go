@@ -57,24 +57,29 @@ func TestRecordContextTokens(t *testing.T) {
 
 func TestRecordContextTokensBySource(t *testing.T) {
 	tests := []struct {
+		userID int64
 		source string
 		tokens int
 	}{
-		{ContextSourceProfile, 500},
-		{ContextSourceTopics, 2000},
-		{ContextSourceSession, 1000},
+		{123, ContextSourceProfile, 500},
+		{456, ContextSourceTopics, 2000},
+		{789, ContextSourceSession, 1000},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.source, func(t *testing.T) {
 			assert.NotPanics(t, func() {
-				RecordContextTokensBySource(tt.source, tt.tokens)
+				RecordContextTokensBySource(tt.userID, tt.source, tt.tokens)
 			})
 		})
 	}
 }
 
 func TestMetricsRegistration(t *testing.T) {
+	// Trigger vec metrics so they appear in the registry
+	RecordMessageProcessing(99999, 1.0, true)
+	RecordContextTokensBySource(99999, ContextSourceProfile, 100)
+
 	// Verify all metrics are registered with correct names
 	metrics := []string{
 		"laplaced_bot_active_sessions",

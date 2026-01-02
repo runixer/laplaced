@@ -656,7 +656,7 @@ func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageCont
 
 	// Record context tokens by source (approximate: 1 token ≈ 4 characters)
 	if len(memoryBankFormatted) > 0 {
-		RecordContextTokensBySource(ContextSourceProfile, len(memoryBankFormatted)/4)
+		RecordContextTokensBySource(userID, ContextSourceProfile, len(memoryBankFormatted)/4)
 	}
 	if ragContextMsg != nil {
 		ragText := ""
@@ -668,11 +668,11 @@ func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageCont
 			}
 		}
 		if len(ragText) > 0 {
-			RecordContextTokensBySource(ContextSourceTopics, len(ragText)/4)
+			RecordContextTokensBySource(userID, ContextSourceTopics, len(ragText)/4)
 		}
 	}
 	if sessionChars > 0 {
-		RecordContextTokensBySource(ContextSourceSession, sessionChars/4)
+		RecordContextTokensBySource(userID, ContextSourceSession, sessionChars/4)
 	}
 
 	return orMessages, debugInfo, nil

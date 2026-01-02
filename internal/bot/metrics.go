@@ -37,8 +37,9 @@ var (
 			Subsystem: "bot",
 			Name:      "message_processing_duration_seconds",
 			Help:      "End-to-end duration of message processing in seconds",
-			// Buckets для типичных времён обработки: 0.5s - 30s
-			Buckets: []float64{0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30},
+			// Buckets для типичных времён обработки: 0.5s - 120s
+			// (LLM генерация может занимать до минуты)
+			Buckets: []float64{0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30, 45, 60, 90, 120},
 		},
 		[]string{"user_id"},
 	)
@@ -72,6 +73,7 @@ var (
 
 	// contextTokensBySource отслеживает токены по источнику контекста.
 	// Labels:
+	//   - user_id: идентификатор пользователя
 	//   - source: profile, topics, session
 	// Помогает понять распределение контекста между источниками.
 	contextTokensBySource = promauto.NewHistogramVec(
@@ -83,7 +85,7 @@ var (
 			// Buckets для каждого источника: 100 - 50K tokens
 			Buckets: []float64{100, 500, 1000, 2000, 5000, 10000, 20000, 30000, 50000},
 		},
-		[]string{"source"},
+		[]string{"user_id", "source"},
 	)
 )
 
@@ -137,6 +139,7 @@ func RecordContextTokens(tokens int) {
 }
 
 // RecordContextTokensBySource записывает токены по источнику контекста.
-func RecordContextTokensBySource(source string, tokens int) {
-	contextTokensBySource.WithLabelValues(source).Observe(float64(tokens))
+func RecordContextTokensBySource(userID int64, source string, tokens int) {
+	uid := formatUserID(userID)
+	contextTokensBySource.WithLabelValues(uid, source).Observe(float64(tokens))
 }

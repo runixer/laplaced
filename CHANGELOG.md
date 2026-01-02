@@ -14,7 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed missing `user_id` label on LLM and Embedding metrics (missed in v0.3.3):
   - LLM: `laplaced_llm_request_duration_seconds`, `laplaced_llm_requests_total`
   - Embedding: `laplaced_embedding_request_duration_seconds`, `laplaced_embedding_requests_total`, `laplaced_embedding_tokens_total`, `laplaced_embedding_cost_usd_total`
+  - Bot: `laplaced_bot_context_tokens_by_source`
 - Fixed `laplaced_memory_topics_total` metric always showing 0
+- Fixed histogram buckets for `laplaced_bot_message_processing_duration_seconds`: extended from 30s to 120s max (LLM responses can take up to a minute)
 
 ## [0.3.3] - 2026-01-02
 
