@@ -135,6 +135,20 @@ var (
 		},
 		[]string{"type"},
 	)
+
+	// ragRetrievalTotal считает результаты RAG retrieval.
+	// Labels:
+	//   - result: результат (hit, miss)
+	// hit = нашли релевантный контекст, miss = контекст пустой
+	ragRetrievalTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: "rag",
+			Name:      "retrieval_total",
+			Help:      "Total number of RAG retrieval operations",
+		},
+		[]string{"result"},
+	)
 )
 
 // Константы для статусов
@@ -147,6 +161,12 @@ const (
 const (
 	searchTypeTopics = "topics"
 	searchTypeFacts  = "facts"
+)
+
+// Константы для RAG результатов
+const (
+	resultHit  = "hit"
+	resultMiss = "miss"
 )
 
 // Размер embedding в байтах (3072 dimensions × 4 bytes per float32)
@@ -185,4 +205,13 @@ func UpdateVectorIndexMetrics(topicsCount, factsCount int) {
 	// Приблизительный размер в памяти
 	vectorIndexMemoryBytes.WithLabelValues(searchTypeTopics).Set(float64(topicsCount * embeddingMemoryBytes))
 	vectorIndexMemoryBytes.WithLabelValues(searchTypeFacts).Set(float64(factsCount * embeddingMemoryBytes))
+}
+
+// RecordRAGRetrieval записывает результат RAG retrieval.
+func RecordRAGRetrieval(hasContext bool) {
+	if hasContext {
+		ragRetrievalTotal.WithLabelValues(resultHit).Inc()
+	} else {
+		ragRetrievalTotal.WithLabelValues(resultMiss).Inc()
+	}
 }

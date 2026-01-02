@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"strings"
+	"time"
 
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/markdown"
@@ -21,6 +22,14 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	if len(group.Messages) == 0 {
 		return
 	}
+
+	// Track processing time and success for metrics
+	startTime := time.Now()
+	success := false
+	defer func() {
+		duration := time.Since(startTime).Seconds()
+		RecordMessageProcessing(duration, success)
+	}()
 
 	lastMsg := group.Messages[len(group.Messages)-1]
 	user := lastMsg.From
@@ -192,7 +201,11 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 
 	b.recordMetrics(userID, totalPromptTokens, totalCompletionTokens, ragInfo, orMessages, finalResponse, logger)
 
+	// Record context tokens for metrics (approximate based on prompt tokens)
+	RecordContextTokens(totalPromptTokens)
+
 	b.sendResponses(shutdownSafeCtx, chatID, responses, logger)
+	success = true
 }
 
 func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logger *slog.Logger) (string, string, []interface{}, error) {

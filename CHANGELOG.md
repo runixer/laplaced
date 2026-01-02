@@ -24,6 +24,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `laplaced_vector_search_vectors_scanned` - vectors per search
   - `laplaced_vector_index_size` - current index size
   - `laplaced_vector_index_memory_bytes` - estimated memory usage
+  - `laplaced_rag_retrieval_total` - RAG retrieval hit/miss counter
+- Added Prometheus metrics for application health:
+  - `laplaced_bot_active_sessions` - active chat sessions gauge
+  - `laplaced_bot_message_processing_duration_seconds` - end-to-end message processing latency
+  - `laplaced_bot_messages_processed_total` - processed messages counter with success/error status
+  - `laplaced_bot_context_tokens` - context size histogram (in tokens)
+- Added Prometheus metrics for LLM observability:
+  - `laplaced_llm_request_duration_seconds` - LLM request latency by model/status
+  - `laplaced_llm_requests_total` - LLM request counter by model/status
+  - `laplaced_llm_tokens_total` - token usage by model/type (prompt/completion)
+  - `laplaced_llm_cost_usd_total` - cumulative LLM cost by model
+  - `laplaced_llm_retries_total` - retry counter by model
+- Added Prometheus metrics for HTTP server:
+  - `laplaced_http_request_duration_seconds` - HTTP request latency by handler/method/status
+  - `laplaced_http_requests_total` - HTTP request counter by handler/method/status
+- Added Prometheus metrics for memory system:
+  - `laplaced_memory_fact_operations_total` - fact operations counter (add/update/delete)
+  - `laplaced_memory_dedup_decisions_total` - deduplication decisions counter (ignore/merge/replace/add)
+  - `laplaced_memory_extraction_duration_seconds` - fact extraction latency
+  - `laplaced_memory_topic_processing_duration_seconds` - topic processing latency
+  - `laplaced_memory_facts_total` - current facts count by type (identity/context/status)
+  - `laplaced_memory_topics_total` - current topics count
 - Added `rag.max_profile_facts` config option (default: 50) - previously hardcoded limit for user profile facts
 
 ### Changed

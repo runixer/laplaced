@@ -156,6 +156,11 @@ func (s *Service) ProcessSessionWithStats(ctx context.Context, userID int64, mes
 }
 
 func (s *Service) extractMemoryUpdate(ctx context.Context, session []storage.Message, facts []storage.Fact, referenceDate time.Time, user *storage.User) (*MemoryUpdate, string, chatUsage, error) {
+	startTime := time.Now()
+	defer func() {
+		RecordMemoryExtraction(time.Since(startTime).Seconds())
+	}()
+
 	var sb strings.Builder
 	for _, msg := range session {
 		if msg.Role == "user" {
@@ -364,6 +369,7 @@ func (s *Service) applyUpdateWithStats(ctx context.Context, userID int64, update
 			s.logger.Error("failed to process fact addition", "error", err)
 		} else {
 			stats.Created++
+			RecordFactOperation(OperationAdd)
 		}
 	}
 
@@ -417,6 +423,7 @@ func (s *Service) applyUpdateWithStats(ctx context.Context, userID int64, update
 			s.logger.Error("failed to update fact", "error", err)
 		} else {
 			stats.Updated++
+			RecordFactOperation(OperationUpdate)
 			s.logger.Info("Fact updated", "id", updated.ID)
 			if s.cfg.Server.DebugMode {
 				var tID *int64
@@ -464,6 +471,7 @@ func (s *Service) applyUpdateWithStats(ctx context.Context, userID int64, update
 			s.logger.Error("failed to delete fact", "error", err)
 		} else {
 			stats.Deleted++
+			RecordFactOperation(OperationDelete)
 			s.logger.Info("Fact removed", "id", removed.ID)
 			if s.cfg.Server.DebugMode {
 				var tID *int64
@@ -585,6 +593,7 @@ func (s *Service) deduplicateAndAddFact(ctx context.Context, fact storage.Fact, 
 
 	switch action {
 	case "IGNORE":
+		RecordDedupDecision(DecisionIgnore)
 		s.logger.Info("Fact ignored as duplicate", "content", fact.Content)
 		// Update LastUpdated of the most similar fact to keep it fresh
 		if len(similar) > 0 {
@@ -596,6 +605,11 @@ func (s *Service) deduplicateAndAddFact(ctx context.Context, fact storage.Fact, 
 		}
 		return nil
 	case "REPLACE", "MERGE":
+		if action == "REPLACE" {
+			RecordDedupDecision(DecisionReplace)
+		} else {
+			RecordDedupDecision(DecisionMerge)
+		}
 		s.logger.Info("Fact merged/replaced", "action", action, "target_id", targetID)
 
 		// Find the target fact in similar list or fetch it
@@ -649,9 +663,11 @@ func (s *Service) deduplicateAndAddFact(ctx context.Context, fact storage.Fact, 
 		return nil
 
 	case "ADD":
+		RecordDedupDecision(DecisionAdd)
 		_, err := s.addFactWithHistory(fact, reason, tID, requestInput)
 		return err
 	default:
+		RecordDedupDecision(DecisionAdd)
 		_, err := s.addFactWithHistory(fact, reason, tID, requestInput)
 		return err
 	}

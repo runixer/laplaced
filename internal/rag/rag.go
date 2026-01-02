@@ -490,6 +490,10 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 	}
 
 	debugInfo.Results = results
+
+	// Record RAG retrieval result (hit if we found context, miss otherwise)
+	RecordRAGRetrieval(len(results) > 0)
+
 	return results, debugInfo, nil
 }
 

@@ -195,17 +195,17 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Register debug routes only if enabled
 	if s.cfg.Server.DebugMode {
-		mux.HandleFunc("/ui/stats", s.statsHandler)
-		mux.HandleFunc("/ui/inspector", s.inspectorHandler)
-		mux.HandleFunc("/ui/debug/rag", s.debugRAGHandler)
-		mux.HandleFunc("/ui/debug/topics", s.topicDebugHandler)
-		mux.HandleFunc("/ui/debug/sessions", s.sessionsHandler)
-		mux.HandleFunc("/ui/debug/sessions/process", s.sessionsProcessSSEHandler)
-		mux.HandleFunc("/ui/debug/chat", s.debugChatHandler)
-		mux.HandleFunc("/ui/debug/chat/send", s.debugChatSendHandler)
-		mux.HandleFunc("/ui/topics", s.topicsHandler)
-		mux.HandleFunc("/ui/facts", s.factsHandler)
-		mux.HandleFunc("/ui/facts/history", s.factsHistoryHandler)
+		mux.HandleFunc("/ui/stats", instrumentHandler("stats", s.statsHandler))
+		mux.HandleFunc("/ui/inspector", instrumentHandler("inspector", s.inspectorHandler))
+		mux.HandleFunc("/ui/debug/rag", instrumentHandler("debug_rag", s.debugRAGHandler))
+		mux.HandleFunc("/ui/debug/topics", instrumentHandler("debug_topics", s.topicDebugHandler))
+		mux.HandleFunc("/ui/debug/sessions", instrumentHandler("debug_sessions", s.sessionsHandler))
+		mux.HandleFunc("/ui/debug/sessions/process", instrumentHandler("debug_sessions_process", s.sessionsProcessSSEHandler))
+		mux.HandleFunc("/ui/debug/chat", instrumentHandler("debug_chat", s.debugChatHandler))
+		mux.HandleFunc("/ui/debug/chat/send", instrumentHandler("debug_chat_send", s.debugChatSendHandler))
+		mux.HandleFunc("/ui/topics", instrumentHandler("topics", s.topicsHandler))
+		mux.HandleFunc("/ui/facts", instrumentHandler("facts", s.factsHandler))
+		mux.HandleFunc("/ui/facts/history", instrumentHandler("facts_history", s.factsHistoryHandler))
 
 		// Redirect /ui/ to /ui/stats
 		mux.HandleFunc("/ui/", func(w http.ResponseWriter, r *http.Request) {
@@ -219,9 +219,9 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	// Always register healthz and webhook
-	mux.HandleFunc("/healthz", s.healthzHandler)
+	mux.HandleFunc("/healthz", instrumentHandler("healthz", s.healthzHandler))
 	if s.cfg.Telegram.WebhookPath != "" {
-		mux.HandleFunc("/telegram/"+s.cfg.Telegram.WebhookPath, s.webhookHandler)
+		mux.HandleFunc("/telegram/"+s.cfg.Telegram.WebhookPath, instrumentHandler("webhook", s.webhookHandler))
 	}
 	mux.Handle("/metrics", promhttp.Handler())
 
