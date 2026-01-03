@@ -7,7 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-01-03
+
+### Added
+- **New metrics for full latency breakdown:**
+  - `laplaced_file_download_duration_seconds{user_id, file_type}` — Telegram file download timing
+  - `laplaced_file_downloads_total{user_id, file_type, status}` — download counter
+  - `laplaced_file_size_bytes{file_type}` — file size histogram
+  - `laplaced_rag_enrichment_duration_seconds{user_id}` — query enrichment LLM timing
+- **Embedding type label** added to `laplaced_embedding_request_duration_seconds` and `laplaced_embedding_requests_total`:
+  - `type=topics` for topic retrieval/processing embeddings
+  - `type=facts` for fact retrieval embeddings
+
 ### Changed
+- **Refactored file processing** into new `internal/files/` package:
+  - **Parallel file downloads across message groups** — 5-8x speedup for photo albums
+  - Automatic retries (3 attempts with exponential backoff)
+  - Graceful degradation — continues with other files if one fails
+  - Simplified `prepareUserMessage` by ~80 lines
 - **Split CI workflows** to eliminate duplicate runs on release:
   - `ci.yml` — lint and test on push to main and PRs
   - `release.yml` — full release pipeline on tags only

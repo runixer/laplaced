@@ -12,6 +12,7 @@ require (
 	github.com/yandex-cloud/go-genproto v0.43.0
 	github.com/yuin/goldmark v1.7.13
 	golang.org/x/net v0.48.0
+	golang.org/x/sync v0.19.0
 	golang.org/x/text v0.32.0
 	google.golang.org/genproto/googleapis/api v0.0.0-20251222181119-0a764e51fe1b
 	google.golang.org/grpc v1.78.0

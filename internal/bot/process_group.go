@@ -10,7 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/markdown"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
@@ -210,158 +213,108 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 }
 
 func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logger *slog.Logger) (string, string, []interface{}, error) {
-	var historyContentBuilder strings.Builder
-	var rawQueryBuilder strings.Builder
-	var currentUserMessageContent []interface{}
+	// 1. Download all files in parallel across messages
+	downloadedFiles := make([][]*files.ProcessedFile, len(group.Messages))
 
-	for _, msg := range group.Messages {
-		fullMessageContent := msg.BuildContent(b.translator, b.cfg.Bot.Language)
-		if fullMessageContent != "" {
-			if historyContentBuilder.Len() > 0 {
-				historyContentBuilder.WriteString("\n")
-			}
-			historyContentBuilder.WriteString(fullMessageContent)
-		}
-
-		var partsForThisMessage []interface{}
-
-		if len(msg.Photo) > 0 {
-			bestPhoto := msg.Photo[len(msg.Photo)-1]
-			base64Image, err := b.downloader.DownloadFileAsBase64(ctx, bestPhoto.FileID)
+	g, gCtx := errgroup.WithContext(ctx)
+	for i, msg := range group.Messages {
+		i, msg := i, msg // capture for goroutine
+		g.Go(func() error {
+			result, err := b.fileProcessor.ProcessMessage(gCtx, msg, group.UserID)
 			if err != nil {
-				logger.Error("failed to download or encode photo", "error", err, "file_id", bestPhoto.FileID)
-				return "", "", nil, err
+				return err // context cancelled
 			}
-			partsForThisMessage = append(partsForThisMessage, openrouter.ImagePart{
-				Type: "image_url",
-				ImageURL: openrouter.ImageURL{
-					URL: fmt.Sprintf("data:image/jpeg;base64,%s", base64Image),
-				},
-			})
+			downloadedFiles[i] = result
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return "", "", nil, err
+	}
+
+	// 2. Process messages sequentially (order preserved)
+	var historyBuilder strings.Builder
+	var rawQueryBuilder strings.Builder
+	var llmParts []interface{}
+
+	for i, msg := range group.Messages {
+		// Text content (message text or caption)
+		textContent := msg.BuildContent(b.translator, b.cfg.Bot.Language)
+		if textContent != "" {
+			appendWithNewline(&historyBuilder, textContent)
+			llmParts = append(llmParts, openrouter.TextPart{Type: "text", Text: textContent})
 		}
 
-		if msg.Document != nil {
-			switch {
-			case strings.HasPrefix(msg.Document.MimeType, "image/"):
-				base64Image, err := b.downloader.DownloadFileAsBase64(ctx, msg.Document.FileID)
-				if err != nil {
-					logger.Error("failed to download or encode document image", "error", err, "file_id", msg.Document.FileID)
-					return "", "", nil, err
-				}
-				partsForThisMessage = append(partsForThisMessage, openrouter.ImagePart{
-					Type: "image_url",
-					ImageURL: openrouter.ImageURL{
-						URL: fmt.Sprintf("data:%s;base64,%s", msg.Document.MimeType, base64Image),
-					},
+		// Process pre-downloaded files
+		for _, f := range downloadedFiles[i] {
+			// Add instruction before file if present (e.g., voice handling instructions)
+			if f.Instruction != "" {
+				prefix := msg.BuildPrefix(b.translator, b.cfg.Bot.Language)
+				llmParts = append(llmParts, openrouter.TextPart{
+					Type: "text",
+					Text: fmt.Sprintf("%s: %s", prefix, f.Instruction),
 				})
+			}
 
-			case msg.Document.MimeType == "application/pdf":
-				base64PDF, err := b.downloader.DownloadFileAsBase64(ctx, msg.Document.FileID)
-				if err != nil {
-					logger.Error("failed to download or encode PDF", "error", err, "file_id", msg.Document.FileID)
-					return "", "", nil, err
+			// Add file parts to LLM message
+			llmParts = append(llmParts, f.LLMParts...)
+
+			// Handle history and RAG query based on file type
+			switch f.FileType {
+			case files.FileTypeVoice:
+				// Voice: add marker to history and RAG query
+				prefix := msg.BuildPrefix(b.translator, b.cfg.Bot.Language)
+				voiceMarker := b.translator.Get(b.cfg.Bot.Language, "bot.voice_message_marker")
+				appendWithNewline(&historyBuilder, fmt.Sprintf("%s: %s", prefix, voiceMarker))
+				appendWithNewline(&rawQueryBuilder, voiceMarker)
+
+				logger.Info("processed voice message",
+					"file_id", f.FileID,
+					"size", f.Size,
+					"duration_ms", f.Duration.Milliseconds(),
+				)
+
+			case files.FileTypeDocument:
+				// Text document: content is already in LLMParts as TextPart
+				// Also add to history for context
+				if len(f.LLMParts) > 0 {
+					if tp, ok := f.LLMParts[0].(openrouter.TextPart); ok {
+						appendWithNewline(&historyBuilder, tp.Text)
+					}
 				}
-				partsForThisMessage = append(partsForThisMessage, openrouter.FilePart{
-					Type: "file",
-					File: openrouter.File{
-						FileName: msg.Document.FileName,
-						FileData: fmt.Sprintf("data:application/pdf;base64,%s", base64PDF),
-					},
-				})
 
 			default:
-				fileBytes, err := b.downloader.DownloadFile(ctx, msg.Document.FileID)
-				if err != nil {
-					logger.Error("failed to download document", "error", err, "file_id", msg.Document.FileID)
-					return "", "", nil, err
-				}
-
-				fileContent := string(fileBytes)
-				textContent := fmt.Sprintf("%s:\n\n%s", msg.Document.FileName, fileContent)
-
-				partsForThisMessage = append(partsForThisMessage, openrouter.TextPart{
-					Type: "text",
-					Text: textContent,
-				})
-
-				if historyContentBuilder.Len() > 0 {
-					historyContentBuilder.WriteString("\n")
-				}
-				historyContentBuilder.WriteString(textContent)
+				// Photo, Image, PDF: just log, no special history handling
+				logger.Debug("processed file",
+					"type", f.FileType,
+					"file_id", f.FileID,
+					"size", f.Size,
+					"duration_ms", f.Duration.Milliseconds(),
+				)
 			}
 		}
 
-		// Handle voice messages - send audio directly to LLM (Gemini supports native audio)
-		if msg.Voice != nil {
-			base64Audio, err := b.downloader.DownloadFileAsBase64(ctx, msg.Voice.FileID)
-			if err != nil {
-				logger.Error("failed to download voice message", "error", err, "file_id", msg.Voice.FileID)
-				return "", "", nil, err
-			}
-
-			// Telegram sends voice messages as OGG Opus, which Gemini supports natively
-			mimeType := msg.Voice.MimeType
-			if mimeType == "" {
-				mimeType = "audio/ogg"
-			}
-
-			// Add explicit instruction for the LLM about the audio, including forwarding info if present
-			prefix := msg.BuildPrefix(b.translator, b.cfg.Bot.Language)
-			audioInstruction := b.translator.Get(b.cfg.Bot.Language, "bot.voice_instruction")
-			fullInstruction := fmt.Sprintf("%s: %s", prefix, audioInstruction)
-			partsForThisMessage = append(partsForThisMessage, openrouter.TextPart{
-				Type: "text",
-				Text: fullInstruction,
-			})
-
-			partsForThisMessage = append(partsForThisMessage, openrouter.FilePart{
-				Type: "file",
-				File: openrouter.File{
-					FileName: "voice.ogg",
-					FileData: fmt.Sprintf("data:%s;base64,%s", mimeType, base64Audio),
-				},
-			})
-
-			// Add placeholder to history for context (LLM will understand the audio directly)
-			voiceMarker := b.translator.Get(b.cfg.Bot.Language, "bot.voice_message_marker")
-			voiceContent := fmt.Sprintf("%s: %s", prefix, voiceMarker)
-
-			if historyContentBuilder.Len() > 0 {
-				historyContentBuilder.WriteString("\n")
-			}
-			historyContentBuilder.WriteString(voiceContent)
-
-			// For RAG, just note that there was a voice message
-			if rawQueryBuilder.Len() > 0 {
-				rawQueryBuilder.WriteString("\n")
-			}
-			rawQueryBuilder.WriteString(voiceMarker)
-
-			logger.Info("added voice message as native audio",
-				"file_id", msg.Voice.FileID,
-				"duration", msg.Voice.Duration,
-				"mime_type", mimeType,
-			)
-		}
-
-		if fullMessageContent != "" {
-			textPart := openrouter.TextPart{Type: "text", Text: fullMessageContent}
-			partsForThisMessage = append([]interface{}{textPart}, partsForThisMessage...)
-		}
-
-		currentUserMessageContent = append(currentUserMessageContent, partsForThisMessage...)
-
+		// Build RAG query from text
 		txt := msg.Text
 		if txt == "" {
 			txt = msg.Caption
 		}
-		if rawQueryBuilder.Len() > 0 && txt != "" {
-			rawQueryBuilder.WriteString("\n")
-		}
-		rawQueryBuilder.WriteString(txt)
+		appendWithNewline(&rawQueryBuilder, txt)
 	}
 
-	return historyContentBuilder.String(), rawQueryBuilder.String(), currentUserMessageContent, nil
+	return historyBuilder.String(), rawQueryBuilder.String(), llmParts, nil
+}
+
+// appendWithNewline appends string to builder with newline separator if not empty.
+func appendWithNewline(b *strings.Builder, s string) {
+	if s == "" {
+		return
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n")
+	}
+	b.WriteString(s)
 }
 
 func (b *Bot) executeToolCalls(ctx context.Context, chatID int64, messageThreadID int, userID int64, toolCalls []openrouter.ToolCall, logger *slog.Logger) ([]openrouter.Message, error) {

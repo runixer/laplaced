@@ -366,7 +366,9 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		var err error
 		var prompt string
 		var tokens int
+		enrichStart := time.Now()
 		enrichedQuery, prompt, tokens, err = s.enrichQuery(ctx, userID, query, opts.History)
+		RecordRAGEnrichment(userID, time.Since(enrichStart).Seconds())
 		debugInfo.EnrichmentPrompt = prompt
 		debugInfo.EnrichmentTokens = tokens
 
@@ -387,14 +389,14 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 	})
 	embeddingDuration := time.Since(embeddingStart).Seconds()
 	if err != nil {
-		RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, embeddingDuration, false, 0, nil)
+		RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, searchTypeTopics, embeddingDuration, false, 0, nil)
 		return nil, debugInfo, err
 	}
 	if len(resp.Data) == 0 {
-		RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, embeddingDuration, false, 0, nil)
+		RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, searchTypeTopics, embeddingDuration, false, 0, nil)
 		return nil, debugInfo, fmt.Errorf("no embedding returned")
 	}
-	RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
+	RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, searchTypeTopics, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
 	qVec := resp.Data[0].Embedding
 
 	// Search topics
@@ -880,10 +882,10 @@ func (s *Service) processChunkWithStats(ctx context.Context, userID int64, chunk
 		})
 		embeddingDuration := time.Since(embeddingStart).Seconds()
 		if err != nil {
-			RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, embeddingDuration, false, 0, nil)
+			RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, searchTypeTopics, embeddingDuration, false, 0, nil)
 			return nil, fmt.Errorf("create embeddings: %w", err)
 		}
-		RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
+		RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, searchTypeTopics, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
 		stats.AddEmbeddingUsage(resp.Usage.TotalTokens, resp.Usage.Cost)
 
 		if len(resp.Data) != len(validTopics) {
@@ -1175,11 +1177,11 @@ func (s *Service) processChunk(ctx context.Context, userID int64, chunk []storag
 		})
 		embeddingDuration := time.Since(embeddingStart).Seconds()
 		if err != nil {
-			RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, embeddingDuration, false, 0, nil)
+			RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, searchTypeTopics, embeddingDuration, false, 0, nil)
 			s.logger.Error("failed to create embeddings for topics", "error", err)
 			return fmt.Errorf("create embeddings: %w", err)
 		}
-		RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
+		RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, searchTypeTopics, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
 
 		if len(resp.Data) != len(validTopics) {
 			s.logger.Error("embedding count mismatch", "expected", len(validTopics), "got", len(resp.Data))
@@ -1319,14 +1321,14 @@ func (s *Service) RetrieveFacts(ctx context.Context, userID int64, query string)
 	})
 	embeddingDuration := time.Since(embeddingStart).Seconds()
 	if err != nil {
-		RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, embeddingDuration, false, 0, nil)
+		RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, searchTypeFacts, embeddingDuration, false, 0, nil)
 		return nil, err
 	}
 	if len(resp.Data) == 0 {
-		RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, embeddingDuration, false, 0, nil)
+		RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, searchTypeFacts, embeddingDuration, false, 0, nil)
 		return nil, fmt.Errorf("no embedding returned")
 	}
-	RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
+	RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, searchTypeFacts, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
 	qVec := resp.Data[0].Embedding
 
 	searchStart := time.Now()

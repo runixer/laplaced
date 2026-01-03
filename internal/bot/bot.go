@@ -14,6 +14,7 @@ import (
 	"golang.org/x/text/language"
 
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
@@ -43,6 +44,7 @@ type Bot struct {
 	speechKitClient yandex.Client
 	ragService      *rag.Service
 	downloader      telegram.FileDownloader
+	fileProcessor   *files.Processor
 	messageGrouper  *MessageGrouper
 	logger          *slog.Logger
 	translator      *i18n.Translator
@@ -55,6 +57,8 @@ func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRe
 	if err != nil {
 		return nil, fmt.Errorf("failed to create file downloader: %w", err)
 	}
+
+	fileProcessor := files.NewProcessor(downloader, translator, cfg.Bot.Language, botLogger)
 
 	b := &Bot{
 		api:             api,
@@ -69,6 +73,7 @@ func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRe
 		speechKitClient: speechKitClient,
 		ragService:      ragService,
 		downloader:      downloader,
+		fileProcessor:   fileProcessor,
 		logger:          botLogger,
 		translator:      translator,
 	}

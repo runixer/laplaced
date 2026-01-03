@@ -26,6 +26,7 @@ var (
 	// Labels:
 	//   - user_id: идентификатор пользователя
 	//   - model: название модели (google/gemini-embedding-001)
+	//   - type: тип embedding (topics, facts)
 	//   - status: результат запроса (success, error)
 	embeddingRequestDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -36,13 +37,14 @@ var (
 			// Buckets для типичных времён embedding API: 100ms - 5s
 			Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 3, 5},
 		},
-		[]string{"user_id", "model", "status"},
+		[]string{"user_id", "model", "type", "status"},
 	)
 
 	// embeddingRequestsTotal считает общее количество embedding запросов.
 	// Labels:
 	//   - user_id: идентификатор пользователя
 	//   - model: название модели
+	//   - type: тип embedding (topics, facts)
 	//   - status: результат (success, error)
 	embeddingRequestsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
@@ -51,7 +53,7 @@ var (
 			Name:      "requests_total",
 			Help:      "Total number of embedding API requests",
 		},
-		[]string{"user_id", "model", "status"},
+		[]string{"user_id", "model", "type", "status"},
 	)
 
 	// embeddingTokensTotal считает использованные токены.
@@ -190,6 +192,21 @@ var (
 		},
 		[]string{"user_id"},
 	)
+
+	// ragEnrichmentDuration измеряет время LLM вызова для обогащения запроса.
+	// Labels:
+	//   - user_id: идентификатор пользователя
+	ragEnrichmentDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: "rag",
+			Name:      "enrichment_duration_seconds",
+			Help:      "Duration of query enrichment LLM calls in seconds",
+			// Buckets: 500ms - 30s (LLM Flash call)
+			Buckets: []float64{0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30},
+		},
+		[]string{"user_id"},
+	)
 )
 
 // Константы для статусов
@@ -219,15 +236,16 @@ func formatUserID(userID int64) string {
 }
 
 // RecordEmbeddingRequest записывает метрики embedding запроса.
-func RecordEmbeddingRequest(userID int64, model string, durationSeconds float64, success bool, tokens int, cost *float64) {
+// embeddingType: searchTypeTopics или searchTypeFacts
+func RecordEmbeddingRequest(userID int64, model string, embeddingType string, durationSeconds float64, success bool, tokens int, cost *float64) {
 	status := statusSuccess
 	if !success {
 		status = statusError
 	}
 
 	uid := formatUserID(userID)
-	embeddingRequestDuration.WithLabelValues(uid, model, status).Observe(durationSeconds)
-	embeddingRequestsTotal.WithLabelValues(uid, model, status).Inc()
+	embeddingRequestDuration.WithLabelValues(uid, model, embeddingType, status).Observe(durationSeconds)
+	embeddingRequestsTotal.WithLabelValues(uid, model, embeddingType, status).Inc()
 
 	if success && tokens > 0 {
 		embeddingTokensTotal.WithLabelValues(uid, model).Add(float64(tokens))
@@ -275,4 +293,10 @@ func RecordRAGCandidates(userID int64, searchType string, count int) {
 func RecordRAGLatency(userID int64, durationSeconds float64) {
 	uid := formatUserID(userID)
 	ragLatency.WithLabelValues(uid).Observe(durationSeconds)
+}
+
+// RecordRAGEnrichment записывает время LLM вызова для обогащения запроса.
+func RecordRAGEnrichment(userID int64, durationSeconds float64) {
+	uid := formatUserID(userID)
+	ragEnrichmentDuration.WithLabelValues(uid).Observe(durationSeconds)
 }

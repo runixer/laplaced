@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
@@ -297,6 +298,7 @@ func TestProcessMessageGroup_VoiceCompletesOnContextCancel(t *testing.T) {
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
 		downloader:      mockDownloader,
+		fileProcessor:   files.NewProcessor(mockDownloader, translator, "en", logger),
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
@@ -306,7 +308,6 @@ func TestProcessMessageGroup_VoiceCompletesOnContextCancel(t *testing.T) {
 	userID := int64(123)
 	chatID := int64(456)
 	voiceFileID := "voice_file_id"
-	voiceBase64 := "ZmFrZV92b2ljZV9kYXRh"
 
 	msg := &telegram.Message{
 		MessageID: 1,
@@ -320,12 +321,12 @@ func TestProcessMessageGroup_VoiceCompletesOnContextCancel(t *testing.T) {
 	var sendMessageCalled bool
 	var sendMessageMu sync.Mutex
 
-	// Mock file download with delay - now uses DownloadFileAsBase64 for native audio
-	mockDownloader.On("DownloadFileAsBase64", mock.Anything, voiceFileID).
+	// Mock file download with delay - FileProcessor uses DownloadFile
+	mockDownloader.On("DownloadFile", mock.Anything, voiceFileID).
 		Run(func(args mock.Arguments) {
 			time.Sleep(50 * time.Millisecond)
 		}).
-		Return(voiceBase64, nil)
+		Return([]byte("fake_voice_data"), nil)
 
 	// Setup remaining mocks
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
@@ -372,7 +373,7 @@ func TestProcessMessageGroup_VoiceCompletesOnContextCancel(t *testing.T) {
 	assert.True(t, sendMessageCalled, "SendMessage should be called even after context cancellation")
 	sendMessageMu.Unlock()
 
-	mockDownloader.AssertCalled(t, "DownloadFileAsBase64", mock.Anything, voiceFileID)
+	mockDownloader.AssertCalled(t, "DownloadFile", mock.Anything, voiceFileID)
 	mockORClient.AssertCalled(t, "CreateChatCompletion", mock.Anything, mock.Anything)
 }
 
@@ -406,6 +407,7 @@ func TestProcessMessageGroup_VoiceDownloadContextNotCancelled(t *testing.T) {
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
 		downloader:      mockDownloader,
+		fileProcessor:   files.NewProcessor(mockDownloader, translator, "en", logger),
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
@@ -415,7 +417,6 @@ func TestProcessMessageGroup_VoiceDownloadContextNotCancelled(t *testing.T) {
 	userID := int64(123)
 	chatID := int64(456)
 	voiceFileID := "voice_file_id"
-	voiceBase64 := "ZmFrZV92b2ljZV9kYXRh"
 
 	msg := &telegram.Message{
 		MessageID: 1,
@@ -430,7 +431,7 @@ func TestProcessMessageGroup_VoiceDownloadContextNotCancelled(t *testing.T) {
 	var downloadContextMu sync.Mutex
 
 	// Check if context is cancelled when file download is called
-	mockDownloader.On("DownloadFileAsBase64", mock.Anything, voiceFileID).
+	mockDownloader.On("DownloadFile", mock.Anything, voiceFileID).
 		Run(func(args mock.Arguments) {
 			ctx := args.Get(0).(context.Context)
 			// Wait to ensure parent context would be cancelled by now
@@ -439,7 +440,7 @@ func TestProcessMessageGroup_VoiceDownloadContextNotCancelled(t *testing.T) {
 			downloadContextCancelled = ctx.Err() != nil
 			downloadContextMu.Unlock()
 		}).
-		Return(voiceBase64, nil)
+		Return([]byte("fake_voice_data"), nil)
 
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)

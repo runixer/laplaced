@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
@@ -403,6 +404,11 @@ memory:
 	return tr
 }
 
+func createTestFileProcessor(t *testing.T, downloader *MockFileDownloader, translator *i18n.Translator) *files.Processor {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	return files.NewProcessor(downloader, translator, "en", logger)
+}
+
 func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 	// Setup
 	translator := createTestTranslator(t)
@@ -430,6 +436,7 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
 		downloader:      mockDownloader,
+		fileProcessor:   createTestFileProcessor(t, mockDownloader, translator),
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
@@ -582,6 +589,7 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
 		downloader:      mockDownloader,
+		fileProcessor:   createTestFileProcessor(t, mockDownloader, translator),
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
@@ -625,8 +633,8 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 	})).Return(nil)
 	mockStore.On("AddStat", mock.Anything).Return(nil)
 
-	// Mock API calls
-	mockDownloader.On("DownloadFileAsBase64", mock.Anything, photoFileID).Return(encodedPhotoData, nil)
+	// Mock API calls - FileProcessor uses DownloadFile for all files
+	mockDownloader.On("DownloadFile", mock.Anything, photoFileID).Return([]byte("fake_image_bytes"), nil)
 	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
@@ -718,6 +726,7 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
 		downloader:      mockDownloader,
+		fileProcessor:   createTestFileProcessor(t, mockDownloader, translator),
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
@@ -762,8 +771,8 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 	})).Return(nil)
 	mockStore.On("AddStat", mock.Anything).Return(nil)
 
-	// Mock API calls
-	mockDownloader.On("DownloadFileAsBase64", mock.Anything, docFileID).Return(encodedDocData, nil)
+	// Mock API calls - FileProcessor uses DownloadFile for all files
+	mockDownloader.On("DownloadFile", mock.Anything, docFileID).Return([]byte("fake_doc_image_bytes"), nil)
 	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
@@ -856,6 +865,7 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
 		downloader:      mockDownloader,
+		fileProcessor:   createTestFileProcessor(t, mockDownloader, translator),
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
@@ -900,8 +910,8 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 	})).Return(nil)
 	mockStore.On("AddStat", mock.Anything).Return(nil)
 
-	// Mock API calls
-	mockDownloader.On("DownloadFileAsBase64", mock.Anything, pdfFileID).Return(encodedPDFData, nil)
+	// Mock API calls - FileProcessor uses DownloadFile for all files
+	mockDownloader.On("DownloadFile", mock.Anything, pdfFileID).Return([]byte("fake_pdf_bytes"), nil)
 	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
@@ -999,6 +1009,7 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
 		downloader:      mockDownloader,
+		fileProcessor:   createTestFileProcessor(t, mockDownloader, translator),
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
@@ -1142,6 +1153,7 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
 		downloader:      mockDownloader,
+		fileProcessor:   createTestFileProcessor(t, mockDownloader, translator),
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
@@ -1152,7 +1164,7 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 	chatID := int64(456)
 	now := int(time.Now().Unix())
 	voiceFileID := "voice_file_id_789"
-	voiceBase64 := "ZmFrZV92b2ljZV9kYXRh" // base64 of "fake_voice_data"
+	voiceBase64 := "ZmFrZS1vZ2ctZGF0YQ==" // base64 of "fake-ogg-data"
 
 	msg := &telegram.Message{
 		MessageID: 1,
@@ -1162,8 +1174,8 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 		Voice:     &telegram.Voice{FileID: voiceFileID, MimeType: "audio/ogg"},
 	}
 
-	// Mock expectations - now uses DownloadFileAsBase64 for native audio
-	mockDownloader.On("DownloadFileAsBase64", mock.Anything, voiceFileID).Return(voiceBase64, nil)
+	// Mock expectations - FileProcessor uses DownloadFile for all files
+	mockDownloader.On("DownloadFile", mock.Anything, voiceFileID).Return([]byte("fake-ogg-data"), nil)
 
 	// Build expected content with voice marker
 	voiceMarker := translator.Get("en", "bot.voice_message_marker")
@@ -1221,7 +1233,7 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 	bot.processMessageGroup(context.Background(), group)
 
 	// Assertions
-	mockDownloader.AssertCalled(t, "DownloadFileAsBase64", mock.Anything, voiceFileID)
+	mockDownloader.AssertCalled(t, "DownloadFile", mock.Anything, voiceFileID)
 	mockORClient.AssertCalled(t, "CreateChatCompletion", mock.Anything, mock.Anything)
 
 	assert.Len(t, capturedRequest.Messages, 2) // System + User
