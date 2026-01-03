@@ -10,6 +10,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/jobtype"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -111,6 +112,9 @@ func (s *Service) ProcessSession(ctx context.Context, userID int64, messages []s
 
 // ProcessSessionWithStats processes a session and returns statistics about fact changes.
 func (s *Service) ProcessSessionWithStats(ctx context.Context, userID int64, messages []storage.Message, referenceDate time.Time, topicID int64) (FactStats, error) {
+	// Mark as background job for metrics (archiver is a maintenance task)
+	ctx = jobtype.WithJobType(ctx, jobtype.Background)
+
 	// Set a timeout to prevent hanging indefinitely if the model is slow or unresponsive
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/runixer/laplaced/internal/jobtype"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -37,6 +38,9 @@ func (s *Service) runConsolidationLoop(ctx context.Context) {
 }
 
 func (s *Service) processConsolidation(ctx context.Context) {
+	// Mark as background job for metrics (consolidation is a maintenance task)
+	ctx = jobtype.WithJobType(ctx, jobtype.Background)
+
 	users := s.cfg.Bot.AllowedUserIDs
 	for _, userID := range users {
 		if ctx.Err() != nil {

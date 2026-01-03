@@ -13,6 +13,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/jobtype"
 	"github.com/runixer/laplaced/internal/memory"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
@@ -582,7 +583,9 @@ func (s *Service) processTopicChunking(ctx context.Context, userID int64) {
 				return
 			}
 
-			runCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			// Mark as background job for metrics (topic extraction is maintenance)
+			runCtx := jobtype.WithJobType(context.Background(), jobtype.Background)
+			runCtx, cancel := context.WithTimeout(runCtx, 10*time.Minute)
 			err := s.processChunk(runCtx, userID, currentChunk)
 			cancel()
 
@@ -605,7 +608,9 @@ func (s *Service) processTopicChunking(ctx context.Context, userID int64) {
 				return
 			}
 
-			runCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			// Mark as background job for metrics (topic extraction is maintenance)
+			runCtx := jobtype.WithJobType(context.Background(), jobtype.Background)
+			runCtx, cancel := context.WithTimeout(runCtx, 10*time.Minute)
 			err := s.processChunk(runCtx, userID, currentChunk)
 			cancel()
 
@@ -617,6 +622,9 @@ func (s *Service) processTopicChunking(ctx context.Context, userID int64) {
 }
 
 func (s *Service) ForceProcessUser(ctx context.Context, userID int64) (int, error) {
+	// Mark as background job for metrics (force processing is a maintenance task)
+	ctx = jobtype.WithJobType(ctx, jobtype.Background)
+
 	// 1. Fetch unprocessed messages
 	messages, err := s.msgRepo.GetUnprocessedMessages(userID)
 	if err != nil {
@@ -661,6 +669,9 @@ func (s *Service) ForceProcessUser(ctx context.Context, userID int64) (int, erro
 // ForceProcessUserWithProgress processes all unprocessed messages for a user with progress reporting.
 // Unlike ForceProcessUser, this runs consolidation and fact extraction synchronously.
 func (s *Service) ForceProcessUserWithProgress(ctx context.Context, userID int64, onProgress ProgressCallback) (*ProcessingStats, error) {
+	// Mark as background job for metrics (force processing is a maintenance task)
+	ctx = jobtype.WithJobType(ctx, jobtype.Background)
+
 	stats := &ProcessingStats{}
 
 	// 1. Fetch unprocessed messages

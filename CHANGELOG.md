@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **System prompt tracking in context metrics** — `laplaced_bot_context_tokens_by_source{source="system"}` now tracks base system prompt size separately from profile facts. Enables complete context breakdown visualization (System + Profile + Session + Topics).
+- **Job type classification for LLM metrics** — new `job_type` label distinguishes interactive user requests from background maintenance:
+  - `job_type="interactive"` — user chat, tool calls (default)
+  - `job_type="background"` — archiver, topic extraction, consolidation, fact extraction
+  - Prevents background batch jobs (60s+ archiver operations) from skewing interactive latency metrics
+  - Affects: `laplaced_llm_request_duration_seconds`, `laplaced_llm_requests_total`, `laplaced_llm_tokens_total`, `laplaced_llm_cost_usd_total`
+  - New package `internal/jobtype` provides context-based job type propagation
 
 ## [0.3.8] - 2026-01-03
 
