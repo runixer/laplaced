@@ -12,6 +12,8 @@ env:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    # Skip CI for release commits (release.yml handles those)
+    if: ${{ !startsWith(github.event.head_commit.message, 'Release v') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -24,6 +26,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    if: ${{ !startsWith(github.event.head_commit.message, 'Release v') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
