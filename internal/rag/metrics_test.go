@@ -139,6 +139,26 @@ func TestRecordRAGCandidates(t *testing.T) {
 	}
 }
 
+func TestRecordRAGLatency(t *testing.T) {
+	tests := []struct {
+		name     string
+		userID   int64
+		duration float64
+	}{
+		{"fast retrieval", 123, 0.05},
+		{"slow retrieval", 456, 2.5},
+		{"zero latency", 789, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				RecordRAGLatency(tt.userID, tt.duration)
+			})
+		})
+	}
+}
+
 func TestUpdateVectorIndexMetrics(t *testing.T) {
 	UpdateVectorIndexMetrics(1000, 500)
 

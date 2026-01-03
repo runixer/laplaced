@@ -345,6 +345,7 @@ type RetrievalOptions struct {
 }
 
 func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts *RetrievalOptions) ([]TopicSearchResult, *RetrievalDebugInfo, error) {
+	startTime := time.Now()
 	debugInfo := &RetrievalDebugInfo{
 		OriginalQuery: query,
 	}
@@ -492,8 +493,9 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 
 	debugInfo.Results = results
 
-	// Record RAG retrieval result (hit if we found context, miss otherwise)
+	// Record RAG metrics
 	RecordRAGRetrieval(userID, len(results) > 0)
+	RecordRAGLatency(userID, time.Since(startTime).Seconds())
 
 	return results, debugInfo, nil
 }

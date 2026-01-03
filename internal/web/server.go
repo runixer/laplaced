@@ -47,21 +47,20 @@ var (
 		},
 		[]string{"user_id"},
 	)
-	ragLatency = prometheus.NewHistogram(
-		prometheus.HistogramOpts{
+	userInfo = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
 			Namespace: metricsNamespace,
-			Subsystem: "rag",
-			Name:      "latency_seconds",
-			Help:      "Latency of RAG operations",
-			Buckets:   prometheus.DefBuckets,
+			Name:      "user_info",
+			Help:      "User information for label joins (value always 1)",
 		},
+		[]string{"user_id", "username", "first_name"},
 	)
 )
 
 func init() {
 	prometheus.MustRegister(memoryFactsCount)
 	prometheus.MustRegister(memoryStaleness)
-	prometheus.MustRegister(ragLatency)
+	prometheus.MustRegister(userInfo)
 }
 
 // getClientIP extracts the real client IP from the request.
@@ -297,6 +296,12 @@ func (s *Server) updateMetrics() {
 	if err != nil {
 		s.logger.Error("failed to get users for metrics", "error", err)
 		return
+	}
+
+	// Update user info metric (for label joins in Grafana)
+	for _, user := range users {
+		userIDStr := fmt.Sprintf("%d", user.ID)
+		userInfo.WithLabelValues(userIDStr, user.Username, user.FirstName).Set(1)
 	}
 
 	// Update facts count and staleness per user

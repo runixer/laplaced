@@ -71,6 +71,23 @@ internal/
 - **Profile**: Up to 50 facts about the user, always included in context
 - **RAG**: Vector similarity search retrieves relevant past discussions
 
+### Terminology (IMPORTANT!)
+
+**Session / Active Session:**
+- Messages with `topic_id IS NULL` (not yet processed into topics)
+- Becomes a topic after inactivity timeout (default 5h, configurable via `rag.chunk_duration`)
+- NOT "user typing" or "waiting for response" — just unprocessed messages
+
+**Topic:**
+- Compressed summary of a conversation chunk
+- Created when session is archived (after inactivity timeout or force-close)
+- Has vector embedding for RAG retrieval
+
+**Message Grouping:**
+- Separate concept! Waits for user to finish typing (few seconds)
+- Groups rapid messages into one processing batch
+- NOT the same as session archival
+
 ## Testing
 
 ### Running Tests

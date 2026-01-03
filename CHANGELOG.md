@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-01-03
+
+### Added
+- Added `laplaced_user_info` gauge metric with labels `{user_id, username, first_name}` for Grafana label joins
+
+### Fixed
+- Fixed `laplaced_rag_latency_seconds` metric: was dead code (defined but never used), now properly records RAG retrieval time with `user_id` label
+- Fixed Grafana user dropdown showing only active users — now uses `memory_facts_count` gauge (populated on startup for all users)
+
 ## [0.3.5] - 2026-01-03
 
 ### Changed
@@ -257,7 +266,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker and docker-compose deployment
 - Configuration via YAML and environment variables
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.3.5...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.3.6...HEAD
+[0.3.6]: https://github.com/runixer/laplaced/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/runixer/laplaced/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/runixer/laplaced/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/runixer/laplaced/compare/v0.3.2...v0.3.3

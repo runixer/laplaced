@@ -175,6 +175,21 @@ var (
 		},
 		[]string{"user_id", "type"},
 	)
+
+	// ragLatency измеряет общее время RAG retrieval (enrichment + embedding + vector search).
+	// Labels:
+	//   - user_id: идентификатор пользователя
+	ragLatency = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: "rag",
+			Name:      "latency_seconds",
+			Help:      "Total latency of RAG retrieval operations in seconds",
+			// Buckets: 5ms - 10s (includes LLM enrichment call)
+			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
+		},
+		[]string{"user_id"},
+	)
 )
 
 // Константы для статусов
@@ -254,4 +269,10 @@ func RecordRAGRetrieval(userID int64, hasContext bool) {
 func RecordRAGCandidates(userID int64, searchType string, count int) {
 	uid := formatUserID(userID)
 	ragCandidatesTotal.WithLabelValues(uid, searchType).Observe(float64(count))
+}
+
+// RecordRAGLatency записывает общее время RAG retrieval.
+func RecordRAGLatency(userID int64, durationSeconds float64) {
+	uid := formatUserID(userID)
+	ragLatency.WithLabelValues(uid).Observe(durationSeconds)
 }
