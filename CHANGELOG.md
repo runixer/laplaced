@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_Next version: v0.4 (Intelligence) — Flash Reranker, Memory Decay_
+
+## [0.3.9] - 2026-01-04
+
+**Final v0.3.x release. Establishes metrics baseline for v0.4 Intelligence features.**
+
 ### Added
 - **System prompt tracking in context metrics** — `laplaced_bot_context_tokens_by_source{source="system"}` now tracks base system prompt size separately from profile facts. Enables complete context breakdown visualization (System + Profile + Session + Topics).
 - **Job type classification for LLM metrics** — new `job_type` label distinguishes interactive user requests from background maintenance:
@@ -15,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Prevents background batch jobs (60s+ archiver operations) from skewing interactive latency metrics
   - Affects: `laplaced_llm_request_duration_seconds`, `laplaced_llm_requests_total`, `laplaced_llm_tokens_total`, `laplaced_llm_cost_usd_total`
   - New package `internal/jobtype` provides context-based job type propagation
+
+### Changed
+- Updated dependencies (BurntSushi/toml v1.6.0, modernc/libc v1.67.4)
+
+### Documentation
+- Added message processing flow architecture diagram (`docs/architecture/message-processing-flow.md`)
+- Added Architectural Decisions section to `CLAUDE.md`
 
 ## [0.3.8] - 2026-01-03
 
