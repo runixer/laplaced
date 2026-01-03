@@ -88,6 +88,24 @@ internal/
 - Groups rapid messages into one processing batch
 - NOT the same as session archival
 
+## Architectural Decisions
+
+Before implementing significant changes (especially when modifying function contracts, adding dependencies, or when a solution feels like a "hack"):
+
+1. **Stop and describe the problem** — what exactly are we trying to solve?
+2. **Propose alternatives** — at least 2-3 approaches with trade-offs
+3. **Ask for confirmation** — even if the user says "just do it"
+4. **If it's a hack — say so explicitly** BEFORE writing code
+
+**Signs you should stop and discuss:**
+- A function starts returning data "for someone else to use later"
+- Single responsibility is being violated
+- Solution contradicts best practices of the tool (Prometheus, Go, OpenTelemetry, etc.)
+- Changes touch 3+ files for one "simple" feature
+- You're working around a limitation instead of solving the root cause
+
+**Example:** Instead of silently implementing "record all metrics atomically at the end of processing" (which violates Prometheus best practices), stop and say: "This is a hack. The real problem is X. Alternatives: (1) OpenTelemetry for correlated tracing, (2) increase scrape interval, (3) live with [6h] smoothing window."
+
 ## Testing
 
 ### Running Tests
