@@ -262,9 +262,9 @@ Update `CHANGELOG.md` when:
 
 1. **Test on dev** (see [Pre-release Testing](#pre-release-testing) below)
 2. Update CHANGELOG.md: move `[Unreleased]` to new version
-3. Commit: `git commit -m "Release vX.Y.Z"`
+3. Commit with exact prefix: `git commit -m "Release vX.Y.Z"` (**MUST start with "Release v"** — CI skips these commits)
 4. Tag and push: `git tag vX.Y.Z && git push && git push --tags`
-5. Wait for GitHub CI to complete
+5. Wait for release.yml to complete (CI is skipped for release commits)
 6. Deploy via Gitea MCP (see `.claude/deploy.md`)
 
 CI automatically extracts release notes from CHANGELOG.md for GitHub Releases.
@@ -319,6 +319,7 @@ GitHub Actions workflows:
 **`.github/workflows/ci.yml`** — runs on push to main and PRs:
 - lint (golangci-lint)
 - test (with coverage)
+- **Skipped for commits starting with "Release v"** (to avoid duplicate runs with release.yml)
 
 **`.github/workflows/release.yml`** — runs on tag push (`v*`):
 - lint, test
