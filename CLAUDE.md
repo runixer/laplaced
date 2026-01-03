@@ -314,9 +314,17 @@ Run the bot locally and verify. I'll wait.
 
 ## CI/CD
 
-GitHub Actions workflow (`.github/workflows/ci.yml`):
-- **On push to main**: lint, test, build binaries (amd64/arm64), build & push Docker image
-- **On tag v***: all above + create GitHub Release with binaries
+GitHub Actions workflows:
+
+**`.github/workflows/ci.yml`** — runs on push to main and PRs:
+- lint (golangci-lint)
+- test (with coverage)
+
+**`.github/workflows/release.yml`** — runs on tag push (`v*`):
+- lint, test
+- build binaries (linux/amd64, linux/arm64)
+- build & push multi-arch Docker image to GHCR
+- create GitHub Release with binaries and changelog
 
 Docker image: `ghcr.io/runixer/laplaced:latest`
 
