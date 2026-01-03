@@ -61,6 +61,7 @@ func TestRecordContextTokensBySource(t *testing.T) {
 		source string
 		tokens int
 	}{
+		{100, ContextSourceSystem, 800},
 		{123, ContextSourceProfile, 500},
 		{456, ContextSourceTopics, 2000},
 		{789, ContextSourceSession, 1000},

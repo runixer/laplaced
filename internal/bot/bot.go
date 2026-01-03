@@ -584,18 +584,19 @@ func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageCont
 	var orMessages []openrouter.Message
 
 	// System Prompt + Core Identity
-	fullSystemPrompt := b.cfg.Bot.SystemPrompt
-	if fullSystemPrompt == "" {
+	baseSystemPrompt := b.cfg.Bot.SystemPrompt
+	if baseSystemPrompt == "" {
 		botName := b.cfg.Bot.BotName
 		if botName == "" {
 			botName = "Bot"
 		}
-		fullSystemPrompt = b.translator.Get(b.cfg.Bot.Language, "bot.system_prompt", botName)
+		baseSystemPrompt = b.translator.Get(b.cfg.Bot.Language, "bot.system_prompt", botName)
 
 		if b.cfg.Bot.SystemPromptExtra != "" {
-			fullSystemPrompt += " " + b.cfg.Bot.SystemPromptExtra
+			baseSystemPrompt += " " + b.cfg.Bot.SystemPromptExtra
 		}
 	}
+	fullSystemPrompt := baseSystemPrompt
 	if memoryBankFormatted != "" {
 		fullSystemPrompt += "\n\n" + memoryBankFormatted
 	}
@@ -663,6 +664,9 @@ func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageCont
 	}
 
 	// Record context tokens by source (approximate: 1 token ≈ 4 characters)
+	if len(baseSystemPrompt) > 0 {
+		RecordContextTokensBySource(userID, ContextSourceSystem, len(baseSystemPrompt)/4)
+	}
 	if len(memoryBankFormatted) > 0 {
 		RecordContextTokensBySource(userID, ContextSourceProfile, len(memoryBankFormatted)/4)
 	}

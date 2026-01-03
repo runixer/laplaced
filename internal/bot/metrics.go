@@ -220,6 +220,7 @@ const (
 
 // Context source types
 const (
+	ContextSourceSystem  = "system"
 	ContextSourceProfile = "profile"
 	ContextSourceTopics  = "topics"
 	ContextSourceSession = "session"

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **System prompt tracking in context metrics** — `laplaced_bot_context_tokens_by_source{source="system"}` now tracks base system prompt size separately from profile facts. Enables complete context breakdown visualization (System + Profile + Session + Topics).
+
 ## [0.3.8] - 2026-01-03
 
 ### Added
