@@ -59,11 +59,11 @@ bot:
 
 tools:
   internet_search:
-    description: "STRICTLY MANDATORY TOOL for fact-checking. You MUST call this function for ANY questions about: news, specific products, games, releases, code documentation, people, companies, or health. IT IS FORBIDDEN to answer factual questions from your own memory, as your knowledge is outdated. If the user asks 'find', 'search', 'google' or asks a question requiring accuracy — CALL THIS FUNCTION."
+    description: "STRICTLY MANDATORY TOOL for fact-checking. You MUST call this function for ANY questions about: news, specific products, games, releases, code documentation, people, companies, or health. IT IS FORBIDDEN to answer factual questions from your own memory, as your knowledge is outdated. If the user asks 'find', 'search', 'google' or asks a question requiring accuracy — CALL THIS FUNCTION. LIMIT: Maximum 3 calls per response. Formulate comprehensive queries instead of many small ones."
     parameter_description: "Search query for Google/internet."
-  memory_search:
-    description: "Tool for searching information in long-term memory (chat history and facts). Use when you need to recall something from the past, find details of previous discussions, or check if we talked about this before."
-    parameter_description: "Search query for RAG system."
+  search_history:
+    description: "Tool for TARGETED search through conversation history (past discussions and topics). MUST call when user explicitly asks: 'search in memory', 'find in history', 'what did we discuss', 'recall our conversation about'. The automatic context provides initial results — this tool allows DEEPER search with YOUR OWN query. Do NOT use for facts about the user — they are already in context."
+    parameter_description: "Search query for conversation history."
   manage_memory:
     description: "Tool for managing the bot's long-term memory. Allows adding, updating, or deleting facts about the user. Use when the user explicitly asks to 'remember', 'forget', or 'correct' information about themselves. DO NOT use for routine memorization of everything — another process does that. HOWEVER, you CAN and SHOULD use this tool independently if the user shares CRITICALLY IMPORTANT information (new preferences, context changes, important plans) that cannot be lost when context is cleared. IMPORTANT: All facts and the 'reason' field must be saved STRICTLY IN ENGLISH. Supports batch processing (array of operations)."
     parameter_description: "JSON object with 'operations' array. Each operation contains: action ('add', 'update', 'delete'), entity (e.g., 'User'), content (the fact itself), category (bio, work, hobby, etc), type (identity, context, status), importance (0-100), fact_id (for update/delete), reason (reason for change)."

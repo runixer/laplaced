@@ -517,13 +517,15 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason,omitempty"`
+			Index        int    `json:"index"`
 		}{
 			{Message: struct {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: "Test response"}},
+			}{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
@@ -651,13 +653,15 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason,omitempty"`
+			Index        int    `json:"index"`
 		}{
 			{Message: struct {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: "Test response"}},
+			}{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
@@ -789,13 +793,15 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason,omitempty"`
+			Index        int    `json:"index"`
 		}{
 			{Message: struct {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: "Test response"}},
+			}{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
@@ -928,13 +934,15 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason,omitempty"`
+			Index        int    `json:"index"`
 		}{
 			{Message: struct {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: "Test response"}},
+			}{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
@@ -1076,13 +1084,15 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason,omitempty"`
+			Index        int    `json:"index"`
 		}{
 			{Message: struct {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: "Test response"}},
+			}{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
@@ -1209,13 +1219,15 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason,omitempty"`
+			Index        int    `json:"index"`
 		}{
 			{Message: struct {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: "Test response"}},
+			}{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
@@ -1498,13 +1510,15 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason,omitempty"`
+			Index        int    `json:"index"`
 		}{
 			{Message: struct {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: "You said hello."}},
+			}{Role: "assistant", Content: "You said hello."}, FinishReason: "stop"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
@@ -1708,13 +1722,15 @@ func TestSendTestMessage_Success(t *testing.T) {
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason,omitempty"`
+			Index        int    `json:"index"`
 		}{
 			{Message: struct {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: "Hello! How can I help you?"}},
+			}{Role: "assistant", Content: "Hello! How can I help you?"}, FinishReason: "stop"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
@@ -1796,13 +1812,15 @@ func TestSendTestMessage_SaveToHistoryFalse(t *testing.T) {
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason,omitempty"`
+			Index        int    `json:"index"`
 		}{
 			{Message: struct {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: "Response without history"}},
+			}{Role: "assistant", Content: "Response without history"}, FinishReason: "stop"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
@@ -1885,4 +1903,122 @@ func TestSendTestMessage_OpenRouterError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "failed to get completion")
+}
+
+func TestSanitizeLLMResponse_NoChanges(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"normal text", "Hello, this is a normal response."},
+		{"with markdown", "# Header\n\nSome **bold** text."},
+		{"single json block", "Here's some JSON:\n```json\n{\"key\": \"value\"}\n```"},
+		{"two json blocks", "First:\n```json\n{\"a\": 1}\n```\nSecond:\n```json\n{\"b\": 2}\n```"},
+		{"empty string", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, sanitized := sanitizeLLMResponse(tt.input)
+			assert.Equal(t, tt.input, result)
+			assert.False(t, sanitized)
+		})
+	}
+}
+
+func TestSanitizeLLMResponse_TruncatesOnHallucinationTags(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			"tool_code tag",
+			"Normal response.</tool_code> garbage after",
+			"Normal response.",
+		},
+		{
+			"tool_call tag",
+			"Good text</tool_call>\n\nmore garbage",
+			"Good text",
+		},
+		{
+			"end of sequence tag",
+			"Valid content</s> invalid content",
+			"Valid content",
+		},
+		{
+			"endoftext tag",
+			"Response here<|endoftext|>more text",
+			"Response here",
+		},
+		{
+			"end tag",
+			"Some text<|end|>garbage",
+			"Some text",
+		},
+		{
+			"tag in middle of text",
+			"First part.\n\nSecond part.</tool_code></s>\n```json\n{}\n```",
+			"First part.\n\nSecond part.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, sanitized := sanitizeLLMResponse(tt.input)
+			assert.Equal(t, tt.expected, result)
+			assert.True(t, sanitized)
+		})
+	}
+}
+
+func TestSanitizeLLMResponse_TruncatesOnConsecutiveJSONBlocks(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			"three consecutive json blocks",
+			"Good response.\n\n```json\n{\"a\": 1}\n```\n```json\n{\"b\": 2}\n```\n```json\n{\"c\": 3}\n```",
+			"Good response.",
+		},
+		{
+			"many json blocks",
+			"Normal text.\n```json\n{\"q\": \"test1\"}\n```\n```json\n{\"q\": \"test2\"}\n```\n```json\n{\"q\": \"test3\"}\n```\n```json\n{\"q\": \"test4\"}\n```\n```json\n{\"q\": \"test5\"}\n```",
+			"Normal text.",
+		},
+		{
+			"real world example",
+			"Response here.\n\n```json\n{\"query\": \"search 1\"}\n```\n\n```json\n{\"query\": \"search 2\"}\n```\n\n```json\n{\"query\": \"search 3\"}\n```\n\n```json\n{\"query\": \"search 4\"}\n```",
+			"Response here.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, sanitized := sanitizeLLMResponse(tt.input)
+			assert.Equal(t, tt.expected, result)
+			assert.True(t, sanitized)
+		})
+	}
+}
+
+func TestSanitizeLLMResponse_CombinedArtifacts(t *testing.T) {
+	// This simulates the real bug: tag followed by JSON blocks
+	input := `Баланс Силы восстановлен. ⚖️😈</tool_code></s>
+` + "```json\n{\"query\": \"test 1\"}\n```\n```json\n{\"query\": \"test 2\"}\n```\n```json\n{\"query\": \"test 3\"}\n```"
+
+	result, sanitized := sanitizeLLMResponse(input)
+	assert.Equal(t, "Баланс Силы восстановлен. ⚖️😈", result)
+	assert.True(t, sanitized)
+}
+
+func TestSanitizeLLMResponse_DoesNotReturnEmpty(t *testing.T) {
+	// If sanitization would result in empty string, return original
+	input := "</tool_code>"
+	result, sanitized := sanitizeLLMResponse(input)
+	assert.Equal(t, input, result)
+	assert.False(t, sanitized)
 }

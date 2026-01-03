@@ -7,6 +7,7 @@ import (
 	"html"
 	"log/slog"
 	"math/rand/v2"
+	"regexp"
 	"strings"
 	"time"
 
@@ -54,6 +55,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 
 	// React to the message with a certain probability
 	if rand.Float32() < 0.1 { // 10% chance
+		reactionStart := time.Now()
 		reaction := availableReactions[rand.IntN(len(availableReactions))]
 		reactionReq := telegram.SetMessageReactionRequest{
 			ChatID:    chatID,
@@ -65,6 +67,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		if err := b.api.SetMessageReaction(shutdownSafeCtx, reactionReq); err != nil {
 			logger.Warn("failed to set message reaction", "error", err)
 		}
+		RecordMessageReaction(user.ID, time.Since(reactionStart).Seconds())
 	}
 
 	typingCtx, cancelTyping := context.WithCancel(shutdownSafeCtx)
@@ -112,6 +115,23 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	var finalResponse string
 	toolIterations := 0
 	const maxToolIterations = 10
+	const maxEmptyRetries = 2
+	emptyRetries := 0
+
+	// Per-message breakdown tracking
+	var totalLLMDuration time.Duration
+	var totalToolDuration time.Duration
+	var totalTelegramDuration time.Duration
+	llmCallCount := 0
+	toolCallCount := 0
+	telegramCallCount := 0
+
+	// Defer Telegram metrics recording to capture early returns
+	defer func() {
+		if telegramCallCount > 0 {
+			RecordMessageTelegram(userID, totalTelegramDuration.Seconds(), telegramCallCount)
+		}
+	}()
 
 	for {
 		if toolIterations >= maxToolIterations {
@@ -130,40 +150,93 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 			UserID:   user.ID,
 		}
 
+		llmStart := time.Now()
 		resp, err := b.orClient.CreateChatCompletion(shutdownSafeCtx, req)
+		llmDuration := time.Since(llmStart)
+		totalLLMDuration += llmDuration
+		llmCallCount++
+
 		if err != nil {
 			logger.Error("failed to get completion from OpenRouter", "error", err)
+			tgStart := time.Now()
 			b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
+			totalTelegramDuration += time.Since(tgStart)
+			telegramCallCount++
 			return
 		}
 
 		if len(resp.Choices) == 0 {
-			logger.Warn("empty response from OpenRouter")
+			logger.Warn("empty choices from OpenRouter",
+				"model", resp.Model,
+				"prompt_tokens", resp.Usage.PromptTokens,
+				"completion_tokens", resp.Usage.CompletionTokens,
+			)
+			RecordLLMAnomaly(userID, AnomalyEmptyResponse)
+			tgStart := time.Now()
 			b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.empty_response")}}, logger)
+			totalTelegramDuration += time.Since(tgStart)
+			telegramCallCount++
 			return
 		}
 
 		totalPromptTokens += resp.Usage.PromptTokens
 		totalCompletionTokens += resp.Usage.CompletionTokens
 
-		choice := resp.Choices[0].Message
+		choice := resp.Choices[0]
+
+		// Check for empty response (no content and no tool calls) - retry
+		if strings.TrimSpace(choice.Message.Content) == "" && len(choice.Message.ToolCalls) == 0 {
+			logger.Warn("empty LLM response (no content, no tools)",
+				"finish_reason", choice.FinishReason,
+				"model", resp.Model,
+				"completion_tokens", resp.Usage.CompletionTokens,
+				"retry_attempt", emptyRetries+1,
+				"max_retries", maxEmptyRetries,
+			)
+			RecordLLMAnomaly(userID, AnomalyEmptyResponse)
+
+			if emptyRetries < maxEmptyRetries {
+				emptyRetries++
+				logger.Info("retrying after empty response", "attempt", emptyRetries)
+				continue
+			}
+
+			// Max retries reached
+			logger.Warn("max empty response retries reached, giving up")
+			RecordLLMAnomaly(userID, AnomalyRetryFailed)
+			tgStart := time.Now()
+			b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.empty_response")}}, logger)
+			totalTelegramDuration += time.Since(tgStart)
+			telegramCallCount++
+			return
+		}
+
+		// If we had retries and finally got content, record success
+		if emptyRetries > 0 {
+			logger.Info("retry successful after empty response", "attempts", emptyRetries)
+			RecordLLMAnomaly(userID, AnomalyRetrySuccess)
+			emptyRetries = 0 // reset for potential future retries in tool loop
+		}
 
 		// Check for tool calls
-		if len(choice.ToolCalls) > 0 {
-			logger.Info("Model requested tool calls", "count", len(choice.ToolCalls))
+		if len(choice.Message.ToolCalls) > 0 {
+			logger.Info("Model requested tool calls", "count", len(choice.Message.ToolCalls))
 
-			var content interface{} = choice.Content
-			if choice.Content == "" {
+			var content interface{} = choice.Message.Content
+			if choice.Message.Content == "" {
 				content = nil
 			}
 
 			// Send intermediate message to user if present
-			if choice.Content != "" && strings.TrimSpace(choice.Content) != "" {
-				intermediateResponses, err := b.finalizeResponse(chatID, lastMsg.MessageThreadID, userID, 0, choice.Content, logger)
+			if choice.Message.Content != "" && strings.TrimSpace(choice.Message.Content) != "" {
+				intermediateResponses, err := b.finalizeResponse(chatID, lastMsg.MessageThreadID, userID, 0, choice.Message.Content, logger)
 				if err != nil {
 					logger.Error("failed to finalize intermediate response", "error", err)
 				} else {
+					tgStart := time.Now()
 					b.sendResponses(shutdownSafeCtx, chatID, intermediateResponses, logger)
+					totalTelegramDuration += time.Since(tgStart)
+					telegramCallCount += len(intermediateResponses)
 				}
 			}
 
@@ -171,11 +244,15 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 			orMessages = append(orMessages, openrouter.Message{
 				Role:             "assistant",
 				Content:          content,
-				ToolCalls:        choice.ToolCalls,
-				ReasoningDetails: choice.ReasoningDetails,
+				ToolCalls:        choice.Message.ToolCalls,
+				ReasoningDetails: choice.Message.ReasoningDetails,
 			})
 
-			toolMessages, err := b.executeToolCalls(shutdownSafeCtx, chatID, lastMsg.MessageThreadID, userID, choice.ToolCalls, logger)
+			toolStart := time.Now()
+			toolMessages, err := b.executeToolCalls(shutdownSafeCtx, chatID, lastMsg.MessageThreadID, userID, choice.Message.ToolCalls, logger)
+			totalToolDuration += time.Since(toolStart)
+			toolCallCount += len(choice.Message.ToolCalls)
+
 			if err != nil {
 				// executeToolCalls logs errors but returns messages with error info if needed
 				// If it returns a critical error, we might want to stop, but currently it returns messages
@@ -188,9 +265,13 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		}
 
 		// Final response
-		finalResponse = choice.Content
+		finalResponse = choice.Message.Content
 		break
 	}
+
+	// Record per-message breakdown metrics
+	RecordMessageLLM(userID, totalLLMDuration.Seconds(), llmCallCount)
+	RecordMessageTools(userID, totalToolDuration.Seconds(), toolCallCount)
 
 	// Handle empty response from model
 	if strings.TrimSpace(finalResponse) == "" {
@@ -208,7 +289,13 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	// Record context tokens for metrics (approximate based on prompt tokens)
 	RecordContextTokens(totalPromptTokens)
 
+	tgStart := time.Now()
 	b.sendResponses(shutdownSafeCtx, chatID, responses, logger)
+	totalTelegramDuration += time.Since(tgStart)
+	telegramCallCount += len(responses)
+
+	// Telegram metrics recorded by defer
+
 	success = true
 }
 
@@ -353,15 +440,15 @@ func (b *Bot) executeToolCalls(ctx context.Context, chatID int64, messageThreadI
 				err = fmt.Errorf("query argument missing or not a string")
 			} else {
 				switch matchedTool.Name {
-				case "memory_search":
-					logger.Info("Executing RAG tool", "tool", matchedTool.Name, "query", query)
-					toolResult, err = b.performRAGTool(ctx, userID, query)
+				case "search_history":
+					logger.Info("Executing history search tool", "tool", matchedTool.Name, "query", query)
+					toolResult, err = b.performHistorySearch(ctx, userID, query)
 				case "manage_memory":
 					logger.Info("Executing Manage Memory tool", "tool", matchedTool.Name)
 					toolResult, err = b.performManageMemory(ctx, userID, args)
 				default:
 					logger.Info("Executing model tool", "tool", matchedTool.Name, "model", matchedTool.Model, "query", query)
-					toolResult, err = b.performModelTool(ctx, matchedTool.Model, query)
+					toolResult, err = b.performModelTool(ctx, userID, matchedTool.Model, query)
 				}
 			}
 
@@ -391,7 +478,61 @@ func (b *Bot) executeToolCalls(ctx context.Context, chatID int64, messageThreadI
 	return toolMessages, nil
 }
 
+// hallucinationTags are special tokens that LLMs sometimes hallucinate in text output.
+// These should never appear in normal response text.
+var hallucinationTags = []string{
+	"</tool_code>",
+	"</tool_call>",
+	"</s>",
+	"<|endoftext|>",
+	"<|end|>",
+}
+
+// consecutiveJSONBlocksPattern matches 3+ consecutive markdown JSON code blocks.
+// This pattern detects runaway generation where model outputs endless JSON blocks.
+var consecutiveJSONBlocksPattern = regexp.MustCompile("(?s)(```json\\s*\\{[^`]*\\}\\s*```\\s*){3,}")
+
+// sanitizeLLMResponse removes hallucination artifacts from LLM responses.
+// It truncates on special tags and detects runaway JSON block generation.
+// Returns sanitized text and whether any sanitization was applied.
+func sanitizeLLMResponse(text string) (string, bool) {
+	original := text
+	sanitized := false
+
+	// 1. Truncate on hallucination tags
+	for _, tag := range hallucinationTags {
+		if idx := strings.Index(text, tag); idx != -1 {
+			text = strings.TrimSpace(text[:idx])
+			sanitized = true
+		}
+	}
+
+	// 2. Truncate on 3+ consecutive JSON blocks (runaway generation)
+	if loc := consecutiveJSONBlocksPattern.FindStringIndex(text); loc != nil {
+		text = strings.TrimSpace(text[:loc[0]])
+		sanitized = true
+	}
+
+	// Don't return empty string if we sanitized everything
+	if sanitized && text == "" {
+		return original, false
+	}
+
+	return text, sanitized
+}
+
 func (b *Bot) finalizeResponse(chatID int64, messageThreadID int, userID int64, replyToMsgID int, responseText string, logger *slog.Logger) ([]telegram.SendMessageRequest, error) {
+	// Sanitize LLM response to remove hallucination artifacts
+	originalLength := len(responseText)
+	responseText, wasSanitized := sanitizeLLMResponse(responseText)
+	if wasSanitized {
+		logger.Warn("sanitized LLM response (removed hallucination artifacts)",
+			"original_length", originalLength,
+			"sanitized_length", len(responseText),
+		)
+		RecordLLMAnomaly(userID, AnomalySanitized)
+	}
+
 	// Split the raw Markdown first (conservative limit to account for HTML tags)
 	const markdownSafeLimit = 3500
 	chunks := telegram.SplitMessageSmart(responseText, markdownSafeLimit)

@@ -105,6 +105,8 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason,omitempty"`
+			Index        int    `json:"index"`
 		}{
 			{Message: struct {
 				Role             string                `json:"role"`
@@ -127,7 +129,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 						},
 					},
 				},
-			}},
+			}, FinishReason: "tool_calls"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
@@ -149,6 +151,8 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason,omitempty"`
+			Index        int    `json:"index"`
 		}{
 			{Message: struct {
 				Role             string                `json:"role"`
@@ -158,7 +162,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 			}{
 				Role:    "assistant",
 				Content: "Tool result data",
-			}},
+			}, FinishReason: "stop"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
@@ -181,6 +185,8 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason,omitempty"`
+			Index        int    `json:"index"`
 		}{
 			{Message: struct {
 				Role             string                `json:"role"`
@@ -190,7 +196,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 			}{
 				Role:    "assistant",
 				Content: finalText,
-			}},
+			}, FinishReason: "stop"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`

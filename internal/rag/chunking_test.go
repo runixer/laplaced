@@ -59,13 +59,15 @@ func TestProcessChunk_HallucinatedIDs(t *testing.T) {
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason,omitempty"`
+			Index        int    `json:"index"`
 		}{
 			{Message: struct {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: string(topicsJSON)}},
+			}{Role: "assistant", Content: string(topicsJSON)}, FinishReason: "stop"},
 		},
 	}, nil)
 
@@ -144,13 +146,15 @@ func TestProcessChunk_ValidIDs(t *testing.T) {
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason,omitempty"`
+			Index        int    `json:"index"`
 		}{
 			{Message: struct {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: string(topicsJSON)}},
+			}{Role: "assistant", Content: string(topicsJSON)}, FinishReason: "stop"},
 		},
 	}, nil)
 

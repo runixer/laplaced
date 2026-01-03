@@ -342,6 +342,7 @@ type SearchResult struct {
 type RetrievalOptions struct {
 	History        []storage.Message
 	SkipEnrichment bool
+	Source         string // "auto" for buildContext, "tool" for search_history
 }
 
 func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts *RetrievalOptions) ([]TopicSearchResult, *RetrievalDebugInfo, error) {
@@ -497,7 +498,7 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 
 	// Record RAG metrics
 	RecordRAGRetrieval(userID, len(results) > 0)
-	RecordRAGLatency(userID, time.Since(startTime).Seconds())
+	RecordRAGLatency(userID, opts.Source, time.Since(startTime).Seconds())
 
 	return results, debugInfo, nil
 }

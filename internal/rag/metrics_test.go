@@ -143,17 +143,18 @@ func TestRecordRAGLatency(t *testing.T) {
 	tests := []struct {
 		name     string
 		userID   int64
+		source   string
 		duration float64
 	}{
-		{"fast retrieval", 123, 0.05},
-		{"slow retrieval", 456, 2.5},
-		{"zero latency", 789, 0},
+		{"fast auto retrieval", 123, "auto", 0.05},
+		{"slow tool retrieval", 456, "tool", 2.5},
+		{"empty source defaults to auto", 789, "", 0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.NotPanics(t, func() {
-				RecordRAGLatency(tt.userID, tt.duration)
+				RecordRAGLatency(tt.userID, tt.source, tt.duration)
 			})
 		})
 	}

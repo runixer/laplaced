@@ -96,13 +96,15 @@ func TestGracefulShutdown(t *testing.T) {
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason,omitempty"`
+			Index        int    `json:"index"`
 		}{
 			{Message: struct {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: `{"topics": []}`}},
+			}{Role: "assistant", Content: `{"topics": []}`}, FinishReason: "stop"},
 		},
 	}, nil)
 
@@ -130,13 +132,15 @@ func TestGracefulShutdown(t *testing.T) {
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason,omitempty"`
+			Index        int    `json:"index"`
 		}{
 			{Message: struct {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: `{"added": [], "updated": [], "removed": []}`}},
+			}{Role: "assistant", Content: `{"added": [], "updated": [], "removed": []}`}, FinishReason: "stop"},
 		},
 	}, nil)
 

@@ -321,7 +321,7 @@ func (b *Bot) getTools() []openrouter.Tool {
 	return tools
 }
 
-func (b *Bot) performModelTool(ctx context.Context, modelName string, query string) (string, error) {
+func (b *Bot) performModelTool(ctx context.Context, userID int64, modelName string, query string) (string, error) {
 	req := openrouter.ChatCompletionRequest{
 		Model: modelName,
 		Messages: []openrouter.Message{
@@ -332,6 +332,7 @@ func (b *Bot) performModelTool(ctx context.Context, modelName string, query stri
 				},
 			},
 		},
+		UserID: userID,
 	}
 
 	resp, err := b.orClient.CreateChatCompletion(ctx, req)
@@ -416,9 +417,10 @@ func (b *Bot) formatRAGResults(results []rag.TopicSearchResult, query string) st
 	return ragContent.String()
 }
 
-func (b *Bot) performRAGTool(ctx context.Context, userID int64, query string) (string, error) {
+func (b *Bot) performHistorySearch(ctx context.Context, userID int64, query string) (string, error) {
 	opts := &rag.RetrievalOptions{
 		SkipEnrichment: true,
+		Source:         "tool",
 	}
 	results, _, err := b.ragService.Retrieve(ctx, userID, query, opts)
 	if err != nil {
@@ -558,6 +560,7 @@ func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageCont
 		opts := &rag.RetrievalOptions{
 			History:        enrichmentContext,
 			SkipEnrichment: false,
+			Source:         "auto",
 		}
 		retrievedResults, debugInfo, err = b.ragService.Retrieve(ctx, userID, currentMessageRaw, opts)
 		if err != nil {
@@ -1193,15 +1196,15 @@ func (b *Bot) executeToolCallsForTest(ctx context.Context, userID int64, toolCal
 				err = fmt.Errorf("query argument missing or not a string")
 			} else {
 				switch matchedTool.Name {
-				case "memory_search":
-					logger.Info("Executing RAG tool", "tool", matchedTool.Name, "query", query)
-					toolResult, err = b.performRAGTool(ctx, userID, query)
+				case "search_history":
+					logger.Info("Executing history search tool", "tool", matchedTool.Name, "query", query)
+					toolResult, err = b.performHistorySearch(ctx, userID, query)
 				case "manage_memory":
 					logger.Info("Executing Manage Memory tool", "tool", matchedTool.Name)
 					toolResult, err = b.performManageMemory(ctx, userID, args)
 				default:
 					logger.Info("Executing model tool", "tool", matchedTool.Name, "model", matchedTool.Model, "query", query)
-					toolResult, err = b.performModelTool(ctx, matchedTool.Model, query)
+					toolResult, err = b.performModelTool(ctx, userID, matchedTool.Model, query)
 				}
 			}
 

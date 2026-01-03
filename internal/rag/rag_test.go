@@ -342,13 +342,15 @@ func TestRetrieve_TopicsGrouping(t *testing.T) {
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason,omitempty"`
+			Index        int    `json:"index"`
 		}{
 			{Message: struct {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: "Enriched Query"}},
+			}{Role: "assistant", Content: "Enriched Query"}, FinishReason: "stop"},
 		},
 	}, nil)
 
@@ -698,13 +700,15 @@ func TestVerifyMerge(t *testing.T) {
 					ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 					ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 				} `json:"message"`
+				FinishReason string `json:"finish_reason,omitempty"`
+				Index        int    `json:"index"`
 			}{
 				{Message: struct {
 					Role             string                `json:"role"`
 					Content          string                `json:"content"`
 					ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 					ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-				}{Content: `{"should_merge": true, "new_summary": "Combined summary"}`}},
+				}{Content: `{"should_merge": true, "new_summary": "Combined summary"}`}, FinishReason: "stop"},
 			},
 		}, nil)
 
@@ -742,13 +746,15 @@ func TestVerifyMerge(t *testing.T) {
 					ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 					ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 				} `json:"message"`
+				FinishReason string `json:"finish_reason,omitempty"`
+				Index        int    `json:"index"`
 			}{
 				{Message: struct {
 					Role             string                `json:"role"`
 					Content          string                `json:"content"`
 					ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 					ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-				}{Content: `{"should_merge": false}`}},
+				}{Content: `{"should_merge": false}`}, FinishReason: "stop"},
 			},
 		}, nil)
 
@@ -1251,6 +1257,8 @@ func TestEnrichQuery(t *testing.T) {
 						ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 						ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 					} `json:"message"`
+					FinishReason string `json:"finish_reason,omitempty"`
+					Index        int    `json:"index"`
 				}{},
 			}, nil,
 		)
@@ -1290,6 +1298,8 @@ func TestEnrichQuery(t *testing.T) {
 						ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 						ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 					} `json:"message"`
+					FinishReason string `json:"finish_reason,omitempty"`
+					Index        int    `json:"index"`
 				}{
 					{Message: struct {
 						Role             string                `json:"role"`
@@ -1299,7 +1309,7 @@ func TestEnrichQuery(t *testing.T) {
 					}{
 						Role:    "assistant",
 						Content: "enriched search terms",
-					}},
+					}, FinishReason: "stop"},
 				},
 				Usage: struct {
 					PromptTokens     int      `json:"prompt_tokens"`
@@ -1354,6 +1364,8 @@ func TestEnrichQuery(t *testing.T) {
 						ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 						ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 					} `json:"message"`
+					FinishReason string `json:"finish_reason,omitempty"`
+					Index        int    `json:"index"`
 				}{
 					{Message: struct {
 						Role             string                `json:"role"`
@@ -1362,7 +1374,7 @@ func TestEnrichQuery(t *testing.T) {
 						ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 					}{
 						Content: "enriched",
-					}},
+					}, FinishReason: "stop"},
 				},
 			}, nil,
 		)
@@ -2131,6 +2143,8 @@ func TestProcessChunkWithStats(t *testing.T) {
 					ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 					ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 				} `json:"message"`
+				FinishReason string `json:"finish_reason,omitempty"`
+				Index        int    `json:"index"`
 			}{
 				{Message: struct {
 					Role             string                `json:"role"`
@@ -2140,7 +2154,7 @@ func TestProcessChunkWithStats(t *testing.T) {
 				}{
 					Role:    "assistant",
 					Content: `{"topics":[{"summary": "Test topic", "start_msg_id": 1, "end_msg_id": 2}]}`,
-				}},
+				}, FinishReason: "stop"},
 			},
 			Usage: struct {
 				PromptTokens     int      `json:"prompt_tokens"`
@@ -2212,6 +2226,8 @@ func TestProcessChunkWithStats(t *testing.T) {
 					ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 					ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 				} `json:"message"`
+				FinishReason string `json:"finish_reason,omitempty"`
+				Index        int    `json:"index"`
 			}{
 				{Message: struct {
 					Role             string                `json:"role"`
@@ -2221,7 +2237,7 @@ func TestProcessChunkWithStats(t *testing.T) {
 				}{
 					Role:    "assistant",
 					Content: `{"topics":[{"summary": "Test topic", "start_msg_id": 1, "end_msg_id": 1}]}`,
-				}},
+				}, FinishReason: "stop"},
 			},
 			Usage: struct {
 				PromptTokens     int      `json:"prompt_tokens"`

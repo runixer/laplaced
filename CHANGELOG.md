@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-01-03
+
+### Added
+- **Per-message latency breakdown metrics** for complete timing analysis:
+  - `laplaced_bot_message_llm_duration_seconds{user_id}` — total LLM time per message (sum of all Tool Loop calls)
+  - `laplaced_bot_message_llm_calls{user_id}` — number of LLM calls per message (1-10)
+  - `laplaced_bot_message_tool_duration_seconds{user_id}` — total tool execution time per message
+  - `laplaced_bot_message_tool_calls{user_id}` — number of tool calls per message
+  - `laplaced_bot_message_telegram_duration_seconds{user_id}` — total Telegram send time per message
+  - `laplaced_bot_message_telegram_calls{user_id}` — number of Telegram sends per message
+  - `laplaced_bot_message_reaction_duration_seconds{user_id}` — SetMessageReaction timing
+- **Source label for RAG latency metric** — `laplaced_rag_latency_seconds{user_id, source}` now distinguishes between `source="auto"` (buildContext) and `source="tool"` (search_history). Eliminates overlap in latency breakdown when search_history tool is used.
+- **LLM anomaly tracking metric** — `laplaced_bot_llm_anomalies_total{user_id, type}` tracks empty responses, hallucination sanitizations, and retry outcomes
+
+### Changed
+- **Latency Breakdown chart** now uses per-message totals (File → RAG → LLM Total → Tool → Telegram) — sum should equal total processing time
+- **Renamed tool `memory_search` → `search_history`** — clearer semantics, focuses on conversation history (topics), not facts (which are always in context). Improved prompt to trigger on explicit user requests like "search in memory", "find in history"
+- **Added call limit to `internet_search` tool** — maximum 3 calls per response to prevent runaway tool generation
+
+### Fixed
+- **Tool model calls (Perplexity) now track user_id** — previously recorded as `user_id="0"`, now correctly attributed to the requesting user
+- **LLM response sanitization** — prevents hallucination artifacts (like `</tool_code>`, `</s>`) and runaway JSON block generation from being sent to users. Gemini sometimes hallucinates special tokens followed by endless JSON queries.
+- **Empty LLM response retry** — automatically retries up to 2 times when model returns empty response (0 completion tokens). Logs detailed info: `finish_reason`, model, token counts. Fixes rare Gemini bug where model responds with `finish_reason=stop` but 0 tokens.
+- **Telegram metrics now recorded on early returns** — previously `message_telegram_duration_seconds` and `message_telegram_calls` were lost when LLM returned errors
+
 ## [0.3.7] - 2026-01-03
 
 ### Added
@@ -289,7 +314,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker and docker-compose deployment
 - Configuration via YAML and environment variables
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.3.6...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.3.8...HEAD
+[0.3.8]: https://github.com/runixer/laplaced/compare/v0.3.7...v0.3.8
+[0.3.7]: https://github.com/runixer/laplaced/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/runixer/laplaced/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/runixer/laplaced/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/runixer/laplaced/compare/v0.3.3...v0.3.4

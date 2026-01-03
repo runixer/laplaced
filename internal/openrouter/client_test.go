@@ -34,6 +34,8 @@ func TestCreateChatCompletion(t *testing.T) {
 					ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
 					ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
 				} `json:"message"`
+				FinishReason string `json:"finish_reason,omitempty"`
+				Index        int    `json:"index"`
 			}{
 				{
 					Message: struct {
@@ -42,6 +44,7 @@ func TestCreateChatCompletion(t *testing.T) {
 						ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
 						ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
 					}{Role: "assistant", Content: "Hello from mock server!"},
+					FinishReason: "stop",
 				},
 			},
 			Usage: struct {
@@ -96,6 +99,8 @@ func TestCreateChatCompletionLogging(t *testing.T) {
 					ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
 					ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
 				} `json:"message"`
+				FinishReason string `json:"finish_reason,omitempty"`
+				Index        int    `json:"index"`
 			}{
 				{
 					Message: struct {
@@ -104,6 +109,7 @@ func TestCreateChatCompletionLogging(t *testing.T) {
 						ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
 						ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
 					}{Role: "assistant", Content: "log test"},
+					FinishReason: "stop",
 				},
 			},
 			Usage: struct {
@@ -175,6 +181,8 @@ func TestCreateChatCompletionRetry(t *testing.T) {
 					ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
 					ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
 				} `json:"message"`
+				FinishReason string `json:"finish_reason,omitempty"`
+				Index        int    `json:"index"`
 			}{
 				{
 					Message: struct {
@@ -183,6 +191,7 @@ func TestCreateChatCompletionRetry(t *testing.T) {
 						ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
 						ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
 					}{Role: "assistant", Content: "Success after retry!"},
+					FinishReason: "stop",
 				},
 			},
 		}

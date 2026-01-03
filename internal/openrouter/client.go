@@ -215,6 +215,8 @@ type ChatCompletionResponse struct {
 			ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
 			ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
 		} `json:"message"`
+		FinishReason string `json:"finish_reason,omitempty"`
+		Index        int    `json:"index"`
 	} `json:"choices"`
 	Usage struct {
 		PromptTokens     int      `json:"prompt_tokens"`

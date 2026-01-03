@@ -68,7 +68,7 @@ tools:
     model: "perplexity/sonar-pro"
     # description: "Override tool description here..."
     # parameter_description: "Override parameter description here..."
-  - name: "memory_search"
+  - name: "search_history"
     model: "memory"
   - name: "manage_memory"
     model: "memory"

@@ -27,6 +27,8 @@ func createSimpleChatResponse(content string) openrouter.ChatCompletionResponse 
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason,omitempty"`
+			Index        int    `json:"index"`
 		}{
 			{Message: struct {
 				Role             string                `json:"role"`
@@ -36,7 +38,7 @@ func createSimpleChatResponse(content string) openrouter.ChatCompletionResponse 
 			}{
 				Role:    "assistant",
 				Content: content,
-			}},
+			}, FinishReason: "stop"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`

@@ -181,6 +181,7 @@ var (
 	// ragLatency измеряет общее время RAG retrieval (enrichment + embedding + vector search).
 	// Labels:
 	//   - user_id: идентификатор пользователя
+	//   - source: "auto" (buildContext) или "tool" (search_history)
 	ragLatency = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -190,7 +191,7 @@ var (
 			// Buckets: 5ms - 10s (includes LLM enrichment call)
 			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
 		},
-		[]string{"user_id"},
+		[]string{"user_id", "source"},
 	)
 
 	// ragEnrichmentDuration измеряет время LLM вызова для обогащения запроса.
@@ -290,9 +291,13 @@ func RecordRAGCandidates(userID int64, searchType string, count int) {
 }
 
 // RecordRAGLatency записывает общее время RAG retrieval.
-func RecordRAGLatency(userID int64, durationSeconds float64) {
+// source: "auto" для buildContext, "tool" для search_history tool.
+func RecordRAGLatency(userID int64, source string, durationSeconds float64) {
 	uid := formatUserID(userID)
-	ragLatency.WithLabelValues(uid).Observe(durationSeconds)
+	if source == "" {
+		source = "auto"
+	}
+	ragLatency.WithLabelValues(uid, source).Observe(durationSeconds)
 }
 
 // RecordRAGEnrichment записывает время LLM вызова для обогащения запроса.
