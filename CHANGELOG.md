@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Split CI workflows** to eliminate duplicate runs on release:
+  - `ci.yml` — lint and test on push to main and PRs
+  - `release.yml` — full release pipeline on tags only
+- **Fixed GHCR image description** for multi-arch images by adding annotations at index level
+
 ## [0.3.6] - 2026-01-03
 
 ### Added
