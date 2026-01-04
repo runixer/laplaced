@@ -1,22 +1,11 @@
-<p align="center">
-  <img src="assets/logo.svg" alt="Laplaced" width="160">
-</p>
+# <img src="assets/logo.svg" alt="" width="32" align="center"> Laplaced
 
-<p align="center">
-  <a href="https://github.com/runixer/laplaced/actions/workflows/ci.yml"><img src="https://github.com/runixer/laplaced/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://codecov.io/gh/runixer/laplaced"><img src="https://codecov.io/gh/runixer/laplaced/graph/badge.svg" alt="codecov"></a>
-  <a href="https://goreportcard.com/report/github.com/runixer/laplaced"><img src="https://goreportcard.com/badge/github.com/runixer/laplaced?v=1" alt="Go Report Card"></a>
-  <a href="https://github.com/runixer/laplaced/releases/latest"><img src="https://img.shields.io/github/v/release/runixer/laplaced" alt="Release"></a>
-</p>
-<p align="center">
-  <a href="https://go.dev/"><img src="https://img.shields.io/github/go-mod/go-version/runixer/laplaced" alt="Go Version"></a>
-  <a href="https://github.com/runixer/laplaced/pkgs/container/laplaced"><img src="https://img.shields.io/badge/ghcr.io-laplaced-blue?logo=docker&logoColor=white" alt="Docker"></a>
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
-</p>
+[![CI](https://github.com/runixer/laplaced/actions/workflows/ci.yml/badge.svg)](https://github.com/runixer/laplaced/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/runixer/laplaced/graph/badge.svg)](https://codecov.io/gh/runixer/laplaced)
+[![Go Report Card](https://goreportcard.com/badge/github.com/runixer/laplaced?v=1)](https://goreportcard.com/report/github.com/runixer/laplaced)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-<p align="center">
-  English | <a href="README.ru.md">Русский</a>
-</p>
+English | [Русский](README.ru.md)
 
 A smart Telegram bot for family use. Powered by Google Gemini via OpenRouter.
 
