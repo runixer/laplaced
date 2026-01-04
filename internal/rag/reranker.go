@@ -11,10 +11,26 @@ import (
 	"github.com/runixer/laplaced/internal/storage"
 )
 
+// TopicSelection represents a selected topic with explanation
+type TopicSelection struct {
+	ID      int64   `json:"id"`
+	Reason  string  `json:"reason"`
+	Excerpt *string `json:"excerpt,omitempty"`
+}
+
 // RerankerResult contains the output of the reranker
 type RerankerResult struct {
-	TopicIDs  []int64 // Final selected topic IDs
-	PeopleIDs []int64 // For future Social Graph (v0.5)
+	Topics    []TopicSelection // Final selected topics with reasons
+	PeopleIDs []int64          // For future Social Graph (v0.5)
+}
+
+// TopicIDs returns just the topic IDs (for backward compatibility)
+func (r *RerankerResult) TopicIDs() []int64 {
+	ids := make([]int64, len(r.Topics))
+	for i, t := range r.Topics {
+		ids[i] = t.ID
+	}
+	return ids
 }
 
 // rerankerCandidate is a topic candidate for reranking
@@ -23,6 +39,7 @@ type rerankerCandidate struct {
 	Score        float32
 	Topic        storage.Topic
 	MessageCount int
+	SizeChars    int // Estimated: MessageCount * avgCharsPerMessage
 }
 
 // rerankerState tracks progress during agentic reranking
@@ -34,14 +51,16 @@ type rerankerState struct {
 type rerankerTrace struct {
 	candidates     []storage.RerankerCandidate
 	toolCalls      []storage.RerankerToolCall
-	selectedIDs    []int64
+	selectedTopics []TopicSelection
 	fallbackReason string
 }
 
 // rerankerResponse is the expected JSON response from Flash
+// Supports both old format {"topics": [42, 18]} and new format {"topics": [{"id": 42, "reason": "..."}]}
 type rerankerResponse struct {
-	Topics []int64 `json:"topics"`
-	IDs    []int64 `json:"ids"` // Fallback: LLM sometimes uses "ids" instead of "topics"
+	TopicIDs json.RawMessage `json:"topic_ids"`
+	Topics   json.RawMessage `json:"topics"` // Fallback: old format
+	IDs      []int64         `json:"ids"`    // Fallback: LLM sometimes uses bare "ids"
 }
 
 // rerankCandidates uses Flash LLM to filter and select the most relevant topics
@@ -85,7 +104,7 @@ func (s *Service) rerankCandidates(
 			Score:        c.Score,
 			Date:         c.Topic.CreatedAt.Format("2006-01-02"),
 			MessageCount: c.MessageCount,
-			SizeChars:    0, // Will be filled if topic is loaded
+			SizeChars:    c.SizeChars, // Estimated from message count
 		})
 	}
 
@@ -117,13 +136,13 @@ func (s *Service) rerankCandidates(
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"ids": map[string]any{
+						"topic_ids": map[string]any{
 							"type":        "array",
 							"items":       map[string]any{"type": "integer"},
 							"description": s.translator.Get(lang, "rag.reranker_tool_param_description"),
 						},
 					},
-					"required": []string{"ids"},
+					"required": []string{"topic_ids"},
 				},
 			},
 		},
@@ -138,12 +157,33 @@ func (s *Service) rerankCandidates(
 	toolCallCount := 0
 
 	for toolCallCount < cfg.MaxToolCalls {
+		// Force tool call on first iteration to enforce protocol
+		// After that, let the model decide (auto)
+		var toolChoice any
+		var responseFormat interface{}
+
+		if toolCallCount == 0 {
+			// Force get_topics_content call - Flash MUST load content before selecting
+			// Note: Gemini doesn't support tool_choice + response_format together
+			toolChoice = map[string]any{
+				"type": "function",
+				"function": map[string]any{
+					"name": "get_topics_content",
+				},
+			}
+		} else {
+			// After first tool call, enable JSON response format for final selection
+			responseFormat = openrouter.ResponseFormat{Type: "json_object"}
+		}
+
 		resp, err := s.client.CreateChatCompletion(ctx, openrouter.ChatCompletionRequest{
 			Model:          cfg.Model,
 			Messages:       messages,
 			Tools:          tools,
+			ToolChoice:     toolChoice,
 			Plugins:        []openrouter.Plugin{{ID: "response-healing"}},
-			ResponseFormat: openrouter.ResponseFormat{Type: "json_object"},
+			ResponseFormat: responseFormat,
+			Reasoning:      &openrouter.ReasoningConfig{Effort: "low"}, // Enable thinking for better tool use
 			UserID:         userID,
 		})
 
@@ -151,9 +191,9 @@ func (s *Service) rerankCandidates(
 			s.logger.Warn("reranker LLM call failed", "error", err, "tool_calls", toolCallCount)
 			trace.fallbackReason = "llm_error"
 			result := s.fallbackFromState(state, candidates, cfg.MaxTopics)
-			trace.selectedIDs = result.TopicIDs
+			trace.selectedTopics = result.Topics
 			s.saveRerankerTrace(userID, originalQuery, contextualizedQuery, trace, startTime)
-			s.recordRerankerMetrics(userID, startTime, toolCallCount, len(result.TopicIDs), totalCost)
+			s.recordRerankerMetrics(userID, startTime, toolCallCount, len(result.Topics), totalCost)
 			return result, nil
 		}
 
@@ -166,9 +206,9 @@ func (s *Service) rerankCandidates(
 			s.logger.Warn("reranker got empty response")
 			trace.fallbackReason = "empty_response"
 			result := s.fallbackFromState(state, candidates, cfg.MaxTopics)
-			trace.selectedIDs = result.TopicIDs
+			trace.selectedTopics = result.Topics
 			s.saveRerankerTrace(userID, originalQuery, contextualizedQuery, trace, startTime)
-			s.recordRerankerMetrics(userID, startTime, toolCallCount, len(result.TopicIDs), totalCost)
+			s.recordRerankerMetrics(userID, startTime, toolCallCount, len(result.Topics), totalCost)
 			return result, nil
 		}
 
@@ -229,30 +269,45 @@ func (s *Service) rerankCandidates(
 		}
 
 		// No tool calls - expect final JSON response
+		// Protocol validation: Flash MUST call get_topics_content before returning
+		if toolCallCount == 0 {
+			s.logger.Warn("reranker protocol violation: no tool calls before final response",
+				"user_id", userID,
+				"content_preview", truncateForLog(choice.Message.Content, 200),
+			)
+			trace.fallbackReason = "protocol_violation"
+			RecordRerankerFallback(userID, "protocol_violation")
+			fallbackResult := s.fallbackToVectorTop(candidates, cfg.MaxTopics)
+			trace.selectedTopics = fallbackResult.Topics
+			s.saveRerankerTrace(userID, originalQuery, contextualizedQuery, trace, startTime)
+			s.recordRerankerMetrics(userID, startTime, toolCallCount, len(fallbackResult.Topics), totalCost)
+			return fallbackResult, nil
+		}
+
 		result, err := s.parseRerankerResponse(choice.Message.Content)
 		if err != nil {
 			s.logger.Warn("failed to parse reranker response", "error", err, "content", choice.Message.Content)
 			trace.fallbackReason = "parse_error"
 			fallbackResult := s.fallbackFromState(state, candidates, cfg.MaxTopics)
-			trace.selectedIDs = fallbackResult.TopicIDs
+			trace.selectedTopics = fallbackResult.Topics
 			s.saveRerankerTrace(userID, originalQuery, contextualizedQuery, trace, startTime)
-			s.recordRerankerMetrics(userID, startTime, toolCallCount, len(fallbackResult.TopicIDs), totalCost)
+			s.recordRerankerMetrics(userID, startTime, toolCallCount, len(fallbackResult.Topics), totalCost)
 			return fallbackResult, nil
 		}
 
 		// Record metrics and log success
-		s.recordRerankerMetrics(userID, startTime, toolCallCount, len(result.TopicIDs), totalCost)
+		s.recordRerankerMetrics(userID, startTime, toolCallCount, len(result.Topics), totalCost)
 		s.logger.Info("reranker completed",
 			"user_id", userID,
 			"candidates_in", len(candidates),
-			"candidates_out", len(result.TopicIDs),
+			"candidates_out", len(result.Topics),
 			"tool_calls", toolCallCount,
 			"duration_ms", int(time.Since(startTime).Milliseconds()),
 			"cost_usd", totalCost,
 		)
 
 		// Save trace on success
-		trace.selectedIDs = result.TopicIDs
+		trace.selectedTopics = result.Topics
 		s.saveRerankerTrace(userID, originalQuery, contextualizedQuery, trace, startTime)
 
 		return result, nil
@@ -263,9 +318,9 @@ func (s *Service) rerankCandidates(
 	RecordRerankerFallback(userID, "max_tool_calls")
 	trace.fallbackReason = "max_tool_calls"
 	result := s.fallbackFromState(state, candidates, cfg.MaxTopics)
-	trace.selectedIDs = result.TopicIDs
+	trace.selectedTopics = result.Topics
 	s.saveRerankerTrace(userID, originalQuery, contextualizedQuery, trace, startTime)
-	s.recordRerankerMetrics(userID, startTime, cfg.MaxToolCalls, len(result.TopicIDs), totalCost)
+	s.recordRerankerMetrics(userID, startTime, cfg.MaxToolCalls, len(result.Topics), totalCost)
 	return result, nil
 }
 
@@ -284,12 +339,21 @@ func (s *Service) recordRerankerMetrics(userID int64, startTime time.Time, toolC
 func (s *Service) formatCandidatesForReranker(candidates []rerankerCandidate) string {
 	var sb strings.Builder
 	for _, c := range candidates {
-		// Format: [ID:42] 2025-07-25 | 20 msgs | Topic summary
+		// Format: [ID:42] 2025-07-25 | 20 msgs, ~10K chars | Topic summary
 		date := c.Topic.CreatedAt.Format("2006-01-02")
-		fmt.Fprintf(&sb, "[ID:%d] %s | %d msgs | %s\n",
-			c.TopicID, date, c.MessageCount, c.Topic.Summary)
+		sizeStr := formatSizeChars(c.SizeChars)
+		fmt.Fprintf(&sb, "[ID:%d] %s | %d msgs, %s | %s\n",
+			c.TopicID, date, c.MessageCount, sizeStr, c.Topic.Summary)
 	}
 	return sb.String()
+}
+
+// formatSizeChars formats character count in a human-readable way
+func formatSizeChars(chars int) string {
+	if chars >= 1000 {
+		return fmt.Sprintf("~%dK chars", chars/1000)
+	}
+	return fmt.Sprintf("~%d chars", chars)
 }
 
 // buildCandidateMap creates a map for quick topic lookup
@@ -304,31 +368,80 @@ func (s *Service) buildCandidateMap(candidates []rerankerCandidate) map[int64]re
 // parseToolCallIDs extracts topic IDs from tool call arguments
 func (s *Service) parseToolCallIDs(arguments string) ([]int64, error) {
 	var args struct {
-		IDs []int64 `json:"ids"`
+		TopicIDs []int64 `json:"topic_ids"`
 	}
 	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
 		return nil, err
 	}
-	return args.IDs, nil
+	return args.TopicIDs, nil
 }
 
 // parseRerankerResponse parses the JSON response from Flash
+// Supports: [{"id": 42, "reason": "..."}] (bare array)
+//
+//	{"topic_ids": [{"id": 42, "reason": "..."}]} (wrapped)
+//	{"topic_ids": [42, 18]} (simple array)
+//	{"topics": [...]} (fallback)
+//	{"ids": [...]} (fallback)
 func (s *Service) parseRerankerResponse(content string) (*RerankerResult, error) {
+	// First, try bare array format: [{"id": 42, "reason": "..."}]
+	var bareArray []TopicSelection
+	if err := json.Unmarshal([]byte(content), &bareArray); err == nil && len(bareArray) > 0 && bareArray[0].ID != 0 {
+		return &RerankerResult{Topics: bareArray}, nil
+	}
+
+	// Try object format: {"topic_ids": [...]}
 	var resp rerankerResponse
 	if err := json.Unmarshal([]byte(content), &resp); err != nil {
 		return nil, err
 	}
 
-	// Use Topics if present, otherwise fall back to IDs (LLM sometimes confuses field names)
-	topicIDs := resp.Topics
-	if len(topicIDs) == 0 && len(resp.IDs) > 0 {
-		topicIDs = resp.IDs
+	var topics []TopicSelection
+
+	// Try topic_ids first (primary format)
+	if len(resp.TopicIDs) > 0 {
+		topics = s.parseTopicArray(resp.TopicIDs)
+	}
+
+	// Fallback to topics field
+	if len(topics) == 0 && len(resp.Topics) > 0 {
+		topics = s.parseTopicArray(resp.Topics)
+	}
+
+	// Fallback: LLM sometimes uses bare "ids"
+	if len(topics) == 0 && len(resp.IDs) > 0 {
+		for _, id := range resp.IDs {
+			topics = append(topics, TopicSelection{ID: id})
+		}
 	}
 
 	return &RerankerResult{
-		TopicIDs:  topicIDs,
+		Topics:    topics,
 		PeopleIDs: nil, // Reserved for v0.5 Social Graph
 	}, nil
+}
+
+// parseTopicArray parses a JSON array that can be either:
+// - [{"id": 42, "reason": "..."}] (object format)
+// - [42, 18] (simple int array)
+func (s *Service) parseTopicArray(data json.RawMessage) []TopicSelection {
+	// First, try object format: [{"id": 42, "reason": "..."}]
+	var objFormat []TopicSelection
+	if err := json.Unmarshal(data, &objFormat); err == nil && len(objFormat) > 0 && objFormat[0].ID != 0 {
+		return objFormat
+	}
+
+	// Fall back to simple int array: [42, 18]
+	var intFormat []int64
+	if err := json.Unmarshal(data, &intFormat); err == nil {
+		topics := make([]TopicSelection, len(intFormat))
+		for i, id := range intFormat {
+			topics[i] = TopicSelection{ID: id}
+		}
+		return topics
+	}
+
+	return nil
 }
 
 // fallbackToVectorTop returns top-N candidates by vector score
@@ -340,12 +453,12 @@ func (s *Service) fallbackToVectorTop(candidates []rerankerCandidate, maxTopics 
 		candidates = candidates[:maxTopics]
 	}
 
-	ids := make([]int64, len(candidates))
+	topics := make([]TopicSelection, len(candidates))
 	for i, c := range candidates {
-		ids[i] = c.TopicID
+		topics[i] = TopicSelection{ID: c.TopicID}
 	}
 
-	return &RerankerResult{TopicIDs: ids}
+	return &RerankerResult{Topics: topics}
 }
 
 // fallbackFromState returns top-N from requestedIDs if available, otherwise vector top
@@ -361,7 +474,11 @@ func (s *Service) fallbackFromState(state *rerankerState, candidates []rerankerC
 		if len(ids) > maxTopics {
 			ids = ids[:maxTopics]
 		}
-		return &RerankerResult{TopicIDs: ids}
+		topics := make([]TopicSelection, len(ids))
+		for i, id := range ids {
+			topics[i] = TopicSelection{ID: id}
+		}
+		return &RerankerResult{Topics: topics}
 	}
 
 	// Fallback to vector search top
@@ -410,7 +527,12 @@ func (s *Service) loadTopicsContentWithSize(
 		}
 
 		fmt.Fprintf(&sb, "=== Topic %d ===\n", id)
-		fmt.Fprintf(&sb, "Date: %s | %d msgs | ~%dK chars\n", date, len(msgs), charCount/1000)
+		threshold := s.cfg.RAG.Reranker.LargeTopicThreshold
+		if charCount > threshold {
+			fmt.Fprintf(&sb, "Date: %s | %d msgs | ~%dK chars ⚠️ LARGE TOPIC - PROVIDE EXCERPT IN RESPONSE!\n", date, len(msgs), charCount/1000)
+		} else {
+			fmt.Fprintf(&sb, "Date: %s | %d msgs | ~%dK chars\n", date, len(msgs), charCount/1000)
+		}
 		fmt.Fprintf(&sb, "Theme: %s\n\n", topic.Summary)
 
 		// Format messages
@@ -488,10 +610,10 @@ func (s *Service) saveRerankerTrace(
 		toolCallsJSON = []byte("[]")
 	}
 
-	// Serialize selected IDs
-	selectedIDsJSON, err := json.Marshal(trace.selectedIDs)
+	// Serialize selected topics (full TopicSelection with reason and excerpt)
+	selectedIDsJSON, err := json.Marshal(trace.selectedTopics)
 	if err != nil {
-		s.logger.Warn("failed to marshal reranker selected IDs", "error", err)
+		s.logger.Warn("failed to marshal reranker selected topics", "error", err)
 		selectedIDsJSON = []byte("[]")
 	}
 
@@ -540,4 +662,12 @@ func (s *Service) formatUserProfileForReranker(ctx context.Context, userID int64
 		fmt.Fprintf(&sb, "- [%s] %s\n", f.Entity, f.Content)
 	}
 	return sb.String()
+}
+
+// truncateForLog truncates a string for logging purposes
+func truncateForLog(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }

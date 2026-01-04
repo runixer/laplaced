@@ -202,6 +202,13 @@ func ParseTopicLog(l storage.RAGLog) TopicLogView {
 	return view
 }
 
+// topicSelectionJSON is used to parse new format topic selections
+type topicSelectionJSON struct {
+	ID      int64   `json:"id"`
+	Reason  string  `json:"reason"`
+	Excerpt *string `json:"excerpt,omitempty"`
+}
+
 // ParseRerankerLog parses a RerankerLog into a view struct for templates
 func ParseRerankerLog(l storage.RerankerLog) RerankerLogView {
 	view := RerankerLogView{
@@ -209,13 +216,55 @@ func ParseRerankerLog(l storage.RerankerLog) RerankerLogView {
 		SelectedIDs: make(map[int64]bool),
 	}
 
-	// Parse selected IDs
+	// Parse candidates first to build size map
+	sizeMap := make(map[int64]int)
+	if l.CandidatesJSON != "" {
+		var candidates []storage.RerankerCandidate
+		if err := json.Unmarshal([]byte(l.CandidatesJSON), &candidates); err == nil {
+			for _, c := range candidates {
+				sizeMap[c.TopicID] = c.SizeChars
+			}
+		}
+	}
+
+	// Map to store reasons by topic ID
+	reasonMap := make(map[int64]string)
+
+	// Parse selected topics - try new format first, then fall back to old format
 	if l.SelectedIDsJSON != "" {
-		var ids []int64
-		if err := json.Unmarshal([]byte(l.SelectedIDsJSON), &ids); err == nil {
-			view.SelectedIDList = ids
-			for _, id := range ids {
-				view.SelectedIDs[id] = true
+		// Try new format: [{"id": 42, "reason": "...", "excerpt": "..."}]
+		var selections []topicSelectionJSON
+		if err := json.Unmarshal([]byte(l.SelectedIDsJSON), &selections); err == nil && len(selections) > 0 && selections[0].ID != 0 {
+			for _, s := range selections {
+				view.SelectedIDList = append(view.SelectedIDList, s.ID)
+				view.SelectedIDs[s.ID] = true
+				reasonMap[s.ID] = s.Reason
+				excerpt := ""
+				excerptLen := 0
+				if s.Excerpt != nil {
+					excerpt = *s.Excerpt
+					excerptLen = len(*s.Excerpt)
+				}
+				view.SelectedTopics = append(view.SelectedTopics, RerankerTopicSelectionView{
+					ID:         s.ID,
+					Reason:     s.Reason,
+					Excerpt:    excerpt,
+					SizeChars:  sizeMap[s.ID],
+					ExcerptLen: excerptLen,
+				})
+			}
+		} else {
+			// Fall back to old format: [42, 18, 5]
+			var ids []int64
+			if err := json.Unmarshal([]byte(l.SelectedIDsJSON), &ids); err == nil {
+				view.SelectedIDList = ids
+				for _, id := range ids {
+					view.SelectedIDs[id] = true
+					view.SelectedTopics = append(view.SelectedTopics, RerankerTopicSelectionView{
+						ID:        id,
+						SizeChars: sizeMap[id],
+					})
+				}
 			}
 		}
 	}
@@ -233,6 +282,7 @@ func ParseRerankerLog(l storage.RerankerLog) RerankerLogView {
 					MessageCount: c.MessageCount,
 					SizeChars:    c.SizeChars,
 					Selected:     view.SelectedIDs[c.TopicID],
+					Reason:       reasonMap[c.TopicID],
 				})
 			}
 		}

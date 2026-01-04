@@ -80,13 +80,14 @@ type RAGConfig struct {
 
 // RerankerConfig configures the agentic LLM reranker for RAG candidates (v0.4)
 type RerankerConfig struct {
-	Enabled      bool   `yaml:"enabled"`
-	Model        string `yaml:"model"`
-	Candidates   int    `yaml:"candidates"`     // summaries to show Flash
-	MaxTopics    int    `yaml:"max_topics"`     // max topics in final selection
-	MaxPeople    int    `yaml:"max_people"`     // max people in final selection (v0.5)
-	Timeout      string `yaml:"timeout"`        // timeout for entire reranker flow
-	MaxToolCalls int    `yaml:"max_tool_calls"` // max tool calls before stopping
+	Enabled             bool   `yaml:"enabled"`
+	Model               string `yaml:"model"`
+	Candidates          int    `yaml:"candidates"`                                                              // summaries to show Flash
+	MaxTopics           int    `yaml:"max_topics"`                                                              // max topics in final selection
+	MaxPeople           int    `yaml:"max_people"`                                                              // max people in final selection (v0.5)
+	Timeout             string `yaml:"timeout"`                                                                 // timeout for entire reranker flow
+	MaxToolCalls        int    `yaml:"max_tool_calls"`                                                          // max tool calls before stopping
+	LargeTopicThreshold int    `yaml:"large_topic_threshold" env:"LAPLACED_RAG_RERANKER_LARGE_TOPIC_THRESHOLD"` // chars threshold for excerpt request (default 25000)
 }
 
 type Config struct {
@@ -257,6 +258,10 @@ func (c *Config) Validate() error {
 			}
 			if c.RAG.Reranker.MaxToolCalls <= 0 {
 				errs = append(errs, fmt.Errorf("rag.reranker.max_tool_calls must be positive, got %d", c.RAG.Reranker.MaxToolCalls))
+			}
+			// Default for LargeTopicThreshold
+			if c.RAG.Reranker.LargeTopicThreshold <= 0 {
+				c.RAG.Reranker.LargeTopicThreshold = 25000
 			}
 			if c.RAG.Reranker.Timeout != "" {
 				if _, err := time.ParseDuration(c.RAG.Reranker.Timeout); err != nil {

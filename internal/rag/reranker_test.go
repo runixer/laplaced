@@ -37,6 +37,7 @@ func TestFormatCandidatesForReranker(t *testing.T) {
 					TopicID:      42,
 					Score:        0.85,
 					MessageCount: 15,
+					SizeChars:    7500, // 15 * 500
 					Topic: storage.Topic{
 						Summary:   "Discussion about Go programming",
 						CreatedAt: time.Date(2025, 7, 15, 10, 0, 0, 0, time.UTC),
@@ -44,7 +45,7 @@ func TestFormatCandidatesForReranker(t *testing.T) {
 				},
 			},
 			wantLines:    1,
-			wantContains: []string{"[ID:42]", "2025-07-15", "15 msgs", "Discussion about Go programming"},
+			wantContains: []string{"[ID:42]", "2025-07-15", "15 msgs", "~7K chars", "Discussion about Go programming"},
 		},
 		{
 			name: "multiple candidates",
@@ -121,19 +122,19 @@ func TestParseToolCallIDs(t *testing.T) {
 	}{
 		{
 			name:      "valid single ID",
-			arguments: `{"ids": [42]}`,
+			arguments: `{"topic_ids": [42]}`,
 			wantIDs:   []int64{42},
 			wantErr:   false,
 		},
 		{
 			name:      "valid multiple IDs",
-			arguments: `{"ids": [1, 5, 10, 42]}`,
+			arguments: `{"topic_ids": [1, 5, 10, 42]}`,
 			wantIDs:   []int64{1, 5, 10, 42},
 			wantErr:   false,
 		},
 		{
 			name:      "empty array",
-			arguments: `{"ids": []}`,
+			arguments: `{"topic_ids": []}`,
 			wantIDs:   []int64{},
 			wantErr:   false,
 		},
@@ -144,7 +145,7 @@ func TestParseToolCallIDs(t *testing.T) {
 			wantErr:   true,
 		},
 		{
-			name:      "missing ids field",
+			name:      "missing topic_ids field",
 			arguments: `{"other": [1, 2]}`,
 			wantIDs:   nil,
 			wantErr:   false,
@@ -169,27 +170,32 @@ func TestParseRerankerResponse(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	s := &Service{logger: logger}
 
+	// Helper to create string pointer
+	strPtr := func(s string) *string { return &s }
+
 	tests := []struct {
-		name       string
-		content    string
-		wantTopics []int64
-		wantErr    bool
+		name           string
+		content        string
+		wantTopics     []int64
+		wantSelections []TopicSelection // For detailed checks
+		wantErr        bool
 	}{
+		// Old format (backward compatibility)
 		{
-			name:       "valid response with topics",
-			content:    `{"topics": [42, 18]}`,
+			name:       "valid response with topics (old format)",
+			content:    `{"topic_ids": [42, 18]}`,
 			wantTopics: []int64{42, 18},
 			wantErr:    false,
 		},
 		{
 			name:       "ignores extra fields like people",
-			content:    `{"topics": [1, 2, 3], "people": ["John", "Jane"]}`,
+			content:    `{"topic_ids": [1, 2, 3], "people": ["John", "Jane"]}`,
 			wantTopics: []int64{1, 2, 3},
 			wantErr:    false,
 		},
 		{
 			name:       "empty topics array",
-			content:    `{"topics": []}`,
+			content:    `{"topic_ids": []}`,
 			wantTopics: []int64{},
 			wantErr:    false,
 		},
@@ -201,7 +207,7 @@ func TestParseRerankerResponse(t *testing.T) {
 		},
 		{
 			name:       "topics takes priority over ids",
-			content:    `{"topics": [1, 2], "ids": [100, 200]}`,
+			content:    `{"topic_ids": [1, 2], "ids": [100, 200]}`,
 			wantTopics: []int64{1, 2},
 			wantErr:    false,
 		},
@@ -209,6 +215,64 @@ func TestParseRerankerResponse(t *testing.T) {
 			name:    "invalid JSON",
 			content: `{not valid json`,
 			wantErr: true,
+		},
+		// New format with objects
+		{
+			name:       "new format with objects",
+			content:    `{"topic_ids": [{"id": 42, "reason": "relevant discussion"}, {"id": 18, "reason": "mentions person"}]}`,
+			wantTopics: []int64{42, 18},
+			wantSelections: []TopicSelection{
+				{ID: 42, Reason: "relevant discussion", Excerpt: nil},
+				{ID: 18, Reason: "mentions person", Excerpt: nil},
+			},
+			wantErr: false,
+		},
+		{
+			name:       "new format with excerpt",
+			content:    `{"topic_ids": [{"id": 42, "reason": "big topic", "excerpt": "[User]: relevant message..."}]}`,
+			wantTopics: []int64{42},
+			wantSelections: []TopicSelection{
+				{ID: 42, Reason: "big topic", Excerpt: strPtr("[User]: relevant message...")},
+			},
+			wantErr: false,
+		},
+		{
+			name:       "new format with null excerpt",
+			content:    `{"topic_ids": [{"id": 42, "reason": "small topic", "excerpt": null}]}`,
+			wantTopics: []int64{42},
+			wantSelections: []TopicSelection{
+				{ID: 42, Reason: "small topic", Excerpt: nil},
+			},
+			wantErr: false,
+		},
+		// Bare array format (Flash sometimes returns this)
+		{
+			name:       "bare array format",
+			content:    `[{"id": 42, "reason": "relevant"}, {"id": 18, "reason": "mentions person"}]`,
+			wantTopics: []int64{42, 18},
+			wantSelections: []TopicSelection{
+				{ID: 42, Reason: "relevant", Excerpt: nil},
+				{ID: 18, Reason: "mentions person", Excerpt: nil},
+			},
+			wantErr: false,
+		},
+		{
+			name:       "bare array with excerpt",
+			content:    `[{"id": 42, "reason": "big topic", "excerpt": "[User]: message..."}]`,
+			wantTopics: []int64{42},
+			wantSelections: []TopicSelection{
+				{ID: 42, Reason: "big topic", Excerpt: strPtr("[User]: message...")},
+			},
+			wantErr: false,
+		},
+		{
+			name:       "new format with empty reason",
+			content:    `{"topic_ids": [{"id": 42}]}`,
+			wantTopics: []int64{42},
+			wantSelections: []TopicSelection{
+				{ID: 42, Reason: "", Excerpt: nil},
+			},
+			wantErr: false,
 		},
 	}
 
@@ -222,8 +286,13 @@ func TestParseRerankerResponse(t *testing.T) {
 			}
 
 			assert.NoError(t, err)
-			assert.Equal(t, tt.wantTopics, result.TopicIDs)
+			assert.Equal(t, tt.wantTopics, result.TopicIDs())
 			assert.Nil(t, result.PeopleIDs) // Reserved for v0.5
+
+			// Check detailed selections if specified
+			if tt.wantSelections != nil {
+				assert.Equal(t, tt.wantSelections, result.Topics)
+			}
 		})
 	}
 }
@@ -271,7 +340,7 @@ func TestFallbackToVectorTop(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := s.fallbackToVectorTop(candidates, tt.maxTopics)
-			assert.Equal(t, tt.wantIDs, result.TopicIDs)
+			assert.Equal(t, tt.wantIDs, result.TopicIDs())
 		})
 	}
 }
@@ -322,7 +391,7 @@ func TestFallbackFromState(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			state := &rerankerState{requestedIDs: tt.requestedIDs}
 			result := s.fallbackFromState(state, candidates, tt.maxTopics)
-			assert.Equal(t, tt.wantIDs, result.TopicIDs)
+			assert.Equal(t, tt.wantIDs, result.TopicIDs())
 		})
 	}
 }
@@ -418,7 +487,7 @@ func TestRerankCandidates_Disabled(t *testing.T) {
 	result, err := s.rerankCandidates(context.Background(), 123, candidates, "contextual_query", "original_query", "current_messages", "profile")
 
 	assert.NoError(t, err)
-	assert.Equal(t, []int64{1, 2, 3}, result.TopicIDs)
+	assert.Equal(t, []int64{1, 2, 3}, result.TopicIDs())
 }
 
 func TestRerankCandidates_EmptyCandidates(t *testing.T) {
@@ -436,10 +505,10 @@ func TestRerankCandidates_EmptyCandidates(t *testing.T) {
 	result, err := s.rerankCandidates(context.Background(), 123, []rerankerCandidate{}, "contextual_query", "original_query", "current_messages", "profile")
 
 	assert.NoError(t, err)
-	assert.Empty(t, result.TopicIDs)
+	assert.Empty(t, result.TopicIDs())
 }
 
-func TestRerankCandidates_SuccessfulRerank(t *testing.T) {
+func TestRerankCandidates_ProtocolViolation_NoToolCalls(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	mockClient := new(MockClient)
 	mockStore := new(MockStorage)
@@ -471,7 +540,8 @@ func TestRerankCandidates_SuccessfulRerank(t *testing.T) {
 		{TopicID: 2, Score: 0.8, MessageCount: 5, Topic: storage.Topic{Summary: "Topic 2", CreatedAt: time.Now()}},
 	}
 
-	// Mock LLM response - direct JSON without tool calls
+	// Mock LLM response - direct JSON without tool calls (protocol violation!)
+	// Flash MUST call get_topics_content before returning final response.
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
 		openrouter.ChatCompletionResponse{
 			Choices: []struct {
@@ -492,7 +562,7 @@ func TestRerankCandidates_SuccessfulRerank(t *testing.T) {
 						ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 					}{
 						Role:    "assistant",
-						Content: `{"topics": [1]}`,
+						Content: `{"topic_ids": [1]}`,
 					},
 				},
 			},
@@ -502,7 +572,13 @@ func TestRerankCandidates_SuccessfulRerank(t *testing.T) {
 	result, err := s.rerankCandidates(context.Background(), 123, candidates, "contextual_query", "original_query", "current_messages", "profile")
 
 	assert.NoError(t, err)
-	assert.Equal(t, []int64{1}, result.TopicIDs)
+	// Protocol violation: no tool calls → falls back to vector top (all candidates by score)
+	assert.Equal(t, []int64{1, 2}, result.TopicIDs())
+	// Reasons are empty because it's a fallback
+	for _, topic := range result.Topics {
+		assert.Empty(t, topic.Reason)
+		assert.Nil(t, topic.Excerpt)
+	}
 	mockClient.AssertExpectations(t)
 }
 
@@ -576,7 +652,7 @@ func TestRerankCandidates_WithToolCall(t *testing.T) {
 									Arguments string `json:"arguments"`
 								}{
 									Name:      "get_topics_content",
-									Arguments: `{"ids": [1]}`,
+									Arguments: `{"topic_ids": [1]}`,
 								},
 							},
 						},
@@ -615,7 +691,7 @@ func TestRerankCandidates_WithToolCall(t *testing.T) {
 						ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 					}{
 						Role:    "assistant",
-						Content: `{"topics": [1]}`,
+						Content: `{"topic_ids": [1]}`,
 					},
 				},
 			},
@@ -625,7 +701,7 @@ func TestRerankCandidates_WithToolCall(t *testing.T) {
 	result, err := s.rerankCandidates(context.Background(), 123, candidates, "contextual_query", "original_query", "current_messages", "profile")
 
 	assert.NoError(t, err)
-	assert.Equal(t, []int64{1}, result.TopicIDs)
+	assert.Equal(t, []int64{1}, result.TopicIDs())
 	mockClient.AssertExpectations(t)
 	mockStore.AssertExpectations(t)
 }
@@ -670,6 +746,6 @@ func TestRerankCandidates_LLMError_FallbackToVector(t *testing.T) {
 
 	// Should not error, should fallback
 	assert.NoError(t, err)
-	assert.Equal(t, []int64{1, 2}, result.TopicIDs) // top-2 by vector score
+	assert.Equal(t, []int64{1, 2}, result.TopicIDs()) // top-2 by vector score
 	mockClient.AssertExpectations(t)
 }

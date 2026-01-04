@@ -16,8 +16,8 @@ func (s *SQLiteStore) CreateTopic(topic Topic) (int64, error) {
 	if topic.CreatedAt.IsZero() {
 		topic.CreatedAt = time.Now()
 	}
-	query := "INSERT INTO topics (user_id, summary, start_msg_id, end_msg_id, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-	res, err := s.db.Exec(query, topic.UserID, topic.Summary, topic.StartMsgID, topic.EndMsgID, embBytes, topic.FactsExtracted, topic.IsConsolidated, topic.ConsolidationChecked, topic.CreatedAt.UTC().Format("2006-01-02 15:04:05.999"))
+	query := "INSERT INTO topics (user_id, summary, start_msg_id, end_msg_id, size_chars, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+	res, err := s.db.Exec(query, topic.UserID, topic.Summary, topic.StartMsgID, topic.EndMsgID, topic.SizeChars, embBytes, topic.FactsExtracted, topic.IsConsolidated, topic.ConsolidationChecked, topic.CreatedAt.UTC().Format("2006-01-02 15:04:05.999"))
 	if err != nil {
 		return 0, err
 	}
@@ -86,7 +86,7 @@ func (s *SQLiteStore) GetLastTopicEndMessageID(userID int64) (int64, error) {
 }
 
 func (s *SQLiteStore) GetAllTopics() ([]Topic, error) {
-	query := "SELECT id, user_id, summary, start_msg_id, end_msg_id, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at FROM topics"
+	query := "SELECT id, user_id, summary, start_msg_id, end_msg_id, size_chars, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at FROM topics"
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -97,7 +97,7 @@ func (s *SQLiteStore) GetAllTopics() ([]Topic, error) {
 	for rows.Next() {
 		var t Topic
 		var embBytes []byte
-		if err := rows.Scan(&t.ID, &t.UserID, &t.Summary, &t.StartMsgID, &t.EndMsgID, &embBytes, &t.FactsExtracted, &t.IsConsolidated, &t.ConsolidationChecked, &t.CreatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.UserID, &t.Summary, &t.StartMsgID, &t.EndMsgID, &t.SizeChars, &embBytes, &t.FactsExtracted, &t.IsConsolidated, &t.ConsolidationChecked, &t.CreatedAt); err != nil {
 			return nil, err
 		}
 		if len(embBytes) > 0 {
@@ -112,7 +112,7 @@ func (s *SQLiteStore) GetAllTopics() ([]Topic, error) {
 }
 
 func (s *SQLiteStore) GetTopicsAfterID(minID int64) ([]Topic, error) {
-	query := "SELECT id, user_id, summary, start_msg_id, end_msg_id, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at FROM topics WHERE id > ? ORDER BY id ASC"
+	query := "SELECT id, user_id, summary, start_msg_id, end_msg_id, size_chars, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at FROM topics WHERE id > ? ORDER BY id ASC"
 	rows, err := s.db.Query(query, minID)
 	if err != nil {
 		return nil, err
@@ -123,7 +123,7 @@ func (s *SQLiteStore) GetTopicsAfterID(minID int64) ([]Topic, error) {
 	for rows.Next() {
 		var t Topic
 		var embBytes []byte
-		if err := rows.Scan(&t.ID, &t.UserID, &t.Summary, &t.StartMsgID, &t.EndMsgID, &embBytes, &t.FactsExtracted, &t.IsConsolidated, &t.ConsolidationChecked, &t.CreatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.UserID, &t.Summary, &t.StartMsgID, &t.EndMsgID, &t.SizeChars, &embBytes, &t.FactsExtracted, &t.IsConsolidated, &t.ConsolidationChecked, &t.CreatedAt); err != nil {
 			return nil, err
 		}
 		if len(embBytes) > 0 {
@@ -151,7 +151,7 @@ func (s *SQLiteStore) GetTopicsByIDs(ids []int64) ([]Topic, error) {
 	}
 
 	query := fmt.Sprintf(
-		"SELECT id, user_id, summary, start_msg_id, end_msg_id, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at FROM topics WHERE id IN (%s)",
+		"SELECT id, user_id, summary, start_msg_id, end_msg_id, size_chars, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at FROM topics WHERE id IN (%s)",
 		strings.Join(placeholders, ","),
 	)
 	rows, err := s.db.Query(query, args...)
@@ -164,7 +164,7 @@ func (s *SQLiteStore) GetTopicsByIDs(ids []int64) ([]Topic, error) {
 	for rows.Next() {
 		var t Topic
 		var embBytes []byte
-		if err := rows.Scan(&t.ID, &t.UserID, &t.Summary, &t.StartMsgID, &t.EndMsgID, &embBytes, &t.FactsExtracted, &t.IsConsolidated, &t.ConsolidationChecked, &t.CreatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.UserID, &t.Summary, &t.StartMsgID, &t.EndMsgID, &t.SizeChars, &embBytes, &t.FactsExtracted, &t.IsConsolidated, &t.ConsolidationChecked, &t.CreatedAt); err != nil {
 			return nil, err
 		}
 		if len(embBytes) > 0 {
@@ -179,7 +179,7 @@ func (s *SQLiteStore) GetTopicsByIDs(ids []int64) ([]Topic, error) {
 }
 
 func (s *SQLiteStore) GetTopics(userID int64) ([]Topic, error) {
-	query := "SELECT id, user_id, summary, start_msg_id, end_msg_id, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at FROM topics WHERE user_id = ?"
+	query := "SELECT id, user_id, summary, start_msg_id, end_msg_id, size_chars, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at FROM topics WHERE user_id = ?"
 	rows, err := s.db.Query(query, userID)
 	if err != nil {
 		return nil, err
@@ -190,7 +190,7 @@ func (s *SQLiteStore) GetTopics(userID int64) ([]Topic, error) {
 	for rows.Next() {
 		var t Topic
 		var embBytes []byte
-		if err := rows.Scan(&t.ID, &t.UserID, &t.Summary, &t.StartMsgID, &t.EndMsgID, &embBytes, &t.FactsExtracted, &t.IsConsolidated, &t.ConsolidationChecked, &t.CreatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.UserID, &t.Summary, &t.StartMsgID, &t.EndMsgID, &t.SizeChars, &embBytes, &t.FactsExtracted, &t.IsConsolidated, &t.ConsolidationChecked, &t.CreatedAt); err != nil {
 			return nil, err
 		}
 		if len(embBytes) > 0 {
@@ -217,7 +217,7 @@ func (s *SQLiteStore) SetTopicConsolidationChecked(topicID int64, checked bool) 
 }
 
 func (s *SQLiteStore) GetTopicsPendingFacts(userID int64) ([]Topic, error) {
-	query := "SELECT id, user_id, summary, start_msg_id, end_msg_id, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at FROM topics WHERE user_id = ? AND facts_extracted = 0 ORDER BY created_at ASC, id ASC"
+	query := "SELECT id, user_id, summary, start_msg_id, end_msg_id, size_chars, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at FROM topics WHERE user_id = ? AND facts_extracted = 0 ORDER BY created_at ASC, id ASC"
 	rows, err := s.db.Query(query, userID)
 	if err != nil {
 		return nil, err
@@ -228,7 +228,7 @@ func (s *SQLiteStore) GetTopicsPendingFacts(userID int64) ([]Topic, error) {
 	for rows.Next() {
 		var t Topic
 		var embBytes []byte
-		if err := rows.Scan(&t.ID, &t.UserID, &t.Summary, &t.StartMsgID, &t.EndMsgID, &embBytes, &t.FactsExtracted, &t.IsConsolidated, &t.ConsolidationChecked, &t.CreatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.UserID, &t.Summary, &t.StartMsgID, &t.EndMsgID, &t.SizeChars, &embBytes, &t.FactsExtracted, &t.IsConsolidated, &t.ConsolidationChecked, &t.CreatedAt); err != nil {
 			return nil, err
 		}
 		if len(embBytes) > 0 {
@@ -303,8 +303,8 @@ func (s *SQLiteStore) GetTopicsExtended(filter TopicFilter, limit, offset int, s
 	}
 
 	query := fmt.Sprintf(`
-		SELECT 
-			t.id, t.user_id, t.summary, t.start_msg_id, t.end_msg_id, t.embedding, t.facts_extracted, t.is_consolidated, t.consolidation_checked, t.created_at,
+		SELECT
+			t.id, t.user_id, t.summary, t.start_msg_id, t.end_msg_id, t.size_chars, t.embedding, t.facts_extracted, t.is_consolidated, t.consolidation_checked, t.created_at,
 			(SELECT COUNT(*) FROM structured_facts f WHERE f.topic_id = t.id) as facts_count,
 			(SELECT COUNT(*) FROM history h WHERE h.topic_id = t.id) as message_count
 		FROM topics t
@@ -326,7 +326,7 @@ func (s *SQLiteStore) GetTopicsExtended(filter TopicFilter, limit, offset int, s
 		var t TopicExtended
 		var embBytes []byte
 		if err := rows.Scan(
-			&t.ID, &t.UserID, &t.Summary, &t.StartMsgID, &t.EndMsgID, &embBytes, &t.FactsExtracted, &t.IsConsolidated, &t.ConsolidationChecked, &t.CreatedAt,
+			&t.ID, &t.UserID, &t.Summary, &t.StartMsgID, &t.EndMsgID, &t.SizeChars, &embBytes, &t.FactsExtracted, &t.IsConsolidated, &t.ConsolidationChecked, &t.CreatedAt,
 			&t.FactsCount, &t.MessageCount,
 		); err != nil {
 			return TopicResult{}, err
@@ -353,9 +353,9 @@ func (s *SQLiteStore) GetMergeCandidates(userID int64) ([]MergeCandidate, error)
 	// 3. Close in message ID (heuristic for time proximity)
 	// 4. t1 comes before t2
 	query := `
-		SELECT 
-			t1.id, t1.user_id, t1.summary, t1.start_msg_id, t1.end_msg_id, t1.embedding, t1.facts_extracted, t1.is_consolidated, t1.consolidation_checked, t1.created_at,
-			t2.id, t2.user_id, t2.summary, t2.start_msg_id, t2.end_msg_id, t2.embedding, t2.facts_extracted, t2.is_consolidated, t2.consolidation_checked, t2.created_at
+		SELECT
+			t1.id, t1.user_id, t1.summary, t1.start_msg_id, t1.end_msg_id, t1.size_chars, t1.embedding, t1.facts_extracted, t1.is_consolidated, t1.consolidation_checked, t1.created_at,
+			t2.id, t2.user_id, t2.summary, t2.start_msg_id, t2.end_msg_id, t2.size_chars, t2.embedding, t2.facts_extracted, t2.is_consolidated, t2.consolidation_checked, t2.created_at
 		FROM topics t1
 		JOIN topics t2 ON t1.user_id = t2.user_id
 		WHERE t1.user_id = ?
@@ -379,8 +379,8 @@ func (s *SQLiteStore) GetMergeCandidates(userID int64) ([]MergeCandidate, error)
 		var emb1, emb2 []byte
 
 		if err := rows.Scan(
-			&t1.ID, &t1.UserID, &t1.Summary, &t1.StartMsgID, &t1.EndMsgID, &emb1, &t1.FactsExtracted, &t1.IsConsolidated, &t1.ConsolidationChecked, &t1.CreatedAt,
-			&t2.ID, &t2.UserID, &t2.Summary, &t2.StartMsgID, &t2.EndMsgID, &emb2, &t2.FactsExtracted, &t2.IsConsolidated, &t2.ConsolidationChecked, &t2.CreatedAt,
+			&t1.ID, &t1.UserID, &t1.Summary, &t1.StartMsgID, &t1.EndMsgID, &t1.SizeChars, &emb1, &t1.FactsExtracted, &t1.IsConsolidated, &t1.ConsolidationChecked, &t1.CreatedAt,
+			&t2.ID, &t2.UserID, &t2.Summary, &t2.StartMsgID, &t2.EndMsgID, &t2.SizeChars, &emb2, &t2.FactsExtracted, &t2.IsConsolidated, &t2.ConsolidationChecked, &t2.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

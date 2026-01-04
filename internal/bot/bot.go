@@ -396,20 +396,30 @@ func (b *Bot) formatRAGResults(results []rag.TopicSearchResult, query string) st
 			topicRes.Topic.Summary,
 			b.translator.Get(b.cfg.Bot.Language, "rag.weight"),
 			topicRes.Score))
-		for i, msg := range topicRes.Messages {
-			var textContent string
 
-			if msg.Role == "user" {
-				// Use existing content if possible (it has built-in headers like [User...])
-				textContent = msg.Content
-			} else {
-				// Assistant/System messages: we build the header
-				dateStr := msg.CreatedAt.Format("2006-01-02 15:04:05")
-				roleTitle := cases.Title(language.English).String(msg.Role)
-				textContent = fmt.Sprintf("[%s (%s)]: %s", roleTitle, dateStr, msg.Content)
+		// Use excerpt if available (for large topics filtered by reranker)
+		if topicRes.Excerpt != nil {
+			ragContent.WriteString(b.translator.Get(b.cfg.Bot.Language, "rag.excerpt_marker"))
+			ragContent.WriteString("\n")
+			ragContent.WriteString(*topicRes.Excerpt)
+			ragContent.WriteString("\n")
+		} else {
+			// Full messages for normal topics
+			for i, msg := range topicRes.Messages {
+				var textContent string
+
+				if msg.Role == "user" {
+					// Use existing content if possible (it has built-in headers like [User...])
+					textContent = msg.Content
+				} else {
+					// Assistant/System messages: we build the header
+					dateStr := msg.CreatedAt.Format("2006-01-02 15:04:05")
+					roleTitle := cases.Title(language.English).String(msg.Role)
+					textContent = fmt.Sprintf("[%s (%s)]: %s", roleTitle, dateStr, msg.Content)
+				}
+
+				ragContent.WriteString(fmt.Sprintf("%d. %s\n", i+1, textContent))
 			}
-
-			ragContent.WriteString(fmt.Sprintf("%d. %s\n", i+1, textContent))
 		}
 	}
 

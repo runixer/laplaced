@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Next version: v0.5 (Social) — People Table, Social Graph_
 
+## [0.4.3] - 2026-01-05
+
+**Reranker protocol enforcement and excerpt quality improvements.**
+
+### Added
+- **Forced tool calling** — Flash must call `get_topics_content` before returning results (API-level enforcement via `tool_choice`)
+- **Reasoning mode** — enabled `reasoning.effort: "low"` for better tool call decisions
+- **Protocol violation detection** — fallback to vector search if Flash skips tool call
+
+### Changed
+- Improved excerpt quality rules:
+  - Preserve User→Assistant message pairs
+  - Don't truncate messages mid-sentence
+  - Include 1-2 neighboring messages for context
+- Fixed query enrichment prompt to prevent word substitution (e.g., "мениск" → "MinIO")
+
+### Fixed
+- JSON parsing now handles bare array format from Flash responses
+
+## [0.4.2] - 2026-01-04
+
+**Reranker transparency: Understand why Flash chose each topic.**
+
+### Added
+- **Reason field** — Flash now explains why each topic was selected (1-2 sentences)
+- **Excerpt field** — For large topics (>25K chars), Flash extracts only relevant messages instead of full content
+- Reranker Debug UI shows reasons and excerpts in Selected Topics table
+- Tooltip on candidate checkmarks shows selection reason
+
+### Changed
+- Updated reranker prompts to require reason for each selected topic
+- Reranker response format changed from `[42, 18]` to `[{"id": 42, "reason": "..."}]`
+- Backward compatibility maintained for old format parsing
+
 ## [0.4.1] - 2026-01-04
 
 **Intelligence release: Smart context filtering with Flash Reranker.**
@@ -214,7 +248,9 @@ _Next version: v0.5 (Social) — People Table, Social Graph_
 - Multi-language support (en, ru)
 - Docker deployment
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/runixer/laplaced/compare/v0.4.2...v0.4.3
+[0.4.2]: https://github.com/runixer/laplaced/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/runixer/laplaced/compare/v0.3.9...v0.4.1
 [0.3.9]: https://github.com/runixer/laplaced/compare/v0.3.8...v0.3.9
 [0.3.8]: https://github.com/runixer/laplaced/compare/v0.3.7...v0.3.8

@@ -152,9 +152,34 @@ ResponseFormat: openrouter.ResponseFormat{Type: "json_object"},
 
 ### Формат финального ответа
 
+**v0.4.2+:** Новый формат с reason и excerpt:
+
 ```json
-{"topics": [42, 18, 5], "people": []}
+{
+  "topics": [
+    {"id": 42, "reason": "Обсуждение vLLM на H100 — прямой ответ на вопрос"},
+    {"id": 18, "reason": "Упоминание Петрова", "excerpt": "[User]: Помню Петрова из ProjectX...\n[Assistant]: Да, он занимался..."}
+  ]
+}
 ```
+
+**Поля:**
+- `id` — ID топика (обязательно)
+- `reason` — краткое объяснение (1-2 предложения) почему выбран (обязательно)
+- `excerpt` — только для топиков >25K chars: Flash вырезает релевантные сообщения вместо использования полного контента
+
+**Зачем excerpt:**
+- Топики >25K chars — редкость (~1%), но занимают много контекста
+- Вместо загрузки полного топика (~50K tokens), Flash извлекает только релевантные сообщения (~2-5K)
+- Формат excerpt: сохраняет полные сообщения `[User]: ..., [Assistant]: ...`
+
+**Правила excerpt (v0.4.3):**
+- Сохранять пары User→Assistant — не вырезать сообщения пользователя
+- Не обрезать сообщения на полуслове — включать полный текст
+- Включать 1-2 соседних сообщения для контекста
+- Excerpt должен отвечать на ОРИГИНАЛЬНЫЙ запрос, а не на расширенный
+
+**Backward compatibility:** Парсер поддерживает старый формат `[42, 18, 5]`
 
 ## Fallback Strategy
 
@@ -242,6 +267,35 @@ rag:
 | Cost per message | ~$0.40 | ~$0.20 | ~$0.05 ✅ |
 
 > **Примечание:** Actual результаты получены при тестировании на dev (2026-01-04). Стоимость ниже ожидаемой за счёт агрессивной фильтрации (50 → 5 топиков) и использования Flash для reranker.
+
+### v0.4.2 Improvements
+
+**Reason & Excerpt:**
+- **Debuggability:** В UI видно почему Flash выбрал каждый топик
+- **Context reduction:** Для гигантских топиков (>25K chars) контекст сократится ещё больше
+- **Quality monitoring:** Можно анализировать reasons для улучшения промптов
+
+### v0.4.3 Protocol Enforcement
+
+**Forced Tool Calling:**
+- На первой итерации используется `tool_choice: {type: "function", function: {name: "get_topics_content"}}`
+- Flash ОБЯЗАН вызвать tool перед возвратом результата — это гарантия изучения контента
+- Gemini API ограничение: `tool_choice` несовместим с `response_format: json_object`
+- Решение: `response_format` включается только после первого tool call
+
+**Reasoning Mode:**
+- Включён `reasoning.effort: "low"` для улучшения качества tool calls
+- Gemini 2.5+ модели используют internal thinking перед ответом
+
+**Protocol Violation Detection:**
+- Если Flash возвращает ответ без tool calls → fallback на vector top
+- Метрика: `laplaced_reranker_fallback_total{reason="protocol_violation"}`
+- Safety net на случай если `tool_choice` не сработает
+
+**Query Enrichment Fix:**
+- Добавлено правило "НЕ УГАДЫВАЙ" в enrichment prompt
+- Предотвращает замену незнакомых слов на похожие технические термины
+- Пример: "мениск" теперь не превращается в "MinIO"
 
 ## Ссылки
 

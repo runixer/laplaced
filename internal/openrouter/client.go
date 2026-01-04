@@ -179,13 +179,20 @@ type Plugin struct {
 	PDF PDFConfig `json:"pdf,omitempty"`
 }
 
+// ReasoningConfig controls the model's internal reasoning behavior.
+// Supported effort levels: "minimal", "low", "medium", "high".
+type ReasoningConfig struct {
+	Effort string `json:"effort,omitempty"`
+}
+
 type ChatCompletionRequest struct {
-	Model          string      `json:"model"`
-	Messages       []Message   `json:"messages"`
-	Plugins        []Plugin    `json:"plugins,omitempty"`
-	Tools          []Tool      `json:"tools,omitempty"`
-	ToolChoice     any         `json:"tool_choice,omitempty"`
-	ResponseFormat interface{} `json:"response_format,omitempty"`
+	Model          string           `json:"model"`
+	Messages       []Message        `json:"messages"`
+	Plugins        []Plugin         `json:"plugins,omitempty"`
+	Tools          []Tool           `json:"tools,omitempty"`
+	ToolChoice     any              `json:"tool_choice,omitempty"`
+	ResponseFormat interface{}      `json:"response_format,omitempty"`
+	Reasoning      *ReasoningConfig `json:"reasoning,omitempty"`
 
 	// UserID is used for metrics tracking only, not sent to API
 	UserID int64 `json:"-"`
@@ -366,6 +373,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		Tools          []Tool            `json:"tools,omitempty"`
 		ToolChoice     any               `json:"tool_choice,omitempty"`
 		ResponseFormat interface{}       `json:"response_format,omitempty"`
+		Reasoning      *ReasoningConfig  `json:"reasoning,omitempty"`
 	}{
 		Model:          req.Model,
 		Messages:       loggableMessages,
@@ -373,6 +381,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		Tools:          req.Tools,
 		ToolChoice:     req.ToolChoice,
 		ResponseFormat: req.ResponseFormat,
+		Reasoning:      req.Reasoning,
 	}
 
 	c.logger.Debug("Sending request to OpenRouter",

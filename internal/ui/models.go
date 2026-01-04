@@ -15,6 +15,16 @@ type RerankerLogView struct {
 	ToolCalls      []RerankerToolCallView
 	SelectedIDs    map[int64]bool // For quick lookup in template
 	SelectedIDList []int64
+	SelectedTopics []RerankerTopicSelectionView // Full topic selection with reason/excerpt
+}
+
+// RerankerTopicSelectionView represents a selected topic with reason and optional excerpt
+type RerankerTopicSelectionView struct {
+	ID         int64
+	Reason     string
+	Excerpt    string // Empty string if none
+	SizeChars  int    // Original topic size in chars
+	ExcerptLen int    // Length of excerpt (0 if no excerpt)
 }
 
 // RerankerCandidateView is a single candidate for template display
@@ -26,6 +36,7 @@ type RerankerCandidateView struct {
 	MessageCount int
 	SizeChars    int
 	Selected     bool
+	Reason       string // Reason for selection (from reranker response)
 }
 
 // RerankerToolCallView represents one iteration of tool calls for template display

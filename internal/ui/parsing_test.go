@@ -160,3 +160,120 @@ func TestParseTopicLog(t *testing.T) {
 		t.Errorf("Expected InputMsgCount 2, got %d", view.InputMsgCount)
 	}
 }
+
+func TestParseRerankerLog_NewFormat(t *testing.T) {
+	// New format with objects containing reason and excerpt
+	log := storage.RerankerLog{
+		SelectedIDsJSON: `[{"id": 42, "reason": "test reason", "excerpt": "some text"}, {"id": 18, "reason": "another reason"}]`,
+		CandidatesJSON:  `[{"topic_id": 42, "summary": "Topic 42", "score": 0.9}, {"topic_id": 18, "summary": "Topic 18", "score": 0.8}]`,
+	}
+
+	view := ParseRerankerLog(log)
+
+	// Check SelectedTopics
+	if len(view.SelectedTopics) != 2 {
+		t.Fatalf("Expected 2 SelectedTopics, got %d", len(view.SelectedTopics))
+	}
+
+	// First topic with excerpt
+	if view.SelectedTopics[0].ID != 42 {
+		t.Errorf("Expected first topic ID 42, got %d", view.SelectedTopics[0].ID)
+	}
+	if view.SelectedTopics[0].Reason != "test reason" {
+		t.Errorf("Expected reason 'test reason', got '%s'", view.SelectedTopics[0].Reason)
+	}
+	if view.SelectedTopics[0].Excerpt != "some text" {
+		t.Errorf("Expected excerpt 'some text', got '%s'", view.SelectedTopics[0].Excerpt)
+	}
+
+	// Second topic without excerpt
+	if view.SelectedTopics[1].ID != 18 {
+		t.Errorf("Expected second topic ID 18, got %d", view.SelectedTopics[1].ID)
+	}
+	if view.SelectedTopics[1].Reason != "another reason" {
+		t.Errorf("Expected reason 'another reason', got '%s'", view.SelectedTopics[1].Reason)
+	}
+	if view.SelectedTopics[1].Excerpt != "" {
+		t.Errorf("Expected empty excerpt, got '%s'", view.SelectedTopics[1].Excerpt)
+	}
+
+	// Check SelectedIDs map
+	if !view.SelectedIDs[42] {
+		t.Error("Expected SelectedIDs[42] to be true")
+	}
+	if !view.SelectedIDs[18] {
+		t.Error("Expected SelectedIDs[18] to be true")
+	}
+
+	// Check SelectedIDList
+	if len(view.SelectedIDList) != 2 {
+		t.Errorf("Expected 2 SelectedIDList, got %d", len(view.SelectedIDList))
+	}
+
+	// Check candidates have reasons assigned
+	if len(view.Candidates) != 2 {
+		t.Fatalf("Expected 2 candidates, got %d", len(view.Candidates))
+	}
+	if view.Candidates[0].Reason != "test reason" {
+		t.Errorf("Expected candidate reason 'test reason', got '%s'", view.Candidates[0].Reason)
+	}
+}
+
+func TestParseRerankerLog_OldFormat(t *testing.T) {
+	// Old format with plain array of IDs
+	log := storage.RerankerLog{
+		SelectedIDsJSON: `[42, 18, 5]`,
+		CandidatesJSON:  `[{"topic_id": 42, "summary": "Topic 42"}, {"topic_id": 18, "summary": "Topic 18"}]`,
+	}
+
+	view := ParseRerankerLog(log)
+
+	// Check SelectedTopics (should be created from IDs without reason)
+	if len(view.SelectedTopics) != 3 {
+		t.Fatalf("Expected 3 SelectedTopics, got %d", len(view.SelectedTopics))
+	}
+	if view.SelectedTopics[0].ID != 42 {
+		t.Errorf("Expected first topic ID 42, got %d", view.SelectedTopics[0].ID)
+	}
+	if view.SelectedTopics[0].Reason != "" {
+		t.Errorf("Expected empty reason in old format, got '%s'", view.SelectedTopics[0].Reason)
+	}
+
+	// Check SelectedIDs map
+	if !view.SelectedIDs[42] {
+		t.Error("Expected SelectedIDs[42] to be true")
+	}
+	if !view.SelectedIDs[18] {
+		t.Error("Expected SelectedIDs[18] to be true")
+	}
+	if !view.SelectedIDs[5] {
+		t.Error("Expected SelectedIDs[5] to be true")
+	}
+
+	// Check SelectedIDList
+	if len(view.SelectedIDList) != 3 {
+		t.Errorf("Expected 3 SelectedIDList, got %d", len(view.SelectedIDList))
+	}
+}
+
+func TestParseRerankerLog_ToolCalls(t *testing.T) {
+	log := storage.RerankerLog{
+		SelectedIDsJSON: `[{"id": 42, "reason": "found in content"}]`,
+		ToolCallsJSON:   `[{"iteration": 1, "topics": [{"id": 42, "summary": "Topic summary"}]}]`,
+	}
+
+	view := ParseRerankerLog(log)
+
+	if len(view.ToolCalls) != 1 {
+		t.Fatalf("Expected 1 tool call, got %d", len(view.ToolCalls))
+	}
+	if view.ToolCalls[0].Iteration != 1 {
+		t.Errorf("Expected iteration 1, got %d", view.ToolCalls[0].Iteration)
+	}
+	if len(view.ToolCalls[0].Topics) != 1 {
+		t.Fatalf("Expected 1 topic in tool call, got %d", len(view.ToolCalls[0].Topics))
+	}
+	if view.ToolCalls[0].Topics[0].ID != 42 {
+		t.Errorf("Expected topic ID 42, got %d", view.ToolCalls[0].Topics[0].ID)
+	}
+}

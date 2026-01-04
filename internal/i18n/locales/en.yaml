@@ -76,6 +76,7 @@ rag:
   query: "QUERY"
   results: "RESULTS"
   end_of_results: "END OF RESULTS"
+  excerpt_marker: "[Truncated by reranker — only relevant fragments shown]"
   topic_extraction_prompt: |
     Analyze the chat log. Break it down into logical semantic topics.
     
@@ -91,15 +92,15 @@ rag:
   enrichment_prompt: |
     Role: You are a context analyst for vector search (Memory Retrieval).
     Current date: %s
-    Task: Formulate a search query that will find ALL relevant discussion history related to the last message's topic. History is only for context understanding. Focus on finding relevant info for the last message.
-    Try to make a short prompt with keywords for search - personalities, technologies, brands.
+    Task: Formulate a search query that will find ALL relevant discussion history related to the last message's topic.
+    Make a short prompt with keywords — personalities, technologies, brands.
 
     STRICT RULES:
-    1. FOCUS: Do not look for "answer to question". Look for "discussion history of the problem".
-    2. SCOPE: Include mentioned technologies, related bugs, architectural decisions, and past configurations.
-    3. TIME: If the query contains time markers ("yesterday", "last week"), calculate specific dates relative to the current date.
-    4. FORMULATION: Use pattern "Discussion [Technology/Problem] and history [Related events]".
-    5. CONTEXT: Replace pronouns ("he", "it", "here") with specific names (Open WebUI, Keycloak, etc.).
+    1. FOCUS: Don't look for "answer". Look for "discussion history of the topic".
+    2. SCOPE: Include mentioned technologies, related bugs, architectural decisions.
+    3. TIME: Time markers ("yesterday") → specific dates.
+    4. CONTEXT: Replace pronouns ("he", "it") with specific names from dialogue.
+    5. DON'T GUESS: Keep unfamiliar words as-is! "meniscus" ≠ "MinIO", "grandma" ≠ "Grandma.js".
     6. LANGUAGE: English (technical terms in English).
     7. OUTPUT: Only the search query text in one line.
 
@@ -134,34 +135,36 @@ rag:
   reranker_system_prompt: |
     You are a relevance filter for a personal AI assistant.
 
-    CRITICAL:
-    - Candidate topics (summaries) are just TITLES, they DON'T contain full information
-    - You MUST use get_topics_content to VERIFY content before selection
-    - NEVER select topics based on title alone — always verify via tool
-    - If query is about a specific person/event — look for EXACTLY that in content
+    You're given topic summaries (titles only). First load interesting topics via get_topics_content, then select final ones.
 
-    Your task:
-    1. Identify key entities in the ORIGINAL query (names, projects, events)
-    2. Select candidates that MAY contain these entities
-    3. ALWAYS call get_topics_content to verify content
-    4. Return ONLY topics where entities are ACTUALLY found
-
-    Selection criteria:
-    - Direct mention of entities from original query (main criterion!)
+    SELECTION CRITERIA:
+    - Direct mention of entities from query (names, projects, technologies) — main criterion
     - Related people, projects, events
     - Recency (fresher is better, all else being equal)
 
-    Important:
-    - If nothing relevant found — return EMPTY array {"topics": []}
-    - This is better than returning irrelevant results
+    IMPORTANT:
+    - If nothing relevant — return {"topic_ids": []}
     - Better 0 results than 5 "just in case"
+    - Limit: maximum %d topics
 
-    Limit: maximum %d topics.
+    RESPONSE FORMAT (JSON):
+    {
+      "topic_ids": [
+        {"id": 42, "reason": "why relevant (1-2 sentences)"},
+        {"id": 18, "reason": "...", "excerpt": "..."}
+      ]
+    }
 
-    FINAL RESPONSE FORMAT (strict JSON, field MUST be named "topics"):
-    {"topics": [42, 18]}
-
-    Do NOT use "ids" — only "topics"!
+    RULES:
+    - "reason" — REQUIRED for each topic
+    - "excerpt" — only for topics marked ⚠️ LARGE TOPIC, if only part is relevant:
+      * Whole topic relevant → DON'T add excerpt
+      * Part relevant → extract EXACTLY the part that answers the ORIGINAL query
+    - PRESERVE User→Assistant pairs! Don't cut user messages
+    - DON'T truncate messages mid-sentence — include FULL text of each message
+    - Include 1-2 NEIGHBORING messages for context (what was before/after the relevant moment)
+    - Excerpt must answer the ORIGINAL query, not the extended context!
+    - Format: [User (date)]: question... [Assistant (date)]: answer...
 
   reranker_user_prompt: |
     Current date: %s

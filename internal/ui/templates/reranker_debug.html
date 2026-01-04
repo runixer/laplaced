@@ -20,6 +20,19 @@
         text-overflow: ellipsis;
     }
     .fallback-reason { font-family: monospace; font-size: 0.85rem; }
+    .size-large { color: #dc3545; font-weight: bold; } /* >25K chars - requires excerpt */
+    .size-medium { color: #fd7e14; } /* 10K-25K chars */
+    .candidate-large { background-color: rgba(220, 53, 69, 0.15) !important; } /* Row highlight for >25K */
+    .excerpt-content {
+        white-space: pre-wrap;
+        font-family: monospace;
+        font-size: 0.85rem;
+        background: #f8f9fa;
+        padding: 12px 16px;
+        border-left: 3px solid #28a745;
+        max-height: 300px;
+        overflow-y: auto;
+    }
 
     /* Sortable table headers */
     .sortable {
@@ -138,6 +151,51 @@
                                 </div>
                                 {{end}}
 
+                                <!-- Selected Topics with Reasons -->
+                                {{if .SelectedTopics}}
+                                {{$logID := .ID}}
+                                <h6>Selected Topics ({{len .SelectedTopics}})</h6>
+                                <div class="table-responsive mb-3">
+                                    <table class="table table-sm table-bordered">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th style="width: 60px">ID</th>
+                                                <th style="width: 80px">Size</th>
+                                                <th>Reason</th>
+                                                <th style="width: 80px">Excerpt</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {{range $idx, $topic := .SelectedTopics}}
+                                            <tr class="{{if $topic.Excerpt}}expandable-row{{end}}{{if gt $topic.SizeChars 25000}} candidate-large{{end}}" {{if $topic.Excerpt}}data-target="#excerpt-{{$logID}}-{{$idx}}"{{end}}>
+                                                <td><a href="/ui/topics?topic_id={{$topic.ID}}" target="_blank" onclick="event.stopPropagation();">{{$topic.ID}}</a></td>
+                                                <td class="{{if gt $topic.SizeChars 25000}}size-large{{else if gt $topic.SizeChars 10000}}size-medium{{end}}">
+                                                    {{if gt $topic.SizeChars 1000}}{{div $topic.SizeChars 1000}}K{{else}}{{$topic.SizeChars}}{{end}}
+                                                </td>
+                                                <td>{{if $topic.Reason}}{{$topic.Reason}}{{else}}<span class="text-muted">-</span>{{end}}</td>
+                                                <td class="text-center">
+                                                    {{if $topic.Excerpt}}
+                                                    <span class="badge bg-success">{{div $topic.SizeChars 1000}}K → {{if gt $topic.ExcerptLen 1000}}{{div $topic.ExcerptLen 1000}}K{{else}}{{$topic.ExcerptLen}}{{end}}</span>
+                                                    {{else if gt $topic.SizeChars 25000}}
+                                                    <span class="badge bg-warning text-dark">missing</span>
+                                                    {{else}}
+                                                    <span class="text-muted">-</span>
+                                                    {{end}}
+                                                </td>
+                                            </tr>
+                                            {{if $topic.Excerpt}}
+                                            <tr class="collapse" id="excerpt-{{$logID}}-{{$idx}}">
+                                                <td colspan="4" class="p-0">
+                                                    <div class="excerpt-content">{{$topic.Excerpt}}</div>
+                                                </td>
+                                            </tr>
+                                            {{end}}
+                                            {{end}}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {{end}}
+
                                 <!-- Candidates Table -->
                                 <h6>Candidates ({{len .Candidates}}) <small class="text-muted fw-normal">- click column headers to sort</small></h6>
                                 <div class="table-responsive mb-3">
@@ -155,7 +213,7 @@
                                         </thead>
                                         <tbody>
                                             {{range .Candidates}}
-                                            <tr class="{{if .Selected}}candidate-selected{{end}}"
+                                            <tr class="{{if .Selected}}candidate-selected{{end}}{{if gt .SizeChars 25000}} candidate-large{{end}}"
                                                 data-selected="{{if .Selected}}1{{else}}0{{end}}"
                                                 data-id="{{.TopicID}}"
                                                 data-summary="{{.Summary}}"
@@ -164,7 +222,7 @@
                                                 data-msgs="{{.MessageCount}}"
                                                 data-size="{{.SizeChars}}">
                                                 <td class="text-center">
-                                                    {{if .Selected}}<i class="bi bi-check-circle-fill text-success"></i>{{end}}
+                                                    {{if .Selected}}<i class="bi bi-check-circle-fill text-success" {{if .Reason}}title="{{.Reason}}"{{end}}></i>{{end}}
                                                 </td>
                                                 <td>
                                                     <a href="/ui/topics?topic_id={{.TopicID}}" target="_blank">{{.TopicID}}</a>
@@ -173,7 +231,7 @@
                                                 <td><span class="badge bg-secondary score-badge">{{printf "%.3f" .Score}}</span></td>
                                                 <td>{{.Date}}</td>
                                                 <td>{{.MessageCount}}</td>
-                                                <td>
+                                                <td class="{{if gt .SizeChars 25000}}size-large{{else if gt .SizeChars 10000}}size-medium{{end}}" {{if gt .SizeChars 25000}}title="Large topic - excerpt recommended"{{end}}>
                                                     {{if gt .SizeChars 0}}
                                                         {{if gt .SizeChars 1000}}
                                                             {{div .SizeChars 1000}}K

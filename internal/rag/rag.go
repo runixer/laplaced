@@ -333,6 +333,8 @@ type TopicSearchResult struct {
 	Topic    storage.Topic
 	Score    float32
 	Messages []storage.Message
+	Reason   string  // Why reranker chose this topic (empty if no reason provided)
+	Excerpt  *string // If set, use this instead of Messages (for large topics)
 }
 
 // SearchResult kept for backward compatibility if needed, but we are moving to TopicSearchResult.
@@ -409,6 +411,8 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 	type match struct {
 		topicID int64
 		score   float32
+		reason  string  // Reranker reason (filled after reranking)
+		excerpt *string // Reranker excerpt (filled after reranking)
 	}
 	var matches []match
 	userVectors := s.topicVectors[userID]
@@ -491,6 +495,7 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 					Score:        m.score,
 					Topic:        topic,
 					MessageCount: msgCount,
+					SizeChars:    topic.SizeChars, // Use real size from DB
 				})
 			}
 		}
@@ -510,15 +515,27 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 			s.logger.Warn("reranker failed, falling back to vector search", "error", err)
 			RecordRerankerFallback(userID, "error")
 		} else {
-			// Filter matches to only include reranker-selected topics
+			// Build maps for selected topics, reasons, and excerpts
 			selectedIDs := make(map[int64]bool)
-			for _, id := range result.TopicIDs {
-				selectedIDs[id] = true
+			topicReasons := make(map[int64]string)
+			topicExcerpts := make(map[int64]string)
+			for _, t := range result.Topics {
+				selectedIDs[t.ID] = true
+				if t.Reason != "" {
+					topicReasons[t.ID] = t.Reason
+				}
+				if t.Excerpt != nil {
+					topicExcerpts[t.ID] = *t.Excerpt
+				}
 			}
 
 			var filteredMatches []match
 			for _, m := range matches {
 				if selectedIDs[m.topicID] {
+					m.reason = topicReasons[m.topicID]
+					if excerpt, ok := topicExcerpts[m.topicID]; ok {
+						m.excerpt = &excerpt
+					}
 					filteredMatches = append(filteredMatches, m)
 				}
 			}
@@ -558,11 +575,13 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 			}
 		}
 
-		if len(topicMsgs) > 0 {
+		if len(topicMsgs) > 0 || m.excerpt != nil {
 			results = append(results, TopicSearchResult{
 				Topic:    topic,
 				Score:    m.score,
 				Messages: topicMsgs,
+				Reason:   m.reason,
+				Excerpt:  m.excerpt,
 			})
 		}
 	}
@@ -981,11 +1000,20 @@ func (s *Service) processChunkWithStats(ctx context.Context, userID int64, chunk
 		})
 
 		for i, t := range validTopics {
+			// Calculate total size of message content in this topic
+			var sizeChars int
+			for _, msg := range chunk {
+				if msg.ID >= t.StartMsgID && msg.ID <= t.EndMsgID {
+					sizeChars += len(msg.Content)
+				}
+			}
+
 			topic := storage.Topic{
 				UserID:         userID,
 				Summary:        t.Summary,
 				StartMsgID:     t.StartMsgID,
 				EndMsgID:       t.EndMsgID,
+				SizeChars:      sizeChars,
 				Embedding:      resp.Data[i].Embedding,
 				CreatedAt:      referenceDate,
 				FactsExtracted: false,
@@ -1278,11 +1306,20 @@ func (s *Service) processChunk(ctx context.Context, userID int64, chunk []storag
 		})
 
 		for i, t := range validTopics {
+			// Calculate total size of message content in this topic
+			var sizeChars int
+			for _, msg := range chunk {
+				if msg.ID >= t.StartMsgID && msg.ID <= t.EndMsgID {
+					sizeChars += len(msg.Content)
+				}
+			}
+
 			topic := storage.Topic{
 				UserID:         userID,
 				Summary:        t.Summary,
 				StartMsgID:     t.StartMsgID,
 				EndMsgID:       t.EndMsgID,
+				SizeChars:      sizeChars,
 				Embedding:      resp.Data[i].Embedding,
 				CreatedAt:      referenceDate,
 				FactsExtracted: false, // Explicitly false, will be processed by factExtractionLoop

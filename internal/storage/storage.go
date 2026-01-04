@@ -33,6 +33,7 @@ type Topic struct {
 	Summary              string
 	StartMsgID           int64
 	EndMsgID             int64
+	SizeChars            int // Total character count of all messages in topic
 	Embedding            []float32
 	FactsExtracted       bool
 	IsConsolidated       bool
@@ -502,6 +503,30 @@ func (s *SQLiteStore) migrate() error {
 	if _, err := s.db.Exec(backfillQuery); err != nil {
 		s.logger.Warn("failed to backfill topic_id", "error", err)
 		// Don't fail migration, maybe just no topics or complex query issue
+	}
+
+	// Check if size_chars exists in topics
+	err = s.db.QueryRow("SELECT count(*) FROM pragma_table_info('topics') WHERE name='size_chars'").Scan(&count)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		s.logger.Info("migrating topics table: adding size_chars")
+		if _, err := s.db.Exec("ALTER TABLE topics ADD COLUMN size_chars INTEGER DEFAULT 0"); err != nil {
+			return err
+		}
+		// Backfill: calculate size from messages
+		s.logger.Info("backfilling size_chars for existing topics...")
+		backfillSizeQuery := `
+			UPDATE topics SET size_chars = (
+				SELECT COALESCE(SUM(LENGTH(content)), 0)
+				FROM history
+				WHERE topic_id = topics.id
+			)
+		`
+		if _, err := s.db.Exec(backfillSizeQuery); err != nil {
+			s.logger.Warn("failed to backfill size_chars", "error", err)
+		}
 	}
 
 	// Create reranker_logs table if not exists
