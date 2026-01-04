@@ -1,4 +1,4 @@
-# <img src="assets/logo.svg" alt="" width="32"> Laplaced
+# <img src="assets/logo.svg" alt="" width="32" height="32"> Laplaced
 
 [![CI](https://github.com/runixer/laplaced/actions/workflows/ci.yml/badge.svg)](https://github.com/runixer/laplaced/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/runixer/laplaced/graph/badge.svg)](https://codecov.io/gh/runixer/laplaced)
