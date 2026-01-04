@@ -1,0 +1,14 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        target: auto
+
+ignore:
+  - "internal/gen/**/*"      # Generated protobuf/grpc code
+  - "**/*_test.go"           # Test files
+  - "**/mock_*.go"           # Mock files
