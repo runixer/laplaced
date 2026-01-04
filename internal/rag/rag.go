@@ -113,6 +113,7 @@ type Service struct {
 	factHistoryRepo      storage.FactHistoryRepository
 	msgRepo              storage.MessageRepository
 	logRepo              storage.LogRepository
+	rerankerLogRepo      storage.RerankerLogRepository
 	client               openrouter.Client
 	memoryService        *memory.Service
 	translator           *i18n.Translator
@@ -126,7 +127,7 @@ type Service struct {
 	wg                   sync.WaitGroup
 }
 
-func NewService(logger *slog.Logger, cfg *config.Config, topicRepo storage.TopicRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, msgRepo storage.MessageRepository, logRepo storage.LogRepository, client openrouter.Client, memoryService *memory.Service, translator *i18n.Translator) *Service {
+func NewService(logger *slog.Logger, cfg *config.Config, topicRepo storage.TopicRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, msgRepo storage.MessageRepository, logRepo storage.LogRepository, rerankerLogRepo storage.RerankerLogRepository, client openrouter.Client, memoryService *memory.Service, translator *i18n.Translator) *Service {
 	return &Service{
 		logger:               logger.With("component", "rag"),
 		cfg:                  cfg,
@@ -135,6 +136,7 @@ func NewService(logger *slog.Logger, cfg *config.Config, topicRepo storage.Topic
 		factHistoryRepo:      factHistoryRepo,
 		msgRepo:              msgRepo,
 		logRepo:              logRepo,
+		rerankerLogRepo:      rerankerLogRepo,
 		client:               client,
 		memoryService:        memoryService,
 		translator:           translator,
@@ -432,18 +434,27 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		return matches[i].score > matches[j].score
 	})
 
-	// Limit topics to search.
-	maxTopics := s.cfg.RAG.RetrievedTopicsCount
-	if maxTopics <= 0 {
-		maxTopics = 10 // Increased default
+	// Determine how many candidates to consider
+	rerankerCfg := s.cfg.RAG.Reranker
+	useReranker := rerankerCfg.Enabled && len(matches) > 0
+
+	var maxCandidates int
+	if useReranker {
+		// For reranker, take more candidates for intelligent filtering
+		maxCandidates = rerankerCfg.Candidates
+		if maxCandidates <= 0 {
+			maxCandidates = 50
+		}
+	} else {
+		// Legacy behavior: limit by retrieved_topics_count
+		maxCandidates = s.cfg.RAG.RetrievedTopicsCount
+		if maxCandidates <= 0 {
+			maxCandidates = 10
+		}
 	}
 
-	// If explicit threshold is configured and high, we might want to respect it optionally?
-	// But user requested "return top 10", so we prioritize count over threshold strictness.
-	// We will simply take top N.
-
-	if len(matches) > maxTopics {
-		matches = matches[:maxTopics]
+	if len(matches) > maxCandidates {
+		matches = matches[:maxCandidates]
 	}
 
 	// Collect topic IDs from matches
@@ -452,7 +463,7 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		topicIDs[i] = m.topicID
 	}
 
-	// Fetch only the topics we need
+	// Fetch topics (needed for summaries in reranker and for final results)
 	topics, err := s.topicRepo.GetTopicsByIDs(topicIDs)
 	if err != nil {
 		s.logger.Error("failed to load topics for retrieval", "error", err)
@@ -461,6 +472,67 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 	topicMap := make(map[int64]storage.Topic)
 	for _, t := range topics {
 		topicMap[t.ID] = t
+	}
+
+	// Apply reranker if enabled
+	if useReranker {
+		RecordRerankerCandidatesInput(userID, len(matches))
+
+		// Build reranker candidates with topic metadata
+		candidates := make([]rerankerCandidate, 0, len(matches))
+		for _, m := range matches {
+			if topic, ok := topicMap[m.topicID]; ok {
+				msgCount := int(topic.EndMsgID - topic.StartMsgID + 1)
+				if msgCount < 0 {
+					msgCount = 0
+				}
+				candidates = append(candidates, rerankerCandidate{
+					TopicID:      m.topicID,
+					Score:        m.score,
+					Topic:        topic,
+					MessageCount: msgCount,
+				})
+			}
+		}
+
+		// Call reranker
+		// contextualizedQuery = enrichedQuery or original query
+		contextualizedQuery := debugInfo.EnrichedQuery
+		if contextualizedQuery == "" {
+			contextualizedQuery = query
+		}
+		// Load user profile for reranker context
+		userProfile := s.formatUserProfileForReranker(ctx, userID)
+		// Format current session messages for reranker
+		currentMessages := s.formatSessionMessages(opts.History)
+		result, err := s.rerankCandidates(ctx, userID, candidates, contextualizedQuery, query, currentMessages, userProfile)
+		if err != nil {
+			s.logger.Warn("reranker failed, falling back to vector search", "error", err)
+			RecordRerankerFallback(userID, "error")
+		} else {
+			// Filter matches to only include reranker-selected topics
+			selectedIDs := make(map[int64]bool)
+			for _, id := range result.TopicIDs {
+				selectedIDs[id] = true
+			}
+
+			var filteredMatches []match
+			for _, m := range matches {
+				if selectedIDs[m.topicID] {
+					filteredMatches = append(filteredMatches, m)
+				}
+			}
+			matches = filteredMatches
+		}
+	} else {
+		// Legacy behavior: limit by maxTopics (already applied above)
+		maxTopics := s.cfg.RAG.RetrievedTopicsCount
+		if maxTopics <= 0 {
+			maxTopics = 10
+		}
+		if len(matches) > maxTopics {
+			matches = matches[:maxTopics]
+		}
 	}
 
 	var results []TopicSearchResult
@@ -1584,7 +1656,7 @@ func (s *Service) enrichQuery(ctx context.Context, userID int64, query string, h
 		promptTmpl = s.translator.Get(s.cfg.Bot.Language, "rag.enrichment_prompt")
 	}
 
-	prompt := fmt.Sprintf(promptTmpl, historyStr.String(), query)
+	prompt := fmt.Sprintf(promptTmpl, time.Now().Format("2006-01-02"), historyStr.String(), query)
 
 	resp, err := s.client.CreateChatCompletion(ctx, openrouter.ChatCompletionRequest{
 		Model: model,

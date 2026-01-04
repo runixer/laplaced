@@ -91,6 +91,7 @@ sequenceDiagram
     participant Bot as Bot
     participant MG as MessageGrouper
     participant RAG as RAG Service
+    participant Reranker as Reranker (Flash)
     participant LLM as OpenRouter
 
     TG->>Bot: Update (сообщение)
@@ -103,6 +104,14 @@ sequenceDiagram
     Note over Bot: shutdownSafeCtx := context.WithoutCancel(ctx)
 
     Bot->>RAG: buildContext(shutdownSafeCtx)
+    RAG->>RAG: Vector Search (50 candidates)
+    RAG->>Reranker: rerankCandidates(shutdownSafeCtx)
+
+    Note over Reranker: rerankerCtx := WithTimeout(ctx, 10s)<br/>Собственный timeout поверх shutdownSafeCtx
+
+    Reranker->>LLM: Flash LLM (tool calling loop)
+    LLM-->>Reranker: {"topics": [42, 18]}
+    Reranker-->>RAG: Top-5 отфильтрованных topics
     RAG-->>Bot: контекст с историей
 
     Bot->>LLM: CreateChatCompletion(shutdownSafeCtx)
@@ -150,7 +159,46 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 - Typing action должен показываться пока идёт обработка
 - Новые сообщения после shutdown будут доставлены Telegram после рестарта
 
-### 2. WaitGroup.Add() вызывается ДО старта горутины
+### 2. Reranker имеет собственный timeout
+
+**Проблема:** Reranker использует agentic LLM loop с tool calls. Без ограничения времени он может зависнуть (медленный LLM, много итераций).
+
+**Решение:** Reranker создаёт child context с timeout поверх shutdownSafeCtx:
+
+```go
+// reranker.go
+func (s *Service) rerankCandidates(ctx context.Context, ...) (*RerankerResult, error) {
+    timeout, _ := time.ParseDuration(cfg.Timeout) // default: 10s
+    ctx, cancel := context.WithTimeout(ctx, timeout)
+    defer cancel()
+
+    // Agentic loop с tool calls
+    for toolCallCount < cfg.MaxToolCalls {
+        resp, err := s.client.CreateChatCompletion(ctx, req)
+        if err != nil {
+            // Timeout или ошибка → fallback
+            return s.fallbackFromState(state, candidates, cfg.MaxTopics), nil
+        }
+        // ...
+    }
+}
+```
+
+**Поведение при shutdown:**
+
+| Сценарий | Результат |
+|----------|-----------|
+| Reranker активен, SIGTERM | Продолжает работу (shutdownSafeCtx не отменяется) |
+| Reranker timeout (10s) | Fallback на requestedIDs или vector top |
+| LLM ошибка | Fallback на requestedIDs или vector top |
+| Max tool calls (3) | Fallback на requestedIDs или vector top |
+
+**Обоснование:**
+- shutdownSafeCtx защищает от преждевременной отмены при shutdown
+- Собственный timeout (10s) гарантирует, что reranker не зависнет
+- Fallback стратегия обеспечивает graceful degradation
+
+### 3. WaitGroup.Add() вызывается ДО старта горутины
 
 **Проблема:** Race condition — если `wg.Wait()` вызван до `wg.Add(1)`, произойдёт panic.
 
@@ -172,7 +220,7 @@ go func() {
 }()
 ```
 
-### 3. Pending группы обрабатываются при shutdown
+### 4. Pending группы обрабатываются при shutdown
 
 **Проблема:** Если пользователь отправил сообщение и сразу произошёл shutdown (в течение turnWait), сообщение может быть потеряно — Telegram считает его доставленным.
 
@@ -198,7 +246,7 @@ for _, group := range pendingGroups {
 mg.wg.Wait() // Ждём завершения всех обработок
 ```
 
-### 4. Webhook использует server context, не request context
+### 5. Webhook использует server context, не request context
 
 **Проблема:** `r.Context()` отменяется когда HTTP handler возвращается, но обработка продолжается асинхронно.
 
@@ -219,7 +267,7 @@ func (s *Server) webhookHandler(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-### 5. Typing action использует detached context
+### 6. Typing action использует detached context
 
 **Проблема:** При отмене основного контекста typing action возвращает ошибку "context canceled", которая засоряет логи.
 
@@ -234,7 +282,7 @@ func (b *Bot) sendAction(ctx context.Context, chatID int64, action string) {
 }
 ```
 
-### 6. Retry отправки сообщений использует bounded context
+### 7. Retry отправки сообщений использует bounded context
 
 **Проблема:** При ошибке отправки сообщения (например, ошибка парсинга MarkdownV2) нужен retry. Если использовать `context.Background()`, retry может зависнуть навсегда.
 
@@ -252,7 +300,7 @@ if _, err := b.api.SendMessage(ctx, resp); err != nil {
 }
 ```
 
-### 7. Web server использует cancel() вместо os.Exit()
+### 8. Web server использует cancel() вместо os.Exit()
 
 **Проблема:** Если web server падает (например, порт занят), вызов `os.Exit(1)` убивает процесс без выполнения deferred функций (закрытие БД, остановка RAG).
 
@@ -273,6 +321,7 @@ go func() {
 | Момент отправки | Long Polling | Webhook |
 |-----------------|--------------|---------|
 | До shutdown | Обрабатывается, ответ отправляется | Обрабатывается, ответ отправляется |
+| Во время Reranker (agentic loop) | Reranker завершится или timeout (10s) → fallback | То же самое |
 | Во время обработки (RAG + LLM) | Обработка завершится, ответ отправится | Обработка завершится, ответ отправится |
 | В turnWait (ожидание группировки) | Группа обработается немедленно | Группа обработается немедленно |
 | После shutdown | Придёт после рестарта | Telegram повторит доставку |
@@ -290,5 +339,6 @@ go func() {
 - `cmd/bot/main.go` — точка входа, signal handling
 - `internal/bot/bot.go` — Bot.Stop(), ProcessUpdateAsync(), HandleUpdateAsync()
 - `internal/bot/message_grouper.go` — MessageGrouper.Stop(), управление таймерами
-- `internal/bot/process_group.go` — processMessageGroup(), llmCtx
+- `internal/bot/process_group.go` — processMessageGroup(), shutdownSafeCtx
+- `internal/rag/reranker.go` — rerankCandidates(), собственный timeout
 - `internal/web/server.go` — webhook handler, server context

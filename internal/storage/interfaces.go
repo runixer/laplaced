@@ -89,4 +89,11 @@ type MaintenanceRepository interface {
 	GetTableSizes() ([]TableSize, error)
 	CleanupFactHistory(keepPerUser int) (int64, error)
 	CleanupRagLogs(keepPerUser int) (int64, error)
+	CleanupRerankerLogs(keepPerUser int) (int64, error)
+}
+
+// RerankerLogRepository handles reranker debug log operations.
+type RerankerLogRepository interface {
+	AddRerankerLog(log RerankerLog) error
+	GetRerankerLogs(userID int64, limit int) ([]RerankerLog, error)
 }

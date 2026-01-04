@@ -57,6 +57,16 @@ rag:
   # enrichment_prompt: |
   #   Override enrichment prompt here...
 
+  # Reranker (v0.4) - agentic LLM filter for RAG candidates
+  reranker:
+    enabled: true
+    model: "google/gemini-3-flash-preview"
+    candidates: 50        # Summaries to show Flash
+    max_topics: 5         # Max topics in final selection
+    max_people: 10        # Max people in final selection (v0.5)
+    timeout: "10s"        # Timeout for entire reranker flow
+    max_tool_calls: 3     # Max tool calls before stopping
+
 # Internet Search Configuration
 internet_search:
   enabled: true

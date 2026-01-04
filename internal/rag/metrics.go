@@ -305,3 +305,113 @@ func RecordRAGEnrichment(userID int64, durationSeconds float64) {
 	uid := formatUserID(userID)
 	ragEnrichmentDuration.WithLabelValues(uid).Observe(durationSeconds)
 }
+
+// === Reranker Metrics (v0.4) ===
+
+var (
+	// rerankerDuration измеряет общее время reranker (все LLM turns).
+	rerankerDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: "reranker",
+			Name:      "duration_seconds",
+			Help:      "Total duration of reranker operation in seconds",
+			Buckets:   []float64{0.5, 1, 2, 3, 5, 7, 10, 15, 20},
+		},
+		[]string{"user_id"},
+	)
+
+	// rerankerToolCallsTotal считает количество tool calls в reranker.
+	rerankerToolCallsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: "reranker",
+			Name:      "tool_calls_total",
+			Help:      "Total number of tool calls in reranker operations",
+		},
+		[]string{"user_id"},
+	)
+
+	// rerankerCandidatesInput - кандидатов на входе (из vector search).
+	rerankerCandidatesInput = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: "reranker",
+			Name:      "candidates_input",
+			Help:      "Number of candidates passed to reranker",
+			Buckets:   []float64{0, 10, 20, 30, 40, 50, 75, 100},
+		},
+		[]string{"user_id"},
+	)
+
+	// rerankerCandidatesOutput - кандидатов на выходе (финальный выбор).
+	rerankerCandidatesOutput = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: "reranker",
+			Name:      "candidates_output",
+			Help:      "Number of candidates selected by reranker",
+			Buckets:   []float64{0, 1, 2, 3, 4, 5, 7, 10},
+		},
+		[]string{"user_id"},
+	)
+
+	// rerankerCostTotal - стоимость reranker (USD).
+	rerankerCostTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: "reranker",
+			Name:      "cost_usd_total",
+			Help:      "Total cost of reranker LLM calls in USD",
+		},
+		[]string{"user_id"},
+	)
+
+	// rerankerFallbackTotal - срабатывания fallback.
+	rerankerFallbackTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: "reranker",
+			Name:      "fallback_total",
+			Help:      "Total number of reranker fallbacks",
+		},
+		[]string{"user_id", "reason"},
+	)
+)
+
+// RecordRerankerDuration записывает время reranker операции.
+func RecordRerankerDuration(userID int64, durationSeconds float64) {
+	uid := formatUserID(userID)
+	rerankerDuration.WithLabelValues(uid).Observe(durationSeconds)
+}
+
+// RecordRerankerToolCalls записывает количество tool calls.
+func RecordRerankerToolCalls(userID int64, count int) {
+	uid := formatUserID(userID)
+	rerankerToolCallsTotal.WithLabelValues(uid).Add(float64(count))
+}
+
+// RecordRerankerCandidatesInput записывает кандидатов на входе.
+func RecordRerankerCandidatesInput(userID int64, count int) {
+	uid := formatUserID(userID)
+	rerankerCandidatesInput.WithLabelValues(uid).Observe(float64(count))
+}
+
+// RecordRerankerCandidatesOutput записывает кандидатов на выходе.
+func RecordRerankerCandidatesOutput(userID int64, count int) {
+	uid := formatUserID(userID)
+	rerankerCandidatesOutput.WithLabelValues(uid).Observe(float64(count))
+}
+
+// RecordRerankerCost записывает стоимость reranker.
+func RecordRerankerCost(userID int64, cost float64) {
+	uid := formatUserID(userID)
+	rerankerCostTotal.WithLabelValues(uid).Add(cost)
+}
+
+// RecordRerankerFallback записывает срабатывание fallback.
+// reason: "timeout", "error", "max_tool_calls", "invalid_json", "requested_ids", "vector_top"
+func RecordRerankerFallback(userID int64, reason string) {
+	uid := formatUserID(userID)
+	rerankerFallbackTotal.WithLabelValues(uid, reason).Inc()
+}

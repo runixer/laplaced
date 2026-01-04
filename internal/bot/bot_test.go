@@ -155,6 +155,19 @@ func (m *MockStorage) GetRAGLogs(userID int64, limit int) ([]storage.RAGLog, err
 	return args.Get(0).([]storage.RAGLog), args.Error(1)
 }
 
+func (m *MockStorage) AddRerankerLog(log storage.RerankerLog) error {
+	args := m.Called(log)
+	return args.Error(0)
+}
+
+func (m *MockStorage) GetRerankerLogs(userID int64, limit int) ([]storage.RerankerLog, error) {
+	args := m.Called(userID, limit)
+	if args.Get(0) == nil {
+		return []storage.RerankerLog{}, args.Error(1)
+	}
+	return args.Get(0).([]storage.RerankerLog), args.Error(1)
+}
+
 func (m *MockStorage) AddTopic(topic storage.Topic) (int64, error) {
 	args := m.Called(topic)
 	return args.Get(0).(int64), args.Error(1)
@@ -1680,7 +1693,7 @@ func TestSendTestMessage_Success(t *testing.T) {
 	}
 
 	// Create a minimal RAG service with RAG disabled
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,
@@ -1778,7 +1791,7 @@ func TestSendTestMessage_SaveToHistoryFalse(t *testing.T) {
 		},
 	}
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,
@@ -1865,7 +1878,7 @@ func TestSendTestMessage_OpenRouterError(t *testing.T) {
 		},
 	}
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,

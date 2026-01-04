@@ -7,7 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Next version: v0.4 (Intelligence) — Flash Reranker, Memory Decay_
+_Next version: v0.5 (Social) — People Table, Social Graph_
+
+## [0.4.0] - 2026-01-04
+
+**Intelligence release: Smart context filtering with Flash Reranker.**
+
+### Added
+- **Flash Reranker** — LLM-based filtering of RAG candidates using agentic tool calls
+  - Reduces context from ~24K to ~7K tokens (70% reduction)
+  - Reduces latency from ~50s to ~26s
+  - Reduces cost from ~$0.40 to ~$0.05 per message
+- Reranker Debug UI (`/ui/debug/reranker`) — inspect reranker decisions, tool calls, selected topics
+- Reranker metrics: duration, tool calls, candidates in/out, cost, fallback reasons
+- Original query passed separately to reranker (avoids enrichment noise)
+
+### Changed
+- Reranker now applies to both auto-RAG and `search_history` tool
+- Updated reranker prompts to require tool verification before topic selection
 
 ## [0.3.9] - 2026-01-04
 

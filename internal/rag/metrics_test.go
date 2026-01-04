@@ -263,3 +263,149 @@ func TestFormatUserID(t *testing.T) {
 		})
 	}
 }
+
+// === Reranker Metrics Tests ===
+
+func TestRecordRerankerDuration(t *testing.T) {
+	tests := []struct {
+		name     string
+		userID   int64
+		duration float64
+	}{
+		{"fast rerank", 111, 0.5},
+		{"slow rerank", 222, 5.0},
+		{"zero duration", 333, 0.0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				RecordRerankerDuration(tt.userID, tt.duration)
+			})
+		})
+	}
+}
+
+func TestRecordRerankerToolCalls(t *testing.T) {
+	userID := int64(55555)
+	uid := formatUserID(userID)
+
+	// Record some tool calls
+	RecordRerankerToolCalls(userID, 3)
+
+	// Verify counter incremented
+	count := testutil.ToFloat64(rerankerToolCallsTotal.WithLabelValues(uid))
+	assert.GreaterOrEqual(t, count, float64(3))
+
+	// Record more
+	RecordRerankerToolCalls(userID, 2)
+	count = testutil.ToFloat64(rerankerToolCallsTotal.WithLabelValues(uid))
+	assert.GreaterOrEqual(t, count, float64(5))
+}
+
+func TestRecordRerankerCandidatesInput(t *testing.T) {
+	tests := []struct {
+		name   string
+		userID int64
+		count  int
+	}{
+		{"50 candidates", 666, 50},
+		{"zero candidates", 777, 0},
+		{"100 candidates", 888, 100},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				RecordRerankerCandidatesInput(tt.userID, tt.count)
+			})
+		})
+	}
+}
+
+func TestRecordRerankerCandidatesOutput(t *testing.T) {
+	tests := []struct {
+		name   string
+		userID int64
+		count  int
+	}{
+		{"5 selected", 999, 5},
+		{"zero selected", 1000, 0},
+		{"max selected", 1001, 10},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				RecordRerankerCandidatesOutput(tt.userID, tt.count)
+			})
+		})
+	}
+}
+
+func TestRecordRerankerCost(t *testing.T) {
+	userID := int64(77777)
+	uid := formatUserID(userID)
+
+	// Record cost
+	RecordRerankerCost(userID, 0.05)
+
+	cost := testutil.ToFloat64(rerankerCostTotal.WithLabelValues(uid))
+	assert.GreaterOrEqual(t, cost, 0.05)
+
+	// Record more cost
+	RecordRerankerCost(userID, 0.03)
+	cost = testutil.ToFloat64(rerankerCostTotal.WithLabelValues(uid))
+	assert.GreaterOrEqual(t, cost, 0.08)
+}
+
+func TestRecordRerankerFallback(t *testing.T) {
+	tests := []struct {
+		name   string
+		userID int64
+		reason string
+	}{
+		{"timeout", 1111, "timeout"},
+		{"error", 2222, "error"},
+		{"max tool calls", 3333, "max_tool_calls"},
+		{"invalid json", 4444, "invalid_json"},
+		{"requested ids fallback", 5555, "requested_ids"},
+		{"vector top fallback", 6666, "vector_top"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				RecordRerankerFallback(tt.userID, tt.reason)
+			})
+
+			uid := formatUserID(tt.userID)
+			count := testutil.ToFloat64(rerankerFallbackTotal.WithLabelValues(uid, tt.reason))
+			assert.GreaterOrEqual(t, count, float64(1))
+		})
+	}
+}
+
+func TestRerankerMetricsRegistration(t *testing.T) {
+	// Verify all reranker metrics are registered
+	metrics := []string{
+		"laplaced_reranker_duration_seconds",
+		"laplaced_reranker_tool_calls_total",
+		"laplaced_reranker_candidates_input",
+		"laplaced_reranker_candidates_output",
+		"laplaced_reranker_cost_usd_total",
+		"laplaced_reranker_fallback_total",
+	}
+
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	assert.NoError(t, err)
+
+	registeredNames := make(map[string]bool)
+	for _, mf := range mfs {
+		registeredNames[mf.GetName()] = true
+	}
+
+	for _, name := range metrics {
+		assert.True(t, registeredNames[name], "metric %s should be registered", name)
+	}
+}

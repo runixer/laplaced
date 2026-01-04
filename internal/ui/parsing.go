@@ -201,3 +201,61 @@ func ParseTopicLog(l storage.RAGLog) TopicLogView {
 
 	return view
 }
+
+// ParseRerankerLog parses a RerankerLog into a view struct for templates
+func ParseRerankerLog(l storage.RerankerLog) RerankerLogView {
+	view := RerankerLogView{
+		RerankerLog: l,
+		SelectedIDs: make(map[int64]bool),
+	}
+
+	// Parse selected IDs
+	if l.SelectedIDsJSON != "" {
+		var ids []int64
+		if err := json.Unmarshal([]byte(l.SelectedIDsJSON), &ids); err == nil {
+			view.SelectedIDList = ids
+			for _, id := range ids {
+				view.SelectedIDs[id] = true
+			}
+		}
+	}
+
+	// Parse candidates
+	if l.CandidatesJSON != "" {
+		var candidates []storage.RerankerCandidate
+		if err := json.Unmarshal([]byte(l.CandidatesJSON), &candidates); err == nil {
+			for _, c := range candidates {
+				view.Candidates = append(view.Candidates, RerankerCandidateView{
+					TopicID:      c.TopicID,
+					Summary:      c.Summary,
+					Score:        c.Score,
+					Date:         c.Date,
+					MessageCount: c.MessageCount,
+					SizeChars:    c.SizeChars,
+					Selected:     view.SelectedIDs[c.TopicID],
+				})
+			}
+		}
+	}
+
+	// Parse tool calls
+	if l.ToolCallsJSON != "" {
+		var toolCalls []storage.RerankerToolCall
+		if err := json.Unmarshal([]byte(l.ToolCallsJSON), &toolCalls); err == nil {
+			for _, tc := range toolCalls {
+				tcView := RerankerToolCallView{
+					Iteration: tc.Iteration,
+				}
+				for _, t := range tc.Topics {
+					tcView.Topics = append(tcView.Topics, RerankerToolCallTopicView{
+						ID:      t.ID,
+						Summary: t.Summary,
+					})
+				}
+				view.ToolCalls = append(view.ToolCalls, tcView)
+			}
+		}
+	}
+
+	return view
+}

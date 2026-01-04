@@ -178,7 +178,7 @@ func main() {
 
 	memoryService := memory.NewService(logger, cfg, store, store, store, openrouterClient, translator)
 
-	ragService := rag.NewService(logger, cfg, store, store, store, store, store, openrouterClient, memoryService, translator)
+	ragService := rag.NewService(logger, cfg, store, store, store, store, store, store, openrouterClient, memoryService, translator)
 	memoryService.SetVectorSearcher(ragService)
 
 	b, err := bot.NewBot(logger, api, cfg, store, store, store, store, store, store, openrouterClient, speechKitClient, ragService, translator)
@@ -198,7 +198,7 @@ func main() {
 	defer b.Stop()
 
 	// Start web server for stats and webhooks
-	webServer, err := web.NewServer(ctx, logger, cfg, store, store, store, store, store, store, store, store, b, ragService)
+	webServer, err := web.NewServer(ctx, logger, cfg, store, store, store, store, store, store, store, store, store, b, ragService)
 	if err != nil {
 		logger.Error("failed to create web server", "error", err)
 		os.Exit(1)

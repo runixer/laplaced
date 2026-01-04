@@ -149,6 +149,7 @@ type Server struct {
 	msgRepo         storage.MessageRepository
 	factHistoryRepo storage.FactHistoryRepository
 	maintenanceRepo storage.MaintenanceRepository
+	rerankerLogRepo storage.RerankerLogRepository
 	bot             BotInterface
 	rag             *rag.Service
 	logger          *slog.Logger
@@ -158,7 +159,7 @@ type Server struct {
 	wg              sync.WaitGroup
 }
 
-func NewServer(ctx context.Context, logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, statsRepo storage.StatsRepository, logRepo storage.LogRepository, topicRepo storage.TopicRepository, msgRepo storage.MessageRepository, factHistoryRepo storage.FactHistoryRepository, maintenanceRepo storage.MaintenanceRepository, bot BotInterface, rag *rag.Service) (*Server, error) {
+func NewServer(ctx context.Context, logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, statsRepo storage.StatsRepository, logRepo storage.LogRepository, topicRepo storage.TopicRepository, msgRepo storage.MessageRepository, factHistoryRepo storage.FactHistoryRepository, maintenanceRepo storage.MaintenanceRepository, rerankerLogRepo storage.RerankerLogRepository, bot BotInterface, rag *rag.Service) (*Server, error) {
 	renderer, err := ui.NewRenderer()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize renderer: %w", err)
@@ -174,6 +175,7 @@ func NewServer(ctx context.Context, logger *slog.Logger, cfg *config.Config, fac
 		msgRepo:         msgRepo,
 		factHistoryRepo: factHistoryRepo,
 		maintenanceRepo: maintenanceRepo,
+		rerankerLogRepo: rerankerLogRepo,
 		bot:             bot,
 		rag:             rag,
 		logger:          logger.With("component", "web_server"),
@@ -201,7 +203,7 @@ func (s *Server) Start(ctx context.Context) error {
 	if s.cfg.Server.DebugMode {
 		mux.HandleFunc("/ui/stats", instrumentHandler("stats", s.statsHandler))
 		mux.HandleFunc("/ui/inspector", instrumentHandler("inspector", s.inspectorHandler))
-		mux.HandleFunc("/ui/debug/rag", instrumentHandler("debug_rag", s.debugRAGHandler))
+		mux.HandleFunc("/ui/debug/reranker", instrumentHandler("debug_reranker", s.debugRerankerHandler))
 		mux.HandleFunc("/ui/debug/topics", instrumentHandler("debug_topics", s.topicDebugHandler))
 		mux.HandleFunc("/ui/debug/sessions", instrumentHandler("debug_sessions", s.sessionsHandler))
 		mux.HandleFunc("/ui/debug/sessions/process", instrumentHandler("debug_sessions_process", s.sessionsProcessSSEHandler))
@@ -390,6 +392,20 @@ func (s *Server) runCleanup() {
 		if deleted > 0 {
 			storage.RecordCleanupDeleted("rag_logs", deleted)
 			s.logger.Info("cleaned up rag_logs", "deleted", deleted, "duration_s", duration)
+		}
+	}
+
+	// Cleanup reranker_logs: keep 20 per user
+	start = time.Now()
+	deleted, err = s.maintenanceRepo.CleanupRerankerLogs(20)
+	duration = time.Since(start).Seconds()
+	if err != nil {
+		s.logger.Error("failed to cleanup reranker_logs", "error", err)
+	} else {
+		storage.RecordCleanupDuration("reranker_logs", duration)
+		if deleted > 0 {
+			storage.RecordCleanupDeleted("reranker_logs", deleted)
+			s.logger.Info("cleaned up reranker_logs", "deleted", deleted, "duration_s", duration)
 		}
 	}
 }
@@ -656,7 +672,7 @@ func (s *Server) topicsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) debugRAGHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) debugRerankerHandler(w http.ResponseWriter, r *http.Request) {
 	pageData, err := s.getCommonData(r)
 	if err != nil {
 		s.logger.Error("failed to get common data", "error", err)
@@ -664,84 +680,25 @@ func (s *Server) debugRAGHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Method == http.MethodGet {
-		// If user_id is in query (from getCommonData), use it as default
-		data := struct {
-			Users            []storage.User
-			UserID           int64
-			Query            string
-			Error            string
-			Results          []rag.TopicSearchResult
-			EnrichedQuery    string
-			EnrichmentPrompt string
-		}{
-			Users:  pageData.Users,
-			UserID: pageData.SelectedUserID,
-		}
-
-		if err := s.renderer.Render(w, "rag_debug.html", data, ui.GetFuncMap()); err != nil {
-			s.logger.Error("failed to render template", "error", err)
-			http.Error(w, "Failed to render template", http.StatusInternalServerError)
-		}
+	limit := 20
+	logs, err := s.rerankerLogRepo.GetRerankerLogs(pageData.SelectedUserID, limit)
+	if err != nil {
+		s.logger.Error("failed to get reranker logs", "error", err)
+		http.Error(w, "Failed to get reranker logs", http.StatusInternalServerError)
 		return
 	}
 
-	if r.Method == http.MethodPost {
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "Failed to parse form", http.StatusBadRequest)
-			return
-		}
+	// Parse JSON fields into view structs
+	viewLogs := make([]ui.RerankerLogView, 0, len(logs))
+	for _, log := range logs {
+		viewLogs = append(viewLogs, ui.ParseRerankerLog(log))
+	}
 
-		query := r.FormValue("query")
-		userIDStr := r.FormValue("user_id")
+	pageData.Data = viewLogs
 
-		var userID int64 = 0
-		_, _ = fmt.Sscanf(userIDStr, "%d", &userID)
-
-		s.logger.Info("Debug RAG search", "user_id", userID, "query", query)
-
-		// Context is currently empty for debug, as parsing text log back to messages is complex
-		// and usually we care about "query -> topic" mapping.
-		// If needed w could add a simple parser.
-		dummyHistory := []storage.Message{}
-
-		skipEnrichment := r.FormValue("skip_enrichment") == "on"
-
-		opts := &rag.RetrievalOptions{
-			History:        dummyHistory,
-			SkipEnrichment: skipEnrichment,
-		}
-
-		results, debugInfo, err := s.rag.Retrieve(r.Context(), userID, query, opts)
-
-		viewData := struct {
-			Users            []storage.User
-			Query            string
-			UserID           int64
-			Error            string
-			Results          []rag.TopicSearchResult
-			EnrichedQuery    string
-			EnrichmentPrompt string
-		}{
-			Users:  pageData.Users,
-			Query:  query,
-			UserID: userID,
-		}
-
-		if err != nil {
-			viewData.Error = err.Error()
-		} else {
-			viewData.Results = results
-			if debugInfo != nil {
-				viewData.EnrichedQuery = debugInfo.EnrichedQuery
-				viewData.EnrichmentPrompt = debugInfo.EnrichmentPrompt
-			}
-		}
-
-		if err := s.renderer.Render(w, "rag_debug.html", viewData, ui.GetFuncMap()); err != nil {
-			s.logger.Error("failed to render template", "error", err)
-			http.Error(w, "Failed to render template", http.StatusInternalServerError)
-		}
+	if err := s.renderer.Render(w, "reranker_debug.html", pageData, ui.GetFuncMap()); err != nil {
+		s.logger.Error("failed to render template", "error", err)
+		http.Error(w, "Failed to render template", http.StatusInternalServerError)
 	}
 }
 

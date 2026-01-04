@@ -90,7 +90,7 @@ func TestProcessChunk_HallucinatedIDs(t *testing.T) {
 	mockStore.On("AddRAGLog", mock.Anything).Return(nil).Maybe()
 
 	// Run
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, nil, nil)
+	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, nil, nil)
 	_, err := svc.ForceProcessUser(context.Background(), userID)
 
 	// Now we expect an error because of incomplete coverage
@@ -181,7 +181,7 @@ func TestProcessChunk_ValidIDs(t *testing.T) {
 	mockStore.On("AddRAGLog", mock.Anything).Return(nil).Maybe()
 
 	// Run
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, nil, nil)
+	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, nil, nil)
 	_, err := svc.ForceProcessUser(context.Background(), userID)
 	assert.NoError(t, err)
 

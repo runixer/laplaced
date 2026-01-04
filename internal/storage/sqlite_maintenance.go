@@ -84,3 +84,22 @@ func (s *SQLiteStore) CleanupRagLogs(keepPerUser int) (int64, error) {
 	}
 	return result.RowsAffected()
 }
+
+// CleanupRerankerLogs removes old reranker_logs records, keeping only the N most recent per user.
+// Returns the number of deleted rows.
+func (s *SQLiteStore) CleanupRerankerLogs(keepPerUser int) (int64, error) {
+	query := `
+		DELETE FROM reranker_logs
+		WHERE id NOT IN (
+			SELECT id FROM (
+				SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY id DESC) as rn
+				FROM reranker_logs
+			) WHERE rn <= ?
+		)
+	`
+	result, err := s.db.Exec(query, keepPerUser)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}

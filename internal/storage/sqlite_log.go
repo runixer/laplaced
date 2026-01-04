@@ -111,3 +111,77 @@ func (s *SQLiteStore) GetTopicExtractionLogs(limit, offset int) ([]RAGLog, int, 
 	}
 	return logs, total, nil
 }
+
+// AddRerankerLog saves a reranker debug trace.
+func (s *SQLiteStore) AddRerankerLog(log RerankerLog) error {
+	if log.CreatedAt.IsZero() {
+		log.CreatedAt = time.Now()
+	}
+	query := `
+	INSERT INTO reranker_logs (
+		user_id, original_query, enriched_query, candidates_json,
+		tool_calls_json, selected_ids_json, fallback_reason,
+		duration_enrichment_ms, duration_vector_ms, duration_reranker_ms,
+		duration_total_ms, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+	_, err := s.db.Exec(query,
+		log.UserID, log.OriginalQuery, log.EnrichedQuery, log.CandidatesJSON,
+		log.ToolCallsJSON, log.SelectedIDsJSON, log.FallbackReason,
+		log.DurationEnrichmentMs, log.DurationVectorMs, log.DurationRerankerMs,
+		log.DurationTotalMs, log.CreatedAt.UTC().Format("2006-01-02 15:04:05.999"),
+	)
+	return err
+}
+
+// GetRerankerLogs retrieves recent reranker traces for a user.
+func (s *SQLiteStore) GetRerankerLogs(userID int64, limit int) ([]RerankerLog, error) {
+	var rows *sql.Rows
+	var err error
+
+	if userID != 0 {
+		query := `
+		SELECT
+			id, user_id, original_query, enriched_query, candidates_json,
+			tool_calls_json, selected_ids_json, fallback_reason,
+			duration_enrichment_ms, duration_vector_ms, duration_reranker_ms,
+			duration_total_ms, created_at
+		FROM reranker_logs
+		WHERE user_id = ?
+		ORDER BY created_at DESC, id DESC
+		LIMIT ?`
+		rows, err = s.db.Query(query, userID, limit)
+	} else {
+		query := `
+		SELECT
+			id, user_id, original_query, enriched_query, candidates_json,
+			tool_calls_json, selected_ids_json, fallback_reason,
+			duration_enrichment_ms, duration_vector_ms, duration_reranker_ms,
+			duration_total_ms, created_at
+		FROM reranker_logs
+		ORDER BY created_at DESC, id DESC
+		LIMIT ?`
+		rows, err = s.db.Query(query, limit)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []RerankerLog
+	for rows.Next() {
+		var l RerankerLog
+		err := rows.Scan(
+			&l.ID, &l.UserID, &l.OriginalQuery, &l.EnrichedQuery, &l.CandidatesJSON,
+			&l.ToolCallsJSON, &l.SelectedIDsJSON, &l.FallbackReason,
+			&l.DurationEnrichmentMs, &l.DurationVectorMs, &l.DurationRerankerMs,
+			&l.DurationTotalMs, &l.CreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		logs = append(logs, l)
+	}
+	return logs, nil
+}

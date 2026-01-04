@@ -74,6 +74,19 @@ type RAGConfig struct {
 	ChunkInterval                    string  `yaml:"chunk_interval"`
 	TopicExtractionPrompt            string  `yaml:"topic_extraction_prompt"` // Deprecated: moved to i18n
 	EnrichmentPrompt                 string  `yaml:"enrichment_prompt"`       // Deprecated: moved to i18n
+
+	Reranker RerankerConfig `yaml:"reranker"` // v0.4
+}
+
+// RerankerConfig configures the agentic LLM reranker for RAG candidates (v0.4)
+type RerankerConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	Model        string `yaml:"model"`
+	Candidates   int    `yaml:"candidates"`     // summaries to show Flash
+	MaxTopics    int    `yaml:"max_topics"`     // max topics in final selection
+	MaxPeople    int    `yaml:"max_people"`     // max people in final selection (v0.5)
+	Timeout      string `yaml:"timeout"`        // timeout for entire reranker flow
+	MaxToolCalls int    `yaml:"max_tool_calls"` // max tool calls before stopping
 }
 
 type Config struct {
@@ -228,6 +241,27 @@ func (c *Config) Validate() error {
 		if c.RAG.ChunkInterval != "" {
 			if _, err := time.ParseDuration(c.RAG.ChunkInterval); err != nil {
 				errs = append(errs, fmt.Errorf("rag.chunk_interval: invalid duration format %q: %w", c.RAG.ChunkInterval, err))
+			}
+		}
+
+		// Reranker validation (only if enabled)
+		if c.RAG.Reranker.Enabled {
+			if c.RAG.Reranker.Model == "" {
+				errs = append(errs, errors.New("rag.reranker.model is required when reranker.enabled is true"))
+			}
+			if c.RAG.Reranker.Candidates <= 0 {
+				errs = append(errs, fmt.Errorf("rag.reranker.candidates must be positive, got %d", c.RAG.Reranker.Candidates))
+			}
+			if c.RAG.Reranker.MaxTopics <= 0 {
+				errs = append(errs, fmt.Errorf("rag.reranker.max_topics must be positive, got %d", c.RAG.Reranker.MaxTopics))
+			}
+			if c.RAG.Reranker.MaxToolCalls <= 0 {
+				errs = append(errs, fmt.Errorf("rag.reranker.max_tool_calls must be positive, got %d", c.RAG.Reranker.MaxToolCalls))
+			}
+			if c.RAG.Reranker.Timeout != "" {
+				if _, err := time.ParseDuration(c.RAG.Reranker.Timeout); err != nil {
+					errs = append(errs, fmt.Errorf("rag.reranker.timeout: invalid duration format %q: %w", c.RAG.Reranker.Timeout, err))
+				}
 			}
 		}
 	}

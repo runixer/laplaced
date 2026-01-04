@@ -1,0 +1,295 @@
+{{template "layout.html" .}}
+
+{{define "title"}}Reranker Debug{{end}}
+
+{{define "styles"}}
+<style>
+    .candidate-selected { background-color: rgba(40, 167, 69, 0.1); }
+    .score-badge { font-family: monospace; }
+    .tool-call-badge { font-size: 0.75rem; }
+    .query-text {
+        max-width: 400px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .summary-text {
+        max-width: 300px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .fallback-reason { font-family: monospace; font-size: 0.85rem; }
+
+    /* Sortable table headers */
+    .sortable {
+        cursor: pointer;
+        user-select: none;
+        position: relative;
+        padding-right: 18px !important;
+    }
+    .sortable:hover {
+        background-color: rgba(0,0,0,0.05);
+    }
+    .sortable::after {
+        content: '\F282';
+        font-family: 'bootstrap-icons';
+        position: absolute;
+        right: 4px;
+        opacity: 0.3;
+        font-size: 0.7em;
+    }
+    .sortable.asc::after {
+        content: '\F148';
+        opacity: 1;
+    }
+    .sortable.desc::after {
+        content: '\F128';
+        opacity: 1;
+    }
+
+    /* Disable collapse animation */
+    .collapse, .collapsing {
+        transition: none;
+    }
+
+    /* Clickable rows */
+    .expandable-row {
+        cursor: pointer;
+    }
+    .expandable-row:hover {
+        background-color: rgba(0,0,0,0.03);
+    }
+    .expand-icon {
+        transition: none;
+    }
+    .expand-icon.expanded {
+        transform: rotate(90deg);
+    }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="container-fluid mt-4">
+
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span>Reranker Traces (Last {{len .Data}})</span>
+            <small class="text-muted">Shows how Flash LLM filters topic candidates</small>
+        </div>
+        <div class="card-body">
+            {{if not .Data}}
+            <div class="alert alert-info">No reranker traces found. Try sending a message with RAG enabled.</div>
+            {{else}}
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th style="width: 50px">ID</th>
+                        <th style="width: 130px">Time</th>
+                        <th>Query</th>
+                        <th style="width: 80px">Candidates</th>
+                        <th style="width: 80px">Selected</th>
+                        <th style="width: 90px; white-space: nowrap">Tool Calls</th>
+                        <th style="width: 90px">Duration</th>
+                        <th style="width: 80px">Status</th>
+                        <th style="width: 40px"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Data}}
+                    <tr class="expandable-row {{if .FallbackReason}}table-warning{{end}}" data-target="#details-{{.ID}}">
+                        <td>{{.ID}}</td>
+                        <td>{{.CreatedAt.Format "02.01 15:04:05"}}</td>
+                        <td class="query-text" title="{{.OriginalQuery}}">{{.OriginalQuery}}</td>
+                        <td>{{len .Candidates}}</td>
+                        <td>{{len .SelectedIDList}}</td>
+                        <td>{{len .ToolCalls}}</td>
+                        <td>{{.DurationTotalMs}}ms</td>
+                        <td>
+                            {{if .FallbackReason}}
+                                <span class="badge bg-warning text-dark">Fallback</span>
+                            {{else}}
+                                <span class="badge bg-success">Success</span>
+                            {{end}}
+                        </td>
+                        <td class="text-center">
+                            <i class="bi bi-chevron-right expand-icon"></i>
+                        </td>
+                    </tr>
+                    <tr class="collapse" id="details-{{.ID}}">
+                        <td colspan="9">
+                            <div class="card card-body bg-light">
+                                <!-- Query Info -->
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <h6>Original Query</h6>
+                                        <p class="border rounded p-2 bg-white">{{.OriginalQuery}}</p>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <h6>Enriched Query</h6>
+                                        <p class="border rounded p-2 bg-white">{{.EnrichedQuery}}</p>
+                                    </div>
+                                </div>
+
+                                {{if .FallbackReason}}
+                                <div class="alert alert-warning">
+                                    <strong>Fallback Reason:</strong>
+                                    <span class="fallback-reason">{{.FallbackReason}}</span>
+                                </div>
+                                {{end}}
+
+                                <!-- Candidates Table -->
+                                <h6>Candidates ({{len .Candidates}}) <small class="text-muted fw-normal">- click column headers to sort</small></h6>
+                                <div class="table-responsive mb-3">
+                                    <table class="table table-sm table-bordered sortable-table" id="candidates-{{.ID}}">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th style="width: 30px" class="sortable" data-sort="selected" data-type="bool">✓</th>
+                                                <th style="width: 60px" class="sortable" data-sort="id" data-type="number">ID</th>
+                                                <th class="sortable" data-sort="summary" data-type="string">Summary</th>
+                                                <th style="width: 80px" class="sortable desc" data-sort="score" data-type="number">Score</th>
+                                                <th style="width: 90px" class="sortable" data-sort="date" data-type="string">Date</th>
+                                                <th style="width: 60px" class="sortable" data-sort="msgs" data-type="number">Msgs</th>
+                                                <th style="width: 70px" class="sortable" data-sort="size" data-type="number">Size</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {{range .Candidates}}
+                                            <tr class="{{if .Selected}}candidate-selected{{end}}"
+                                                data-selected="{{if .Selected}}1{{else}}0{{end}}"
+                                                data-id="{{.TopicID}}"
+                                                data-summary="{{.Summary}}"
+                                                data-score="{{printf "%.6f" .Score}}"
+                                                data-date="{{.Date}}"
+                                                data-msgs="{{.MessageCount}}"
+                                                data-size="{{.SizeChars}}">
+                                                <td class="text-center">
+                                                    {{if .Selected}}<i class="bi bi-check-circle-fill text-success"></i>{{end}}
+                                                </td>
+                                                <td>
+                                                    <a href="/ui/topics?topic_id={{.TopicID}}" target="_blank">{{.TopicID}}</a>
+                                                </td>
+                                                <td class="summary-text" title="{{.Summary}}">{{.Summary}}</td>
+                                                <td><span class="badge bg-secondary score-badge">{{printf "%.3f" .Score}}</span></td>
+                                                <td>{{.Date}}</td>
+                                                <td>{{.MessageCount}}</td>
+                                                <td>
+                                                    {{if gt .SizeChars 0}}
+                                                        {{if gt .SizeChars 1000}}
+                                                            {{div .SizeChars 1000}}K
+                                                        {{else}}
+                                                            {{.SizeChars}}
+                                                        {{end}}
+                                                    {{else}}
+                                                        -
+                                                    {{end}}
+                                                </td>
+                                            </tr>
+                                            {{end}}
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <!-- Tool Calls -->
+                                {{if .ToolCalls}}
+                                <h6>Tool Calls ({{len .ToolCalls}})</h6>
+                                <div class="mb-3">
+                                    {{range .ToolCalls}}
+                                    <div class="border rounded p-2 mb-2 bg-white">
+                                        <span class="badge bg-info tool-call-badge me-2">Iteration {{.Iteration}}</span>
+                                        <span class="text-muted">Loaded {{len .Topics}} topic(s):</span>
+                                        <ul class="mb-0 mt-1">
+                                            {{range .Topics}}
+                                            <li>
+                                                <a href="/ui/topics?topic_id={{.ID}}" target="_blank">#{{.ID}}</a>
+                                                <span class="text-muted">- {{.Summary}}</span>
+                                            </li>
+                                            {{end}}
+                                        </ul>
+                                    </div>
+                                    {{end}}
+                                </div>
+                                {{end}}
+                            </div>
+                        </td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+            {{end}}
+        </div>
+    </div>
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Make rows expandable by clicking anywhere
+    document.querySelectorAll('.expandable-row').forEach(function(row) {
+        row.addEventListener('click', function() {
+            const targetSelector = this.dataset.target;
+            const targetRow = document.querySelector(targetSelector);
+            const icon = this.querySelector('.expand-icon');
+
+            if (targetRow) {
+                const bsCollapse = bootstrap.Collapse.getOrCreateInstance(targetRow, {toggle: false});
+                bsCollapse.toggle();
+                icon.classList.toggle('expanded');
+            }
+        });
+    });
+
+    // Make all sortable tables functional
+    document.querySelectorAll('.sortable-table').forEach(function(table) {
+        const headers = table.querySelectorAll('th.sortable');
+
+        headers.forEach(function(header) {
+            header.addEventListener('click', function() {
+                const sortKey = this.dataset.sort;
+                const sortType = this.dataset.type;
+                const tbody = table.querySelector('tbody');
+                const rows = Array.from(tbody.querySelectorAll('tr'));
+
+                // Determine sort direction
+                const isAsc = this.classList.contains('asc');
+                const isDesc = this.classList.contains('desc');
+                let newDir = 'asc';
+                if (isAsc) newDir = 'desc';
+                else if (isDesc) newDir = 'asc';
+
+                // Remove sort classes from all headers in this table
+                headers.forEach(h => h.classList.remove('asc', 'desc'));
+                this.classList.add(newDir);
+
+                // Sort rows
+                rows.sort(function(a, b) {
+                    let aVal = a.dataset[sortKey];
+                    let bVal = b.dataset[sortKey];
+
+                    if (sortType === 'number') {
+                        aVal = parseFloat(aVal) || 0;
+                        bVal = parseFloat(bVal) || 0;
+                    } else if (sortType === 'bool') {
+                        aVal = parseInt(aVal) || 0;
+                        bVal = parseInt(bVal) || 0;
+                    } else {
+                        aVal = (aVal || '').toLowerCase();
+                        bVal = (bVal || '').toLowerCase();
+                    }
+
+                    let result = 0;
+                    if (aVal < bVal) result = -1;
+                    else if (aVal > bVal) result = 1;
+
+                    return newDir === 'asc' ? result : -result;
+                });
+
+                // Re-append sorted rows
+                rows.forEach(row => tbody.appendChild(row));
+            });
+        });
+    });
+});
+</script>
+{{end}}

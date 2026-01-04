@@ -24,6 +24,12 @@ func GetFuncMap() template.FuncMap {
 		"sub": func(a, b int) int {
 			return a - b
 		},
+		"div": func(a, b int) int {
+			if b == 0 {
+				return 0
+			}
+			return a / b
+		},
 		"add64": func(a, b int64) int64 {
 			return a + b
 		},

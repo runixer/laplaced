@@ -8,6 +8,38 @@ import (
 	"github.com/runixer/laplaced/internal/storage"
 )
 
+// RerankerLogView is the parsed view of a RerankerLog for templates
+type RerankerLogView struct {
+	storage.RerankerLog
+	Candidates     []RerankerCandidateView
+	ToolCalls      []RerankerToolCallView
+	SelectedIDs    map[int64]bool // For quick lookup in template
+	SelectedIDList []int64
+}
+
+// RerankerCandidateView is a single candidate for template display
+type RerankerCandidateView struct {
+	TopicID      int64
+	Summary      string
+	Score        float32
+	Date         string
+	MessageCount int
+	SizeChars    int
+	Selected     bool
+}
+
+// RerankerToolCallView represents one iteration of tool calls for template display
+type RerankerToolCallView struct {
+	Iteration int
+	Topics    []RerankerToolCallTopicView
+}
+
+// RerankerToolCallTopicView contains topic info for tool call display
+type RerankerToolCallTopicView struct {
+	ID      int64
+	Summary string
+}
+
 type ContextStats struct {
 	SystemPromptPct float64
 	UserFactsPct    float64

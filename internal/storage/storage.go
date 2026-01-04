@@ -151,6 +151,46 @@ type DashboardStats struct {
 	FactsGrowth         map[string]int
 }
 
+// RerankerLog stores debug traces from the reranker component
+type RerankerLog struct {
+	ID                   int64
+	UserID               int64
+	OriginalQuery        string
+	EnrichedQuery        string
+	CandidatesJSON       string  // JSON array of candidates with scores
+	ToolCallsJSON        string  // JSON array of tool call iterations
+	SelectedIDsJSON      string  // JSON array of selected topic IDs
+	FallbackReason       *string // nil if no fallback, otherwise reason
+	DurationEnrichmentMs int
+	DurationVectorMs     int
+	DurationRerankerMs   int
+	DurationTotalMs      int
+	CreatedAt            time.Time
+}
+
+// RerankerCandidate is a single candidate for JSON serialization
+type RerankerCandidate struct {
+	TopicID      int64   `json:"topic_id"`
+	Summary      string  `json:"summary"`
+	Score        float32 `json:"score"`
+	Date         string  `json:"date"`
+	MessageCount int     `json:"message_count"`
+	SizeChars    int     `json:"size_chars"`
+}
+
+// RerankerToolCall represents one iteration of tool calls
+type RerankerToolCall struct {
+	Iteration int                     `json:"iteration"`
+	TopicIDs  []int64                 `json:"topic_ids"`
+	Topics    []RerankerToolCallTopic `json:"topics"`
+}
+
+// RerankerToolCallTopic contains topic info for tool call display
+type RerankerToolCallTopic struct {
+	ID      int64  `json:"id"`
+	Summary string `json:"summary"`
+}
+
 type Storage interface {
 	MessageRepository
 	UserRepository
@@ -161,6 +201,7 @@ type Storage interface {
 	FactRepository
 	FactHistoryRepository
 	MaintenanceRepository
+	RerankerLogRepository
 }
 
 type SQLiteStore struct {
@@ -448,10 +489,10 @@ func (s *SQLiteStore) migrate() error {
 	// It's idempotent enough (re-updating same values).
 	// Note: SQLite update with join/subquery
 	backfillQuery := `
-		UPDATE history 
+		UPDATE history
 		SET topic_id = (
-			SELECT id FROM topics 
-			WHERE history.id >= topics.start_msg_id 
+			SELECT id FROM topics
+			WHERE history.id >= topics.start_msg_id
 			AND history.id <= topics.end_msg_id
 			LIMIT 1
 		)
@@ -461,6 +502,30 @@ func (s *SQLiteStore) migrate() error {
 	if _, err := s.db.Exec(backfillQuery); err != nil {
 		s.logger.Warn("failed to backfill topic_id", "error", err)
 		// Don't fail migration, maybe just no topics or complex query issue
+	}
+
+	// Create reranker_logs table if not exists
+	rerankerLogsQuery := `
+		CREATE TABLE IF NOT EXISTS reranker_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			original_query TEXT,
+			enriched_query TEXT,
+			candidates_json TEXT,
+			tool_calls_json TEXT,
+			selected_ids_json TEXT,
+			fallback_reason TEXT,
+			duration_enrichment_ms INTEGER,
+			duration_vector_ms INTEGER,
+			duration_reranker_ms INTEGER,
+			duration_total_ms INTEGER,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE INDEX IF NOT EXISTS idx_reranker_logs_user_id ON reranker_logs(user_id);
+		CREATE INDEX IF NOT EXISTS idx_reranker_logs_created_at ON reranker_logs(created_at DESC);
+	`
+	if _, err := s.db.Exec(rerankerLogsQuery); err != nil {
+		return fmt.Errorf("failed to create reranker_logs table: %w", err)
 	}
 
 	return nil
