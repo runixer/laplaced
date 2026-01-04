@@ -258,21 +258,38 @@ Project has `golangci-lint` pre-commit hook. If commit fails, fix lint errors an
 
 This project uses [Keep a Changelog](https://keepachangelog.com/) format.
 
-### When to Update
+### Philosophy
 
-Update `CHANGELOG.md` when:
-- Adding new features (### Added)
-- Changing existing functionality (### Changed)
-- Deprecating features (### Deprecated)
-- Removing features (### Removed)
-- Fixing bugs (### Fixed)
-- Addressing security issues (### Security)
+**Changelog is for users, not developers.** Write what changed from user's perspective, not implementation details.
+
+**Good:**
+```markdown
+- Per-message latency breakdown — track LLM, tools, Telegram timing separately
+- Voice messages now use native Gemini audio understanding
+```
+
+**Bad (too technical):**
+```markdown
+- `laplaced_bot_message_llm_duration_seconds{user_id}` — total LLM time per message
+- Added `job_type` label with values "interactive" and "background"
+```
+
+### What to Include
+
+| Include | Skip |
+|---------|------|
+| New features users can use | Internal refactoring |
+| Bug fixes that affected users | Code cleanup |
+| Security fixes | Metric/label names |
+| Breaking changes | Test improvements |
+| Config option changes | Minor dependency updates |
 
 ### Workflow
 
-1. Add changes to `[Unreleased]` section during development
-2. When releasing, move `[Unreleased]` content to new version section
-3. Update comparison links at the bottom
+1. Add significant changes to `[Unreleased]` during development
+2. Skip trivial fixes — batch them into "Various bug fixes" if needed
+3. When releasing, move `[Unreleased]` to new version section
+4. Update comparison links at the bottom
 
 ### Release Process
 
