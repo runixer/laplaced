@@ -11,88 +11,89 @@ A smart Telegram bot for family use. Powered by Google Gemini via OpenRouter.
 
 **What it does:**
 - Chats using LLM with long-term memory (RAG)
-- Transcribes voice messages (Yandex SpeechKit)
+- Understands voice messages natively (Gemini multimodal)
 - Understands images and PDFs
-- Has a web dashboard for stats
+- Has a web dashboard for debugging
 
 ## Quick Start
 
-**Requirements:** Go 1.24+, Docker (optional)
+### Docker (recommended)
+
+```bash
+# Create config
+mkdir -p data
+cat > .env << 'EOF'
+LAPLACED_TELEGRAM_TOKEN=your_bot_token
+LAPLACED_OPENROUTER_API_KEY=your_api_key
+LAPLACED_ALLOWED_USER_IDS=123456789
+EOF
+
+# Run
+docker run -d --name laplaced \
+  --env-file .env \
+  -v $(pwd)/data:/data \
+  ghcr.io/runixer/laplaced:latest
+```
+
+### Docker Compose
 
 ```bash
 git clone https://github.com/runixer/laplaced.git
 cd laplaced
-
-# Option 1: Docker
 cp .env.example .env
 # Edit .env with your tokens
-docker-compose up -d --build
+docker-compose up -d
+```
 
-# Option 2: Local
+### From Source
+
+**Requirements:** Go 1.24+
+
+```bash
+git clone https://github.com/runixer/laplaced.git
+cd laplaced
 go run cmd/bot/main.go
-
-# With custom config file
-go run cmd/bot/main.go --config /path/to/config.yaml
 ```
 
 ## Configuration
 
-Two ways to configure:
+Configure via environment variables (recommended) or YAML config.
 
-1. **Environment variables** (recommended) — copy `.env.example` to `.env`
-2. **YAML config** — see [`internal/config/default.yaml`](internal/config/default.yaml) for all options
-
-Key variables:
+**Required variables:**
 ```bash
 LAPLACED_TELEGRAM_TOKEN=your_bot_token
 LAPLACED_OPENROUTER_API_KEY=your_api_key
 LAPLACED_ALLOWED_USER_IDS=123456789,987654321  # ⚠️ Required! Empty = reject all
 ```
 
+See [`.env.example`](.env.example) for all options.
+
 > **Note:** `LAPLACED_ALLOWED_USER_IDS` must contain at least one user ID. If empty, the bot will reject all messages.
 
 ## Telegram Modes
 
-Two modes available:
-
-- **Long Polling** (default) — simpler, works behind NAT, no public URL needed
+- **Long Polling** (default) — simpler, works behind NAT
 - **Webhook** — lower latency, better for production
 
 ```bash
-# For webhook mode, set base URL (path is auto-generated):
+# For webhook mode:
 LAPLACED_TELEGRAM_WEBHOOK_URL=https://your-domain.com
 ```
 
-Webhook path and secret are automatically derived from the bot token. Requests without a valid `X-Telegram-Bot-Api-Secret-Token` header are rejected.
-
-## Voice Messages
-
-The bot transcribes voice messages using Yandex SpeechKit. To enable:
-
-```bash
-LAPLACED_YANDEX_API_KEY=your_key
-LAPLACED_YANDEX_FOLDER_ID=your_folder_id
-```
-
-Without these — voice messages are ignored.
-
 ## Debug Interface
 
-There's a built-in web UI for debugging. **Disabled by default**.
+Built-in web UI for debugging. **Disabled by default**.
 
-To enable:
 ```bash
 LAPLACED_WEB_ENABLED=true
 LAPLACED_WEB_PASSWORD=your_password
 ```
 
-If password is not set, a random one will be generated and printed to console at startup (not logged to files/aggregators for security).
+Useful for understanding how RAG works and inspecting memory.
 
-Useful for understanding how RAG works, inspecting memory, and debugging.
+**⚠️ Warning:** Exposes sensitive data. Don't expose publicly.
 
-**⚠️ Warning:** The interface exposes sensitive data — conversation history, extracted facts, memory contents. Don't expose it publicly.
-
-## Project Structure
+## Architecture
 
 ```
 cmd/bot/          — entry point
@@ -101,6 +102,8 @@ internal/rag/     — vector search, memory retrieval
 internal/memory/  — facts extraction
 internal/storage/ — SQLite
 ```
+
+See [docs/architecture/](docs/architecture/) for detailed documentation (in Russian).
 
 ## Contributing
 
