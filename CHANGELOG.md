@@ -14,329 +14,191 @@ _Next version: v0.4 (Intelligence) — Flash Reranker, Memory Decay_
 **Final v0.3.x release. Establishes metrics baseline for v0.4 Intelligence features.**
 
 ### Added
-- **System prompt tracking in context metrics** — `laplaced_bot_context_tokens_by_source{source="system"}` now tracks base system prompt size separately from profile facts. Enables complete context breakdown visualization (System + Profile + Session + Topics).
-- **Job type classification for LLM metrics** — new `job_type` label distinguishes interactive user requests from background maintenance:
-  - `job_type="interactive"` — user chat, tool calls (default)
-  - `job_type="background"` — archiver, topic extraction, consolidation, fact extraction
-  - Prevents background batch jobs (60s+ archiver operations) from skewing interactive latency metrics
-  - Affects: `laplaced_llm_request_duration_seconds`, `laplaced_llm_requests_total`, `laplaced_llm_tokens_total`, `laplaced_llm_cost_usd_total`
-  - New package `internal/jobtype` provides context-based job type propagation
+- System prompt tracking in context metrics — enables complete context breakdown (System + Profile + Session + Topics)
+- Job type label for LLM metrics — separates interactive requests from background jobs (archiver, fact extraction)
 
 ### Changed
-- Updated dependencies (BurntSushi/toml v1.6.0, modernc/libc v1.67.4)
+- Updated dependencies
 
 ### Documentation
-- Added message processing flow architecture diagram (`docs/architecture/message-processing-flow.md`)
-- Added Architectural Decisions section to `CLAUDE.md`
+- Added message processing flow architecture diagram
+- Added Architectural Decisions section to CLAUDE.md
 
 ## [0.3.8] - 2026-01-03
 
 ### Added
-- **Per-message latency breakdown metrics** for complete timing analysis:
-  - `laplaced_bot_message_llm_duration_seconds{user_id}` — total LLM time per message (sum of all Tool Loop calls)
-  - `laplaced_bot_message_llm_calls{user_id}` — number of LLM calls per message (1-10)
-  - `laplaced_bot_message_tool_duration_seconds{user_id}` — total tool execution time per message
-  - `laplaced_bot_message_tool_calls{user_id}` — number of tool calls per message
-  - `laplaced_bot_message_telegram_duration_seconds{user_id}` — total Telegram send time per message
-  - `laplaced_bot_message_telegram_calls{user_id}` — number of Telegram sends per message
-  - `laplaced_bot_message_reaction_duration_seconds{user_id}` — SetMessageReaction timing
-- **Source label for RAG latency metric** — `laplaced_rag_latency_seconds{user_id, source}` now distinguishes between `source="auto"` (buildContext) and `source="tool"` (search_history). Eliminates overlap in latency breakdown when search_history tool is used.
-- **LLM anomaly tracking metric** — `laplaced_bot_llm_anomalies_total{user_id, type}` tracks empty responses, hallucination sanitizations, and retry outcomes
+- Per-message latency breakdown — track LLM, tools, Telegram timing separately
+- RAG source tracking — distinguish automatic retrieval from search_history tool
+- LLM anomaly tracking — monitor empty responses, retries, sanitizations
 
 ### Changed
-- **Latency Breakdown chart** now uses per-message totals (File → RAG → LLM Total → Tool → Telegram) — sum should equal total processing time
-- **Renamed tool `memory_search` → `search_history`** — clearer semantics, focuses on conversation history (topics), not facts (which are always in context). Improved prompt to trigger on explicit user requests like "search in memory", "find in history"
-- **Added call limit to `internet_search` tool** — maximum 3 calls per response to prevent runaway tool generation
+- Renamed tool `memory_search` → `search_history` for clarity
+- Added call limit (3) to `internet_search` tool
 
 ### Fixed
-- **Tool model calls (Perplexity) now track user_id** — previously recorded as `user_id="0"`, now correctly attributed to the requesting user
-- **LLM response sanitization** — prevents hallucination artifacts (like `</tool_code>`, `</s>`) and runaway JSON block generation from being sent to users. Gemini sometimes hallucinates special tokens followed by endless JSON queries.
-- **Empty LLM response retry** — automatically retries up to 2 times when model returns empty response (0 completion tokens). Logs detailed info: `finish_reason`, model, token counts. Fixes rare Gemini bug where model responds with `finish_reason=stop` but 0 tokens.
-- **Telegram metrics now recorded on early returns** — previously `message_telegram_duration_seconds` and `message_telegram_calls` were lost when LLM returned errors
+- Tool calls (Perplexity) now correctly track user attribution
+- LLM response sanitization prevents hallucination artifacts
+- Empty LLM responses trigger automatic retry
+- Telegram metrics recorded even on early returns
 
 ## [0.3.7] - 2026-01-03
 
 ### Added
-- **New metrics for full latency breakdown:**
-  - `laplaced_file_download_duration_seconds{user_id, file_type}` — Telegram file download timing
-  - `laplaced_file_downloads_total{user_id, file_type, status}` — download counter
-  - `laplaced_file_size_bytes{file_type}` — file size histogram
-  - `laplaced_rag_enrichment_duration_seconds{user_id}` — query enrichment LLM timing
-- **Embedding type label** added to `laplaced_embedding_request_duration_seconds` and `laplaced_embedding_requests_total`:
-  - `type=topics` for topic retrieval/processing embeddings
-  - `type=facts` for fact retrieval embeddings
+- File download metrics for latency analysis
+- RAG enrichment timing metric
+- Embedding type label (topics vs facts)
 
 ### Changed
-- **Refactored file processing** into new `internal/files/` package:
-  - **Parallel file downloads across message groups** — 5-8x speedup for photo albums
-  - Automatic retries (3 attempts with exponential backoff)
-  - Graceful degradation — continues with other files if one fails
-  - Simplified `prepareUserMessage` by ~80 lines
-- **Split CI workflows** to eliminate duplicate runs on release:
-  - `ci.yml` — lint and test on push to main and PRs
-  - `release.yml` — full release pipeline on tags only
-- **Fixed GHCR image description** for multi-arch images by adding annotations at index level
+- Parallel file downloads — 5-8x speedup for photo albums
+- Split CI workflows to avoid duplicate runs on release
 
 ## [0.3.6] - 2026-01-03
 
 ### Added
-- Added `laplaced_user_info` gauge metric with labels `{user_id, username, first_name}` for Grafana label joins
+- User info metric for Grafana label joins
 
 ### Fixed
-- Fixed `laplaced_rag_latency_seconds` metric: was dead code (defined but never used), now properly records RAG retrieval time with `user_id` label
-- Fixed Grafana user dropdown showing only active users — now uses `memory_facts_count` gauge (populated on startup for all users)
+- RAG latency metric was dead code — now working
+- User dropdown shows all users, not just active ones
 
 ## [0.3.5] - 2026-01-03
 
 ### Changed
-- **Improved memory extraction prompts** to prevent fact pollution:
-  - Added "Zero Trust to Bot" protocol — facts extracted only from User messages, not Bot speculation
-  - Added "Silence ≠ Consent" rule — Bot's unanswered hypotheses are not saved as facts
-  - Added "No Psychology" rule — no interpretation of feelings, only actions
-  - Added "Identity Protection" — prevents merging people with similar names (e.g., Roman P. vs Roman L.)
-  - Removed aggressive consolidation instruction that caused data loss
-- **Voice messages now quote full transcription** in Bot's response:
-  - LLM must quote cleaned voice content with `> 🎤` prefix
-  - Forwarded voice messages attributed as `> 🎤 **From [sender]:** [text]`
-  - Enables archivist and RAG to work with voice message content
+- Improved memory extraction prompts:
+  - "Zero Trust to Bot" — extract facts only from User messages
+  - "Silence ≠ Consent" — unanswered hypotheses not saved
+  - "No Psychology" — no interpretation of feelings
+  - "Identity Protection" — prevents merging people with similar names
+- Voice messages now quote full transcription with `> 🎤` prefix
 
 ### Added
-- Added storage metrics for database observability:
-  - `laplaced_storage_size_bytes` - total database file size
-  - `laplaced_storage_table_bytes{table}` - per-table size via SQLite dbstat
-  - `laplaced_storage_cleanup_deleted_total{table}` - count of deleted rows during cleanup
-  - `laplaced_storage_cleanup_duration_seconds{table}` - cleanup operation duration
-- Added automatic retention cleanup (runs hourly with metrics update):
-  - `fact_history`: keeps 100 most recent records per user
-  - `rag_logs`: keeps 20 most recent records per user
-  - Reclaims ~263 MB (54% of DB) on first run for existing installations
+- Storage metrics (database size, per-table size, cleanup stats)
+- Automatic retention cleanup for fact_history and rag_logs
 
 ### Fixed
-- Fixed missing `user_id` label on `laplaced_memory_topics_total` metric (missed in v0.3.3)
-- Fixed missing `user_id` label on `laplaced_memory_facts_count` and `laplaced_memory_staleness_days` metrics
-- Removed dead code: unused `factsTotal` gauge and `UpdateFactsTotal` function in memory/metrics.go
+- Missing user_id labels on several metrics
 
 ## [0.3.4] - 2026-01-02
 
 ### Changed
-- **Voice messages now use native Gemini audio understanding** instead of Yandex SpeechKit transcription
-  - Audio is sent directly to the LLM as base64-encoded OGG Opus
-  - Supports any language Gemini understands (not limited to Russian)
-  - No external speech recognition service required
-  - Yandex SpeechKit integration is now optional/unused
-  - Includes explicit instruction for LLM to respond in configured language and avoid reasoning leakage
+- Voice messages now use native Gemini audio understanding instead of Yandex SpeechKit
+- No external speech recognition service required
 
 ### Added
-- Added `laplaced_build_info{version, go_version}` metric for version tracking in Grafana
+- Build info metric for version tracking
 
 ### Fixed
-- Fixed missing `user_id` label on LLM and Embedding metrics (missed in v0.3.3):
-  - LLM: `laplaced_llm_request_duration_seconds`, `laplaced_llm_requests_total`
-  - Embedding: `laplaced_embedding_request_duration_seconds`, `laplaced_embedding_requests_total`, `laplaced_embedding_tokens_total`, `laplaced_embedding_cost_usd_total`
-  - Bot: `laplaced_bot_context_tokens_by_source`
-- Fixed `laplaced_memory_topics_total` metric always showing 0
-- Fixed histogram buckets for `laplaced_bot_message_processing_duration_seconds`: extended from 30s to 120s max (LLM responses can take up to a minute)
+- Missing user_id labels on LLM and Embedding metrics
+- Extended histogram buckets for message processing (up to 120s)
 
 ## [0.3.3] - 2026-01-02
 
 ### Added
-- Added `user_id` label to all Prometheus metrics for per-user tracking:
-  - RAG: `laplaced_vector_search_duration_seconds`, `laplaced_vector_search_vectors_scanned`, `laplaced_rag_retrieval_total`
-  - Bot: `laplaced_bot_message_processing_duration_seconds`, `laplaced_bot_messages_processed_total`
-  - Memory: `laplaced_memory_fact_operations_total`, `laplaced_memory_dedup_decisions_total`
-  - LLM: `laplaced_llm_tokens_total`, `laplaced_llm_cost_usd_total`
-- Added `laplaced_rag_candidates` histogram metric to track candidates before filtering
-- Added `laplaced_bot_context_tokens_by_source{source}` histogram metric to track context tokens by source (profile, topics, session)
+- User ID label on all metrics for per-user tracking
+- RAG candidates histogram
+- Context tokens by source metric
 
 ## [0.3.2] - 2026-01-02
 
 ### Fixed
-- Fixed `laplaced_bot_active_sessions` metric not tracking correct concept - now shows users with unprocessed messages (waiting for fact extraction), not message grouper sessions
+- Active sessions metric now tracks correct concept
 
 ## [0.3.1] - 2026-01-02
 
 ### Added
-- Added Grafana dashboard (`grafana/dashboards/laplaced-bot.json`) with 35 panels:
-  - Overview: active sessions, messages/hour, error rate, uptime, facts/topics count
-  - Latency: message processing p50/p95/p99, LLM duration, embedding & vector search
-  - Cost: LLM/embedding cost (24h), cost/message, monthly projection, cost over time
-  - Memory Health: facts by type, fact operations, growth trends, context tokens, RAG hit/miss
-  - Capacity Planning: vector index size, memory usage, goroutines, open FDs, trends
+- Grafana dashboard with 35 panels (overview, latency, cost, memory health, capacity)
 
 ### Fixed
-- Fixed `laplaced_memory_facts_count` metric not populated until 1 hour after startup (now updates immediately)
+- Facts count metric updates immediately on startup
 
 ## [0.3.0] - 2026-01-02
 
 ### Added
-- Added startup warning when `allowed_user_ids` is empty (bot rejects all messages in this case)
-- Added Session Inspector in web UI: view active sessions with user name, message count, timestamps (local timezone), countdown timer until auto-processing, and context size
-- Added "Force Process" with real-time progress bar via SSE, showing detailed results: topics extracted/merged, facts created/updated/deleted, API usage (tokens and cost)
-- Added Debug Chat interface (`/ui/debug/chat`): test bot pipeline without Telegram
-  - Chat UI with message history
-  - Debug panel: timing breakdown (total, embedding, search, LLM), token usage, cost, context preview
-  - Option to save messages to real history (checkbox, enabled by default)
-- Added Prometheus metrics for embedding observability:
-  - `laplaced_embedding_request_duration_seconds` - embedding API latency
-  - `laplaced_embedding_requests_total` - request counter with status
-  - `laplaced_embedding_tokens_total` - token usage
-  - `laplaced_embedding_cost_usd_total` - cumulative cost tracking
-  - `laplaced_vector_search_duration_seconds` - vector search latency
-  - `laplaced_vector_search_vectors_scanned` - vectors per search
-  - `laplaced_vector_index_size` - current index size
-  - `laplaced_vector_index_memory_bytes` - estimated memory usage
-  - `laplaced_rag_retrieval_total` - RAG retrieval hit/miss counter
-- Added Prometheus metrics for application health:
-  - `laplaced_bot_active_sessions` - active chat sessions gauge
-  - `laplaced_bot_message_processing_duration_seconds` - end-to-end message processing latency
-  - `laplaced_bot_messages_processed_total` - processed messages counter with success/error status
-  - `laplaced_bot_context_tokens` - context size histogram (in tokens)
-- Added Prometheus metrics for LLM observability:
-  - `laplaced_llm_request_duration_seconds` - LLM request latency by model/status
-  - `laplaced_llm_requests_total` - LLM request counter by model/status
-  - `laplaced_llm_tokens_total` - token usage by model/type (prompt/completion)
-  - `laplaced_llm_cost_usd_total` - cumulative LLM cost by model
-  - `laplaced_llm_retries_total` - retry counter by model
-- Added Prometheus metrics for HTTP server:
-  - `laplaced_http_request_duration_seconds` - HTTP request latency by handler/method/status
-  - `laplaced_http_requests_total` - HTTP request counter by handler/method/status
-- Added Prometheus metrics for memory system:
-  - `laplaced_memory_fact_operations_total` - fact operations counter (add/update/delete)
-  - `laplaced_memory_dedup_decisions_total` - deduplication decisions counter (ignore/merge/replace/add)
-  - `laplaced_memory_extraction_duration_seconds` - fact extraction latency
-  - `laplaced_memory_topic_processing_duration_seconds` - topic processing latency
-  - `laplaced_memory_facts_total` - current facts count by type (identity/context/status)
-  - `laplaced_memory_topics_total` - current topics count
-- Added `rag.max_profile_facts` config option (default: 50) - previously hardcoded limit for user profile facts
+- Startup warning when allowed_user_ids is empty
+- Session Inspector in web UI with force-process feature
+- Debug Chat interface for testing without Telegram
+- Full metrics suite: embedding, vector search, RAG, bot, LLM, HTTP, memory
+- Config option `rag.max_profile_facts`
 
 ### Changed
-- Improved test coverage: rag 76.8%, web 69.5%, bot 66.2%, memory 76.7%, all packages 66%+
-- Renamed all Prometheus metrics to use `laplaced_` namespace for consistency
-  - `telegram_api_*` → `laplaced_telegram_*`
-  - `memory_*` → `laplaced_memory_*`
-  - `rag_*` → `laplaced_rag_*`
-
-### Fixed
-- Fixed SSE endpoints returning 500 when wrapped with metrics middleware (responseWriter now implements http.Flusher)
+- Improved test coverage to 66%+
+- Renamed metrics to use `laplaced_` namespace
 
 ## [0.2.2] - 2026-01-01
 
-### Changed
-- Switched from `math/rand` to `math/rand/v2` for better randomness in backoff jitter
-- Migrated from deprecated `grpc.DialContext` to `grpc.NewClient` in Yandex SpeechKit client
-
 ### Security
-- Fixed password appearing in structured logs when auto-generated - now printed to stdout only
-- Added webhook secret token verification with auto-generation from bot token hash (zero-config protection against unauthorized requests)
-- Removed bot token from webhook URL path - now uses separate hash to prevent token leakage in logs
+- Fixed password appearing in logs
+- Added webhook secret token verification
+- Removed bot token from webhook URL path
 
 ### Fixed
-- Fixed data race in web server: context now passed to constructor instead of being set in Start()
-- Fixed remaining ignored errors in fact history debug logging (4 additional locations)
-- Fixed client IP logging behind reverse proxy - now uses X-Forwarded-For/X-Real-IP headers
-- Added User-Agent logging for HTTP requests
-- Fixed potential race condition in `LoadNewVectors()` when multiple goroutines load vectors concurrently
-- Fixed untracked goroutines in RAG service (`LoadNewVectors`, `ReloadVectors`) - now properly tracked by WaitGroup for graceful shutdown
-- Fixed metrics update goroutine in web server not tracked by WaitGroup
-- Fixed missing duration format validation in config (`turn_wait_duration`, `backfill_interval`, `chunk_interval`)
+- Data race in web server
+- Client IP logging behind reverse proxy
+- Race conditions in RAG and MessageGrouper
 
 ## [0.2.1] - 2026-01-01
 
 ### Added
-- Added retry logic with exponential backoff to OpenRouter client (max 3 retries on 429/5xx)
-- Added configuration validation with clear error messages for required fields and value ranges
-- Added `GetTopicsByIDs()` method for efficient topic retrieval by IDs
-- Added incremental vector loading: `LoadNewVectors()` fetches only new topics/facts after initial load
-- Added dashboard stats caching with 5-minute TTL to reduce database load
+- Retry logic with exponential backoff for OpenRouter
+- Configuration validation
+- Incremental vector loading
+- Dashboard stats caching
 
 ### Changed
-- Optimized RAG retrieval: now fetches only matched topics instead of all topics
-- Optimized `HasFacts` filter: uses `EXISTS` subquery instead of `COUNT(*)` for faster execution
-- Replaced `println()` with structured logging (`slog`) in config loading
-- Removed `goto` statement in i18n package, using simpler control flow
+- Optimized RAG retrieval (fetch only matched topics)
 
 ### Fixed
-- Fixed early startup logs using text format instead of JSON (now JSON from first line)
-- Fixed OpenRouter client returning nil instead of error on non-OK HTTP status
-- Fixed `sendResponses()` retry logic using unbounded `context.Background()` - now uses 30s timeout
-- Fixed web server calling `os.Exit(1)` on failure - now triggers graceful shutdown via `cancel()`
-- Fixed ignored errors in fact history operations - now logged with warning level
-
-### Removed
-- Removed dead code: unused `processSingleMessage()` function and its test
-- Removed `cmd/import_history` and `cmd/reset_user` CLI utilities (to be replaced by web UI)
+- Early startup logs now use JSON format
+- Various error handling improvements
 
 ## [0.2.0] - 2026-01-01
 
 ### Added
-- Added `.golangci.yml` with extended linter set (goimports, misspell, gocritic, gosec, bodyclose, errorlint)
+- Extended linter configuration
 
 ### Changed
-- Voice messages now go through MessageGrouper for proper grouping with text messages
-- Forwarded voice messages now correctly show their original source in transcription
+- Voice messages go through MessageGrouper
 
 ### Fixed
-- Fixed excessive log size from OpenRouter responses - removed raw body logging and filtered out `reasoning.encrypted` blobs
-- Removed noisy "Partial recognition result" debug logging from SpeechKit client
-- Fixed "context canceled" warnings for typing action by using detached context with timeout
-- Fixed bot token leaking in error log messages - now sanitized as `[REDACTED]`
-- Fixed graceful shutdown for voice messages: file download, speech recognition, and response sending now complete even when shutdown is triggered
-- Fixed file downloader missing HTTP timeout and context support
-- Fixed file downloader not using configured proxy (was only using environment variables)
-- Fixed graceful shutdown: MessageGrouper now properly waits for active downloads to complete
-- Fixed race condition in ProcessUpdate with WaitGroup.Add() inside goroutine
-- Fixed MessageGrouper not tracking active processing with WaitGroup
-- Fixed voice message handler using `context.Background()` - now properly supports cancellation
-- Fixed webhook handler not tracking goroutines with WaitGroup - now uses `HandleUpdateAsync` for proper shutdown
-- Fixed graceful shutdown: RAG retrieval, LLM generation, and typing action now complete even when shutdown is triggered
-- Fixed graceful shutdown: pending message groups in turnWait are now processed immediately instead of being dropped
-- Fixed noisy "failed to get updates" error during shutdown - now properly suppressed when context is cancelled
+- Excessive log size from OpenRouter responses
+- Graceful shutdown for voice messages
+- Multiple race conditions
 
 ### Security
-- Fixed potential Slowloris attack vector by adding `ReadHeaderTimeout` to HTTP server
+- Added ReadHeaderTimeout to prevent Slowloris attacks
 
 ## [0.1.3] - 2026-01-01
 
 ### Changed
-- Refactored `buildContext`: extracted `formatCoreIdentityFacts` and `deduplicateTopics` helpers
-- Refactored `processChunk`: extracted `findChunkBounds` and `findStragglers` helpers
-- Refactored `ParseRAGLog`: extracted `extractMessageContent` helper
-- Refactored `performManageMemory`: extracted CRUD operation handlers
-- Refactored `deduplicateAndAddFact`: extracted `addFactWithHistory` helper, removed duplicate code
-
-### Fixed
-- Fixed Go Report Card badge caching issue in README
+- Refactored complex functions (buildContext, processChunk, etc.)
 
 ## [0.1.2] - 2026-01-01
 
 ### Changed
-- Docker images on main branch now get `latest` tag automatically
+- Docker images on main branch get `latest` tag
 
 ## [0.1.1] - 2026-01-01
 
 ### Added
-- GitHub Actions CI/CD workflow for linting, testing, building, and releasing
+- GitHub Actions CI/CD workflow
 - Pre-commit hook for golangci-lint
-- Cross-compilation support for linux/amd64 and linux/arm64
-
-### Fixed
-- Fixed golangci-lint errors across the codebase
+- Cross-compilation (linux/amd64, linux/arm64)
 
 ## [0.1.0-beta] - 2025-12-31
 
 ### Added
-- Initial release of Laplaced Telegram bot
-- LLM-powered chat with Google Gemini via OpenRouter
-- Long-term memory using RAG (Retrieval-Augmented Generation)
-- Voice message transcription via Yandex SpeechKit
+- Initial release
+- LLM chat with Google Gemini via OpenRouter
+- Long-term memory with RAG
+- Voice transcription via Yandex SpeechKit
 - Image and PDF analysis
-- Web dashboard for statistics and debugging
+- Web dashboard
 - SQLite storage with vector embeddings
-- Multi-language support (English, Russian)
-- Docker and docker-compose deployment
-- Configuration via YAML and environment variables
+- Multi-language support (en, ru)
+- Docker deployment
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.3.8...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.3.9...HEAD
+[0.3.9]: https://github.com/runixer/laplaced/compare/v0.3.8...v0.3.9
 [0.3.8]: https://github.com/runixer/laplaced/compare/v0.3.7...v0.3.8
 [0.3.7]: https://github.com/runixer/laplaced/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/runixer/laplaced/compare/v0.3.5...v0.3.6

@@ -1,0 +1,43 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <!-- 1. BODY: Строгий, насыщенный фиолетовый металл -->
+        <linearGradient id="bodySkin" x1="256" y1="50" x2="256" y2="460" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#A855F7" /> <!-- Светлый (Wisteria) -->
+            <stop offset="100%" stop-color="#6B21A8" /> <!-- Темный (Deep Purple) -->
+        </linearGradient>
+
+        <!-- 2. IRIS (РАДУЖКА): Светлая/Лавандовая (Lilya's Choice) -->
+        <!-- Создает эффект "живого глаза", а не стеклянной линзы -->
+        <linearGradient id="irisLight" x1="100" y1="100" x2="400" y2="400" gradientUnits="userSpaceOnUse">
+             <stop offset="0%" stop-color="#E879F9" /> <!-- Яркий светло-фиолетовый верх -->
+             <stop offset="100%" stop-color="#9333EA" /> <!-- Насыщенный низ -->
+        </linearGradient>
+    </defs>
+
+    <!-- 1. ФОН: Темный скругленный квадрат (Squircle) #09090b -->
+    <rect width="512" height="512" rx="120" fill="#09090b" />
+
+    <!-- 2. КОРПУС: Гексагон -->
+    <path d="M256 60 L450 170 V342 L256 452 L62 342 V170 L256 60Z" 
+          fill="url(#bodySkin)" />
+
+    <!-- 3. КРЕПЛЕНИЕ: Тонкое темное кольцо (Разделяет корпус и глаз) -->
+    <circle cx="256" cy="256" r="148" fill="#18181b" opacity="0.4"/>
+
+    <!-- 4. РАДУЖКА: Цветная часть глаза -->
+    <circle cx="256" cy="256" r="140" fill="url(#irisLight)" stroke="#09090b" stroke-width="6"/>
+
+    <!-- 5. ЗРАЧОК: Абсолютно черный (OLED Black) -->
+    <circle cx="256" cy="256" r="90" fill="#000000" />
+
+    <!-- 6. БЛИКИ: Душа системы -->
+    <!-- 6.1. Cyan Spark (Go/Tech) -->
+    <circle cx="215" cy="215" r="28" fill="#22D3EE" /> 
+    
+    <!-- 6.2. White Spark (Life) -->
+    <circle cx="295" cy="295" r="14" fill="#FFFFFF" />
+    
+    <!-- 6.3. Стеклянный отблеск внизу (Объем) -->
+    <path d="M190 190 Q256 160 320 190" stroke="#ffffff" stroke-width="4" stroke-opacity="0.2" stroke-linecap="round"/>
+
+</svg>
