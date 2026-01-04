@@ -10,6 +10,9 @@ import (
 //go:embed templates/*.html
 var templatesFS embed.FS
 
+//go:embed static/*
+var StaticFS embed.FS
+
 type Renderer struct {
 	layout *template.Template
 }

@@ -229,6 +229,10 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	mux.Handle("/metrics", promhttp.Handler())
 
+	// Serve static files (favicon, logo, etc.)
+	mux.HandleFunc("/favicon.ico", s.faviconHandler)
+	mux.HandleFunc("/static/logo.svg", s.logoHandler)
+
 	// Wrap the mux with middlewares
 	// Chain: Logging -> Auth -> Mux
 	handler := s.basicAuthMiddleware(mux)
@@ -1071,6 +1075,32 @@ func (s *Server) sessionsProcessSSEHandler(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) healthzHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) faviconHandler(w http.ResponseWriter, r *http.Request) {
+	data, err := ui.StaticFS.ReadFile("static/favicon.ico")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/x-icon")
+	w.Header().Set("Cache-Control", "public, max-age=604800") // 7 days
+	if _, err := w.Write(data); err != nil {
+		s.logger.Debug("failed to write favicon response", "error", err)
+	}
+}
+
+func (s *Server) logoHandler(w http.ResponseWriter, r *http.Request) {
+	data, err := ui.StaticFS.ReadFile("static/logo.svg")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=604800") // 7 days
+	if _, err := w.Write(data); err != nil {
+		s.logger.Debug("failed to write logo response", "error", err)
+	}
 }
 
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {

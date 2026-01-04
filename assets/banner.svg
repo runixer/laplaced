@@ -1,0 +1,30 @@
+<svg width="1280" height="640" viewBox="0 0 1280 640" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <linearGradient id="bodySkin" x1="256" y1="50" x2="256" y2="460" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#A855F7" />
+            <stop offset="100%" stop-color="#6B21A8" />
+        </linearGradient>
+        <linearGradient id="lensHousing" x1="100" y1="100" x2="400" y2="400" gradientUnits="userSpaceOnUse">
+             <stop offset="0%" stop-color="#E879F9" />
+             <stop offset="100%" stop-color="#9333EA" />
+        </linearGradient>
+    </defs>
+
+    <!-- 1. WIDE BACKGROUND (1280x640) matches app color #09090b -->
+    <rect width="1280" height="640" fill="#09090b" />
+
+    <!-- 2. LOGO GROUP (Centered) -->
+    <!-- (1280 - 512) / 2 = 384 (X offset) -->
+    <!-- (640 - 512) / 2 = 64 (Y offset) -->
+    <g transform="translate(384, 64)">
+        <!-- Вставка твоего логотипа v9 -->
+        <use href="#bg_void" /> <!-- Фон внутри лого не нужен, он сольется, но оставим геометрию -->
+        <path d="M256 60 L450 170 V342 L256 452 L62 342 V170 L256 60Z" fill="url(#bodySkin)" />
+        <circle cx="256" cy="256" r="148" fill="#18181b" opacity="0.4"/>
+        <circle cx="256" cy="256" r="140" fill="url(#lensHousing)" stroke="#09090b" stroke-width="6"/>
+        <circle cx="256" cy="256" r="90" fill="#000000" />
+        <circle cx="215" cy="215" r="28" fill="#22D3EE" /> 
+        <circle cx="295" cy="295" r="14" fill="#FFFFFF" />
+        <path d="M190 190 Q256 160 320 190" stroke="#ffffff" stroke-width="4" stroke-opacity="0.2" stroke-linecap="round"/>
+    </g>
+</svg>
