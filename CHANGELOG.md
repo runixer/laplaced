@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Next version: v0.5 (Social) — People Table, Social Graph_
 
-## [0.4.0] - 2026-01-04
+## [0.4.1] - 2026-01-04
 
 **Intelligence release: Smart context filtering with Flash Reranker.**
 
@@ -214,7 +214,8 @@ _Next version: v0.5 (Social) — People Table, Social Graph_
 - Multi-language support (en, ru)
 - Docker deployment
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.3.9...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/runixer/laplaced/compare/v0.3.9...v0.4.1
 [0.3.9]: https://github.com/runixer/laplaced/compare/v0.3.8...v0.3.9
 [0.3.8]: https://github.com/runixer/laplaced/compare/v0.3.7...v0.3.8
 [0.3.7]: https://github.com/runixer/laplaced/compare/v0.3.6...v0.3.7
