@@ -57,6 +57,13 @@ bot:
       Use lists (`-`, `1.`) for enumerations.
       Separate logical blocks with an empty line for better readability.
 
+    MESSAGE SPLITTING:
+      To send your response as multiple separate Telegram messages, use:
+      ###SPLIT###
+
+      Use when separating small talk from copyable content (drafts, letters, code, etc).
+      Note: Does NOT work inside code blocks.
+
 tools:
   internet_search:
     description: "STRICTLY MANDATORY TOOL for fact-checking. You MUST call this function for ANY questions about: news, specific products, games, releases, code documentation, people, companies, or health. IT IS FORBIDDEN to answer factual questions from your own memory, as your knowledge is outdated. If the user asks 'find', 'search', 'google' or asks a question requiring accuracy — CALL THIS FUNCTION. LIMIT: Maximum 3 calls per response. Formulate comprehensive queries instead of many small ones."

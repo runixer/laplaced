@@ -521,6 +521,53 @@ func sanitizeLLMResponse(text string) (string, bool) {
 	return text, sanitized
 }
 
+// splitByDelimiter splits text by ###SPLIT### delimiter, respecting code blocks.
+// Delimiters inside code blocks are ignored. Empty parts are filtered out.
+func splitByDelimiter(text string) []string {
+	const delimiter = "###SPLIT###"
+
+	if !strings.Contains(text, delimiter) {
+		return []string{text}
+	}
+
+	codeBlocks := telegram.FindCodeBlocks(text)
+
+	var splitPositions []int
+	searchStart := 0
+	for {
+		idx := strings.Index(text[searchStart:], delimiter)
+		if idx == -1 {
+			break
+		}
+		pos := searchStart + idx
+		if telegram.IsSafeSplitPosition(pos, codeBlocks) {
+			splitPositions = append(splitPositions, pos)
+		}
+		searchStart = pos + len(delimiter)
+	}
+
+	if len(splitPositions) == 0 {
+		return []string{text}
+	}
+
+	var parts []string
+	start := 0
+	for _, pos := range splitPositions {
+		if part := strings.TrimSpace(text[start:pos]); part != "" {
+			parts = append(parts, part)
+		}
+		start = pos + len(delimiter)
+	}
+	if remaining := strings.TrimSpace(text[start:]); remaining != "" {
+		parts = append(parts, remaining)
+	}
+
+	if len(parts) == 0 {
+		return []string{text}
+	}
+	return parts
+}
+
 func (b *Bot) finalizeResponse(chatID int64, messageThreadID int, userID int64, replyToMsgID int, responseText string, logger *slog.Logger) ([]telegram.SendMessageRequest, error) {
 	// Sanitize LLM response to remove hallucination artifacts
 	originalLength := len(responseText)
@@ -533,9 +580,15 @@ func (b *Bot) finalizeResponse(chatID int64, messageThreadID int, userID int64, 
 		RecordLLMAnomaly(userID, AnomalySanitized)
 	}
 
-	// Split the raw Markdown first (conservative limit to account for HTML tags)
+	// Split by explicit ###SPLIT### delimiter first (respects code blocks)
+	delimiterParts := splitByDelimiter(responseText)
+
+	// Then split each part by character limit (safety net for oversized chunks)
 	const markdownSafeLimit = 3500
-	chunks := telegram.SplitMessageSmart(responseText, markdownSafeLimit)
+	var chunks []string
+	for _, part := range delimiterParts {
+		chunks = append(chunks, telegram.SplitMessageSmart(part, markdownSafeLimit)...)
+	}
 
 	var responses []telegram.SendMessageRequest
 	for i, chunk := range chunks {
