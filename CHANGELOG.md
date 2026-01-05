@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Next version: v0.5 (Social) — People Table, Social Graph_
 
+### Added
+- **Message splitting** — bot can now send responses as multiple separate Telegram messages using `###SPLIT###` delimiter, making copyable content (drafts, letters, code) easier to forward or copy
+
+### Changed
+- CI workflow unified: Docker image `:main` built on every push to main, `:latest` on release tags
+- Automatic cleanup of untagged container images (keeps last 5)
+
 ## [0.4.5] - 2026-01-05
 
 **Multimodal RAG and prompt quality improvements.**
