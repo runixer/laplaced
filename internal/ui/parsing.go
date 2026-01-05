@@ -307,5 +307,13 @@ func ParseRerankerLog(l storage.RerankerLog) RerankerLogView {
 		}
 	}
 
+	// Parse reasoning entries
+	if l.ReasoningJSON != "" {
+		var reasoning []RerankerReasoningEntry
+		if err := json.Unmarshal([]byte(l.ReasoningJSON), &reasoning); err == nil {
+			view.Reasoning = reasoning
+		}
+	}
+
 	return view
 }

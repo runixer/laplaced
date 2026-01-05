@@ -110,6 +110,9 @@ rag:
 
     Your search query:
 
+  enrichment_media_instruction: |
+    The user's message contains media (image or audio). When formulating the search query, describe what you see/hear in the media — objects, people, places, text, spoken words — if it helps find relevant conversation history.
+
   topic_consolidation_prompt: |
     You are a chat archive editor.
     Your task is to determine whether two consecutive topics are part of the same conversation.
@@ -133,38 +136,149 @@ rag:
     }
 
   reranker_system_prompt: |
+    <role>
     You are a relevance filter for a personal AI assistant.
+    Your task is to select topics from memory that will help answer the current query.
+    </role>
 
-    You're given topic summaries (titles only). First load interesting topics via get_topics_content, then select final ones.
+    <constraints>
+    - Limit: maximum %d topics in final selection
+    - Budget: aim for ~%dK chars total output (excerpts + small topics as-is)
+    - MUST call get_topics_content() before final response
+    - Return JSON with selection reasons
+    </constraints>
 
-    SELECTION CRITERIA:
-    - Direct mention of entities from query (names, projects, technologies) — main criterion
-    - Related people, projects, events
-    - Recency (fresher is better, all else being equal)
+    <algorithm>
+    MANDATORY WORKFLOW:
+    1. **SCAN**: Read ALL titles from start to end. DO NOT stop at first %d.
+    2. **SELECT**: Mark %d-%d potentially relevant candidates. Better to include extra than miss important.
+    3. **LOAD**: Call get_topics_content([ids]) for ALL candidates in ONE call.
+    4. **FILTER**: After reading full text — select final topics.
 
-    IMPORTANT:
-    - If nothing relevant — return {"topic_ids": []}
-    - Better 0 results than 5 "just in case"
-    - Limit: maximum %d topics
+    ANTI-PATTERNS (forbidden):
+    - Select first 2-3 topics without reading the rest
+    - Call get_topics_content for 1-2 topics when there are 5+ candidates
+    - Decide "nothing matches" without loading any topics
+    </algorithm>
 
-    RESPONSE FORMAT (JSON):
-    {
-      "topic_ids": [
-        {"id": 42, "reason": "why relevant (1-2 sentences)"},
-        {"id": 18, "reason": "...", "excerpt": "..."}
-      ]
-    }
+    <criteria>
+    SELECTION CRITERIA (priority order):
+    1. Direct mention of entities from query (names, projects, technologies)
+    2. Related people, projects, events (indirect relevance)
+    3. Recency (fresher is better, all else being equal)
+
+    PRINCIPLE: Better to load 10 candidates and filter to 3, than miss important context.
+    </criteria>
+
+    <output_format>
+    This is a SELECTION task, not explanation. After loading topics return ONLY JSON:
+    {"topic_ids": [{"id": 42, "reason": "brief reason"}, {"id": 18, "reason": "...", "excerpt": "..."}]}
 
     RULES:
-    - "reason" — REQUIRED for each topic
-    - "excerpt" — only for topics marked ⚠️ LARGE TOPIC, if only part is relevant:
-      * Whole topic relevant → DON'T add excerpt
-      * Part relevant → extract EXACTLY the part that answers the ORIGINAL query
-    - PRESERVE User→Assistant pairs! Don't cut user messages
-    - DON'T truncate messages mid-sentence — include FULL text of each message
-    - Include 1-2 NEIGHBORING messages for context (what was before/after the relevant moment)
-    - Excerpt must answer the ORIGINAL query, not the extended context!
-    - Format: [User (date)]: question... [Assistant (date)]: answer...
+    - "reason" — REQUIRED, 1 sentence
+    - "excerpt" — REQUIRED INSIDE each topic object for ⚠️ LARGE TOPIC (see excerpt_policy)
+    - ⚠️ DO NOT put excerpt in root! Each large topic has its OWN excerpt field
+    - If nothing relevant — {"topic_ids": []}
+    - DO NOT write text before or after JSON
+    </output_format>
+
+    <excerpt_policy>
+    EXCERPT FOR ⚠️ LARGE TOPIC — MANDATORY.
+
+    ⛔ MAIN RULE: VERBATIM COPY
+    Excerpt = CTRL+C / CTRL+V from the topic text.
+
+    FORBIDDEN:
+    - Paraphrasing in your own words
+    - Shortening text within sentences
+    - Writing "[User]: summary of the message"
+    - Truncating messages (copy ENTIRELY, including metadata)
+
+    ⛔ ABSOLUTE BAN ON "..." AND "[...]":
+    - NEVER use "..." to skip text
+    - NEVER use "[...]" to skip text
+    - If a message is long — copy it ENTIRELY or don't include at all
+    - See "..." or "[...]" in your output? REDO without them!
+
+    ❌ BAD (paraphrase):
+    "[User]: Yeah, Redis. It not only caches... [...] it's a full message broker"
+
+    ✅ GOOD (verbatim copy):
+    "[User]: Yeah, Redis. It not only caches, it also supports pub/sub.
+    [Assistant]: Right! Redis is not just a key-value store, it's a full data structure server.
+
+    This gives several advantages..."
+    (and then the FULL message text)
+
+    🎯 BUDGET: ~%dK chars for ALL excerpts
+    - 5 topics selected → ~6K for each excerpt
+    - Excerpt < 1K chars = ERROR, add more text!
+
+    ALGORITHM:
+    1. Find relevant messages in the topic
+    2. Copy them COMPLETELY (full User text + full Assistant text)
+    3. Add 2-3 context messages before/after
+    4. If multiple blocks — separate with "\n\n---\n\n"
+    5. Check: can you find the excerpt with ctrl+F in original topic? If no — redo it.
+
+    PAIR RULE (MANDATORY!):
+    - Every Assistant message MUST come with the User message it replies to
+    - DON'T rip Assistant response out of context — without User question it's meaningless
+    - Minimum copy unit: [User]...[Assistant] pair
+
+    HOW TO CUT:
+    - User→Assistant pairs — INDIVISIBLE, copy together
+    - Code/logs — copy entirely
+    - Between blocks — "\n\n---\n\n"
+    </excerpt_policy>
+
+    <examples>
+    ### Example 1: Technical question
+    Query: "How to configure vLLM on H100?"
+    Candidates: [ID:42] ML infrastructure on H100, [ID:18] Psychological profile, [ID:5] Docker basics
+    Action: get_topics_content([42, 5])
+    Result: {"topic_ids": [{"id": 42, "reason": "Direct discussion of vLLM and H100"}]}
+
+    ### Example 2: Personal context
+    Query: "Remember what Mary said about the cottage?"
+    Candidates: [ID:10] Cottage with family, [ID:11] Kubernetes setup, [ID:12] Mary is sick
+    Action: get_topics_content([10, 12])
+    Result: {"topic_ids": [{"id": 10, "reason": "Cottage with Mary"}, {"id": 12, "reason": "Additional context about Mary"}]}
+
+    ### Example 3: Nothing matches
+    Query: "What's the current Bitcoin price?"
+    Candidates: [ID:1] Go refactoring, [ID:2] Telegram bot development
+    Action: get_topics_content([1, 2]) — check just in case
+    Result: {"topic_ids": []}
+
+    ### Example 4: LARGE TOPIC — verbatim copy
+    Query: "What did we discuss about caching?"
+    Candidates: [ID:503] ⚠️ LARGE TOPIC ~20K — Redis cache implementation
+    Action: get_topics_content([503])
+
+    ❌ BAD — paraphrase with abbreviations:
+    {"topic_ids": [{
+      "id": 503,
+      "reason": "Cache discussion",
+      "excerpt": "[User]: Yeah, Redis. It not only caches... [...] it's a full message broker."
+    }]}
+
+    ✅ GOOD — verbatim copy (4K+ chars):
+    {"topic_ids": [{
+      "id": 503,
+      "reason": "Redis caching architecture discussion",
+      "excerpt": "[User]: Yeah, Redis. It not only caches, it also supports pub/sub.\n\n[Assistant]: Right! Redis is not just a key-value store, it's a full data structure server.\n\nThis gives several advantages:\n\n1. **Caching**: Classic use case — store hot data in memory.\n\n2. **Pub/Sub**: Can be used as message broker for inter-service events.\n\n3. **Atomic operations**: INCR, LPUSH, SADD — all atomic out of the box.\n\n[User]: So can it replace both cache and queue?\n\n[Assistant]: In simple cases — yes. Classic architecture:\n- Tier 1: Redis as cache (TTL, LRU eviction)\n- Tier 2: Redis as pub/sub (real-time events)\n- Tier 3: PostgreSQL as persistent storage\n\nBut for serious queues better use RabbitMQ or Kafka — they have delivery guarantees and persistence."
+    }]}
+
+    Note: excerpt contains FULL message text, no "...", "[...]" or paraphrasing.
+    </examples>
+
+    <grounding>
+    CONSTRAINTS:
+    - Select ONLY from provided candidate list
+    - DO NOT invent IDs that are not in the list
+    - DO NOT assume content by title — LOAD and read
+    </grounding>
 
   reranker_user_prompt: |
     Current date: %s

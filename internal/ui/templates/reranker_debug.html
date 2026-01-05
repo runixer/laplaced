@@ -33,6 +33,19 @@
         max-height: 300px;
         overflow-y: auto;
     }
+    .reasoning-content {
+        white-space: pre-wrap;
+        font-family: system-ui, -apple-system, sans-serif;
+        font-size: 0.9rem;
+        line-height: 1.5;
+        color: #495057;
+        background: #f8f9fa;
+        padding: 12px 16px;
+        border-left: 3px solid #6c757d;
+        border-radius: 4px;
+        max-height: 400px;
+        overflow-y: auto;
+    }
 
     /* Sortable table headers */
     .sortable {
@@ -264,6 +277,19 @@
                                             </li>
                                             {{end}}
                                         </ul>
+                                    </div>
+                                    {{end}}
+                                </div>
+                                {{end}}
+
+                                <!-- Reasoning (Thinking) -->
+                                {{if .Reasoning}}
+                                <h6>Model Reasoning ({{len .Reasoning}} iteration{{if gt (len .Reasoning) 1}}s{{end}})</h6>
+                                <div class="mb-3">
+                                    {{range .Reasoning}}
+                                    <div class="border rounded p-2 mb-2 bg-white">
+                                        <span class="badge bg-secondary tool-call-badge me-2">Iteration {{.Iteration}}</span>
+                                        <div class="reasoning-content mt-2">{{.Text}}</div>
                                     </div>
                                     {{end}}
                                 </div>

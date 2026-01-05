@@ -38,8 +38,9 @@ flowchart TB
     end
 
     subgraph context["4. Контекст (RAG)"]
-        EQ["Enrichment Query<br/>(Flash LLM)"]
-        VS["Vector Search<br/>(topics + facts)"]
+        EQ["Enrichment Query<br/>(Flash + media)"]
+        VS["Vector Search<br/>→ Top-50 candidates"]
+        RR["Flash Reranker<br/>(agentic filtering)"]
         CTX["Сборка контекста"]
     end
 
@@ -61,7 +62,7 @@ flowchart TB
     GR --> FD
     FD --> VC & IMG & PDF
     VC & IMG & PDF --> EQ
-    EQ --> VS --> CTX
+    EQ --> VS --> RR --> CTX
     CTX --> TL --> TC
     TC -->|Да| TE --> TL
     TC -->|Нет| FR
@@ -173,14 +174,22 @@ flowchart LR
 1. **Query Enrichment** (опционально)
    - Flash LLM переписывает запрос для лучшего поиска
    - Использует последние 5 сообщений для контекста
+   - **Multimodal (v0.4.5):** медиа из сообщения (images, audio) передаётся в enricher
 
 2. **Vector Search**
    - Создаём embedding запроса
    - Cosine similarity по topics и facts
-   - Top-N результатов (дедупликация с историей)
+   - Top-50 кандидатов для reranker
 
-3. **Context Assembly**
-   - Topics → загружаем связанные сообщения
+3. **Flash Reranker** (v0.4.1+)
+   - Agentic фильтрация: Flash видит 50 summaries (~3K токенов)
+   - Tool call `get_topics_content([ids])` для загрузки содержимого
+   - Финальный выбор: до 15 топиков с reason и excerpt
+   - **Multimodal (v0.4.5):** медиа передаётся в reranker
+   - Fallback на vector top-5 при timeout/error
+
+4. **Context Assembly**
+   - Topics → загружаем связанные сообщения (или excerpt для больших)
    - Facts → добавляем релевантные факты
 
 ### 5. LLM Generation (Tool Loop)

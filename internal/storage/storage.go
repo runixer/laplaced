@@ -161,6 +161,7 @@ type RerankerLog struct {
 	CandidatesJSON       string  // JSON array of candidates with scores
 	ToolCallsJSON        string  // JSON array of tool call iterations
 	SelectedIDsJSON      string  // JSON array of selected topic IDs
+	ReasoningJSON        string  // JSON array of reasoning entries per iteration
 	FallbackReason       *string // nil if no fallback, otherwise reason
 	DurationEnrichmentMs int
 	DurationVectorMs     int
@@ -539,6 +540,7 @@ func (s *SQLiteStore) migrate() error {
 			candidates_json TEXT,
 			tool_calls_json TEXT,
 			selected_ids_json TEXT,
+			reasoning_json TEXT,
 			fallback_reason TEXT,
 			duration_enrichment_ms INTEGER,
 			duration_vector_ms INTEGER,
@@ -551,6 +553,15 @@ func (s *SQLiteStore) migrate() error {
 	`
 	if _, err := s.db.Exec(rerankerLogsQuery); err != nil {
 		return fmt.Errorf("failed to create reranker_logs table: %w", err)
+	}
+
+	// Migration: add reasoning_json column if missing
+	var reasoningColExists int
+	err = s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('reranker_logs') WHERE name='reasoning_json'`).Scan(&reasoningColExists)
+	if err == nil && reasoningColExists == 0 {
+		if _, err := s.db.Exec(`ALTER TABLE reranker_logs ADD COLUMN reasoning_json TEXT`); err != nil {
+			s.logger.Warn("failed to add reasoning_json column", "error", err)
+		}
 	}
 
 	return nil

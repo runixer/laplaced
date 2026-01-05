@@ -62,10 +62,12 @@ rag:
     enabled: true
     model: "google/gemini-3-flash-preview"
     candidates: 50        # Summaries to show Flash
-    max_topics: 5         # Max topics in final selection
+    max_topics: 15        # Max topics in final selection (Flash handles excerpts)
     max_people: 10        # Max people in final selection (v0.5)
-    timeout: "10s"        # Timeout for entire reranker flow
+    timeout: "60s"        # Timeout for entire reranker flow
+    turn_timeout: "30s"   # Timeout per LLM turn
     max_tool_calls: 3     # Max tool calls before stopping
+    thinking_level: "medium"  # Reasoning effort: minimal/low/medium/high
 
 # Internet Search Configuration
 internet_search:

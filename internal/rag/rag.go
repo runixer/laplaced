@@ -347,7 +347,8 @@ type SearchResult struct {
 type RetrievalOptions struct {
 	History        []storage.Message
 	SkipEnrichment bool
-	Source         string // "auto" for buildContext, "tool" for search_history
+	Source         string        // "auto" for buildContext, "tool" for search_history
+	MediaParts     []interface{} // Multimodal content (images, audio) for enricher and reranker
 }
 
 func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts *RetrievalOptions) ([]TopicSearchResult, *RetrievalDebugInfo, error) {
@@ -373,7 +374,7 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		var prompt string
 		var tokens int
 		enrichStart := time.Now()
-		enrichedQuery, prompt, tokens, err = s.enrichQuery(ctx, userID, query, opts.History)
+		enrichedQuery, prompt, tokens, err = s.enrichQuery(ctx, userID, query, opts.History, opts.MediaParts)
 		RecordRAGEnrichment(userID, time.Since(enrichStart).Seconds())
 		debugInfo.EnrichmentPrompt = prompt
 		debugInfo.EnrichmentTokens = tokens
@@ -510,7 +511,7 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		userProfile := s.formatUserProfileForReranker(ctx, userID)
 		// Format current session messages for reranker
 		currentMessages := s.formatSessionMessages(opts.History)
-		result, err := s.rerankCandidates(ctx, userID, candidates, contextualizedQuery, query, currentMessages, userProfile)
+		result, err := s.rerankCandidates(ctx, userID, candidates, contextualizedQuery, query, currentMessages, userProfile, opts.MediaParts)
 		if err != nil {
 			s.logger.Warn("reranker failed, falling back to vector search", "error", err)
 			RecordRerankerFallback(userID, "error")
@@ -1672,7 +1673,7 @@ func (s *Service) extractTopics(ctx context.Context, userID int64, chunk []stora
 	return result.Topics, usage, nil
 }
 
-func (s *Service) enrichQuery(ctx context.Context, userID int64, query string, history []storage.Message) (string, string, int, error) {
+func (s *Service) enrichQuery(ctx context.Context, userID int64, query string, history []storage.Message, mediaParts []interface{}) (string, string, int, error) {
 	model := s.cfg.RAG.QueryModel
 	if model == "" {
 		return query, "", 0, nil
@@ -1695,10 +1696,29 @@ func (s *Service) enrichQuery(ctx context.Context, userID int64, query string, h
 
 	prompt := fmt.Sprintf(promptTmpl, time.Now().Format("2006-01-02"), historyStr.String(), query)
 
+	// Build message content - multimodal if mediaParts provided
+	var messageContent interface{}
+	if len(mediaParts) > 0 {
+		// Add media description instruction for multimodal queries
+		mediaInstruction := s.translator.Get(s.cfg.Bot.Language, "rag.enrichment_media_instruction")
+		if mediaInstruction == "" {
+			mediaInstruction = "If the user's message contains an image or audio, include relevant visual/audio details in your search query (objects, people, places, spoken content)."
+		}
+
+		// Build multimodal content: text prompt + media parts
+		parts := []interface{}{
+			openrouter.TextPart{Type: "text", Text: prompt + "\n\n" + mediaInstruction},
+		}
+		parts = append(parts, mediaParts...)
+		messageContent = parts
+	} else {
+		messageContent = prompt
+	}
+
 	resp, err := s.client.CreateChatCompletion(ctx, openrouter.ChatCompletionRequest{
 		Model: model,
 		Messages: []openrouter.Message{
-			{Role: "user", Content: prompt},
+			{Role: "user", Content: messageContent},
 		},
 		UserID: userID,
 	})

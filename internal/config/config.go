@@ -80,14 +80,17 @@ type RAGConfig struct {
 
 // RerankerConfig configures the agentic LLM reranker for RAG candidates (v0.4)
 type RerankerConfig struct {
-	Enabled             bool   `yaml:"enabled"`
-	Model               string `yaml:"model"`
-	Candidates          int    `yaml:"candidates"`                                                              // summaries to show Flash
-	MaxTopics           int    `yaml:"max_topics"`                                                              // max topics in final selection
-	MaxPeople           int    `yaml:"max_people"`                                                              // max people in final selection (v0.5)
-	Timeout             string `yaml:"timeout"`                                                                 // timeout for entire reranker flow
-	MaxToolCalls        int    `yaml:"max_tool_calls"`                                                          // max tool calls before stopping
+	Enabled             bool   `yaml:"enabled" env:"LAPLACED_RAG_RERANKER_ENABLED"`
+	Model               string `yaml:"model" env:"LAPLACED_RAG_RERANKER_MODEL"`
+	Candidates          int    `yaml:"candidates" env:"LAPLACED_RAG_RERANKER_CANDIDATES"`                       // summaries to show Flash
+	MaxTopics           int    `yaml:"max_topics" env:"LAPLACED_RAG_RERANKER_MAX_TOPICS"`                       // max topics in final selection
+	MaxPeople           int    `yaml:"max_people" env:"LAPLACED_RAG_RERANKER_MAX_PEOPLE"`                       // max people in final selection (v0.5)
+	Timeout             string `yaml:"timeout" env:"LAPLACED_RAG_RERANKER_TIMEOUT"`                             // timeout for entire reranker flow
+	TurnTimeout         string `yaml:"turn_timeout" env:"LAPLACED_RAG_RERANKER_TURN_TIMEOUT"`                   // timeout per LLM turn (default: Timeout / (MaxToolCalls+1))
+	MaxToolCalls        int    `yaml:"max_tool_calls" env:"LAPLACED_RAG_RERANKER_MAX_TOOL_CALLS"`               // max tool calls before stopping
+	ThinkingLevel       string `yaml:"thinking_level" env:"LAPLACED_RAG_RERANKER_THINKING_LEVEL"`               // reasoning effort: "minimal", "low", "medium", "high" (default: "medium")
 	LargeTopicThreshold int    `yaml:"large_topic_threshold" env:"LAPLACED_RAG_RERANKER_LARGE_TOPIC_THRESHOLD"` // chars threshold for excerpt request (default 25000)
+	TargetContextChars  int    `yaml:"target_context_chars" env:"LAPLACED_RAG_RERANKER_TARGET_CONTEXT_CHARS"`   // target total chars for all selected topics (default 25000)
 }
 
 type Config struct {
@@ -266,6 +269,18 @@ func (c *Config) Validate() error {
 			if c.RAG.Reranker.Timeout != "" {
 				if _, err := time.ParseDuration(c.RAG.Reranker.Timeout); err != nil {
 					errs = append(errs, fmt.Errorf("rag.reranker.timeout: invalid duration format %q: %w", c.RAG.Reranker.Timeout, err))
+				}
+			}
+			if c.RAG.Reranker.TurnTimeout != "" {
+				if _, err := time.ParseDuration(c.RAG.Reranker.TurnTimeout); err != nil {
+					errs = append(errs, fmt.Errorf("rag.reranker.turn_timeout: invalid duration format %q: %w", c.RAG.Reranker.TurnTimeout, err))
+				}
+			}
+			// Validate thinking_level if set
+			if c.RAG.Reranker.ThinkingLevel != "" {
+				validLevels := map[string]bool{"off": true, "minimal": true, "low": true, "medium": true, "high": true}
+				if !validLevels[c.RAG.Reranker.ThinkingLevel] {
+					errs = append(errs, fmt.Errorf("rag.reranker.thinking_level: must be one of 'off', 'minimal', 'low', 'medium', 'high', got %q", c.RAG.Reranker.ThinkingLevel))
 				}
 			}
 		}

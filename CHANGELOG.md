@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Next version: v0.5 (Social) — People Table, Social Graph_
 
+## [0.4.5] - 2026-01-05
+
+**Multimodal RAG and prompt quality improvements.**
+
+### Added
+- **Multimodal RAG** — images and audio from user messages are now passed to enricher and reranker for better context understanding
+- **Reasoning display** — Debug UI now shows Flash's internal thinking process for each reranker iteration
+- **Target context budget** — configurable `target_context_chars` parameter guides Flash on output size
+
+### Changed
+- Reranker prompts completely restructured with XML sections, few-shot examples, and anti-laziness rules
+- Increased `max_topics` default from 5 to 15 (Flash handles excerpts for large topics)
+- Increased `timeout` default from 10s to 60s for more thorough analysis
+- Added `turn_timeout` (30s default) for per-LLM-call timeout control
+- Changed `thinking_level` default to "medium" for balanced speed/quality
+- Prompts depersonalized for public release (example names changed)
+
+### Fixed
+- Soft validation for excerpts (warns on too short/long excerpts without blocking)
+- Tool call payload monitoring (warns if >15 topics or >200K chars requested)
+
 ## [0.4.3] - 2026-01-05
 
 **Reranker protocol enforcement and excerpt quality improvements.**
@@ -248,7 +269,8 @@ _Next version: v0.5 (Social) — People Table, Social Graph_
 - Multi-language support (en, ru)
 - Docker deployment
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.4.5...HEAD
+[0.4.5]: https://github.com/runixer/laplaced/compare/v0.4.3...v0.4.5
 [0.4.3]: https://github.com/runixer/laplaced/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/runixer/laplaced/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/runixer/laplaced/compare/v0.3.9...v0.4.1

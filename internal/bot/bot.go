@@ -567,10 +567,21 @@ func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageCont
 		}
 
 		var err error
+		// Extract media parts (images, audio) for multimodal RAG
+		// ImagePart = photos/images, FilePart = voice/audio/documents
+		var mediaParts []interface{}
+		for _, part := range currentUserMessageParts {
+			switch part.(type) {
+			case openrouter.ImagePart, openrouter.FilePart:
+				mediaParts = append(mediaParts, part)
+			}
+		}
+
 		opts := &rag.RetrievalOptions{
 			History:        enrichmentContext,
 			SkipEnrichment: false,
 			Source:         "auto",
+			MediaParts:     mediaParts,
 		}
 		retrievedResults, debugInfo, err = b.ragService.Retrieve(ctx, userID, currentMessageRaw, opts)
 		if err != nil {

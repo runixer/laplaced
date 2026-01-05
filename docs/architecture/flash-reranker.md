@@ -181,6 +181,40 @@ ResponseFormat: openrouter.ResponseFormat{Type: "json_object"},
 
 **Backward compatibility:** Парсер поддерживает старый формат `[42, 18, 5]`
 
+## Multimodal RAG (v0.4.5)
+
+Flash Reranker поддерживает multimodal input — изображения и аудио из сообщения пользователя передаются в enricher и reranker.
+
+**Проблема:** Без multimodal RAG не понимает содержимое голосовых/картинок:
+```
+User: [voice 30s] + "о чём тут речь?"
+      ↓
+RAG ищет "🎤 о чём тут речь?" → бесполезно для поиска
+```
+
+**Решение:** Передаём медиа в RAG pipeline:
+```
+User: [voice 30s] + "о чём тут речь?"
+      ↓
+Enricher ВИДИТ аудио → "Маша рассказывает о даче, собаке"
+      ↓
+Vector search: "дача, собака" → релевантные топики
+      ↓
+Reranker ВИДИТ аудио + 50 саммари → точная фильтрация
+```
+
+**Реализация:**
+- `RetrievalOptions.MediaParts` — slice с `ImagePart`, `AudioPart`, `FilePart`
+- `enrichQuery()` строит multimodal message при наличии медиа
+- `rerankCandidates()` включает медиа в user prompt
+
+**Cost impact:**
+| Этап | Audio 30s (~2K tok) | Cost |
+|------|---------------------|------|
+| Enricher | +2K tokens | $0.002 |
+| Reranker | +2K tokens | $0.002 |
+| **Extra cost per message** | ~4K tokens | **~$0.004** |
+
 ## Fallback Strategy
 
 **Принцип:** Если Flash успел сделать tool call — его выбор (requestedIDs) ценнее чем голый косинус.
@@ -249,13 +283,17 @@ Flash обычно ставит более релевантные первыми
 
 ```yaml
 rag:
-  reranker_enabled: true
-  reranker_model: "google/gemini-3-flash-preview"
-  reranker_candidates: 50       # сколько summaries показать
-  reranker_max_topics: 5        # лимит топиков в выборе
-  reranker_max_people: 10       # лимит людей (v0.5)
-  reranker_timeout: "10s"       # timeout на весь reranker flow
-  reranker_max_tool_calls: 3    # максимум tool calls
+  reranker:
+    enabled: true
+    model: "google/gemini-3-flash-preview"
+    candidates: 50              # сколько summaries показать
+    max_topics: 15              # лимит топиков в выборе (v0.4.5: было 5)
+    max_people: 10              # лимит людей (v0.5)
+    timeout: "60s"              # timeout на весь reranker flow (v0.4.5: было 10s)
+    turn_timeout: "30s"         # timeout на каждый LLM вызов (v0.4.5)
+    max_tool_calls: 3           # максимум tool calls
+    thinking_level: "medium"    # reasoning effort: minimal/low/medium/high (v0.4.5)
+    target_context_chars: 25000 # целевой бюджет контекста в символах (v0.4.5)
 ```
 
 ## Ожидаемый эффект

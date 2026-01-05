@@ -11,6 +11,19 @@ import (
 	"github.com/runixer/laplaced/internal/storage"
 )
 
+// Tool call payload thresholds for monitoring (soft limits - warning only)
+const (
+	warnToolCallTopics = 15      // Warn if more than 15 topics requested
+	warnToolCallChars  = 200_000 // Warn if payload exceeds ~200K chars (~50K tokens)
+)
+
+// Excerpt validation thresholds (soft limits - warning only)
+const (
+	warnExcerptMinChars = 100    // Warn if excerpt is too short
+	warnExcerptMaxRatio = 0.5    // Warn if excerpt is >50% of topic (should be extracting, not copying)
+	largeTopicThreshold = 25_000 // Only validate excerpts for topics >25K chars
+)
+
 // TopicSelection represents a selected topic with explanation
 type TopicSelection struct {
 	ID      int64   `json:"id"`
@@ -44,7 +57,14 @@ type rerankerCandidate struct {
 
 // rerankerState tracks progress during agentic reranking
 type rerankerState struct {
-	requestedIDs []int64 // IDs requested via tool calls (for fallback)
+	requestedIDs   []int64          // IDs requested via tool calls (for fallback)
+	loadedContents map[int64]string // Content of loaded topics (for excerpt validation)
+}
+
+// RerankerReasoningEntry holds reasoning text for one iteration
+type RerankerReasoningEntry struct {
+	Iteration int    `json:"iteration"`
+	Text      string `json:"text"`
 }
 
 // rerankerTrace collects debug data for the reranker UI
@@ -53,6 +73,7 @@ type rerankerTrace struct {
 	toolCalls      []storage.RerankerToolCall
 	selectedTopics []TopicSelection
 	fallbackReason string
+	reasoning      []RerankerReasoningEntry
 }
 
 // rerankerResponse is the expected JSON response from Flash
@@ -74,6 +95,7 @@ func (s *Service) rerankCandidates(
 	originalQuery string,
 	currentMessages string,
 	userProfile string,
+	mediaParts []interface{}, // Multimodal content (images, audio) from current message
 ) (*RerankerResult, error) {
 	cfg := s.cfg.RAG.Reranker
 	if !cfg.Enabled || len(candidates) == 0 {
@@ -81,16 +103,37 @@ func (s *Service) rerankCandidates(
 		return s.fallbackToVectorTop(candidates, cfg.MaxTopics), nil
 	}
 
-	// Parse timeout
+	// Parse overall timeout
 	timeout, err := time.ParseDuration(cfg.Timeout)
 	if err != nil {
-		timeout = 10 * time.Second
+		timeout = 20 * time.Second
 	}
+
+	// Parse per-turn timeout (default: overall timeout / (max_tool_calls + 1))
+	turnTimeout, err := time.ParseDuration(cfg.TurnTimeout)
+	if err != nil || turnTimeout <= 0 {
+		turnTimeout = timeout / time.Duration(cfg.MaxToolCalls+1)
+	}
+
+	// Determine thinking level (default: "low")
+	thinkingLevel := cfg.ThinkingLevel
+	if thinkingLevel == "" {
+		thinkingLevel = "low"
+	}
+
+	// Target context budget (default: 25000 chars)
+	targetContextChars := cfg.TargetContextChars
+	if targetContextChars <= 0 {
+		targetContextChars = 25000
+	}
+	budgetK := targetContextChars / 1000
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	state := &rerankerState{}
+	state := &rerankerState{
+		loadedContents: make(map[int64]string),
+	}
 	trace := &rerankerTrace{}
 	startTime := time.Now()
 	var totalCost float64 // Accumulate cost across all LLM calls
@@ -110,9 +153,17 @@ func (s *Service) rerankCandidates(
 
 	// Build initial prompt
 	lang := s.cfg.Bot.Language
+	selectCandidatesMax := cfg.Candidates / 2
+	if selectCandidatesMax < cfg.MaxTopics*2 {
+		selectCandidatesMax = cfg.MaxTopics * 2
+	}
 	systemPrompt := fmt.Sprintf(
 		s.translator.Get(lang, "rag.reranker_system_prompt"),
-		cfg.MaxTopics,
+		cfg.MaxTopics,                      // %d in constraints (max topics)
+		budgetK,                            // %d in constraints (budget)
+		cfg.MaxTopics,                      // %d in algorithm (don't stop at first N)
+		cfg.MaxTopics, selectCandidatesMax, // %d-%d in algorithm (select N-M candidates)
+		budgetK, // %d in excerpt_policy (budget)
 	)
 
 	candidatesList := s.formatCandidatesForReranker(candidates)
@@ -148,17 +199,29 @@ func (s *Service) rerankCandidates(
 		},
 	}
 
+	// Build user message content - multimodal if mediaParts provided
+	var userMessageContent interface{}
+	if len(mediaParts) > 0 {
+		// Include media in user message so Flash can see what user is asking about
+		parts := []interface{}{
+			openrouter.TextPart{Type: "text", Text: userPrompt},
+		}
+		parts = append(parts, mediaParts...)
+		userMessageContent = parts
+	} else {
+		userMessageContent = userPrompt
+	}
+
 	messages := []openrouter.Message{
 		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userPrompt},
+		{Role: "user", Content: userMessageContent},
 	}
 
 	// Agentic loop
 	toolCallCount := 0
 
 	for toolCallCount < cfg.MaxToolCalls {
-		// Force tool call on first iteration to enforce protocol
-		// After that, let the model decide (auto)
+		// Force tool call on first iteration to ensure protocol compliance
 		var toolChoice any
 		var responseFormat interface{}
 
@@ -176,20 +239,46 @@ func (s *Service) rerankCandidates(
 			responseFormat = openrouter.ResponseFormat{Type: "json_object"}
 		}
 
-		resp, err := s.client.CreateChatCompletion(ctx, openrouter.ChatCompletionRequest{
+		// Per-turn timeout to prevent one slow turn from eating entire budget
+		turnCtx, turnCancel := context.WithTimeout(ctx, turnTimeout)
+
+		// Configure reasoning (nil disables thinking entirely)
+		// OpenRouter requires "enabled": true for Gemini Flash to return reasoning_details
+		var reasoning *openrouter.ReasoningConfig
+		if thinkingLevel != "off" && thinkingLevel != "" {
+			reasoning = &openrouter.ReasoningConfig{
+				Enabled: true,
+				Effort:  thinkingLevel,
+			}
+		}
+
+		resp, err := s.client.CreateChatCompletion(turnCtx, openrouter.ChatCompletionRequest{
 			Model:          cfg.Model,
 			Messages:       messages,
 			Tools:          tools,
 			ToolChoice:     toolChoice,
 			Plugins:        []openrouter.Plugin{{ID: "response-healing"}},
 			ResponseFormat: responseFormat,
-			Reasoning:      &openrouter.ReasoningConfig{Effort: "low"}, // Enable thinking for better tool use
+			Reasoning:      reasoning,
 			UserID:         userID,
 		})
+		turnCancel() // Always cancel to free resources
 
 		if err != nil {
-			s.logger.Warn("reranker LLM call failed", "error", err, "tool_calls", toolCallCount)
-			trace.fallbackReason = "llm_error"
+			// Distinguish between turn timeout and other errors
+			fallbackReason := "llm_error"
+			if ctx.Err() == context.DeadlineExceeded {
+				fallbackReason = "timeout"
+			} else if turnCtx.Err() == context.DeadlineExceeded {
+				fallbackReason = "turn_timeout"
+			}
+			s.logger.Warn("reranker LLM call failed",
+				"error", err,
+				"tool_calls", toolCallCount,
+				"reason", fallbackReason,
+			)
+			trace.fallbackReason = fallbackReason
+			RecordRerankerFallback(userID, fallbackReason)
 			result := s.fallbackFromState(state, candidates, cfg.MaxTopics)
 			trace.selectedTopics = result.Topics
 			s.saveRerankerTrace(userID, originalQuery, contextualizedQuery, trace, startTime)
@@ -214,6 +303,22 @@ func (s *Service) rerankCandidates(
 
 		choice := resp.Choices[0]
 
+		// Log and collect reasoning details if present
+		if choice.Message.ReasoningDetails != nil {
+			reasoningText := extractReasoningText(choice.Message.ReasoningDetails)
+			s.logger.Debug("reranker reasoning",
+				"user_id", userID,
+				"iteration", toolCallCount+1,
+				"reasoning", openrouter.FilterReasoningForLog(choice.Message.ReasoningDetails),
+			)
+			if reasoningText != "" {
+				trace.reasoning = append(trace.reasoning, RerankerReasoningEntry{
+					Iteration: toolCallCount + 1,
+					Text:      reasoningText,
+				})
+			}
+		}
+
 		// Check for tool calls
 		if len(choice.Message.ToolCalls) > 0 {
 			toolCallCount++
@@ -230,8 +335,19 @@ func (s *Service) rerankCandidates(
 						continue
 					}
 
-					// Track requested IDs for fallback
-					state.requestedIDs = append(state.requestedIDs, ids...)
+					// Track requested IDs for fallback (deduplicated)
+					for _, id := range ids {
+						isDuplicate := false
+						for _, existing := range state.requestedIDs {
+							if existing == id {
+								isDuplicate = true
+								break
+							}
+						}
+						if !isDuplicate {
+							state.requestedIDs = append(state.requestedIDs, id)
+						}
+					}
 
 					// Track for trace with topic summaries
 					toolCall.TopicIDs = append(toolCall.TopicIDs, ids...)
@@ -245,7 +361,7 @@ func (s *Service) rerankCandidates(
 					}
 
 					// Load topic content and update size in trace
-					content := s.loadTopicsContentWithSize(ctx, userID, ids, candidateMap, trace)
+					content := s.loadTopicsContentWithSize(ctx, userID, ids, candidateMap, trace, state)
 					toolResults = append(toolResults, openrouter.Message{
 						Role:       "tool",
 						Content:    content,
@@ -256,11 +372,12 @@ func (s *Service) rerankCandidates(
 
 			trace.toolCalls = append(trace.toolCalls, toolCall)
 
-			// Add assistant message with tool calls
+			// Add assistant message with tool calls (include reasoning_details for continuity)
 			messages = append(messages, openrouter.Message{
-				Role:      "assistant",
-				Content:   choice.Message.Content,
-				ToolCalls: choice.Message.ToolCalls,
+				Role:             "assistant",
+				Content:          choice.Message.Content,
+				ToolCalls:        choice.Message.ToolCalls,
+				ReasoningDetails: choice.Message.ReasoningDetails,
 			})
 
 			// Add tool results
@@ -294,6 +411,9 @@ func (s *Service) rerankCandidates(
 			s.recordRerankerMetrics(userID, startTime, toolCallCount, len(fallbackResult.Topics), totalCost)
 			return fallbackResult, nil
 		}
+
+		// Validate excerpts for large topics (warning only)
+		s.validateExcerpts(userID, result, candidateMap, state.loadedContents)
 
 		// Record metrics and log success
 		s.recordRerankerMetrics(userID, startTime, toolCallCount, len(result.Topics), totalCost)
@@ -444,6 +564,125 @@ func (s *Service) parseTopicArray(data json.RawMessage) []TopicSelection {
 	return nil
 }
 
+// validateExcerpts logs warnings for invalid excerpts (soft validation - monitoring only)
+func (s *Service) validateExcerpts(userID int64, result *RerankerResult, candidateMap map[int64]rerankerCandidate, loadedContents map[int64]string) {
+	for _, topic := range result.Topics {
+		candidate, ok := candidateMap[topic.ID]
+		if !ok {
+			continue
+		}
+
+		topicSize := candidate.SizeChars
+
+		// Only validate excerpts for large topics (>25K chars)
+		if topicSize < largeTopicThreshold {
+			continue
+		}
+
+		// Large topic without excerpt — should provide one
+		if topic.Excerpt == nil || *topic.Excerpt == "" {
+			s.logger.Warn("large topic without excerpt",
+				"user_id", userID,
+				"topic_id", topic.ID,
+				"topic_size_chars", topicSize,
+				"threshold", largeTopicThreshold,
+			)
+			continue
+		}
+
+		excerptLen := len(*topic.Excerpt)
+
+		// Excerpt too short
+		if excerptLen < warnExcerptMinChars {
+			s.logger.Warn("excerpt too short",
+				"user_id", userID,
+				"topic_id", topic.ID,
+				"excerpt_chars", excerptLen,
+				"min_chars", warnExcerptMinChars,
+			)
+		}
+
+		// Excerpt too long (just copying instead of extracting)
+		ratio := float64(excerptLen) / float64(topicSize)
+		if ratio > warnExcerptMaxRatio {
+			s.logger.Warn("excerpt too long",
+				"user_id", userID,
+				"topic_id", topic.ID,
+				"excerpt_chars", excerptLen,
+				"topic_size_chars", topicSize,
+				"ratio_percent", int(ratio*100),
+				"max_ratio_percent", int(warnExcerptMaxRatio*100),
+			)
+		}
+
+		// Validate excerpt content is actually from the topic (not hallucinated)
+		if loadedContents != nil {
+			topicContent, hasContent := loadedContents[topic.ID]
+			if hasContent && !excerptFoundInContent(*topic.Excerpt, topicContent) {
+				s.logger.Warn("excerpt not found in topic content (possible hallucination)",
+					"user_id", userID,
+					"topic_id", topic.ID,
+					"excerpt_preview", truncateForLog(*topic.Excerpt, 200),
+				)
+			}
+		}
+	}
+}
+
+// excerptFoundInContent checks if excerpt text is actually present in topic content
+// Uses normalized comparison to handle minor formatting differences
+func excerptFoundInContent(excerpt, content string) bool {
+	// Normalize both strings: collapse whitespace, lowercase
+	normalizedExcerpt := normalizeForComparison(excerpt)
+	normalizedContent := normalizeForComparison(content)
+
+	// Split by various ellipsis patterns that Flash might use
+	// Replace [...] and ... with a common separator
+	normalizedExcerpt = strings.ReplaceAll(normalizedExcerpt, "[...]", "|||")
+	normalizedExcerpt = strings.ReplaceAll(normalizedExcerpt, "...", "|||")
+	parts := strings.Split(normalizedExcerpt, "|||")
+
+	// Clean up parts - remove leading/trailing ellipsis artifacts
+	var cleanParts []string
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		part = strings.Trim(part, ".")
+		part = strings.TrimSpace(part)
+		if len(part) >= 20 { // Only meaningful parts
+			cleanParts = append(cleanParts, part)
+		}
+	}
+
+	if len(cleanParts) == 0 {
+		// Very short excerpt, try direct substring match
+		// Remove all ellipsis for direct comparison
+		cleanExcerpt := strings.ReplaceAll(normalizedExcerpt, "|||", " ")
+		cleanExcerpt = strings.TrimSpace(cleanExcerpt)
+		if len(cleanExcerpt) < 10 {
+			return true // Too short to validate meaningfully
+		}
+		return strings.Contains(normalizedContent, cleanExcerpt)
+	}
+
+	// At least one meaningful part should be found in content
+	for _, part := range cleanParts {
+		if strings.Contains(normalizedContent, part) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// normalizeForComparison normalizes text for fuzzy comparison
+func normalizeForComparison(s string) string {
+	// Lowercase
+	s = strings.ToLower(s)
+	// Collapse multiple whitespace to single space
+	fields := strings.Fields(s)
+	return strings.Join(fields, " ")
+}
+
 // fallbackToVectorTop returns top-N candidates by vector score
 func (s *Service) fallbackToVectorTop(candidates []rerankerCandidate, maxTopics int) *RerankerResult {
 	if maxTopics <= 0 {
@@ -493,8 +732,11 @@ func (s *Service) loadTopicsContentWithSize(
 	ids []int64,
 	candidateMap map[int64]rerankerCandidate,
 	trace *rerankerTrace,
+	state *rerankerState,
 ) string {
 	var sb strings.Builder
+	var totalChars int
+	loadedCount := 0
 
 	for _, id := range ids {
 		candidate, ok := candidateMap[id]
@@ -517,6 +759,8 @@ func (s *Service) loadTopicsContentWithSize(
 		for _, m := range msgs {
 			charCount += len(m.Content)
 		}
+		totalChars += charCount
+		loadedCount++
 
 		// Update trace with size info
 		for i := range trace.candidates {
@@ -535,7 +779,8 @@ func (s *Service) loadTopicsContentWithSize(
 		}
 		fmt.Fprintf(&sb, "Theme: %s\n\n", topic.Summary)
 
-		// Format messages
+		// Format messages and save raw content for excerpt validation
+		var topicContent strings.Builder
 		for _, m := range msgs {
 			timestamp := m.CreatedAt.Format("2006-01-02 15:04:05")
 			role := m.Role
@@ -544,9 +789,28 @@ func (s *Service) loadTopicsContentWithSize(
 			} else if role == "user" {
 				role = "User"
 			}
-			fmt.Fprintf(&sb, "[%s (%s)]: %s\n", role, timestamp, m.Content)
+			line := fmt.Sprintf("[%s (%s)]: %s\n", role, timestamp, m.Content)
+			sb.WriteString(line)
+			topicContent.WriteString(line)
 		}
 		sb.WriteString("\n")
+
+		// Save content for excerpt validation
+		if state != nil {
+			state.loadedContents[id] = topicContent.String()
+		}
+	}
+
+	// Warn if payload is large (soft limit for monitoring)
+	if loadedCount > warnToolCallTopics || totalChars > warnToolCallChars {
+		s.logger.Warn("large tool call payload",
+			"user_id", userID,
+			"topics_requested", len(ids),
+			"topics_loaded", loadedCount,
+			"total_chars", totalChars,
+			"warn_topics_threshold", warnToolCallTopics,
+			"warn_chars_threshold", warnToolCallChars,
+		)
 	}
 
 	return sb.String()
@@ -617,6 +881,13 @@ func (s *Service) saveRerankerTrace(
 		selectedIDsJSON = []byte("[]")
 	}
 
+	// Serialize reasoning entries
+	reasoningJSON, err := json.Marshal(trace.reasoning)
+	if err != nil {
+		s.logger.Warn("failed to marshal reranker reasoning", "error", err)
+		reasoningJSON = []byte("[]")
+	}
+
 	log := storage.RerankerLog{
 		UserID:          userID,
 		OriginalQuery:   originalQuery,
@@ -624,6 +895,7 @@ func (s *Service) saveRerankerTrace(
 		CandidatesJSON:  string(candidatesJSON),
 		ToolCallsJSON:   string(toolCallsJSON),
 		SelectedIDsJSON: string(selectedIDsJSON),
+		ReasoningJSON:   string(reasoningJSON),
 		DurationTotalMs: int(time.Since(startTime).Milliseconds()),
 	}
 
@@ -670,4 +942,37 @@ func truncateForLog(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// extractReasoningText extracts human-readable reasoning text from reasoning_details.
+// reasoning_details is typically []interface{} containing maps with "type" and "text"/"data" fields.
+// Only "reasoning.text" type entries contain readable text; other types have encrypted data.
+func extractReasoningText(details interface{}) string {
+	if details == nil {
+		return ""
+	}
+
+	arr, ok := details.([]interface{})
+	if !ok {
+		return ""
+	}
+
+	var sb strings.Builder
+	for _, item := range arr {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Only extract "reasoning.text" type entries
+		if t, ok := m["type"].(string); ok && t == "reasoning.text" {
+			if text, ok := m["text"].(string); ok && text != "" {
+				if sb.Len() > 0 {
+					sb.WriteString("\n")
+				}
+				sb.WriteString(text)
+			}
+		}
+	}
+	return sb.String()
 }

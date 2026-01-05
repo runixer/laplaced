@@ -8,6 +8,12 @@ import (
 	"github.com/runixer/laplaced/internal/storage"
 )
 
+// RerankerReasoningEntry holds reasoning text for one iteration (matches rag.RerankerReasoningEntry)
+type RerankerReasoningEntry struct {
+	Iteration int    `json:"iteration"`
+	Text      string `json:"text"`
+}
+
 // RerankerLogView is the parsed view of a RerankerLog for templates
 type RerankerLogView struct {
 	storage.RerankerLog
@@ -16,6 +22,7 @@ type RerankerLogView struct {
 	SelectedIDs    map[int64]bool // For quick lookup in template
 	SelectedIDList []int64
 	SelectedTopics []RerankerTopicSelectionView // Full topic selection with reason/excerpt
+	Reasoning      []RerankerReasoningEntry     // Reasoning entries per iteration
 }
 
 // RerankerTopicSelectionView represents a selected topic with reason and optional excerpt

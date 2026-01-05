@@ -30,10 +30,10 @@ type Client interface {
 	CreateEmbeddings(ctx context.Context, req EmbeddingRequest) (EmbeddingResponse, error)
 }
 
-// filterReasoningForLog filters out encrypted reasoning entries from reasoning_details.
+// FilterReasoningForLog filters out encrypted reasoning entries from reasoning_details.
 // Keeps only "reasoning.text" entries which are human-readable and useful for debugging.
 // This prevents massive base64 blobs from polluting logs.
-func filterReasoningForLog(details interface{}) interface{} {
+func FilterReasoningForLog(details interface{}) interface{} {
 	if details == nil {
 		return nil
 	}
@@ -182,7 +182,9 @@ type Plugin struct {
 // ReasoningConfig controls the model's internal reasoning behavior.
 // Supported effort levels: "minimal", "low", "medium", "high".
 type ReasoningConfig struct {
-	Effort string `json:"effort,omitempty"`
+	Enabled   bool   `json:"enabled,omitempty"`
+	Effort    string `json:"effort,omitempty"`
+	MaxTokens int    `json:"max_tokens,omitempty"`
 }
 
 type ChatCompletionRequest struct {
@@ -477,7 +479,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		c.logger.Debug("OpenRouter response content",
 			"content", msg.Content,
 			"tool_calls_count", len(msg.ToolCalls),
-			"reasoning_details", filterReasoningForLog(msg.ReasoningDetails),
+			"reasoning_details", FilterReasoningForLog(msg.ReasoningDetails),
 		)
 	}
 

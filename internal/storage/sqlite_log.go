@@ -120,14 +120,14 @@ func (s *SQLiteStore) AddRerankerLog(log RerankerLog) error {
 	query := `
 	INSERT INTO reranker_logs (
 		user_id, original_query, enriched_query, candidates_json,
-		tool_calls_json, selected_ids_json, fallback_reason,
+		tool_calls_json, selected_ids_json, reasoning_json, fallback_reason,
 		duration_enrichment_ms, duration_vector_ms, duration_reranker_ms,
 		duration_total_ms, created_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	_, err := s.db.Exec(query,
 		log.UserID, log.OriginalQuery, log.EnrichedQuery, log.CandidatesJSON,
-		log.ToolCallsJSON, log.SelectedIDsJSON, log.FallbackReason,
+		log.ToolCallsJSON, log.SelectedIDsJSON, log.ReasoningJSON, log.FallbackReason,
 		log.DurationEnrichmentMs, log.DurationVectorMs, log.DurationRerankerMs,
 		log.DurationTotalMs, log.CreatedAt.UTC().Format("2006-01-02 15:04:05.999"),
 	)
@@ -143,7 +143,7 @@ func (s *SQLiteStore) GetRerankerLogs(userID int64, limit int) ([]RerankerLog, e
 		query := `
 		SELECT
 			id, user_id, original_query, enriched_query, candidates_json,
-			tool_calls_json, selected_ids_json, fallback_reason,
+			tool_calls_json, selected_ids_json, COALESCE(reasoning_json, ''), fallback_reason,
 			duration_enrichment_ms, duration_vector_ms, duration_reranker_ms,
 			duration_total_ms, created_at
 		FROM reranker_logs
@@ -155,7 +155,7 @@ func (s *SQLiteStore) GetRerankerLogs(userID int64, limit int) ([]RerankerLog, e
 		query := `
 		SELECT
 			id, user_id, original_query, enriched_query, candidates_json,
-			tool_calls_json, selected_ids_json, fallback_reason,
+			tool_calls_json, selected_ids_json, COALESCE(reasoning_json, ''), fallback_reason,
 			duration_enrichment_ms, duration_vector_ms, duration_reranker_ms,
 			duration_total_ms, created_at
 		FROM reranker_logs
@@ -174,7 +174,7 @@ func (s *SQLiteStore) GetRerankerLogs(userID int64, limit int) ([]RerankerLog, e
 		var l RerankerLog
 		err := rows.Scan(
 			&l.ID, &l.UserID, &l.OriginalQuery, &l.EnrichedQuery, &l.CandidatesJSON,
-			&l.ToolCallsJSON, &l.SelectedIDsJSON, &l.FallbackReason,
+			&l.ToolCallsJSON, &l.SelectedIDsJSON, &l.ReasoningJSON, &l.FallbackReason,
 			&l.DurationEnrichmentMs, &l.DurationVectorMs, &l.DurationRerankerMs,
 			&l.DurationTotalMs, &l.CreatedAt,
 		)
