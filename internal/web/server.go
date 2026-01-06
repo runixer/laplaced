@@ -924,12 +924,7 @@ func (s *Server) sessionsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get chunk interval for countdown calculation
-	chunkInterval := 5 * time.Hour // default
-	if s.cfg.RAG.ChunkInterval != "" {
-		if parsed, err := time.ParseDuration(s.cfg.RAG.ChunkInterval); err == nil {
-			chunkInterval = parsed
-		}
-	}
+	chunkInterval := s.cfg.RAG.GetChunkDuration()
 
 	type sessionDisplayData struct {
 		UserID          int64

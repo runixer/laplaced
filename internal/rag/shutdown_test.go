@@ -39,7 +39,7 @@ func TestGracefulShutdown(t *testing.T) {
 	msgs := []storage.Message{
 		{ID: 1, CreatedAt: time.Now().Add(-10 * time.Hour), Content: "Msg 1"},
 		{ID: 2, CreatedAt: time.Now().Add(-9 * time.Hour), Content: "Msg 2"}, // Diff 1h
-		// ... we need a gap > 5h (default chunk duration)
+		// ... we need a gap > 1h (default chunk duration)
 		{ID: 3, CreatedAt: time.Now().Add(-1 * time.Hour), Content: "Msg 3"}, // Diff 8h -> Trigger chunk [1, 2]
 	}
 	mockStore.On("GetUnprocessedMessages", int64(123)).Return(msgs, nil)

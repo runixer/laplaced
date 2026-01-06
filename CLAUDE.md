@@ -101,7 +101,7 @@ UPDATE history SET topic_id = ? WHERE user_id = ? AND id >= ? AND id <= ?
 
 **Session / Active Session:**
 - Messages with `topic_id IS NULL` (not yet processed into topics)
-- Becomes a topic after inactivity timeout (default 5h, configurable via `rag.chunk_duration`)
+- Becomes a topic after inactivity timeout (default 1h, configurable via `rag.chunk_interval`)
 - NOT "user typing" or "waiting for response" — just unprocessed messages
 
 **Topic:**

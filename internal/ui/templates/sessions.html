@@ -149,7 +149,7 @@
             </button>
         </div>
         <p class="text-muted mt-2 mb-0">
-            View and manage active sessions. A session contains unprocessed messages that will be converted to topics after inactivity timeout (default: 5 hours).
+            View and manage active sessions. A session contains unprocessed messages that will be converted to topics after inactivity timeout (default: 1 hour).
         </p>
     </div>
 </div>
@@ -202,7 +202,7 @@
             <div class="card-body">
                 <h6 class="card-title">How Sessions Work</h6>
                 <p class="card-text small mb-0">
-                    Messages are collected into a session until there's a period of inactivity (default: 5 hours between messages).
+                    Messages are collected into a session until there's a period of inactivity (default: 1 hour between messages).
                     After the timeout, messages are grouped into topics and facts are extracted.
                     "Force Process" immediately triggers topic creation without waiting for the timeout.
                 </p>

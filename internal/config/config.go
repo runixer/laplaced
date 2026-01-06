@@ -79,6 +79,22 @@ type RAGConfig struct {
 	Reranker RerankerConfig `yaml:"reranker"` // v0.4
 }
 
+// DefaultChunkInterval is the default inactivity period before a session becomes a topic.
+const DefaultChunkInterval = 1 * time.Hour
+
+// GetChunkDuration returns the parsed chunk interval duration.
+// Falls back to DefaultChunkInterval if not configured or invalid.
+func (c *RAGConfig) GetChunkDuration() time.Duration {
+	if c.ChunkInterval == "" {
+		return DefaultChunkInterval
+	}
+	d, err := time.ParseDuration(c.ChunkInterval)
+	if err != nil {
+		return DefaultChunkInterval
+	}
+	return d
+}
+
 // RerankerConfig configures the agentic LLM reranker for RAG candidates (v0.4)
 type RerankerConfig struct {
 	Enabled             bool   `yaml:"enabled" env:"LAPLACED_RAG_RERANKER_ENABLED"`

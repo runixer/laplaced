@@ -634,14 +634,7 @@ func (s *Service) processAllUsers(ctx context.Context) {
 }
 
 func (s *Service) processTopicChunking(ctx context.Context, userID int64) {
-	chunkIntervalConfig := s.cfg.RAG.ChunkInterval
-	if chunkIntervalConfig == "" {
-		chunkIntervalConfig = "5h"
-	}
-	chunkDuration, err := time.ParseDuration(chunkIntervalConfig)
-	if err != nil {
-		chunkDuration = 5 * time.Hour
-	}
+	chunkDuration := s.cfg.RAG.GetChunkDuration()
 
 	// 1. Fetch unprocessed messages (topic_id IS NULL)
 	messages, err := s.msgRepo.GetUnprocessedMessages(userID)
