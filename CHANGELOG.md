@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Next version: v0.5 (Social) — People Table, Social Graph_
 
+## [0.4.6] - 2026-01-06
+
+**Reranker optimization and maintenance tools.**
+
 ### Added
 - **Recent topics in context** — system prompt now includes metadata about recent conversations (date, title, message count) for temporal awareness. Configurable via `rag.recent_topics_in_context`.
 - **Database Maintenance UI** — new inspector `/ui/debug/database` for database health checks, repair, and splitting large topics.
@@ -16,6 +20,7 @@ _Next version: v0.5 (Social) — People Table, Social Graph_
 - **Topic Splitter** — mechanism to break down oversized topics into smaller logical subtopics.
 - **Max topic size** — added `max_merged_size_chars` config to prevent creating "black hole" topics during consolidation.
 - **Maintenance Prompts** — new system prompts for "The Splitter" and updated prompts for "The Merger" (now aware of user profiles).
+- **Optional excerpts** — new `ignore_excerpts` config to always use full topic content instead of reranker-generated excerpts
 
 ### Changed
 - **Session timeout reduced** — default inactivity timeout for topic creation changed from 5h to 1h (`rag.chunk_interval`)
@@ -23,24 +28,15 @@ _Next version: v0.5 (Social) — People Table, Social Graph_
 - **Splitter keeps message pairs** — user question and assistant response are never split into separate topics
 - **Data Isolation Improvements** — refactored message retrieval in RAG service to prefer explicit topic-based lookups over raw ID ranges to reduce leakage risks.
 - **SQLite Reliability** — explicit WAL mode setting via PRAGMA statements to ensure compatibility with modernc driver.
+- **Excerpts disabled by default** — `ignore_excerpts: true` simplifies reranker prompt and improves reliability
+- **Minimal thinking** — `thinking_level` default changed from "medium" to "minimal" for faster responses
+- **Fewer topics** — `max_topics` default reduced from 15 to 5 for focused context
 
 ### Fixed
 - Fixed broken "Context" link on Facts page — now links to associated Topic
 - Improved contamination detection accuracy in dry-run mode
 - Fixed multi-user repair to correctly isolate messages by user
 - Overlapping topics now shown as clickable list in Database Maintenance UI
-
-## [0.4.6] - 2026-01-06
-
-**Reranker optimization: faster, simpler, cheaper.**
-
-### Added
-- **Optional excerpts** — new `ignore_excerpts` config to always use full topic content instead of reranker-generated excerpts
-
-### Changed
-- **Excerpts disabled by default** — `ignore_excerpts: true` simplifies reranker prompt and improves reliability
-- **Minimal thinking** — `thinking_level` default changed from "medium" to "minimal" for faster responses
-- **Fewer topics** — `max_topics` default reduced from 15 to 5 for focused context
 
 ## [0.4.5] - 2026-01-05
 
