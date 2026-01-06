@@ -143,7 +143,7 @@
 					<th onclick="sortTable('factsTable', 5)" style="cursor: pointer;">Content</th>
 					<th onclick="sortTable('factsTable', 6)" style="cursor: pointer;">Imp.</th>
 					<th onclick="sortTable('factsTable', 7)" style="cursor: pointer;">Updated</th>
-					<th>Actions</th>
+					<th>Topic</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -168,7 +168,15 @@
 						{{end}}
 					</td>
 					<td>
-						<a href="/ui/debug/rag?query={{.Content}}&user_id={{.UserID}}" class="btn btn-sm btn-outline-primary" target="_blank">Context</a>
+						{{if .TopicID}}
+							{{if ne (derefInt64 .TopicID) 0}}
+							<a href="/ui/topics?topic_id={{derefInt64 .TopicID}}" class="btn btn-sm btn-outline-secondary" target="_blank">Topic</a>
+							{{else}}
+							<span class="text-muted">—</span>
+							{{end}}
+						{{else}}
+						<span class="text-muted">—</span>
+						{{end}}
 					</td>
 				</tr>
 				{{end}}
