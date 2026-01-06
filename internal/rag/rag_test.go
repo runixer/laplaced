@@ -1749,6 +1749,8 @@ func TestProcessConsolidation(t *testing.T) {
 
 		// Return empty merge candidates
 		mockStore.On("GetMergeCandidates", int64(123)).Return([]storage.MergeCandidate{}, nil)
+		// Return empty pending topics (for orphan check)
+		mockStore.On("GetTopicsPendingFacts", int64(123)).Return([]storage.Topic{}, nil)
 
 		tmpDir := t.TempDir()
 		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)

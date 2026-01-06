@@ -1398,7 +1398,8 @@ func (s *Service) processFactExtraction(ctx context.Context) {
 			}
 
 			// Enforce chronological order: stop if we hit a topic that hasn't been checked for consolidation yet.
-			if !topic.ConsolidationChecked {
+			// Exception: merged topics (is_consolidated=true) can proceed immediately since they're already consolidated.
+			if !topic.ConsolidationChecked && !topic.IsConsolidated {
 				// We stop processing for this user to ensure we don't skip ahead.
 				// The consolidation loop will eventually mark this topic as checked (or merge it).
 				break

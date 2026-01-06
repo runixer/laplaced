@@ -91,6 +91,49 @@ func (s *Service) processConsolidation(ctx context.Context) {
 				}
 			}
 		}
+
+		// Mark orphan topics (no potential merge partner) as checked
+		// This unblocks fact extraction for topics at the end of the queue
+		s.markOrphanTopicsChecked(userID)
+	}
+}
+
+// markOrphanTopicsChecked marks topics that have no potential merge partner as consolidation-checked.
+// A topic is an "orphan" if there's no unchecked topic within 100 message IDs after it.
+func (s *Service) markOrphanTopicsChecked(userID int64) {
+	pendingTopics, err := s.topicRepo.GetTopicsPendingFacts(userID)
+	if err != nil {
+		s.logger.Error("failed to get pending topics for orphan check", "error", err)
+		return
+	}
+
+	for _, topic := range pendingTopics {
+		if topic.ConsolidationChecked {
+			continue
+		}
+
+		// Check if this topic has any potential merge partner
+		hasPartner := false
+		for _, other := range pendingTopics {
+			if other.ID <= topic.ID {
+				continue
+			}
+			// Check proximity (same logic as GetMergeCandidates: gap < 100 messages)
+			gap := other.StartMsgID - topic.EndMsgID
+			if gap > 0 && gap < 100 && !other.ConsolidationChecked {
+				hasPartner = true
+				break
+			}
+		}
+
+		if !hasPartner {
+			// No potential partner found, mark as checked
+			if err := s.topicRepo.SetTopicConsolidationChecked(topic.ID, true); err != nil {
+				s.logger.Error("failed to mark orphan topic checked", "id", topic.ID, "error", err)
+			} else {
+				s.logger.Debug("Marked orphan topic as checked", "id", topic.ID)
+			}
+		}
 	}
 }
 
@@ -259,7 +302,9 @@ func (s *Service) mergeTopics(ctx context.Context, candidate storage.MergeCandid
 		Embedding:      resp.Data[0].Embedding,
 		FactsExtracted: candidate.Topic1.FactsExtracted && candidate.Topic2.FactsExtracted,
 		IsConsolidated: true,
-		CreatedAt:      candidate.Topic2.CreatedAt,
+		// ConsolidationChecked stays false: merged topics can still merge with adjacent topics.
+		// Fact extraction uses is_consolidated=true to proceed without waiting.
+		CreatedAt: candidate.Topic2.CreatedAt,
 	}
 
 	// Add new topic WITHOUT updating all messages in range (to preserve intermediate topics)
