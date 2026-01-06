@@ -15,8 +15,8 @@ env:
 jobs:
   lint:
     runs-on: ubuntu-latest
-    # Skip for release commits (avoid duplicate runs)
-    if: ${{ !startsWith(github.event.head_commit.message, 'Release v') }}
+    # Skip for release commits on main (avoid duplicate runs), but always run for tags
+    if: ${{ startsWith(github.ref, 'refs/tags/') || !startsWith(github.event.head_commit.message, 'Release v') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -29,7 +29,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    if: ${{ !startsWith(github.event.head_commit.message, 'Release v') }}
+    if: ${{ startsWith(github.ref, 'refs/tags/') || !startsWith(github.event.head_commit.message, 'Release v') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -46,7 +46,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    if: ${{ !startsWith(github.event.head_commit.message, 'Release v') }}
+    if: ${{ startsWith(github.ref, 'refs/tags/') || !startsWith(github.event.head_commit.message, 'Release v') }}
     # Only build binaries for main branch and tags (not PRs)
     needs: [lint, test]
     strategy:
@@ -84,7 +84,7 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     # Only build Docker on main branch and tags (not PRs)
-    if: github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'Release v')
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/') || !startsWith(github.event.head_commit.message, 'Release v'))
     permissions:
       contents: read
       packages: write
@@ -150,7 +150,7 @@ jobs:
   cleanup:
     needs: [docker]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && !startsWith(github.event.head_commit.message, 'Release v')
+    if: github.ref == 'refs/heads/main'
     permissions:
       packages: write
     steps:
