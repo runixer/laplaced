@@ -190,6 +190,19 @@ func (s *Service) TriggerConsolidation() {
 	}
 }
 
+// GetRecentTopics returns the N most recent topics for a user with message counts.
+func (s *Service) GetRecentTopics(userID int64, limit int) ([]storage.TopicExtended, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	filter := storage.TopicFilter{UserID: userID}
+	result, err := s.topicRepo.GetTopicsExtended(filter, limit, 0, "created_at", "DESC")
+	if err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
 func (s *Service) ReloadVectors() error {
 	// Full reload on startup - load all topics and facts
 	topics, err := s.topicRepo.GetAllTopics()

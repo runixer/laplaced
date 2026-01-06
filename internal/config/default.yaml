@@ -53,6 +53,7 @@ rag:
   backfill_interval: "1s"       # Pause between batches
   chunk_interval: "1h"          # Time gap to consider a new topic
   split_threshold_chars: 25000  # Threshold for splitting large topics
+  recent_topics_in_context: 3   # Recent topics metadata in context (0 to disable)
   # topic_extraction_prompt: |
   #   Override topic extraction prompt here...
   # enrichment_prompt: |

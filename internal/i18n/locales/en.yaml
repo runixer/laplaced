@@ -78,6 +78,7 @@ tools:
 rag:
   context_header: "CONTEXT (RAG)"
   relevant_facts_header: "=== RELEVANT FACTS ==="
+  recent_topics_header: "📅 Recent conversations:"
   topic_header: "Topic"
   weight: "Weight"
   query: "QUERY"

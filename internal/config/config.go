@@ -72,10 +72,11 @@ type RAGConfig struct {
 	BackfillInterval                 string  `yaml:"backfill_interval"`
 	TopicModel                       string  `yaml:"topic_model"`
 	ChunkInterval                    string  `yaml:"chunk_interval"`
-	MaxMergedSizeChars               int     `yaml:"max_merged_size_chars"`   // Max combined size for topic merge (default 50000)
-	SplitThresholdChars              int     `yaml:"split_threshold_chars"`   // Threshold for splitting large topics
-	TopicExtractionPrompt            string  `yaml:"topic_extraction_prompt"` // Deprecated: moved to i18n
-	EnrichmentPrompt                 string  `yaml:"enrichment_prompt"`       // Deprecated: moved to i18n
+	MaxMergedSizeChars               int     `yaml:"max_merged_size_chars"`    // Max combined size for topic merge (default 50000)
+	SplitThresholdChars              int     `yaml:"split_threshold_chars"`    // Threshold for splitting large topics
+	RecentTopicsInContext            int     `yaml:"recent_topics_in_context"` // Number of recent topics to show in context (metadata only)
+	TopicExtractionPrompt            string  `yaml:"topic_extraction_prompt"`  // Deprecated: moved to i18n
+	EnrichmentPrompt                 string  `yaml:"enrichment_prompt"`        // Deprecated: moved to i18n
 
 	Reranker RerankerConfig `yaml:"reranker"` // v0.4
 }
@@ -85,6 +86,9 @@ const DefaultChunkInterval = 1 * time.Hour
 
 // DefaultSplitThreshold is the default character threshold for splitting large topics.
 const DefaultSplitThreshold = 25000
+
+// DefaultRecentTopicsInContext is the default number of recent topics to show in context.
+const DefaultRecentTopicsInContext = 3
 
 // GetChunkDuration returns the parsed chunk interval duration.
 // Falls back to DefaultChunkInterval if not configured or invalid.
@@ -106,6 +110,18 @@ func (c *RAGConfig) GetSplitThreshold() int {
 		return DefaultSplitThreshold
 	}
 	return c.SplitThresholdChars
+}
+
+// GetRecentTopicsInContext returns the number of recent topics to include in context.
+// Falls back to DefaultRecentTopicsInContext if not configured. Returns 0 to disable.
+func (c *RAGConfig) GetRecentTopicsInContext() int {
+	if c.RecentTopicsInContext < 0 {
+		return DefaultRecentTopicsInContext
+	}
+	if c.RecentTopicsInContext == 0 {
+		return DefaultRecentTopicsInContext // 0 in config means use default, explicit disable not supported
+	}
+	return c.RecentTopicsInContext
 }
 
 // RerankerConfig configures the agentic LLM reranker for RAG candidates (v0.4)

@@ -487,6 +487,24 @@ func (b *Bot) formatCoreIdentityFacts(facts []storage.Fact) string {
 	return strings.TrimRight(result, "\n")
 }
 
+// formatRecentTopics formats recent topics metadata for temporal context.
+func (b *Bot) formatRecentTopics(topics []storage.TopicExtended) string {
+	if len(topics) == 0 {
+		return ""
+	}
+
+	result := b.translator.Get(b.cfg.Bot.Language, "rag.recent_topics_header") + "\n"
+	for _, t := range topics {
+		result += fmt.Sprintf("- %s: %q (%d msg, ~%dk chars)\n",
+			t.CreatedAt.Format("2006-01-02"),
+			t.Summary,
+			t.MessageCount,
+			t.SizeChars/1000,
+		)
+	}
+	return strings.TrimRight(result, "\n")
+}
+
 // deduplicateTopics removes messages from retrieved topics that are already present in recent history.
 func (b *Bot) deduplicateTopics(topics []rag.TopicSearchResult, recentHistory []storage.Message) []rag.TopicSearchResult {
 	recentIDs := make(map[int64]bool, len(recentHistory))
@@ -541,6 +559,20 @@ func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageCont
 
 	// Format Core Identity for System Prompt
 	memoryBankFormatted := b.formatCoreIdentityFacts(coreIdentityFacts)
+
+	// Get Recent Topics for temporal context
+	var recentTopicsFormatted string
+	if b.cfg.RAG.Enabled {
+		recentTopicsCount := b.cfg.RAG.GetRecentTopicsInContext()
+		if recentTopicsCount > 0 {
+			recentTopics, err := b.ragService.GetRecentTopics(userID, recentTopicsCount)
+			if err != nil {
+				b.logger.Warn("failed to get recent topics", "error", err)
+			} else {
+				recentTopicsFormatted = b.formatRecentTopics(recentTopics)
+			}
+		}
+	}
 
 	recentHistory := unprocessedHistory
 
@@ -620,6 +652,9 @@ func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageCont
 	fullSystemPrompt := baseSystemPrompt
 	if memoryBankFormatted != "" {
 		fullSystemPrompt += "\n\n" + memoryBankFormatted
+	}
+	if recentTopicsFormatted != "" {
+		fullSystemPrompt += "\n\n" + recentTopicsFormatted
 	}
 
 	if fullSystemPrompt != "" {

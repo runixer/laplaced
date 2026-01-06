@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 _Next version: v0.5 (Social) — People Table, Social Graph_
 
 ### Added
+- **Recent topics in context** — system prompt now includes metadata about recent conversations (date, title, message count) for temporal awareness. Configurable via `rag.recent_topics_in_context`.
 - **Database Maintenance UI** — new inspector `/ui/debug/database` for database health checks, repair, and splitting large topics.
 - **Cross-User Contamination detection** — tools to identify and repair message leakage between users (caused by global auto-increment IDs).
 - **Topic Splitter** — mechanism to break down oversized topics into smaller logical subtopics.
