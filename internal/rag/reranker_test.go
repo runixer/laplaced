@@ -275,6 +275,23 @@ func TestParseRerankerResponse(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		// LLM quirk: wraps entire response in an array
+		{
+			name:       "wrapped in array (LLM quirk)",
+			content:    `[{"topic_ids": [{"id": 5205, "reason": "discussion about limits"}, {"id": 4750, "reason": "cost context"}]}]`,
+			wantTopics: []int64{5205, 4750},
+			wantSelections: []TopicSelection{
+				{ID: 5205, Reason: "discussion about limits", Excerpt: nil},
+				{ID: 4750, Reason: "cost context", Excerpt: nil},
+			},
+			wantErr: false,
+		},
+		{
+			name:       "wrapped in array with simple IDs",
+			content:    `[{"topic_ids": [42, 18]}]`,
+			wantTopics: []int64{42, 18},
+			wantErr:    false,
+		},
 	}
 
 	for _, tt := range tests {

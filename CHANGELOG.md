@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Next version: v0.5 (Social) — People Table, Social Graph_
 
+### Fixed
+- Fixed reranker JSON parsing when LLM wraps response in array
+
 ## [0.4.6] - 2026-01-06
 
 **Reranker optimization and maintenance tools.**

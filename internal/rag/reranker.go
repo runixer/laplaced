@@ -516,6 +516,7 @@ func (s *Service) parseToolCallIDs(arguments string) ([]int64, error) {
 // Supports: [{"id": 42, "reason": "..."}] (bare array)
 //
 //	{"topic_ids": [{"id": 42, "reason": "..."}]} (wrapped)
+//	[{"topic_ids": [...]}] (wrapped in array - LLM quirk)
 //	{"topic_ids": [42, 18]} (simple array)
 //	{"topics": [...]} (fallback)
 //	{"ids": [...]} (fallback)
@@ -529,7 +530,13 @@ func (s *Service) parseRerankerResponse(content string) (*RerankerResult, error)
 	// Try object format: {"topic_ids": [...]}
 	var resp rerankerResponse
 	if err := json.Unmarshal([]byte(content), &resp); err != nil {
-		return nil, err
+		// LLM sometimes wraps the response in an array: [{"topic_ids": [...]}]
+		var wrappedArray []rerankerResponse
+		if arrErr := json.Unmarshal([]byte(content), &wrappedArray); arrErr == nil && len(wrappedArray) > 0 {
+			resp = wrappedArray[0]
+		} else {
+			return nil, err
+		}
 	}
 
 	var topics []TopicSelection
