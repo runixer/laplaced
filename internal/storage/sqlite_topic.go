@@ -39,6 +39,12 @@ func (s *SQLiteStore) AddTopic(topic Topic) (int64, error) {
 	return id, err
 }
 
+// AddTopicWithoutMessageUpdate creates a topic without updating message references.
+// Used when manually managing message-topic relationships (e.g., during topic splitting).
+func (s *SQLiteStore) AddTopicWithoutMessageUpdate(topic Topic) (int64, error) {
+	return s.CreateTopic(topic)
+}
+
 func (s *SQLiteStore) DeleteTopic(id int64) error {
 	query := "DELETE FROM topics WHERE id = ?"
 	_, err := s.db.Exec(query, id)

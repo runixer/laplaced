@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -99,9 +100,35 @@ func (s *Service) findMergeCandidates(userID int64) ([]storage.MergeCandidate, e
 		return nil, err
 	}
 
+	// Get max merged size from config (default 50K chars)
+	maxMergedSize := s.cfg.RAG.MaxMergedSizeChars
+	if maxMergedSize == 0 {
+		maxMergedSize = 50000
+	}
+
 	var filteredCandidates []storage.MergeCandidate
 
 	for _, candidate := range candidates {
+		// Size check: don't create monster topics
+		combinedSize := candidate.Topic1.SizeChars + candidate.Topic2.SizeChars
+		if combinedSize > maxMergedSize {
+			s.logger.Debug("Skipping merge due to size limit",
+				"t1", candidate.Topic1.ID, "t2", candidate.Topic2.ID,
+				"combined_size", combinedSize, "max_size", maxMergedSize)
+			// Mark both as checked to avoid re-processing
+			if !candidate.Topic1.ConsolidationChecked {
+				if err := s.topicRepo.SetTopicConsolidationChecked(candidate.Topic1.ID, true); err != nil {
+					s.logger.Error("failed to mark topic checked (size)", "id", candidate.Topic1.ID, "error", err)
+				}
+			}
+			if !candidate.Topic2.ConsolidationChecked {
+				if err := s.topicRepo.SetTopicConsolidationChecked(candidate.Topic2.ID, true); err != nil {
+					s.logger.Error("failed to mark topic checked (size)", "id", candidate.Topic2.ID, "error", err)
+				}
+			}
+			continue
+		}
+
 		// Similarity check
 		if len(candidate.Topic1.Embedding) > 0 && len(candidate.Topic2.Embedding) > 0 {
 			sim := cosineSimilarity(candidate.Topic1.Embedding, candidate.Topic2.Embedding)
@@ -132,8 +159,11 @@ func (s *Service) findMergeCandidates(userID int64) ([]storage.MergeCandidate, e
 }
 
 func (s *Service) verifyMerge(ctx context.Context, candidate storage.MergeCandidate) (bool, string, UsageInfo, error) {
+	// Load user profile for context
+	profile := s.formatUserProfileCompact(candidate.Topic1.UserID)
+
 	promptTmpl := s.translator.Get(s.cfg.Bot.Language, "rag.topic_consolidation_prompt")
-	prompt := fmt.Sprintf(promptTmpl, candidate.Topic1.Summary, candidate.Topic2.Summary)
+	prompt := fmt.Sprintf(promptTmpl, profile, candidate.Topic1.Summary, candidate.Topic2.Summary)
 
 	model := s.cfg.RAG.TopicModel // Use same model as topic extraction
 	if model == "" {
@@ -175,25 +205,32 @@ func (s *Service) verifyMerge(ctx context.Context, candidate storage.MergeCandid
 }
 
 func (s *Service) mergeTopics(ctx context.Context, candidate storage.MergeCandidate, newSummary string) (UsageInfo, error) {
-	// 1. Create new topic
-	// We need to combine embeddings? No, we re-embed.
-	// But we need the content to re-embed.
-	// Or we can just save it and let a background process re-embed?
-	// The plan says: "Re-embed: Generate embedding for T_new (using the new summary + combined content)."
-
-	// Fetch all messages
-	msgs, err := s.msgRepo.GetMessagesInRange(ctx, candidate.Topic1.UserID, candidate.Topic1.StartMsgID, candidate.Topic2.EndMsgID)
+	// Fetch messages from T1 and T2 separately (don't include intermediate topics!)
+	msgs1, err := s.msgRepo.GetMessagesByTopicID(ctx, candidate.Topic1.ID)
 	if err != nil {
-		return UsageInfo{}, err
+		return UsageInfo{}, fmt.Errorf("failed to get messages for topic1: %w", err)
+	}
+	msgs2, err := s.msgRepo.GetMessagesByTopicID(ctx, candidate.Topic2.ID)
+	if err != nil {
+		return UsageInfo{}, fmt.Errorf("failed to get messages for topic2: %w", err)
 	}
 
-	// Filter messages that belong to T1 or T2 (or are in between)
-	// Actually, we are merging the range.
+	// Combine and sort by ID
+	msgs := make([]storage.Message, 0, len(msgs1)+len(msgs2))
+	msgs = append(msgs, msgs1...)
+	msgs = append(msgs, msgs2...)
+	sort.Slice(msgs, func(i, j int) bool { return msgs[i].ID < msgs[j].ID })
 
-	// Create content for embedding
+	if len(msgs) == 0 {
+		return UsageInfo{}, fmt.Errorf("no messages found for topics %d and %d", candidate.Topic1.ID, candidate.Topic2.ID)
+	}
+
+	// Create content for embedding (only messages from T1 and T2)
 	var contentBuilder strings.Builder
+	var sizeChars int
 	for _, msg := range msgs {
 		contentBuilder.WriteString(fmt.Sprintf("[%s]: %s\n", msg.Role, msg.Content))
+		sizeChars += len(msg.Content)
 	}
 	embeddingInput := fmt.Sprintf("Topic Summary: %s\n\nConversation Log:\n%s", newSummary, contentBuilder.String())
 
@@ -218,23 +255,26 @@ func (s *Service) mergeTopics(ctx context.Context, candidate storage.MergeCandid
 		Summary:        newSummary,
 		StartMsgID:     candidate.Topic1.StartMsgID,
 		EndMsgID:       candidate.Topic2.EndMsgID,
+		SizeChars:      sizeChars,
 		Embedding:      resp.Data[0].Embedding,
-		FactsExtracted: candidate.Topic1.FactsExtracted && candidate.Topic2.FactsExtracted, // If both extracted, new is extracted? Or should we re-extract?
-		// If we merge, we might want to re-extract facts?
-		// The plan says: "Facts linked to T1 or T2 are updated to point to T_new."
-		// So we don't need to re-extract facts.
+		FactsExtracted: candidate.Topic1.FactsExtracted && candidate.Topic2.FactsExtracted,
 		IsConsolidated: true,
 		CreatedAt:      candidate.Topic2.CreatedAt,
 	}
 
-	// 1. Add new topic
-	newTopicID, err := s.topicRepo.AddTopic(newTopic)
+	// Add new topic WITHOUT updating all messages in range (to preserve intermediate topics)
+	newTopicID, err := s.topicRepo.AddTopicWithoutMessageUpdate(newTopic)
 	if err != nil {
 		return usage, err
 	}
 
-	// 2. Update references
-	// AddTopic already updates messages in range.
+	// Update only messages that belonged to T1 and T2 (filter by user_id to prevent cross-user contamination)
+	if err := s.msgRepo.UpdateMessagesTopicInRange(ctx, candidate.Topic1.UserID, candidate.Topic1.StartMsgID, candidate.Topic1.EndMsgID, newTopicID); err != nil {
+		s.logger.Error("failed to update messages for topic 1", "id", candidate.Topic1.ID, "error", err)
+	}
+	if err := s.msgRepo.UpdateMessagesTopicInRange(ctx, candidate.Topic2.UserID, candidate.Topic2.StartMsgID, candidate.Topic2.EndMsgID, newTopicID); err != nil {
+		s.logger.Error("failed to update messages for topic 2", "id", candidate.Topic2.ID, "error", err)
+	}
 
 	// Update structured_facts
 	if err := s.factRepo.UpdateFactTopic(candidate.Topic1.ID, newTopicID); err != nil {

@@ -209,6 +209,12 @@ func (s *Server) Start(ctx context.Context) error {
 		mux.HandleFunc("/ui/debug/sessions/process", instrumentHandler("debug_sessions_process", s.sessionsProcessSSEHandler))
 		mux.HandleFunc("/ui/debug/chat", instrumentHandler("debug_chat", s.debugChatHandler))
 		mux.HandleFunc("/ui/debug/chat/send", instrumentHandler("debug_chat_send", s.debugChatSendHandler))
+		mux.HandleFunc("/ui/debug/split", instrumentHandler("debug_split", s.splitTopicsHandler))
+		mux.HandleFunc("/ui/debug/database", instrumentHandler("debug_database", s.databaseMaintenanceHandler))
+		mux.HandleFunc("/ui/debug/database/health", instrumentHandler("debug_database_health", s.databaseHealthHandler))
+		mux.HandleFunc("/ui/debug/database/repair", instrumentHandler("debug_database_repair", s.databaseRepairHandler))
+		mux.HandleFunc("/ui/debug/database/contamination", instrumentHandler("debug_database_contamination", s.databaseContaminationHandler))
+		mux.HandleFunc("/ui/debug/database/contamination/fix", instrumentHandler("debug_database_contamination_fix", s.databaseContaminationFixHandler))
 		mux.HandleFunc("/ui/topics", instrumentHandler("topics", s.topicsHandler))
 		mux.HandleFunc("/ui/facts", instrumentHandler("facts", s.factsHandler))
 		mux.HandleFunc("/ui/facts/history", instrumentHandler("facts_history", s.factsHistoryHandler))
@@ -633,7 +639,7 @@ func (s *Server) topicsHandler(w http.ResponseWriter, r *http.Request) {
 
 	var viewTopics []ui.TopicView
 	for _, t := range result.Data {
-		msgs, err := s.msgRepo.GetMessagesInRange(context.Background(), t.UserID, t.StartMsgID, t.EndMsgID)
+		msgs, err := s.msgRepo.GetMessagesByTopicID(context.Background(), t.ID)
 		if err != nil {
 			s.logger.Error("failed to get topic messages", "id", t.ID, "error", err)
 			// Continue without messages
@@ -1164,6 +1170,233 @@ type debugChatSendResponse struct {
 		Preview       string `json:"preview"`
 	} `json:"context"`
 	Error string `json:"error,omitempty"`
+}
+
+// splitTopicsHandler handles POST /ui/debug/split - triggers splitting of large topics.
+func (s *Server) splitTopicsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		UserID         int64 `json:"user_id"`
+		ThresholdChars int   `json:"threshold_chars"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Invalid JSON: " + err.Error()})
+		return
+	}
+
+	// user_id=0 means all users
+
+	if req.ThresholdChars == 0 {
+		req.ThresholdChars = 50000 // Default 50K chars threshold
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
+	defer cancel()
+
+	stats, err := s.rag.SplitLargeTopics(ctx, req.UserID, req.ThresholdChars)
+	if err != nil {
+		s.logger.Error("SplitLargeTopics failed", "error", err, "user_id", req.UserID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": err.Error(),
+			"stats": stats,
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"stats":   stats,
+	})
+}
+
+// databaseMaintenanceHandler handles GET /ui/debug/database - renders database maintenance page.
+func (s *Server) databaseMaintenanceHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	pageData, err := s.getCommonData(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	data := struct {
+		ui.PageData
+		DefaultThreshold int
+	}{
+		PageData:         pageData,
+		DefaultThreshold: 25000,
+	}
+
+	_ = s.renderer.Render(w, "database_maintenance.html", data, ui.GetFuncMap())
+}
+
+// databaseHealthHandler handles GET /ui/debug/database/health - returns database health info.
+func (s *Server) databaseHealthHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var userID int64
+	if idStr := r.URL.Query().Get("user_id"); idStr != "" {
+		_, _ = fmt.Sscanf(idStr, "%d", &userID)
+	}
+	// userID=0 means all users
+
+	thresholdChars := 25000
+	if t := r.URL.Query().Get("threshold"); t != "" {
+		if _, err := fmt.Sscanf(t, "%d", &thresholdChars); err != nil {
+			thresholdChars = 25000
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	health, err := s.rag.GetDatabaseHealth(ctx, userID, thresholdChars)
+	if err != nil {
+		s.logger.Error("GetDatabaseHealth failed", "error", err, "user_id", userID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(health)
+}
+
+// databaseRepairHandler handles POST /ui/debug/database/repair - repairs database issues.
+func (s *Server) databaseRepairHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		UserID int64 `json:"user_id"`
+		DryRun bool  `json:"dry_run"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Invalid JSON: " + err.Error()})
+		return
+	}
+	// user_id=0 means all users
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+
+	stats, err := s.rag.RepairDatabase(ctx, req.UserID, req.DryRun)
+	if err != nil {
+		s.logger.Error("RepairDatabase failed", "error", err, "user_id", req.UserID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":   err.Error(),
+			"stats":   stats,
+			"dry_run": req.DryRun,
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"stats":   stats,
+		"dry_run": req.DryRun,
+	})
+}
+
+// databaseContaminationHandler handles GET /ui/debug/database/contamination - returns cross-user contamination info.
+func (s *Server) databaseContaminationHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var userID int64
+	if idStr := r.URL.Query().Get("user_id"); idStr != "" {
+		_, _ = fmt.Sscanf(idStr, "%d", &userID)
+	}
+	// userID=0 means all users
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	info, err := s.rag.GetContaminationInfo(ctx, userID)
+	if err != nil {
+		s.logger.Error("GetContaminationInfo failed", "error", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Log contamination count for debugging
+	s.logger.Info("Contamination check result", "count", info.TotalContaminated, "user_id", userID)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(info)
+}
+
+// databaseContaminationFixHandler handles POST /ui/debug/database/contamination/fix - fixes cross-user contamination.
+func (s *Server) databaseContaminationFixHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		UserID int64 `json:"user_id"`
+		DryRun bool  `json:"dry_run"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Invalid JSON: " + err.Error()})
+		return
+	}
+	// user_id=0 means all users
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+
+	stats, err := s.rag.FixContamination(ctx, req.UserID, req.DryRun)
+	if err != nil {
+		s.logger.Error("FixContamination failed", "error", err, "user_id", req.UserID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":   err.Error(),
+			"stats":   stats,
+			"dry_run": req.DryRun,
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"stats":   stats,
+		"dry_run": req.DryRun,
+	})
 }
 
 // debugChatSendHandler handles POST /ui/debug/chat/send - sends a test message and returns metrics.

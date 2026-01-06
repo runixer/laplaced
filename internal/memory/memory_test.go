@@ -211,6 +211,14 @@ func (m *MockStorage) ResetUserData(userID int64) error {
 	return args.Error(0)
 }
 
+func (m *MockStorage) GetFactsByTopicID(topicID int64) ([]storage.Fact, error) {
+	args := m.Called(topicID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.Fact), args.Error(1)
+}
+
 // MockOpenRouterClient
 type MockOpenRouterClient struct {
 	mock.Mock

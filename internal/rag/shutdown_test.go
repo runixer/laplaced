@@ -49,8 +49,8 @@ func TestGracefulShutdown(t *testing.T) {
 	mockStore.On("GetTopicsPendingFacts", int64(123)).Return([]storage.Topic{topic}, nil)
 	mockStore.On("SetTopicFactsExtracted", int64(1), true).Return(nil)
 
-	// It calls GetMessagesInRange (from processFactExtraction)
-	mockStore.On("GetMessagesInRange", mock.Anything, int64(123), int64(1), int64(3)).Return(msgs, nil)
+	// It calls GetMessagesByTopicID (from processFactExtraction)
+	mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return(msgs, nil)
 
 	// Consolidation loop calls GetTopics
 	mockStore.On("GetTopics", int64(123)).Return([]storage.Topic{}, nil).Maybe()
@@ -150,7 +150,7 @@ func TestGracefulShutdown(t *testing.T) {
 	translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
 
 	// Start
 	ctx, cancel := context.WithCancel(context.Background())

@@ -178,7 +178,7 @@ func main() {
 
 	memoryService := memory.NewService(logger, cfg, store, store, store, openrouterClient, translator)
 
-	ragService := rag.NewService(logger, cfg, store, store, store, store, store, store, openrouterClient, memoryService, translator)
+	ragService := rag.NewService(logger, cfg, store, store, store, store, store, store, store, openrouterClient, memoryService, translator)
 	memoryService.SetVectorSearcher(ragService)
 
 	b, err := bot.NewBot(logger, api, cfg, store, store, store, store, store, store, openrouterClient, speechKitClient, ragService, translator)

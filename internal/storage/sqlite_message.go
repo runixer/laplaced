@@ -142,3 +142,28 @@ func (s *SQLiteStore) UpdateMessageTopic(messageID, topicID int64) error {
 	_, err := s.db.Exec(query, topicID, messageID)
 	return err
 }
+
+func (s *SQLiteStore) GetMessagesByTopicID(ctx context.Context, topicID int64) ([]Message, error) {
+	query := "SELECT id, user_id, role, content, created_at, topic_id FROM history WHERE topic_id = ? ORDER BY created_at ASC, id ASC"
+	rows, err := s.db.QueryContext(ctx, query, topicID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var messages []Message
+	for rows.Next() {
+		var msg Message
+		if err := rows.Scan(&msg.ID, &msg.UserID, &msg.Role, &msg.Content, &msg.CreatedAt, &msg.TopicID); err != nil {
+			return nil, err
+		}
+		messages = append(messages, msg)
+	}
+	return messages, nil
+}
+
+func (s *SQLiteStore) UpdateMessagesTopicInRange(ctx context.Context, userID, startMsgID, endMsgID, topicID int64) error {
+	query := "UPDATE history SET topic_id = ? WHERE user_id = ? AND id >= ? AND id <= ?"
+	_, err := s.db.ExecContext(ctx, query, topicID, userID, startMsgID, endMsgID)
+	return err
+}

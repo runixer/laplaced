@@ -664,7 +664,7 @@ func TestRerankCandidates_WithToolCall(t *testing.T) {
 	).Once()
 
 	// Mock message loading
-	mockStore.On("GetMessagesInRange", mock.Anything, int64(123), int64(10), int64(12)).Return(
+	mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return(
 		[]storage.Message{
 			{ID: 10, Role: "user", Content: "Hello", CreatedAt: time.Now()},
 			{ID: 11, Role: "assistant", Content: "Hi!", CreatedAt: time.Now()},

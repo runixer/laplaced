@@ -219,14 +219,8 @@ func NewSQLiteStore(logger *slog.Logger, path string) (*SQLiteStore, error) {
 		originalPath = path[:idx]
 	}
 
-	// Add connection parameters for better concurrency
-	if !strings.Contains(path, "?") {
-		path += "?"
-	} else {
-		path += "&"
-	}
-	path += "_busy_timeout=5000&_journal_mode=WAL"
-
+	// Note: modernc.org/sqlite doesn't support _journal_mode query param,
+	// so we set it via PRAGMA after opening the connection
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err
@@ -239,6 +233,19 @@ func NewSQLiteStore(logger *slog.Logger, path string) (*SQLiteStore, error) {
 
 	if err := db.Ping(); err != nil {
 		return nil, err
+	}
+
+	// Set WAL mode explicitly - the _journal_mode query param doesn't work with modernc.org/sqlite
+	var journalMode string
+	if err := db.QueryRow("PRAGMA journal_mode=WAL").Scan(&journalMode); err != nil {
+		logger.Warn("failed to set WAL journal mode", "error", err)
+	} else {
+		logger.Info("SQLite journal mode set", "mode", journalMode, "path", originalPath)
+	}
+
+	// Set busy timeout explicitly as well
+	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		logger.Warn("failed to set busy timeout", "error", err)
 	}
 
 	return &SQLiteStore{db: db, logger: logger, dbPath: originalPath}, nil
@@ -490,11 +497,13 @@ func (s *SQLiteStore) migrate() error {
 	// This is a simple heuristic: if we have topics, run the update.
 	// It's idempotent enough (re-updating same values).
 	// Note: SQLite update with join/subquery
+	// IMPORTANT: Filter by user_id to prevent cross-user contamination!
 	backfillQuery := `
 		UPDATE history
 		SET topic_id = (
 			SELECT id FROM topics
-			WHERE history.id >= topics.start_msg_id
+			WHERE history.user_id = topics.user_id
+			AND history.id >= topics.start_msg_id
 			AND history.id <= topics.end_msg_id
 			LIMIT 1
 		)
@@ -567,6 +576,42 @@ func (s *SQLiteStore) migrate() error {
 	return nil
 }
 
+// CheckpointResult contains the result of a WAL checkpoint operation.
+type CheckpointResult struct {
+	Busy         int // 0 = success, 1 = blocked by reader
+	Log          int // Total frames in WAL file
+	Checkpointed int // Frames actually checkpointed
+}
+
+// Checkpoint forces a WAL checkpoint to flush all pending writes to the main database file.
+// This is useful before shutdown or after critical writes to ensure data persistence.
+// Returns CheckpointResult with details about what was checkpointed.
+func (s *SQLiteStore) Checkpoint() error {
+	var busy, log, checkpointed int
+	err := s.db.QueryRow("PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &log, &checkpointed)
+	if err != nil {
+		return fmt.Errorf("checkpoint query failed: %w", err)
+	}
+
+	s.logger.Info("WAL checkpoint result",
+		"busy", busy,
+		"log_frames", log,
+		"checkpointed_frames", checkpointed,
+	)
+
+	if busy != 0 {
+		return fmt.Errorf("checkpoint blocked by reader (busy=%d)", busy)
+	}
+	if log > 0 && checkpointed < log {
+		return fmt.Errorf("incomplete checkpoint: %d/%d frames", checkpointed, log)
+	}
+	return nil
+}
+
 func (s *SQLiteStore) Close() error {
+	// Checkpoint WAL before closing to ensure all writes are flushed
+	if err := s.Checkpoint(); err != nil {
+		s.logger.Warn("failed to checkpoint WAL before close", "error", err)
+	}
 	return s.db.Close()
 }

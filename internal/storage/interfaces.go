@@ -12,7 +12,9 @@ type MessageRepository interface {
 	GetMessagesByIDs(ids []int64) ([]Message, error)
 	ClearHistory(userID int64) error
 	GetMessagesInRange(ctx context.Context, userID int64, startID, endID int64) ([]Message, error)
+	GetMessagesByTopicID(ctx context.Context, topicID int64) ([]Message, error)
 	UpdateMessageTopic(messageID, topicID int64) error
+	UpdateMessagesTopicInRange(ctx context.Context, userID, startMsgID, endMsgID, topicID int64) error
 	GetUnprocessedMessages(userID int64) ([]Message, error)
 }
 
@@ -26,6 +28,7 @@ type UserRepository interface {
 // TopicRepository handles topic operations.
 type TopicRepository interface {
 	AddTopic(topic Topic) (int64, error)
+	AddTopicWithoutMessageUpdate(topic Topic) (int64, error)
 	CreateTopic(topic Topic) (int64, error)
 	DeleteTopic(id int64) error
 	DeleteTopicCascade(id int64) error
@@ -46,6 +49,7 @@ type FactRepository interface {
 	AddFact(fact Fact) (int64, error)
 	GetFacts(userID int64) ([]Fact, error)
 	GetFactsByIDs(ids []int64) ([]Fact, error)
+	GetFactsByTopicID(topicID int64) ([]Fact, error)
 	GetAllFacts() ([]Fact, error)
 	GetFactsAfterID(minID int64) ([]Fact, error)
 	GetFactStats() (FactStats, error)
@@ -90,6 +94,21 @@ type MaintenanceRepository interface {
 	CleanupFactHistory(keepPerUser int) (int64, error)
 	CleanupRagLogs(keepPerUser int) (int64, error)
 	CleanupRerankerLogs(keepPerUser int) (int64, error)
+
+	// Database health diagnostics
+	CountOrphanedTopics(userID int64) (int, error)
+	GetOrphanedTopicIDs(userID int64) ([]int64, error)
+	CountOverlappingTopics(userID int64) (int, error)
+	CountFactsOnOrphanedTopics(userID int64) (int, error)
+	RecalculateTopicSizes(userID int64) (int, error)
+
+	// Cross-user contamination detection and repair
+	GetContaminatedTopics(userID int64) ([]ContaminatedTopic, error)
+	CountContaminatedTopics(userID int64) (int, error)
+	FixContaminatedTopics(userID int64) (int64, error)
+
+	// WAL checkpoint for ensuring data persistence
+	Checkpoint() error
 }
 
 // RerankerLogRepository handles reranker debug log operations.

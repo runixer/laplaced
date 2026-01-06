@@ -71,6 +71,32 @@ internal/
 - **Profile**: Up to 50 facts about the user, always included in context
 - **RAG**: Vector similarity search retrieves relevant past discussions
 
+### Critical Data Invariants (MUST READ!)
+
+**User Data Isolation:**
+- Message IDs (`history.id`) are **GLOBAL auto-increment**, NOT per-user
+- Topic IDs, Fact IDs are also global
+- **ANY query using ID ranges MUST include `user_id` filter!**
+
+```sql
+-- WRONG: captures messages from other users!
+UPDATE history SET topic_id = ? WHERE id >= ? AND id <= ?
+
+-- CORRECT: always filter by user_id
+UPDATE history SET topic_id = ? WHERE user_id = ? AND id >= ? AND id <= ?
+```
+
+**Why this matters:**
+- Multiple users send messages concurrently
+- Their message IDs interleave: user1 gets ID 100, user2 gets ID 101, user1 gets ID 102
+- A range query `WHERE id BETWEEN 100 AND 102` captures BOTH users' data
+- This causes catastrophic data leakage between users
+
+**Checklist for any storage function using ID ranges:**
+1. Does it have a `user_id` parameter?
+2. Does the SQL WHERE clause include `AND user_id = ?`?
+3. If operating on topics/facts, does it verify ownership?
+
 ### Terminology (IMPORTANT!)
 
 **Session / Active Session:**
@@ -375,4 +401,3 @@ gh run watch <run_id> --exit-status
 ## Related Documentation
 
 - @.claude/deploy.md — Production deployment via Gitea
-- @.claude/observability.md — Grafana dashboards, VictoriaMetrics, metrics reference

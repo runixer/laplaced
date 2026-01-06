@@ -747,7 +747,7 @@ func (s *Service) loadTopicsContentWithSize(
 		topic := candidate.Topic
 
 		// Load messages for this topic
-		msgs, err := s.msgRepo.GetMessagesInRange(ctx, userID, topic.StartMsgID, topic.EndMsgID)
+		msgs, err := s.msgRepo.GetMessagesByTopicID(ctx, topic.ID)
 		if err != nil {
 			s.logger.Warn("failed to load messages for reranker", "topic_id", id, "error", err)
 			continue

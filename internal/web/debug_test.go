@@ -311,7 +311,7 @@ func TestTopicsHandler_WithFilters(t *testing.T) {
 		IsConsolidated: &isConsolidated,
 		TopicID:        (*int64)(nil),
 	}, 20, 0, "", "DESC").Return(result, nil)
-	mockStorage.On("GetMessagesInRange", context.Background(), int64(123), int64(0), int64(0)).Return([]storage.Message{}, nil)
+	mockStorage.On("GetMessagesByTopicID", context.Background(), int64(1)).Return([]storage.Message{}, nil)
 
 	req, err := http.NewRequest("GET", "/ui/topics?user_id=123&has_facts=true&merged=false", nil)
 	assert.NoError(t, err)
@@ -530,7 +530,7 @@ func TestTopicsHandler_WithSearch(t *testing.T) {
 		IsConsolidated: (*bool)(nil),
 		TopicID:        &topicID,
 	}, 20, 0, "", "DESC").Return(result, nil)
-	mockStorage.On("GetMessagesInRange", context.Background(), int64(123), int64(0), int64(0)).Return([]storage.Message{}, nil)
+	mockStorage.On("GetMessagesByTopicID", context.Background(), int64(42)).Return([]storage.Message{}, nil)
 
 	req, err := http.NewRequest("GET", "/ui/topics?q=search+term&topic_id=42", nil)
 	assert.NoError(t, err)

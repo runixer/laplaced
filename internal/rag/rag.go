@@ -114,6 +114,7 @@ type Service struct {
 	msgRepo              storage.MessageRepository
 	logRepo              storage.LogRepository
 	rerankerLogRepo      storage.RerankerLogRepository
+	maintenanceRepo      storage.MaintenanceRepository
 	client               openrouter.Client
 	memoryService        *memory.Service
 	translator           *i18n.Translator
@@ -127,7 +128,7 @@ type Service struct {
 	wg                   sync.WaitGroup
 }
 
-func NewService(logger *slog.Logger, cfg *config.Config, topicRepo storage.TopicRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, msgRepo storage.MessageRepository, logRepo storage.LogRepository, rerankerLogRepo storage.RerankerLogRepository, client openrouter.Client, memoryService *memory.Service, translator *i18n.Translator) *Service {
+func NewService(logger *slog.Logger, cfg *config.Config, topicRepo storage.TopicRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, msgRepo storage.MessageRepository, logRepo storage.LogRepository, rerankerLogRepo storage.RerankerLogRepository, maintenanceRepo storage.MaintenanceRepository, client openrouter.Client, memoryService *memory.Service, translator *i18n.Translator) *Service {
 	return &Service{
 		logger:               logger.With("component", "rag"),
 		cfg:                  cfg,
@@ -137,6 +138,7 @@ func NewService(logger *slog.Logger, cfg *config.Config, topicRepo storage.Topic
 		msgRepo:              msgRepo,
 		logRepo:              logRepo,
 		rerankerLogRepo:      rerankerLogRepo,
+		maintenanceRepo:      maintenanceRepo,
 		client:               client,
 		memoryService:        memoryService,
 		translator:           translator,
@@ -562,7 +564,7 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 			continue
 		}
 
-		msgs, err := s.msgRepo.GetMessagesInRange(ctx, userID, topic.StartMsgID, topic.EndMsgID)
+		msgs, err := s.msgRepo.GetMessagesByTopicID(ctx, topic.ID)
 		if err != nil {
 			s.logger.Error("failed to get messages for topic", "topic_id", topic.ID, "error", err)
 			continue
@@ -859,7 +861,7 @@ func (s *Service) ForceProcessUserWithProgress(ctx context.Context, userID int64
 				Message: fmt.Sprintf("Processing topic %d/%d...", i+1, len(toProcess)),
 			})
 
-			msgs, err := s.msgRepo.GetMessagesInRange(ctx, userID, topic.StartMsgID, topic.EndMsgID)
+			msgs, err := s.msgRepo.GetMessagesByTopicID(ctx, topic.ID)
 			if err != nil {
 				s.logger.Error("failed to get messages for topic", "topic_id", topic.ID, "error", err)
 				continue
@@ -1397,7 +1399,7 @@ func (s *Service) processFactExtraction(ctx context.Context) {
 			}
 
 			// Get messages for this topic
-			msgs, err := s.msgRepo.GetMessagesInRange(ctx, userID, topic.StartMsgID, topic.EndMsgID)
+			msgs, err := s.msgRepo.GetMessagesByTopicID(ctx, topic.ID)
 			if err != nil {
 				s.logger.Error("failed to get messages for topic", "topic_id", topic.ID, "error", err)
 				continue

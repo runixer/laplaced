@@ -86,18 +86,46 @@ rag:
   excerpt_marker: "[Truncated by reranker — only relevant fragments shown]"
   topic_extraction_prompt: |
     Analyze the chat log. Break it down into logical semantic topics.
-    
+
     STRICT RULES:
     1. YOU MUST DISTRIBUTE ALL MESSAGES. Each message from the log must be assigned to one of the topics.
     2. If a message is meaningless noise, a greeting, or a short response, include it in the context of the current topic.
     3. If the entire dialogue or part of it consists only of noise, create a topic named "Small Talk / Noise".
     4. Do not leave "gaps" (missing IDs) between topics.
-    
+
     LANGUAGE REQUIREMENTS:
     ALL HEADERS AND DESCRIPTIONS MUST BE IN ENGLISH.
     EXCEPTION: Keep brand names, software names, device models, and specific technical terms (e.g., GitLab, Notepad++, VPN, API) in their original (English) language. Do not translate or transliterate them.
+  topic_split_prompt: |
+    <role>
+    You are the Splitter, a specialist in organizing dialogue archives.
+    Your task is to split a LARGE conversation into MULTIPLE smaller logical topics.
+    </role>
+
+    <user_profile>
+    %s
+    </user_profile>
+
+    <goal>
+    Split into 3-10 topics of 10-25 messages each. Find natural boundaries:
+    - Change in discussion topic
+    - Time gaps (if visible from dates)
+    - Transition from one project/task to another
+    - Shift in conversation focus
+
+    Use the user profile to understand context: what counts as "one topic" vs "different topics" for this user.
+    </goal>
+
+    <rules>
+    1. YOU MUST DISTRIBUTE ALL MESSAGES. Each message from the log must be assigned to one of the topics.
+    2. DO NOT CREATE ONE LARGE TOPIC. If the dialogue is long — split it forcefully.
+    3. If a topic was discussed for a long time (>30 messages), split by subtopics or time blocks.
+    4. Do not leave "gaps" (missing IDs) between topics.
+    5. ALL HEADERS AND DESCRIPTIONS MUST BE IN ENGLISH.
+    6. EXCEPTION: Keep brand names, software, technical terms in their original form.
+    </rules>
   enrichment_prompt: |
-    Role: You are a context analyst for vector search (Memory Retrieval).
+    Role: You are the Enricher, a context analyst for vector search (Memory Retrieval).
     Current date: %s
     Task: Formulate a search query that will find ALL relevant discussion history related to the last message's topic.
     Make a short prompt with keywords — personalities, technologies, brands.
@@ -121,30 +149,40 @@ rag:
     The user's message contains media (image or audio). When formulating the search query, describe what you see/hear in the media — objects, people, places, text, spoken words — if it helps find relevant conversation history.
 
   topic_consolidation_prompt: |
-    You are a chat archive editor.
+    <role>
+    You are the Merger, a specialist in combining related topics in dialogue archives.
     Your task is to determine whether two consecutive topics are part of the same conversation.
+    </role>
 
+    <user_profile>
+    %s
+    </user_profile>
+
+    <topics>
     Topic 1 (Beginning):
     %s
 
     Topic 2 (Continuation):
     %s
+    </topics>
 
-    Analyze their content. If Topic 2 is a logical continuation of Topic 1 (same context, same problem, same discussion), they should be merged.
+    <task>
+    Analyze the topics' content considering the user profile.
+    If Topic 2 is a logical continuation of Topic 1 (same context, same problem, same discussion), they should be merged.
 
+    Use the profile to understand: are the topics related in the context of user's interests and activities.
+    </task>
+
+    <output>
     Return the answer STRICTLY in JSON format:
-    {
-      "should_merge": true,
-      "new_summary": "New merged summary (only if should_merge=true)"
-    }
-    Or:
-    {
-      "should_merge": false
-    }
+    {"should_merge": true, "new_summary": "New merged summary"}
+    or:
+    {"should_merge": false}
+    </output>
 
   reranker_system_prompt: |
     <role>
-    You are a relevance filter for a personal AI assistant.
+    You are the Reranker, a relevance filter for a personal AI assistant.
     Your task is to select topics from memory that will help answer the current query.
     </role>
 
@@ -313,7 +351,7 @@ memory:
   facts_user_header: "=== USER FACTS ==="
   facts_others_header: "=== ENVIRONMENT FACTS ==="
   system_prompt: |
-    You are a strict system archivist. Your task is to maintain a CONCISE but ACCURATE fact log, ignoring noise and speculation.
+    You are the Archivist, a strict system keeper of facts. Your task is to maintain a CONCISE but ACCURATE fact log, ignoring noise and speculation.
 
     CURRENT DATE: %[1]s
 

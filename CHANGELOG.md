@@ -10,11 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 _Next version: v0.5 (Social) — People Table, Social Graph_
 
 ### Added
-- **Message splitting** — bot can now send responses as multiple separate Telegram messages using `###SPLIT###` delimiter, making copyable content (drafts, letters, code) easier to forward or copy
+- **Database Maintenance UI** — new inspector `/ui/debug/database` for database health checks, repair, and splitting large topics.
+- **Cross-User Contamination detection** — tools to identify and repair message leakage between users (caused by global auto-increment IDs).
+- **Topic Splitter** — mechanism to break down oversized topics (e.g., >50k chars) into smaller logical subtopics.
+- **Max topic size** — added `max_merged_size_chars` config to prevent creating "black hole" topics during consolidation.
+- **Maintenance Prompts** — new system prompts for "The Splitter" and updated prompts for "The Merger" (now aware of user profiles).
 
 ### Changed
-- CI workflow unified: Docker image `:main` built on every push to main, `:latest` on release tags
-- Automatic cleanup of untagged container images (keeps last 5)
+- **Data Isolation Improvements** — refactored message retrieval in RAG service to prefer explicit topic-based lookups over raw ID ranges to reduce leakage risks.
+- **SQLite Reliability** — explicit WAL mode setting via PRAGMA statements to ensure compatibility with modernc driver.
 
 ## [0.4.5] - 2026-01-05
 

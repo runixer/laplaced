@@ -355,6 +355,106 @@ func (m *MockStorage) GetTopicExtractionLogs(limit, offset int) ([]storage.RAGLo
 	return args.Get(0).([]storage.RAGLog), args.Int(1), args.Error(2)
 }
 
+func (m *MockStorage) GetFactsByTopicID(topicID int64) ([]storage.Fact, error) {
+	args := m.Called(topicID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.Fact), args.Error(1)
+}
+
+func (m *MockStorage) AddTopicWithoutMessageUpdate(topic storage.Topic) (int64, error) {
+	args := m.Called(topic)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockStorage) GetMessagesByTopicID(ctx context.Context, topicID int64) ([]storage.Message, error) {
+	args := m.Called(ctx, topicID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.Message), args.Error(1)
+}
+
+func (m *MockStorage) UpdateMessagesTopicInRange(ctx context.Context, userID, startMsgID, endMsgID, topicID int64) error {
+	args := m.Called(ctx, userID, startMsgID, endMsgID, topicID)
+	return args.Error(0)
+}
+
+// MaintenanceRepository methods
+func (m *MockStorage) GetDBSize() (int64, error) {
+	args := m.Called()
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockStorage) GetTableSizes() ([]storage.TableSize, error) {
+	args := m.Called()
+	return args.Get(0).([]storage.TableSize), args.Error(1)
+}
+
+func (m *MockStorage) CleanupFactHistory(keepPerUser int) (int64, error) {
+	args := m.Called(keepPerUser)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockStorage) CleanupRagLogs(keepPerUser int) (int64, error) {
+	args := m.Called(keepPerUser)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockStorage) CleanupRerankerLogs(keepPerUser int) (int64, error) {
+	args := m.Called(keepPerUser)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockStorage) CountOrphanedTopics(userID int64) (int, error) {
+	args := m.Called(userID)
+	return args.Get(0).(int), args.Error(1)
+}
+
+func (m *MockStorage) GetOrphanedTopicIDs(userID int64) ([]int64, error) {
+	args := m.Called(userID)
+	return args.Get(0).([]int64), args.Error(1)
+}
+
+func (m *MockStorage) CountOverlappingTopics(userID int64) (int, error) {
+	args := m.Called(userID)
+	return args.Get(0).(int), args.Error(1)
+}
+
+func (m *MockStorage) CountFactsOnOrphanedTopics(userID int64) (int, error) {
+	args := m.Called(userID)
+	return args.Get(0).(int), args.Error(1)
+}
+
+func (m *MockStorage) RecalculateTopicSizes(userID int64) (int, error) {
+	args := m.Called(userID)
+	return args.Get(0).(int), args.Error(1)
+}
+
+func (m *MockStorage) GetContaminatedTopics(userID int64) ([]storage.ContaminatedTopic, error) {
+	args := m.Called(userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.ContaminatedTopic), args.Error(1)
+}
+
+func (m *MockStorage) CountContaminatedTopics(userID int64) (int, error) {
+	args := m.Called(userID)
+	return args.Get(0).(int), args.Error(1)
+}
+
+func (m *MockStorage) FixContaminatedTopics(userID int64) (int64, error) {
+	args := m.Called(userID)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockStorage) Checkpoint() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
 // Mock OpenRouter Client
 type MockOpenRouterClient struct {
 	mock.Mock
@@ -1693,7 +1793,7 @@ func TestSendTestMessage_Success(t *testing.T) {
 	}
 
 	// Create a minimal RAG service with RAG disabled
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,
@@ -1791,7 +1891,7 @@ func TestSendTestMessage_SaveToHistoryFalse(t *testing.T) {
 		},
 	}
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,
@@ -1878,7 +1978,7 @@ func TestSendTestMessage_OpenRouterError(t *testing.T) {
 		},
 	}
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,

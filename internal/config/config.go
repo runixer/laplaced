@@ -72,6 +72,7 @@ type RAGConfig struct {
 	BackfillInterval                 string  `yaml:"backfill_interval"`
 	TopicModel                       string  `yaml:"topic_model"`
 	ChunkInterval                    string  `yaml:"chunk_interval"`
+	MaxMergedSizeChars               int     `yaml:"max_merged_size_chars"`   // Max combined size for topic merge (default 50000)
 	TopicExtractionPrompt            string  `yaml:"topic_extraction_prompt"` // Deprecated: moved to i18n
 	EnrichmentPrompt                 string  `yaml:"enrichment_prompt"`       // Deprecated: moved to i18n
 
