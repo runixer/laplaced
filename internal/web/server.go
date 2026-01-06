@@ -1189,7 +1189,7 @@ func (s *Server) splitTopicsHandler(w http.ResponseWriter, r *http.Request) {
 	// user_id=0 means all users
 
 	if req.ThresholdChars == 0 {
-		req.ThresholdChars = 50000 // Default 50K chars threshold
+		req.ThresholdChars = s.cfg.RAG.GetSplitThreshold()
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
@@ -1232,7 +1232,7 @@ func (s *Server) databaseMaintenanceHandler(w http.ResponseWriter, r *http.Reque
 		DefaultThreshold int
 	}{
 		PageData:         pageData,
-		DefaultThreshold: 25000,
+		DefaultThreshold: s.cfg.RAG.GetSplitThreshold(),
 	}
 
 	_ = s.renderer.Render(w, "database_maintenance.html", data, ui.GetFuncMap())

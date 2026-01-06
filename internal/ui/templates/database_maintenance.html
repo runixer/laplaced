@@ -212,7 +212,7 @@
             <div class="row g-3 align-items-end">
                 <div class="col-auto">
                     <label for="splitThreshold" class="form-label">Threshold (chars)</label>
-                    <input type="number" class="form-control" id="splitThreshold" value="25000" min="5000" step="1000">
+                    <input type="number" class="form-control" id="splitThreshold" value="{{.DefaultThreshold}}" min="5000" step="1000">
                 </div>
                 <div class="col-auto">
                     <button class="btn btn-primary" onclick="runSplit()" id="splitBtn">

@@ -73,6 +73,7 @@ type RAGConfig struct {
 	TopicModel                       string  `yaml:"topic_model"`
 	ChunkInterval                    string  `yaml:"chunk_interval"`
 	MaxMergedSizeChars               int     `yaml:"max_merged_size_chars"`   // Max combined size for topic merge (default 50000)
+	SplitThresholdChars              int     `yaml:"split_threshold_chars"`   // Threshold for splitting large topics
 	TopicExtractionPrompt            string  `yaml:"topic_extraction_prompt"` // Deprecated: moved to i18n
 	EnrichmentPrompt                 string  `yaml:"enrichment_prompt"`       // Deprecated: moved to i18n
 
@@ -81,6 +82,9 @@ type RAGConfig struct {
 
 // DefaultChunkInterval is the default inactivity period before a session becomes a topic.
 const DefaultChunkInterval = 1 * time.Hour
+
+// DefaultSplitThreshold is the default character threshold for splitting large topics.
+const DefaultSplitThreshold = 25000
 
 // GetChunkDuration returns the parsed chunk interval duration.
 // Falls back to DefaultChunkInterval if not configured or invalid.
@@ -93,6 +97,15 @@ func (c *RAGConfig) GetChunkDuration() time.Duration {
 		return DefaultChunkInterval
 	}
 	return d
+}
+
+// GetSplitThreshold returns the threshold for splitting large topics.
+// Falls back to DefaultSplitThreshold if not configured.
+func (c *RAGConfig) GetSplitThreshold() int {
+	if c.SplitThresholdChars <= 0 {
+		return DefaultSplitThreshold
+	}
+	return c.SplitThresholdChars
 }
 
 // RerankerConfig configures the agentic LLM reranker for RAG candidates (v0.4)

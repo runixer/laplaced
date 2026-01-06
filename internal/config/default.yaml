@@ -52,6 +52,7 @@ rag:
   backfill_batch_size: 20       # Batch size for background vectorization
   backfill_interval: "1s"       # Pause between batches
   chunk_interval: "1h"          # Time gap to consider a new topic
+  split_threshold_chars: 25000  # Threshold for splitting large topics
   # topic_extraction_prompt: |
   #   Override topic extraction prompt here...
   # enrichment_prompt: |
