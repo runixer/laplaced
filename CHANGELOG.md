@@ -12,13 +12,22 @@ _Next version: v0.5 (Social) — People Table, Social Graph_
 ### Added
 - **Database Maintenance UI** — new inspector `/ui/debug/database` for database health checks, repair, and splitting large topics.
 - **Cross-User Contamination detection** — tools to identify and repair message leakage between users (caused by global auto-increment IDs).
-- **Topic Splitter** — mechanism to break down oversized topics (e.g., >50k chars) into smaller logical subtopics.
+- **Topic Splitter** — mechanism to break down oversized topics into smaller logical subtopics.
 - **Max topic size** — added `max_merged_size_chars` config to prevent creating "black hole" topics during consolidation.
 - **Maintenance Prompts** — new system prompts for "The Splitter" and updated prompts for "The Merger" (now aware of user profiles).
 
 ### Changed
+- **Session timeout reduced** — default inactivity timeout for topic creation changed from 5h to 1h (`rag.chunk_interval`)
+- **Split threshold configurable** — new `rag.split_threshold_chars` config option (default 25000 chars)
+- **Splitter keeps message pairs** — user question and assistant response are never split into separate topics
 - **Data Isolation Improvements** — refactored message retrieval in RAG service to prefer explicit topic-based lookups over raw ID ranges to reduce leakage risks.
 - **SQLite Reliability** — explicit WAL mode setting via PRAGMA statements to ensure compatibility with modernc driver.
+
+### Fixed
+- Fixed broken "Context" link on Facts page — now links to associated Topic
+- Improved contamination detection accuracy in dry-run mode
+- Fixed multi-user repair to correctly isolate messages by user
+- Overlapping topics now shown as clickable list in Database Maintenance UI
 
 ## [0.4.5] - 2026-01-05
 
