@@ -134,9 +134,10 @@ type RerankerConfig struct {
 	Timeout             string `yaml:"timeout" env:"LAPLACED_RAG_RERANKER_TIMEOUT"`                             // timeout for entire reranker flow
 	TurnTimeout         string `yaml:"turn_timeout" env:"LAPLACED_RAG_RERANKER_TURN_TIMEOUT"`                   // timeout per LLM turn (default: Timeout / (MaxToolCalls+1))
 	MaxToolCalls        int    `yaml:"max_tool_calls" env:"LAPLACED_RAG_RERANKER_MAX_TOOL_CALLS"`               // max tool calls before stopping
-	ThinkingLevel       string `yaml:"thinking_level" env:"LAPLACED_RAG_RERANKER_THINKING_LEVEL"`               // reasoning effort: "minimal", "low", "medium", "high" (default: "medium")
+	ThinkingLevel       string `yaml:"thinking_level" env:"LAPLACED_RAG_RERANKER_THINKING_LEVEL"`               // reasoning effort: "minimal", "low", "medium", "high" (default: "minimal")
 	LargeTopicThreshold int    `yaml:"large_topic_threshold" env:"LAPLACED_RAG_RERANKER_LARGE_TOPIC_THRESHOLD"` // chars threshold for excerpt request (default 25000)
 	TargetContextChars  int    `yaml:"target_context_chars" env:"LAPLACED_RAG_RERANKER_TARGET_CONTEXT_CHARS"`   // target total chars for all selected topics (default 25000)
+	IgnoreExcerpts      bool   `yaml:"ignore_excerpts" env:"LAPLACED_RAG_RERANKER_IGNORE_EXCERPTS"`             // if true, always use full topic content instead of excerpts
 }
 
 type Config struct {

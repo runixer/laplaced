@@ -398,7 +398,8 @@ func (b *Bot) formatRAGResults(results []rag.TopicSearchResult, query string) st
 			topicRes.Score))
 
 		// Use excerpt if available (for large topics filtered by reranker)
-		if topicRes.Excerpt != nil {
+		// Can be disabled with ignore_excerpts config option
+		if topicRes.Excerpt != nil && !b.cfg.RAG.Reranker.IgnoreExcerpts {
 			ragContent.WriteString(b.translator.Get(b.cfg.Bot.Language, "rag.excerpt_marker"))
 			ragContent.WriteString("\n")
 			ragContent.WriteString(*topicRes.Excerpt)

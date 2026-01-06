@@ -115,10 +115,10 @@ func (s *Service) rerankCandidates(
 		turnTimeout = timeout / time.Duration(cfg.MaxToolCalls+1)
 	}
 
-	// Determine thinking level (default: "low")
+	// Determine thinking level (default: "minimal")
 	thinkingLevel := cfg.ThinkingLevel
 	if thinkingLevel == "" {
-		thinkingLevel = "low"
+		thinkingLevel = "minimal"
 	}
 
 	// Target context budget (default: 25000 chars)
@@ -157,14 +157,28 @@ func (s *Service) rerankCandidates(
 	if selectCandidatesMax < cfg.MaxTopics*2 {
 		selectCandidatesMax = cfg.MaxTopics * 2
 	}
-	systemPrompt := fmt.Sprintf(
-		s.translator.Get(lang, "rag.reranker_system_prompt"),
-		cfg.MaxTopics,                      // %d in constraints (max topics)
-		budgetK,                            // %d in constraints (budget)
-		cfg.MaxTopics,                      // %d in algorithm (don't stop at first N)
-		cfg.MaxTopics, selectCandidatesMax, // %d-%d in algorithm (select N-M candidates)
-		budgetK, // %d in excerpt_policy (budget)
-	)
+
+	// Choose prompt based on ignore_excerpts config
+	var systemPrompt string
+	if cfg.IgnoreExcerpts {
+		// Simplified prompt without excerpt requirements (4 placeholders)
+		systemPrompt = fmt.Sprintf(
+			s.translator.Get(lang, "rag.reranker_system_prompt_simple"),
+			cfg.MaxTopics,                      // %d in constraints (max topics)
+			cfg.MaxTopics,                      // %d in algorithm (don't stop at first N)
+			cfg.MaxTopics, selectCandidatesMax, // %d-%d in algorithm (select N-M candidates)
+		)
+	} else {
+		// Full prompt with excerpt policy (6 placeholders)
+		systemPrompt = fmt.Sprintf(
+			s.translator.Get(lang, "rag.reranker_system_prompt"),
+			cfg.MaxTopics,                      // %d in constraints (max topics)
+			budgetK,                            // %d in constraints (budget)
+			cfg.MaxTopics,                      // %d in algorithm (don't stop at first N)
+			cfg.MaxTopics, selectCandidatesMax, // %d-%d in algorithm (select N-M candidates)
+			budgetK, // %d in excerpt_policy (budget)
+		)
+	}
 
 	candidatesList := s.formatCandidatesForReranker(candidates)
 	userPrompt := fmt.Sprintf(
@@ -412,8 +426,10 @@ func (s *Service) rerankCandidates(
 			return fallbackResult, nil
 		}
 
-		// Validate excerpts for large topics (warning only)
-		s.validateExcerpts(userID, result, candidateMap, state.loadedContents)
+		// Validate excerpts for large topics (warning only, skip if excerpts disabled)
+		if !cfg.IgnoreExcerpts {
+			s.validateExcerpts(userID, result, candidateMap, state.loadedContents)
+		}
 
 		// Record metrics and log success
 		s.recordRerankerMetrics(userID, startTime, toolCallCount, len(result.Topics), totalCost)
@@ -772,7 +788,8 @@ func (s *Service) loadTopicsContentWithSize(
 
 		fmt.Fprintf(&sb, "=== Topic %d ===\n", id)
 		threshold := s.cfg.RAG.Reranker.LargeTopicThreshold
-		if charCount > threshold {
+		// Only show LARGE TOPIC warning when excerpts are enabled
+		if charCount > threshold && !s.cfg.RAG.Reranker.IgnoreExcerpts {
 			fmt.Fprintf(&sb, "Date: %s | %d msgs | ~%dK chars ⚠️ LARGE TOPIC - PROVIDE EXCERPT IN RESPONSE!\n", date, len(msgs), charCount/1000)
 		} else {
 			fmt.Fprintf(&sb, "Date: %s | %d msgs | ~%dK chars\n", date, len(msgs), charCount/1000)

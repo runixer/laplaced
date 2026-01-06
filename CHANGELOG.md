@@ -30,6 +30,18 @@ _Next version: v0.5 (Social) — People Table, Social Graph_
 - Fixed multi-user repair to correctly isolate messages by user
 - Overlapping topics now shown as clickable list in Database Maintenance UI
 
+## [0.4.6] - 2026-01-06
+
+**Reranker optimization: faster, simpler, cheaper.**
+
+### Added
+- **Optional excerpts** — new `ignore_excerpts` config to always use full topic content instead of reranker-generated excerpts
+
+### Changed
+- **Excerpts disabled by default** — `ignore_excerpts: true` simplifies reranker prompt and improves reliability
+- **Minimal thinking** — `thinking_level` default changed from "medium" to "minimal" for faster responses
+- **Fewer topics** — `max_topics` default reduced from 15 to 5 for focused context
+
 ## [0.4.5] - 2026-01-05
 
 **Multimodal RAG and prompt quality improvements.**
