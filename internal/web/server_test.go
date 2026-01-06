@@ -425,7 +425,20 @@ func (m *MockStorage) CountOverlappingTopics(userID int64) (int, error) {
 	return args.Int(0), args.Error(1)
 }
 
+func (m *MockStorage) GetOverlappingTopics(userID int64) ([]storage.OverlappingPair, error) {
+	args := m.Called(userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.OverlappingPair), args.Error(1)
+}
+
 func (m *MockStorage) CountFactsOnOrphanedTopics(userID int64) (int, error) {
+	args := m.Called(userID)
+	return args.Int(0), args.Error(1)
+}
+
+func (m *MockStorage) RecalculateTopicRanges(userID int64) (int, error) {
 	args := m.Called(userID)
 	return args.Int(0), args.Error(1)
 }

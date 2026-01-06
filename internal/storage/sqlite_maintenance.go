@@ -162,6 +162,14 @@ func (s *SQLiteStore) GetOrphanedTopicIDs(userID int64) ([]int64, error) {
 	return ids, rows.Err()
 }
 
+// OverlappingPair contains information about two overlapping topics.
+type OverlappingPair struct {
+	Topic1ID      int64
+	Topic1Summary string
+	Topic2ID      int64
+	Topic2Summary string
+}
+
 // CountOverlappingTopics counts pairs of topics with overlapping message ranges.
 // If userID is 0, counts for all users.
 func (s *SQLiteStore) CountOverlappingTopics(userID int64) (int, error) {
@@ -187,6 +195,51 @@ func (s *SQLiteStore) CountOverlappingTopics(userID int64) (int, error) {
 	var count int
 	err := s.db.QueryRow(query, args...).Scan(&count)
 	return count, err
+}
+
+// GetOverlappingTopics returns pairs of topics with overlapping message ranges.
+// If userID is 0, returns for all users.
+func (s *SQLiteStore) GetOverlappingTopics(userID int64) ([]OverlappingPair, error) {
+	var query string
+	var args []any
+	if userID == 0 {
+		query = `
+			SELECT t1.id, t1.summary, t2.id, t2.summary
+			FROM topics t1
+			JOIN topics t2 ON t1.id < t2.id
+				AND t1.user_id = t2.user_id
+				AND NOT (t1.end_msg_id < t2.start_msg_id OR t1.start_msg_id > t2.end_msg_id)
+			ORDER BY t1.id DESC
+			LIMIT 50
+		`
+	} else {
+		query = `
+			SELECT t1.id, t1.summary, t2.id, t2.summary
+			FROM topics t1
+			JOIN topics t2 ON t1.id < t2.id
+				AND t1.user_id = t2.user_id
+				AND NOT (t1.end_msg_id < t2.start_msg_id OR t1.start_msg_id > t2.end_msg_id)
+			WHERE t1.user_id = ?
+			ORDER BY t1.id DESC
+			LIMIT 50
+		`
+		args = append(args, userID)
+	}
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var pairs []OverlappingPair
+	for rows.Next() {
+		var p OverlappingPair
+		if err := rows.Scan(&p.Topic1ID, &p.Topic1Summary, &p.Topic2ID, &p.Topic2Summary); err != nil {
+			return nil, err
+		}
+		pairs = append(pairs, p)
+	}
+	return pairs, rows.Err()
 }
 
 // CountFactsOnOrphanedTopics counts facts linked to orphaned topics.
@@ -216,6 +269,34 @@ func (s *SQLiteStore) CountFactsOnOrphanedTopics(userID int64) (int, error) {
 	var count int
 	err := s.db.QueryRow(query, args...).Scan(&count)
 	return count, err
+}
+
+// RecalculateTopicRanges recalculates start_msg_id and end_msg_id for all topics based on actual message assignments.
+// If userID is 0, recalculates for all users.
+func (s *SQLiteStore) RecalculateTopicRanges(userID int64) (int, error) {
+	var query string
+	var args []any
+	if userID == 0 {
+		query = `
+			UPDATE topics SET
+				start_msg_id = COALESCE((SELECT MIN(h.id) FROM history h WHERE h.topic_id = topics.id), start_msg_id),
+				end_msg_id = COALESCE((SELECT MAX(h.id) FROM history h WHERE h.topic_id = topics.id), end_msg_id)
+		`
+	} else {
+		query = `
+			UPDATE topics SET
+				start_msg_id = COALESCE((SELECT MIN(h.id) FROM history h WHERE h.topic_id = topics.id), start_msg_id),
+				end_msg_id = COALESCE((SELECT MAX(h.id) FROM history h WHERE h.topic_id = topics.id), end_msg_id)
+			WHERE user_id = ?
+		`
+		args = append(args, userID)
+	}
+	result, err := s.db.Exec(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	affected, _ := result.RowsAffected()
+	return int(affected), nil
 }
 
 // RecalculateTopicSizes recalculates size_chars for all topics based on actual message content.
@@ -274,7 +355,7 @@ func (s *SQLiteStore) GetContaminatedTopics(userID int64) ([]ContaminatedTopic, 
 			FROM topics t
 			JOIN history h ON h.topic_id = t.id
 			GROUP BY t.id
-			HAVING COUNT(DISTINCT h.user_id) > 1
+			HAVING foreign_msgs > 0
 			ORDER BY foreign_msgs DESC
 		`
 	} else {
@@ -290,7 +371,7 @@ func (s *SQLiteStore) GetContaminatedTopics(userID int64) ([]ContaminatedTopic, 
 			JOIN history h ON h.topic_id = t.id
 			WHERE t.user_id = ?
 			GROUP BY t.id
-			HAVING COUNT(DISTINCT h.user_id) > 1
+			HAVING foreign_msgs > 0
 			ORDER BY foreign_msgs DESC
 		`
 		args = append(args, userID)
@@ -333,7 +414,7 @@ func (s *SQLiteStore) CountContaminatedTopics(userID int64) (int, error) {
 				FROM topics t
 				JOIN history h ON h.topic_id = t.id
 				GROUP BY t.id
-				HAVING COUNT(DISTINCT h.user_id) > 1
+				HAVING SUM(CASE WHEN h.user_id != t.user_id THEN 1 ELSE 0 END) > 0
 			)
 		`
 	} else {
@@ -344,7 +425,7 @@ func (s *SQLiteStore) CountContaminatedTopics(userID int64) (int, error) {
 				JOIN history h ON h.topic_id = t.id
 				WHERE t.user_id = ?
 				GROUP BY t.id
-				HAVING COUNT(DISTINCT h.user_id) > 1
+				HAVING SUM(CASE WHEN h.user_id != t.user_id THEN 1 ELSE 0 END) > 0
 			)
 		`
 		args = append(args, userID)
@@ -368,7 +449,7 @@ func (s *SQLiteStore) FixContaminatedTopics(userID int64) (int64, error) {
 				SELECT t.id FROM topics t
 				JOIN history h ON h.topic_id = t.id
 				GROUP BY t.id
-				HAVING COUNT(DISTINCT h.user_id) > 1
+				HAVING SUM(CASE WHEN h.user_id != t.user_id THEN 1 ELSE 0 END) > 0
 			)
 			AND user_id != (SELECT user_id FROM topics WHERE id = history.topic_id)
 		`
@@ -381,7 +462,7 @@ func (s *SQLiteStore) FixContaminatedTopics(userID int64) (int64, error) {
 				JOIN history h ON h.topic_id = t.id
 				WHERE t.user_id = ?
 				GROUP BY t.id
-				HAVING COUNT(DISTINCT h.user_id) > 1
+				HAVING SUM(CASE WHEN h.user_id != t.user_id THEN 1 ELSE 0 END) > 0
 			)
 			AND user_id != (SELECT user_id FROM topics WHERE id = history.topic_id)
 		`

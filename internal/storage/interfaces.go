@@ -99,7 +99,9 @@ type MaintenanceRepository interface {
 	CountOrphanedTopics(userID int64) (int, error)
 	GetOrphanedTopicIDs(userID int64) ([]int64, error)
 	CountOverlappingTopics(userID int64) (int, error)
+	GetOverlappingTopics(userID int64) ([]OverlappingPair, error)
 	CountFactsOnOrphanedTopics(userID int64) (int, error)
+	RecalculateTopicRanges(userID int64) (int, error)
 	RecalculateTopicSizes(userID int64) (int, error)
 
 	// Cross-user contamination detection and repair

@@ -11,14 +11,15 @@ import (
 
 // DatabaseHealth contains diagnostic information about the database.
 type DatabaseHealth struct {
-	TotalTopics      int         `json:"total_topics"`
-	OrphanedTopics   int         `json:"orphaned_topics"`
-	ZeroSizeTopics   int         `json:"zero_size_topics"`
-	LargeTopics      int         `json:"large_topics"`
-	OverlappingPairs int         `json:"overlapping_pairs"`
-	FactsOnOrphaned  int         `json:"facts_on_orphaned"`
-	AvgTopicSize     int         `json:"avg_topic_size"`
-	LargeTopicsList  []TopicInfo `json:"large_topics_list,omitempty"`
+	TotalTopics          int               `json:"total_topics"`
+	OrphanedTopics       int               `json:"orphaned_topics"`
+	ZeroSizeTopics       int               `json:"zero_size_topics"`
+	LargeTopics          int               `json:"large_topics"`
+	OverlappingPairs     int               `json:"overlapping_pairs"`
+	FactsOnOrphaned      int               `json:"facts_on_orphaned"`
+	AvgTopicSize         int               `json:"avg_topic_size"`
+	LargeTopicsList      []TopicInfo       `json:"large_topics_list,omitempty"`
+	OverlappingPairsList []OverlappingPair `json:"overlapping_pairs_list,omitempty"`
 }
 
 // TopicInfo contains brief topic information for display.
@@ -28,10 +29,19 @@ type TopicInfo struct {
 	Summary   string `json:"summary"`
 }
 
+// OverlappingPair contains information about two overlapping topics.
+type OverlappingPair struct {
+	Topic1ID      int64  `json:"topic1_id"`
+	Topic1Summary string `json:"topic1_summary"`
+	Topic2ID      int64  `json:"topic2_id"`
+	Topic2Summary string `json:"topic2_summary"`
+}
+
 // RepairStats contains statistics about repair operations.
 type RepairStats struct {
 	OrphanedTopicsDeleted int `json:"orphaned_topics_deleted"`
 	FactsRelinked         int `json:"facts_relinked"`
+	RangesRecalculated    int `json:"ranges_recalculated"`
 	SizesRecalculated     int `json:"sizes_recalculated"`
 }
 
@@ -92,12 +102,29 @@ func (s *Service) GetDatabaseHealth(ctx context.Context, userID int64, largeThre
 		health.OrphanedTopics = orphaned
 	}
 
-	// Count overlapping topic pairs
+	// Count overlapping topic pairs and get details
 	overlaps, err := s.maintenanceRepo.CountOverlappingTopics(userID)
 	if err != nil {
 		s.logger.Warn("failed to count overlapping topics", "error", err)
 	} else {
 		health.OverlappingPairs = overlaps
+	}
+
+	// Get overlapping pairs details
+	if overlaps > 0 {
+		pairs, err := s.maintenanceRepo.GetOverlappingTopics(userID)
+		if err != nil {
+			s.logger.Warn("failed to get overlapping topics", "error", err)
+		} else {
+			for _, p := range pairs {
+				health.OverlappingPairsList = append(health.OverlappingPairsList, OverlappingPair{
+					Topic1ID:      p.Topic1ID,
+					Topic1Summary: p.Topic1Summary,
+					Topic2ID:      p.Topic2ID,
+					Topic2Summary: p.Topic2Summary,
+				})
+			}
+		}
 	}
 
 	// Count facts on orphaned topics
@@ -124,35 +151,56 @@ func (s *Service) RepairDatabase(ctx context.Context, userID int64, dryRun bool)
 	}
 	stats.OrphanedTopicsDeleted = len(orphanedIDs)
 
-	if !dryRun && len(orphanedIDs) > 0 {
-		// Relink facts from orphaned topics before deleting
-		relinked, err := s.relinkFactsFromOrphanedTopics(ctx, userID, orphanedIDs)
-		if err != nil {
-			s.logger.Error("failed to relink facts", "error", err)
+	if len(orphanedIDs) > 0 {
+		if dryRun {
+			// For dry run, count facts that would be relinked
+			factsCount, _ := s.maintenanceRepo.CountFactsOnOrphanedTopics(userID)
+			stats.FactsRelinked = factsCount
 		} else {
-			stats.FactsRelinked = relinked
-		}
-
-		// Delete orphaned topics
-		for _, id := range orphanedIDs {
-			if err := s.topicRepo.DeleteTopicCascade(id); err != nil {
-				s.logger.Error("failed to delete orphaned topic", "id", id, "error", err)
+			// Relink facts from orphaned topics before deleting
+			relinked, err := s.relinkFactsFromOrphanedTopics(ctx, userID, orphanedIDs)
+			if err != nil {
+				s.logger.Error("failed to relink facts", "error", err)
+			} else {
+				stats.FactsRelinked = relinked
 			}
+
+			// Delete orphaned topics
+			for _, id := range orphanedIDs {
+				if err := s.topicRepo.DeleteTopicCascade(id); err != nil {
+					s.logger.Error("failed to delete orphaned topic", "id", id, "error", err)
+				}
+			}
+			s.logger.Info("Deleted orphaned topics", "count", len(orphanedIDs))
 		}
-		s.logger.Info("Deleted orphaned topics", "count", len(orphanedIDs))
 	}
 
-	// 2. Recalculate size_chars for all topics
+	// 2. Recalculate topic ranges and sizes
+	var topics []storage.Topic
+	if userID == 0 {
+		topics, _ = s.topicRepo.GetAllTopics()
+	} else {
+		topics, _ = s.topicRepo.GetTopics(userID)
+	}
+
 	if !dryRun {
-		recalced, err := s.maintenanceRepo.RecalculateTopicSizes(userID)
+		// Recalculate start_msg_id/end_msg_id based on actual message assignments
+		rangesRecalced, err := s.maintenanceRepo.RecalculateTopicRanges(userID)
+		if err != nil {
+			s.logger.Error("failed to recalculate ranges", "error", err)
+		} else {
+			stats.RangesRecalculated = rangesRecalced
+		}
+
+		// Recalculate size_chars
+		sizesRecalced, err := s.maintenanceRepo.RecalculateTopicSizes(userID)
 		if err != nil {
 			s.logger.Error("failed to recalculate sizes", "error", err)
 		} else {
-			stats.SizesRecalculated = recalced
+			stats.SizesRecalculated = sizesRecalced
 		}
 	} else {
-		// For dry run, just count how many would be updated
-		topics, _ := s.topicRepo.GetTopics(userID)
+		stats.RangesRecalculated = len(topics)
 		stats.SizesRecalculated = len(topics)
 	}
 
@@ -167,40 +215,58 @@ func (s *Service) RepairDatabase(ctx context.Context, userID int64, dryRun bool)
 }
 
 // relinkFactsFromOrphanedTopics moves facts from orphaned topics to valid ones.
+// Facts are relinked to a valid topic owned by the SAME user.
 func (s *Service) relinkFactsFromOrphanedTopics(ctx context.Context, userID int64, orphanedIDs []int64) (int, error) {
 	if len(orphanedIDs) == 0 {
 		return 0, nil
 	}
 
-	// Find a valid topic to relink to (most recent one)
-	topics, err := s.topicRepo.GetTopics(userID)
+	// Build set of orphaned IDs for quick lookup
+	orphanedSet := make(map[int64]bool)
+	for _, id := range orphanedIDs {
+		orphanedSet[id] = true
+	}
+
+	// Get all topics (we need to find valid topics per user)
+	var allTopics []storage.Topic
+	var err error
+	if userID == 0 {
+		allTopics, err = s.topicRepo.GetAllTopics()
+	} else {
+		allTopics, err = s.topicRepo.GetTopics(userID)
+	}
 	if err != nil {
 		return 0, err
 	}
 
-	var validTopicID int64
-	for _, t := range topics {
-		isOrphaned := false
-		for _, oid := range orphanedIDs {
-			if t.ID == oid {
-				isOrphaned = true
-				break
+	// Build map: userID -> first valid (non-orphaned) topic ID
+	validTopicByUser := make(map[int64]int64)
+	for _, t := range allTopics {
+		if !orphanedSet[t.ID] {
+			if _, exists := validTopicByUser[t.UserID]; !exists {
+				validTopicByUser[t.UserID] = t.ID
 			}
 		}
-		if !isOrphaned {
-			validTopicID = t.ID
-			break
+	}
+
+	// Also build map: orphanedTopicID -> userID
+	orphanedTopicOwner := make(map[int64]int64)
+	for _, t := range allTopics {
+		if orphanedSet[t.ID] {
+			orphanedTopicOwner[t.ID] = t.UserID
 		}
 	}
 
-	if validTopicID == 0 {
-		// No valid topic found, facts will be deleted with cascade
-		return 0, nil
-	}
-
-	// Update facts to point to valid topic
+	// Update facts to point to valid topic of the SAME user
 	var count int
 	for _, orphanedID := range orphanedIDs {
+		ownerUserID := orphanedTopicOwner[orphanedID]
+		validTopicID := validTopicByUser[ownerUserID]
+		if validTopicID == 0 {
+			// No valid topic for this user, facts will be deleted with cascade
+			continue
+		}
+
 		facts, err := s.factRepo.GetFactsByTopicID(orphanedID)
 		if err != nil {
 			continue
@@ -225,7 +291,8 @@ type ContaminationInfo struct {
 
 // ContaminationFixStats contains statistics about contamination repair.
 type ContaminationFixStats struct {
-	MessagesUnlinked int64 `json:"messages_unlinked"`
+	MessagesUnlinked      int64 `json:"messages_unlinked"`
+	OrphanedTopicsDeleted int   `json:"orphaned_topics_deleted"`
 }
 
 // GetContaminationInfo returns information about cross-user data contamination.
@@ -288,6 +355,21 @@ func (s *Service) FixContamination(ctx context.Context, userID int64, dryRun boo
 		// Recalculate topic sizes after fixing
 		if _, err := s.maintenanceRepo.RecalculateTopicSizes(userID); err != nil {
 			s.logger.Error("failed to recalculate sizes after contamination fix", "error", err)
+		}
+
+		// Delete orphaned topics (topics with no messages after unlinking)
+		orphanedIDs, err := s.maintenanceRepo.GetOrphanedTopicIDs(userID)
+		if err != nil {
+			s.logger.Error("failed to get orphaned topics", "error", err)
+		} else if len(orphanedIDs) > 0 {
+			for _, id := range orphanedIDs {
+				if err := s.topicRepo.DeleteTopicCascade(id); err != nil {
+					s.logger.Error("failed to delete orphaned topic", "id", id, "error", err)
+				} else {
+					stats.OrphanedTopicsDeleted++
+				}
+			}
+			s.logger.Info("Deleted orphaned topics after contamination fix", "count", stats.OrphanedTopicsDeleted)
 		}
 
 		// Force WAL checkpoint to ensure data is flushed to main database file

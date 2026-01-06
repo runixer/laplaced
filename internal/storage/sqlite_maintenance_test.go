@@ -154,6 +154,130 @@ func TestCleanupRagLogs(t *testing.T) {
 	assert.Equal(t, 4, count, "Should have 4 records remaining (2 for user 1, 2 for user 2)")
 }
 
+func TestContaminatedTopicsDetection(t *testing.T) {
+	// Create temp directory
+	tmpDir, err := os.MkdirTemp("", "test-db-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	store, err := NewSQLiteStore(logger, dbPath)
+	require.NoError(t, err)
+	defer store.Close()
+
+	err = store.Init()
+	require.NoError(t, err)
+
+	user1 := int64(100)
+	user2 := int64(200)
+
+	// Create topic owned by user1
+	topicID, err := store.AddTopic(Topic{
+		UserID:     user1,
+		Summary:    "User1's topic",
+		StartMsgID: 1,
+		EndMsgID:   10,
+	})
+	require.NoError(t, err)
+
+	t.Run("detects contamination when ALL messages from foreign user", func(t *testing.T) {
+		// Add messages from user2 to user1's topic (simulating contamination)
+		// This is the edge case: topic owner has NO messages, only foreign user
+		_, err = store.db.Exec("INSERT INTO history (user_id, role, content, topic_id) VALUES (?, 'user', 'msg1', ?)", user2, topicID)
+		require.NoError(t, err)
+		_, err = store.db.Exec("INSERT INTO history (user_id, role, content, topic_id) VALUES (?, 'user', 'msg2', ?)", user2, topicID)
+		require.NoError(t, err)
+
+		// Should detect contamination
+		count, err := store.CountContaminatedTopics(0)
+		require.NoError(t, err)
+		assert.Equal(t, 1, count, "Should detect 1 contaminated topic")
+
+		topics, err := store.GetContaminatedTopics(0)
+		require.NoError(t, err)
+		require.Len(t, topics, 1)
+		assert.Equal(t, topicID, topics[0].TopicID)
+		assert.Equal(t, user1, topics[0].TopicOwner)
+		assert.Equal(t, 2, topics[0].ForeignMsgCnt)
+		assert.Contains(t, topics[0].ForeignUsers, user2)
+	})
+
+	t.Run("detects contamination when mixed messages", func(t *testing.T) {
+		// Add a message from the actual owner
+		_, err = store.db.Exec("INSERT INTO history (user_id, role, content, topic_id) VALUES (?, 'user', 'owner msg', ?)", user1, topicID)
+		require.NoError(t, err)
+
+		// Should still detect contamination (2 foreign + 1 owner)
+		count, err := store.CountContaminatedTopics(0)
+		require.NoError(t, err)
+		assert.Equal(t, 1, count, "Should still detect 1 contaminated topic")
+
+		topics, err := store.GetContaminatedTopics(0)
+		require.NoError(t, err)
+		require.Len(t, topics, 1)
+		assert.Equal(t, 3, topics[0].TotalMsgCnt)
+		assert.Equal(t, 2, topics[0].ForeignMsgCnt)
+	})
+}
+
+func TestFixContaminatedTopics(t *testing.T) {
+	// Create temp directory
+	tmpDir, err := os.MkdirTemp("", "test-db-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	store, err := NewSQLiteStore(logger, dbPath)
+	require.NoError(t, err)
+	defer store.Close()
+
+	err = store.Init()
+	require.NoError(t, err)
+
+	user1 := int64(100)
+	user2 := int64(200)
+
+	// Create topic owned by user1
+	topicID, err := store.AddTopic(Topic{
+		UserID:     user1,
+		Summary:    "User1's topic",
+		StartMsgID: 1,
+		EndMsgID:   10,
+	})
+	require.NoError(t, err)
+
+	t.Run("fixes contamination when ALL messages from foreign user", func(t *testing.T) {
+		// Add messages ONLY from user2 to user1's topic (edge case)
+		_, err = store.db.Exec("INSERT INTO history (user_id, role, content, topic_id) VALUES (?, 'user', 'foreign1', ?)", user2, topicID)
+		require.NoError(t, err)
+		_, err = store.db.Exec("INSERT INTO history (user_id, role, content, topic_id) VALUES (?, 'user', 'foreign2', ?)", user2, topicID)
+		require.NoError(t, err)
+
+		// Verify contamination detected
+		count, err := store.CountContaminatedTopics(0)
+		require.NoError(t, err)
+		assert.Equal(t, 1, count, "Should detect 1 contaminated topic before fix")
+
+		// Fix contamination
+		unlinked, err := store.FixContaminatedTopics(0)
+		require.NoError(t, err)
+		assert.Equal(t, int64(2), unlinked, "Should unlink 2 foreign messages")
+
+		// Verify no more contamination
+		count, err = store.CountContaminatedTopics(0)
+		require.NoError(t, err)
+		assert.Equal(t, 0, count, "Should have 0 contaminated topics after fix")
+
+		// Verify messages are unlinked (topic_id = NULL)
+		var nullCount int
+		err = store.db.QueryRow("SELECT COUNT(*) FROM history WHERE topic_id IS NULL AND user_id = ?", user2).Scan(&nullCount)
+		require.NoError(t, err)
+		assert.Equal(t, 2, nullCount, "Foreign messages should have topic_id = NULL")
+	})
+}
+
 func TestCleanupNoRecordsToDelete(t *testing.T) {
 	// Create temp directory
 	tmpDir, err := os.MkdirTemp("", "test-db-*")

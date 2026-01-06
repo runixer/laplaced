@@ -64,10 +64,10 @@
                         </div>
                     </div>
                     <div class="col-md-3">
-                        <div class="card" id="overlappingCard">
+                        <div class="card bg-light" id="overlappingCard">
                             <div class="card-body text-center">
                                 <h3 id="overlappingPairs">-</h3>
-                                <small class="text-muted">Overlapping Pairs</small>
+                                <small class="text-muted">Overlapping Pairs <i class="bi bi-info-circle" title="Informational only. Overlap is by ID range, not actual message assignment."></i></small>
                             </div>
                         </div>
                     </div>
@@ -94,6 +94,23 @@
                                 </tr>
                             </thead>
                             <tbody id="largeTopicsBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Overlapping Pairs List -->
+                <div id="overlappingPairsList" class="mt-4" style="display: none;">
+                    <h6>Overlapping Topic Pairs <small class="text-muted">(informational)</small></h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Topic 1</th>
+                                    <th>Topic 2</th>
+                                </tr>
+                            </thead>
+                            <tbody id="overlappingPairsBody">
                             </tbody>
                         </table>
                     </div>
@@ -258,7 +275,7 @@ async function loadHealth() {
         setCardStatus('orphanedCard', data.orphaned_topics);
         setCardStatus('zeroSizeCard', data.zero_size_topics);
         setCardStatus('largeCard', data.large_topics);
-        setCardStatus('overlappingCard', data.overlapping_pairs);
+        // overlappingCard is informational only - don't color it
         setCardStatus('factsOrphanedCard', data.facts_on_orphaned);
 
         // Show large topics list
@@ -274,6 +291,24 @@ async function loadHealth() {
             document.getElementById('largeTopicsList').style.display = 'block';
         } else {
             document.getElementById('largeTopicsList').style.display = 'none';
+        }
+
+        // Show overlapping pairs list
+        if (data.overlapping_pairs_list && data.overlapping_pairs_list.length > 0) {
+            const tbody = document.getElementById('overlappingPairsBody');
+            tbody.innerHTML = '';
+            for (const p of data.overlapping_pairs_list) {
+                const row = document.createElement('tr');
+                const url1 = userId ? `/ui/topics?topic_id=${p.topic1_id}&user_id=${userId}` : `/ui/topics?topic_id=${p.topic1_id}`;
+                const url2 = userId ? `/ui/topics?topic_id=${p.topic2_id}&user_id=${userId}` : `/ui/topics?topic_id=${p.topic2_id}`;
+                const summary1 = p.topic1_summary.length > 60 ? p.topic1_summary.substring(0, 60) + '...' : p.topic1_summary;
+                const summary2 = p.topic2_summary.length > 60 ? p.topic2_summary.substring(0, 60) + '...' : p.topic2_summary;
+                row.innerHTML = `<td><a href="${url1}">${p.topic1_id}</a>: ${escapeHtml(summary1)}</td><td><a href="${url2}">${p.topic2_id}</a>: ${escapeHtml(summary2)}</td>`;
+                tbody.appendChild(row);
+            }
+            document.getElementById('overlappingPairsList').style.display = 'block';
+        } else {
+            document.getElementById('overlappingPairsList').style.display = 'none';
         }
 
         document.getElementById('healthContent').style.display = 'block';
@@ -310,12 +345,14 @@ async function runRepair(dryRun) {
             title.textContent = 'Error';
             stats.innerHTML = `<li>${data.error}</li>`;
         } else {
+            const s = data.stats || {};
             alert.classList.add(dryRun ? 'alert-info' : 'alert-success');
             title.textContent = dryRun ? 'Dry Run Results (no changes made)' : 'Repair Complete';
             stats.innerHTML = `
-                <li>Orphaned topics ${dryRun ? 'to delete' : 'deleted'}: ${data.orphaned_topics_deleted}</li>
-                <li>Facts ${dryRun ? 'to relink' : 'relinked'}: ${data.facts_relinked}</li>
-                <li>Topic sizes ${dryRun ? 'to recalculate' : 'recalculated'}: ${data.sizes_recalculated}</li>
+                <li>Orphaned topics ${dryRun ? 'to delete' : 'deleted'}: ${s.orphaned_topics_deleted || 0}</li>
+                <li>Facts ${dryRun ? 'to relink' : 'relinked'}: ${s.facts_relinked || 0}</li>
+                <li>Topic ranges ${dryRun ? 'to recalculate' : 'recalculated'}: ${s.ranges_recalculated || 0}</li>
+                <li>Topic sizes ${dryRun ? 'to recalculate' : 'recalculated'}: ${s.sizes_recalculated || 0}</li>
             `;
             // Refresh health after repair
             if (!dryRun) {
