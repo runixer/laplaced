@@ -121,8 +121,9 @@ rag:
     2. DO NOT CREATE ONE LARGE TOPIC. If the dialogue is long — split it forcefully.
     3. If a topic was discussed for a long time (>30 messages), split by subtopics or time blocks.
     4. Do not leave "gaps" (missing IDs) between topics.
-    5. ALL HEADERS AND DESCRIPTIONS MUST BE IN ENGLISH.
-    6. EXCEPTION: Keep brand names, software, technical terms in their original form.
+    5. NEVER split a user message from its assistant response. The [user]-[assistant] pair must stay together, even if it exceeds the message limit per topic.
+    6. ALL HEADERS AND DESCRIPTIONS MUST BE IN ENGLISH.
+    7. EXCEPTION: Keep brand names, software, technical terms in their original form.
     </rules>
   enrichment_prompt: |
     Role: You are the Enricher, a context analyst for vector search (Memory Retrieval).
