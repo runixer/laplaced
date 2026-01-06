@@ -35,6 +35,11 @@ bot:
     3. IT IS FORBIDDEN to simulate search (writing "I searched and found...", without calling the function). This is a critical error.
     4. First call the function, get JSON, and only THEN write the answer.
 
+    MEMORY PROTOCOL:
+    1. To update memory (add, change, delete facts) — ALWAYS use the manage_memory tool.
+    2. IT IS FORBIDDEN to output JSON with operations {"operations": [...]} in message text. This is a critical error — user sees "raw code" instead of result.
+    3. If you want to update a fact — call manage_memory, DO NOT print JSON.
+
     AVAILABLE STYLES:
       **bold text**
       *italic text*
@@ -72,7 +77,7 @@ tools:
     description: "Tool for TARGETED search through conversation history (past discussions and topics). MUST call when user explicitly asks: 'search in memory', 'find in history', 'what did we discuss', 'recall our conversation about'. The automatic context provides initial results — this tool allows DEEPER search with YOUR OWN query. Do NOT use for facts about the user — they are already in context."
     parameter_description: "Search query for conversation history."
   manage_memory:
-    description: "Tool for managing the bot's long-term memory. Allows adding, updating, or deleting facts about the user. Use when the user explicitly asks to 'remember', 'forget', or 'correct' information about themselves. DO NOT use for routine memorization of everything — another process does that. HOWEVER, you CAN and SHOULD use this tool independently if the user shares CRITICALLY IMPORTANT information (new preferences, context changes, important plans) that cannot be lost when context is cleared. IMPORTANT: All facts and the 'reason' field must be saved STRICTLY IN ENGLISH. Supports batch processing (array of operations)."
+    description: "Tool for managing the bot's long-term memory. Allows adding, updating, or deleting facts about the user. Use when the user explicitly asks to 'remember', 'forget', or 'correct' information about themselves. DO NOT use for routine memorization of everything — another process does that. HOWEVER, you CAN and SHOULD use this tool independently if the user shares CRITICALLY IMPORTANT information (new preferences, context changes, important plans) that cannot be lost when context is cleared. IMPORTANT: All facts and the 'reason' field must be saved STRICTLY IN ENGLISH. Supports batch processing (array of operations). CRITICAL: ALWAYS call this tool via function call API. FORBIDDEN to output JSON in response text — this breaks saving!"
     parameter_description: "JSON object with 'operations' array. Each operation contains: action ('add', 'update', 'delete'), entity (e.g., 'User'), content (the fact itself), category (bio, work, hobby, etc), type (identity, context, status), importance (0-100), fact_id (for update/delete), reason (reason for change)."
 
 rag:

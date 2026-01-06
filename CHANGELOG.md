@@ -11,6 +11,7 @@ _Next version: v0.5 (Social) — People Table, Social Graph_
 
 ### Fixed
 - Fixed reranker JSON parsing when LLM wraps response in array
+- Fixed bot outputting raw JSON for memory updates instead of calling manage_memory tool (added explicit prohibition in system prompt and tool description)
 
 ## [0.4.6] - 2026-01-06
 
