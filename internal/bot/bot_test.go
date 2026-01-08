@@ -2148,3 +2148,78 @@ func TestSanitizeLLMResponse_DoesNotReturnEmpty(t *testing.T) {
 	assert.Equal(t, input, result)
 	assert.False(t, sanitized)
 }
+
+func TestSanitizeLLMResponse_RemovesDefaultAPIBlock(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			"default_api at start with text after",
+			`default_api:manage_memory{query:{"operations": [{"action": "add"}]}}Отличные новости!`,
+			"Отличные новости!",
+		},
+		{
+			"default_api at start with newline and text",
+			"default_api:internet_search{query:home assistant golang}\n\nHere are the results:",
+			"Here are the results:",
+		},
+		{
+			"text before and after default_api",
+			"Let me search for that. default_api:internet_search{query:test} Found it!",
+			"Let me search for that.\n\nFound it!",
+		},
+		{
+			"nested braces in JSON",
+			`default_api:manage_memory{query:{"data": {"nested": {"deep": true}}}}Done!`,
+			"Done!",
+		},
+		{
+			"default_api with escaped quotes in JSON",
+			`default_api:manage_memory{query:{"content": "He said \"hello\""}}Text after`,
+			"Text after",
+		},
+		{
+			"only default_api block (returns original)",
+			`default_api:manage_memory{query:{"action": "test"}}`,
+			`default_api:manage_memory{query:{"action": "test"}}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, sanitized := sanitizeLLMResponse(tt.input)
+			assert.Equal(t, tt.expected, result)
+			if tt.input != tt.expected {
+				assert.True(t, sanitized)
+			}
+		})
+	}
+}
+
+func TestFindMatchingBrace(t *testing.T) {
+	tests := []struct {
+		name     string
+		text     string
+		startIdx int
+		expected int
+	}{
+		{"simple", `{"a": 1}`, 0, 7},
+		{"nested", `{"a": {"b": 2}}`, 0, 14},
+		{"with string", `{"a": "hello"}`, 0, 13},
+		{"with escaped quote", `{"a": "say \"hi\""}`, 0, 18},
+		{"deeply nested", `{"a": {"b": {"c": {"d": 1}}}}`, 0, 28},
+		{"no closing brace", `{"a": 1`, 0, -1},
+		{"invalid start", `hello`, 0, -1},
+		{"start not at brace", `hello {world}`, 0, -1},
+		{"correct start index", `hello {world}`, 6, 12},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := findMatchingBrace(tt.text, tt.startIdx)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

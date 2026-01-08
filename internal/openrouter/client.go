@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/runixer/laplaced/internal/jobtype"
@@ -60,6 +61,15 @@ func FilterReasoningForLog(details interface{}) interface{} {
 		return nil
 	}
 	return filtered
+}
+
+// truncateForLog truncates a string to maxLen characters for logging.
+// Adds "... (truncated)" suffix if truncation occurred.
+func truncateForLog(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "... (truncated)"
 }
 
 type clientImpl struct {
@@ -481,6 +491,18 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 			"tool_calls_count", len(msg.ToolCalls),
 			"reasoning_details", FilterReasoningForLog(msg.ReasoningDetails),
 		)
+
+		// Log warning if model outputs tool call as text instead of proper tool_calls
+		// This is a known Gemini issue where it hallucinates the internal tool format
+		if strings.Contains(msg.Content, "default_api:") {
+			c.logger.Warn("Model leaked internal tool call format in content (Gemini hallucination)",
+				"content_length", len(msg.Content),
+				"content_preview", truncateForLog(msg.Content, 500),
+				"tool_calls_count", len(msg.ToolCalls),
+				"finish_reason", chatResp.Choices[0].FinishReason,
+				"completion_tokens", chatResp.Usage.CompletionTokens,
+			)
+		}
 	}
 
 	c.logger.Info("OpenRouter response parsed successfully",

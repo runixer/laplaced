@@ -486,11 +486,20 @@ var hallucinationTags = []string{
 	"</s>",
 	"<|endoftext|>",
 	"<|end|>",
+	// Gemini sometimes outputs its internal tool call format as text instead of proper tool_calls.
+	// This "default_api:" prefix is from OpenAPI Generator code patterns in training data.
+	// See: https://github.com/OpenAPITools/openapi-generator
+	"default_api:",
 }
 
 // consecutiveJSONBlocksPattern matches 3+ consecutive markdown JSON code blocks.
 // This pattern detects runaway generation where model outputs endless JSON blocks.
 var consecutiveJSONBlocksPattern = regexp.MustCompile("(?s)(```json\\s*\\{[^`]*\\}\\s*```\\s*){3,}")
+
+// defaultAPIPattern matches Gemini's hallucinated tool call format.
+// Format: default_api:<tool_name>{query:<json>}
+// The JSON can contain nested braces, so we need to match balanced braces.
+var defaultAPIPattern = regexp.MustCompile(`default_api:\w+\{`)
 
 // sanitizeLLMResponse removes hallucination artifacts from LLM responses.
 // It truncates on special tags and detects runaway JSON block generation.
@@ -499,15 +508,39 @@ func sanitizeLLMResponse(text string) (string, bool) {
 	original := text
 	sanitized := false
 
-	// 1. Truncate on hallucination tags
+	// 1. Remove Gemini's "default_api:" hallucinated tool calls
+	// These appear when the model outputs internal tool format as text
+	if loc := defaultAPIPattern.FindStringIndex(text); loc != nil {
+		// Find matching closing brace (handle nested braces)
+		startIdx := loc[1] - 1 // Position of opening '{'
+		endIdx := findMatchingBrace(text, startIdx)
+		if endIdx != -1 {
+			// Remove the entire default_api:...{...} block
+			before := strings.TrimSpace(text[:loc[0]])
+			after := strings.TrimSpace(text[endIdx+1:])
+			if before != "" && after != "" {
+				text = before + "\n\n" + after
+			} else if after != "" {
+				text = after
+			} else {
+				text = before
+			}
+			sanitized = true
+		}
+	}
+
+	// 2. Truncate on other hallucination tags (but skip default_api: as it's handled above)
 	for _, tag := range hallucinationTags {
+		if tag == "default_api:" {
+			continue // Already handled with brace matching
+		}
 		if idx := strings.Index(text, tag); idx != -1 {
 			text = strings.TrimSpace(text[:idx])
 			sanitized = true
 		}
 	}
 
-	// 2. Truncate on 3+ consecutive JSON blocks (runaway generation)
+	// 3. Truncate on 3+ consecutive JSON blocks (runaway generation)
 	if loc := consecutiveJSONBlocksPattern.FindStringIndex(text); loc != nil {
 		text = strings.TrimSpace(text[:loc[0]])
 		sanitized = true
@@ -519,6 +552,52 @@ func sanitizeLLMResponse(text string) (string, bool) {
 	}
 
 	return text, sanitized
+}
+
+// findMatchingBrace finds the index of the closing brace that matches the opening brace at startIdx.
+// Returns -1 if no matching brace is found.
+func findMatchingBrace(text string, startIdx int) int {
+	if startIdx >= len(text) || text[startIdx] != '{' {
+		return -1
+	}
+
+	depth := 0
+	inString := false
+	escaped := false
+
+	for i := startIdx; i < len(text); i++ {
+		c := text[i]
+
+		if escaped {
+			escaped = false
+			continue
+		}
+
+		if c == '\\' && inString {
+			escaped = true
+			continue
+		}
+
+		if c == '"' {
+			inString = !inString
+			continue
+		}
+
+		if inString {
+			continue
+		}
+
+		if c == '{' {
+			depth++
+		} else if c == '}' {
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+
+	return -1
 }
 
 // splitByDelimiter splits text by ###SPLIT### delimiter, respecting code blocks.
