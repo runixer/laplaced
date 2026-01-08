@@ -301,7 +301,7 @@ func (s *Service) extractMemoryUpdate(ctx context.Context, userID int64, session
 	fullRequest := fmt.Sprintf("%s\n\n=== MESSAGES ===\n%s", prompt, sb.String())
 
 	req := openrouter.ChatCompletionRequest{
-		Model: s.cfg.OpenRouter.Model,
+		Model: s.cfg.Agents.Archivist.GetModel(s.cfg.Agents.Default.Model),
 		Messages: []openrouter.Message{
 			{Role: "system", Content: prompt},
 		},
@@ -520,7 +520,7 @@ type embeddingUsage struct {
 
 func (s *Service) getEmbedding(ctx context.Context, text string) ([]float32, embeddingUsage, error) {
 	resp, err := s.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-		Model: s.cfg.RAG.EmbeddingModel,
+		Model: s.cfg.Embedding.Model,
 		Input: []string{text},
 	})
 	if err != nil {
@@ -705,7 +705,7 @@ func (s *Service) arbitrateFact(ctx context.Context, newFact storage.Fact, exist
 	}
 
 	req := openrouter.ChatCompletionRequest{
-		Model: s.cfg.OpenRouter.Model, // Use main model or a cheaper one? Main is fine for now.
+		Model: s.cfg.Agents.Archivist.GetModel(s.cfg.Agents.Default.Model),
 		Messages: []openrouter.Message{
 			{Role: "system", Content: prompt},
 		},

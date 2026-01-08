@@ -4,85 +4,104 @@ log:
 
 # Server Configuration
 server:
-  listen_port: "9081" # Internal port for webhooks and the web interface
-  debug_mode: false   # Enable debug endpoints (/debug, /stats, /topics)
+  listen_port: "9081"
+  debug_mode: false
   auth:
     enabled: true
     username: "admin"
-    password: "" # If empty, a random password will be generated on startup
+    password: ""
 
 # Telegram Bot Configuration
 telegram:
-  token: "" # Set via LAPLACED_TELEGRAM_TOKEN
-  webhook_url: "" # Public URL for Telegram Webhook (path and secret auto-generated from token)
-  proxy_url: "" # Optional: "http://user:pass@host:port"
+  token: ""
+  webhook_url: ""
+  proxy_url: ""
 
 # OpenRouter API Configuration
 openrouter:
-  api_key: "" # Set via LAPLACED_OPENROUTER_API_KEY
-  proxy_url: "" # Optional, leave empty if not needed
-  model: "google/gemini-3-pro-preview"
-  pdf_parser_engine: "native" # Can be "native", "pdf-text", or "mistral-ocr"
+  api_key: ""
+  proxy_url: ""
+  pdf_parser_engine: "native"
   request_cost: 0.0
   price_tiers:
-    - up_to_tokens: 200000       # Tier 1 threshold
-      prompt_cost: 1.25          # Price per 1M input tokens
-      completion_cost: 10.0      # Price per 1M output tokens
-    - up_to_tokens: 1048576      # Tier 2 threshold
+    - up_to_tokens: 200000
+      prompt_cost: 1.25
+      completion_cost: 10.0
+    - up_to_tokens: 1048576
       prompt_cost: 2.50
       completion_cost: 15.0
+
+# Agents Configuration
+agents:
+  # Default model for all agents (used when agent's model is not specified)
+  default:
+    name: "Agent"
+    model: "google/gemini-3-flash-preview"
+
+  # Main bot - talks to users
+  chat:
+    name: "Laplaced"
+    model: "google/gemini-3-pro-preview"
+
+  # Archivist - extracts facts from conversations
+  archivist:
+    name: "Archivist"
+    # model: uses default
+
+  # Enricher - expands search queries for RAG
+  enricher:
+    name: "Enricher"
+    # model: uses default
+
+  # Reranker - filters and ranks RAG candidates
+  reranker:
+    name: "Reranker"
+    # model: uses default
+    enabled: true
+    candidates: 50
+    max_topics: 5
+    max_people: 10
+    timeout: "60s"
+    turn_timeout: "30s"
+    max_tool_calls: 3
+    thinking_level: "minimal"
+    ignore_excerpts: true
+
+  # Splitter - splits large topics into smaller ones
+  splitter:
+    name: "Splitter"
+    # model: uses default
+
+  # Merger - merges similar topics
+  merger:
+    name: "Merger"
+    # model: uses default
+
+# Embedding Configuration
+embedding:
+  model: "google/gemini-embedding-001"
 
 # RAG Configuration
 rag:
   enabled: true
-  embedding_model: "google/gemini-embedding-001"
-  summary_model: "google/gemini-3-flash-preview"
-  query_model: "google/gemini-3-flash-preview"
-  topic_model: "google/gemini-3-flash-preview"
-  
-  max_context_messages: 50      # Short-term memory size
-  max_profile_facts: 50         # Max facts about user in profile
-  retrieved_messages_count: 20  # How many historical messages to inject
-  retrieved_topics_count: 5     # How many topics to inject
-  similarity_threshold: 0.5     # Cosine similarity threshold
-  consolidation_similarity_threshold: 0.8 # Threshold for merging topics
-  min_safety_threshold: 0.3     # Minimum score to consider a match
-  max_chunk_size: 400           # Max messages per topic chunk
-  
-  backfill_batch_size: 20       # Batch size for background vectorization
-  backfill_interval: "1s"       # Pause between batches
-  chunk_interval: "1h"          # Time gap to consider a new topic
-  split_threshold_chars: 25000  # Threshold for splitting large topics
-  recent_topics_in_context: 3   # Recent topics metadata in context (0 to disable)
-  # topic_extraction_prompt: |
-  #   Override topic extraction prompt here...
-  # enrichment_prompt: |
-  #   Override enrichment prompt here...
-
-  # Reranker (v0.4) - agentic LLM filter for RAG candidates
-  reranker:
-    enabled: true
-    model: "google/gemini-3-flash-preview"
-    candidates: 50        # Summaries to show Flash
-    max_topics: 5         # Max topics in final selection
-    max_people: 10        # Max people in final selection (v0.5)
-    timeout: "60s"        # Timeout for entire reranker flow
-    turn_timeout: "30s"   # Timeout per LLM turn
-    max_tool_calls: 3     # Max tool calls before stopping
-    thinking_level: "minimal" # Reasoning effort: minimal/low/medium/high
-    ignore_excerpts: true     # If true, always use full topic content instead of excerpts
-
-# Internet Search Configuration
-internet_search:
-  enabled: true
-  model: "perplexity/sonar-pro"
+  max_context_messages: 50
+  max_profile_facts: 50
+  retrieved_messages_count: 20
+  retrieved_topics_count: 5
+  similarity_threshold: 0.5
+  consolidation_similarity_threshold: 0.8
+  min_safety_threshold: 0.3
+  max_chunk_size: 400
+  backfill_batch_size: 20
+  backfill_interval: "1s"
+  chunk_interval: "1h"
+  split_threshold_chars: 25000
+  recent_topics_in_context: 3
 
 # Tools Configuration
 tools:
   - name: "internet_search"
     model: "perplexity/sonar-pro"
-    # description: "Override tool description here..."
-    # parameter_description: "Override parameter description here..."
   - name: "search_history"
     model: "memory"
   - name: "manage_memory"
@@ -90,23 +109,16 @@ tools:
 
 # Bot Configuration
 bot:
-  language: "en" # Default language (en, ru)
-  bot_name: "Laplaced"
-  # system_prompt: |
-  #   Override system prompt here...
-  # system_prompt_extra: "Additional instructions appended to the system prompt."
+  language: "en"
   turn_wait_duration: "2s"
-  # allowed_user_ids: [] # Telegram User IDs allowed to use the bot.
-  #                      # ⚠️ If empty, bot will REJECT ALL messages!
-  #                      # Set via LAPLACED_ALLOWED_USER_IDS=123,456 or in config.yaml
 
 # Database Configuration
 database:
   path: "data/laplaced.db"
 
-# Yandex Cloud SpeechKit Configuration (Optional, for STT)
+# Yandex Cloud SpeechKit Configuration (Optional)
 yandex:
   enabled: false
-  api_key: "" # Set via LAPLACED_YANDEX_API_KEY
-  folder_id: "" # Set via LAPLACED_YANDEX_FOLDER_ID
-  language: "ru-RU" # Language code for recognition (e.g., ru-RU, en-US)
+  api_key: ""
+  folder_id: ""
+  language: "ru-RU"

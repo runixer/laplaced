@@ -17,11 +17,58 @@ var defaultConfig []byte
 
 type BotConfig struct {
 	Language          string  `yaml:"language" env:"LAPLACED_BOT_LANGUAGE"`
-	BotName           string  `yaml:"bot_name" env:"LAPLACED_BOT_NAME"`
 	AllowedUserIDs    []int64 `yaml:"allowed_user_ids" env:"LAPLACED_ALLOWED_USER_IDS"`
-	SystemPrompt      string  `yaml:"system_prompt"`       // Deprecated: moved to i18n
-	SystemPromptExtra string  `yaml:"system_prompt_extra"` // New
+	SystemPromptExtra string  `yaml:"system_prompt_extra"`
 	TurnWaitDuration  string  `yaml:"turn_wait_duration"`
+}
+
+// AgentConfig defines configuration for a single agent.
+type AgentConfig struct {
+	Name  string `yaml:"name"`
+	Model string `yaml:"model"`
+}
+
+// RerankerAgentConfig extends AgentConfig with reranker-specific settings.
+type RerankerAgentConfig struct {
+	AgentConfig         `yaml:",inline"`
+	Enabled             bool   `yaml:"enabled" env:"LAPLACED_RERANKER_ENABLED"`
+	Candidates          int    `yaml:"candidates" env:"LAPLACED_RERANKER_CANDIDATES"`
+	MaxTopics           int    `yaml:"max_topics" env:"LAPLACED_RERANKER_MAX_TOPICS"`
+	MaxPeople           int    `yaml:"max_people" env:"LAPLACED_RERANKER_MAX_PEOPLE"`
+	Timeout             string `yaml:"timeout" env:"LAPLACED_RERANKER_TIMEOUT"`
+	TurnTimeout         string `yaml:"turn_timeout" env:"LAPLACED_RERANKER_TURN_TIMEOUT"`
+	MaxToolCalls        int    `yaml:"max_tool_calls" env:"LAPLACED_RERANKER_MAX_TOOL_CALLS"`
+	ThinkingLevel       string `yaml:"thinking_level" env:"LAPLACED_RERANKER_THINKING_LEVEL"`
+	LargeTopicThreshold int    `yaml:"large_topic_threshold" env:"LAPLACED_RERANKER_LARGE_TOPIC_THRESHOLD"`
+	TargetContextChars  int    `yaml:"target_context_chars" env:"LAPLACED_RERANKER_TARGET_CONTEXT_CHARS"`
+	IgnoreExcerpts      bool   `yaml:"ignore_excerpts" env:"LAPLACED_RERANKER_IGNORE_EXCERPTS"`
+}
+
+// AgentsConfig defines all agents in the system.
+type AgentsConfig struct {
+	Default   AgentConfig         `yaml:"default"`   // Default model for all agents
+	Chat      AgentConfig         `yaml:"chat"`      // Main bot - talks to users
+	Archivist AgentConfig         `yaml:"archivist"` // Extracts facts from conversations
+	Enricher  AgentConfig         `yaml:"enricher"`  // Expands search queries
+	Reranker  RerankerAgentConfig `yaml:"reranker"`  // Filters and ranks RAG candidates
+	Splitter  AgentConfig         `yaml:"splitter"`  // Splits large topics
+	Merger    AgentConfig         `yaml:"merger"`    // Merges similar topics
+}
+
+// GetModel returns the agent's model, falling back to default if not set.
+func (a *AgentConfig) GetModel(defaultModel string) string {
+	if a.Model != "" {
+		return a.Model
+	}
+	return defaultModel
+}
+
+// GetModel returns the reranker's model, falling back to default if not set.
+func (r *RerankerAgentConfig) GetModel(defaultModel string) string {
+	if r.Model != "" {
+		return r.Model
+	}
+	return defaultModel
 }
 
 type YandexConfig struct {
@@ -49,36 +96,32 @@ type ToolConfig struct {
 type OpenRouterConfig struct {
 	APIKey          string      `yaml:"api_key" env:"LAPLACED_OPENROUTER_API_KEY"`
 	ProxyURL        string      `yaml:"proxy_url" env:"LAPLACED_OPENROUTER_PROXY_URL"`
-	Model           string      `yaml:"model" env:"LAPLACED_OPENROUTER_MODEL"`
 	PDFParserEngine string      `yaml:"pdf_parser_engine"`
 	RequestCost     float64     `yaml:"request_cost"`
 	PriceTiers      []PriceTier `yaml:"price_tiers"`
 }
 
+// EmbeddingConfig defines embedding model settings.
+type EmbeddingConfig struct {
+	Model string `yaml:"model" env:"LAPLACED_EMBEDDING_MODEL"`
+}
+
 type RAGConfig struct {
 	Enabled                          bool    `yaml:"enabled" env:"LAPLACED_RAG_ENABLED"`
-	EmbeddingModel                   string  `yaml:"embedding_model"`
-	SummaryModel                     string  `yaml:"summary_model"`
-	QueryModel                       string  `yaml:"query_model"`
 	MaxContextMessages               int     `yaml:"max_context_messages"`
 	MaxProfileFacts                  int     `yaml:"max_profile_facts"`
 	RetrievedMessagesCount           int     `yaml:"retrieved_messages_count"`
 	RetrievedTopicsCount             int     `yaml:"retrieved_topics_count"`
 	SimilarityThreshold              float64 `yaml:"similarity_threshold"`
-	ConsolidationSimilarityThreshold float64 `yaml:"consolidation_similarity_threshold"` // New
-	MinSafetyThreshold               float64 `yaml:"min_safety_threshold"`               // New
-	MaxChunkSize                     int     `yaml:"max_chunk_size"`                     // New
+	ConsolidationSimilarityThreshold float64 `yaml:"consolidation_similarity_threshold"`
+	MinSafetyThreshold               float64 `yaml:"min_safety_threshold"`
+	MaxChunkSize                     int     `yaml:"max_chunk_size"`
 	BackfillBatchSize                int     `yaml:"backfill_batch_size"`
 	BackfillInterval                 string  `yaml:"backfill_interval"`
-	TopicModel                       string  `yaml:"topic_model"`
 	ChunkInterval                    string  `yaml:"chunk_interval"`
-	MaxMergedSizeChars               int     `yaml:"max_merged_size_chars"`    // Max combined size for topic merge (default 50000)
-	SplitThresholdChars              int     `yaml:"split_threshold_chars"`    // Threshold for splitting large topics
-	RecentTopicsInContext            int     `yaml:"recent_topics_in_context"` // Number of recent topics to show in context (metadata only)
-	TopicExtractionPrompt            string  `yaml:"topic_extraction_prompt"`  // Deprecated: moved to i18n
-	EnrichmentPrompt                 string  `yaml:"enrichment_prompt"`        // Deprecated: moved to i18n
-
-	Reranker RerankerConfig `yaml:"reranker"` // v0.4
+	MaxMergedSizeChars               int     `yaml:"max_merged_size_chars"`
+	SplitThresholdChars              int     `yaml:"split_threshold_chars"`
+	RecentTopicsInContext            int     `yaml:"recent_topics_in_context"`
 }
 
 // DefaultChunkInterval is the default inactivity period before a session becomes a topic.
@@ -124,22 +167,6 @@ func (c *RAGConfig) GetRecentTopicsInContext() int {
 	return c.RecentTopicsInContext
 }
 
-// RerankerConfig configures the agentic LLM reranker for RAG candidates (v0.4)
-type RerankerConfig struct {
-	Enabled             bool   `yaml:"enabled" env:"LAPLACED_RAG_RERANKER_ENABLED"`
-	Model               string `yaml:"model" env:"LAPLACED_RAG_RERANKER_MODEL"`
-	Candidates          int    `yaml:"candidates" env:"LAPLACED_RAG_RERANKER_CANDIDATES"`                       // summaries to show Flash
-	MaxTopics           int    `yaml:"max_topics" env:"LAPLACED_RAG_RERANKER_MAX_TOPICS"`                       // max topics in final selection
-	MaxPeople           int    `yaml:"max_people" env:"LAPLACED_RAG_RERANKER_MAX_PEOPLE"`                       // max people in final selection (v0.5)
-	Timeout             string `yaml:"timeout" env:"LAPLACED_RAG_RERANKER_TIMEOUT"`                             // timeout for entire reranker flow
-	TurnTimeout         string `yaml:"turn_timeout" env:"LAPLACED_RAG_RERANKER_TURN_TIMEOUT"`                   // timeout per LLM turn (default: Timeout / (MaxToolCalls+1))
-	MaxToolCalls        int    `yaml:"max_tool_calls" env:"LAPLACED_RAG_RERANKER_MAX_TOOL_CALLS"`               // max tool calls before stopping
-	ThinkingLevel       string `yaml:"thinking_level" env:"LAPLACED_RAG_RERANKER_THINKING_LEVEL"`               // reasoning effort: "minimal", "low", "medium", "high" (default: "minimal")
-	LargeTopicThreshold int    `yaml:"large_topic_threshold" env:"LAPLACED_RAG_RERANKER_LARGE_TOPIC_THRESHOLD"` // chars threshold for excerpt request (default 25000)
-	TargetContextChars  int    `yaml:"target_context_chars" env:"LAPLACED_RAG_RERANKER_TARGET_CONTEXT_CHARS"`   // target total chars for all selected topics (default 25000)
-	IgnoreExcerpts      bool   `yaml:"ignore_excerpts" env:"LAPLACED_RAG_RERANKER_IGNORE_EXCERPTS"`             // if true, always use full topic content instead of excerpts
-}
-
 type Config struct {
 	Log struct {
 		Level string `yaml:"level" env:"LAPLACED_LOG_LEVEL"`
@@ -161,6 +188,8 @@ type Config struct {
 		ProxyURL      string `yaml:"proxy_url" env:"LAPLACED_TELEGRAM_PROXY_URL"`
 	} `yaml:"telegram"`
 	OpenRouter OpenRouterConfig `yaml:"openrouter"`
+	Agents     AgentsConfig     `yaml:"agents"`
+	Embedding  EmbeddingConfig  `yaml:"embedding"`
 	RAG        RAGConfig        `yaml:"rag"`
 	Tools      []ToolConfig     `yaml:"tools"`
 	Bot        BotConfig        `yaml:"bot"`
@@ -295,41 +324,49 @@ func (c *Config) Validate() error {
 			}
 		}
 
-		// Reranker validation (only if enabled)
-		if c.RAG.Reranker.Enabled {
-			if c.RAG.Reranker.Model == "" {
-				errs = append(errs, errors.New("rag.reranker.model is required when reranker.enabled is true"))
-			}
-			if c.RAG.Reranker.Candidates <= 0 {
-				errs = append(errs, fmt.Errorf("rag.reranker.candidates must be positive, got %d", c.RAG.Reranker.Candidates))
-			}
-			if c.RAG.Reranker.MaxTopics <= 0 {
-				errs = append(errs, fmt.Errorf("rag.reranker.max_topics must be positive, got %d", c.RAG.Reranker.MaxTopics))
-			}
-			if c.RAG.Reranker.MaxToolCalls <= 0 {
-				errs = append(errs, fmt.Errorf("rag.reranker.max_tool_calls must be positive, got %d", c.RAG.Reranker.MaxToolCalls))
-			}
-			// Default for LargeTopicThreshold
-			if c.RAG.Reranker.LargeTopicThreshold <= 0 {
-				c.RAG.Reranker.LargeTopicThreshold = 25000
-			}
-			if c.RAG.Reranker.Timeout != "" {
-				if _, err := time.ParseDuration(c.RAG.Reranker.Timeout); err != nil {
-					errs = append(errs, fmt.Errorf("rag.reranker.timeout: invalid duration format %q: %w", c.RAG.Reranker.Timeout, err))
-				}
-			}
-			if c.RAG.Reranker.TurnTimeout != "" {
-				if _, err := time.ParseDuration(c.RAG.Reranker.TurnTimeout); err != nil {
-					errs = append(errs, fmt.Errorf("rag.reranker.turn_timeout: invalid duration format %q: %w", c.RAG.Reranker.TurnTimeout, err))
-				}
-			}
-			// Validate thinking_level if set
-			if c.RAG.Reranker.ThinkingLevel != "" {
-				validLevels := map[string]bool{"off": true, "minimal": true, "low": true, "medium": true, "high": true}
-				if !validLevels[c.RAG.Reranker.ThinkingLevel] {
-					errs = append(errs, fmt.Errorf("rag.reranker.thinking_level: must be one of 'off', 'minimal', 'low', 'medium', 'high', got %q", c.RAG.Reranker.ThinkingLevel))
-				}
-			}
+	}
+
+	// Agents validation
+	if c.Agents.Default.Model == "" {
+		errs = append(errs, errors.New("agents.default.model is required"))
+	}
+	if c.Agents.Chat.Name == "" {
+		errs = append(errs, errors.New("agents.chat.name is required"))
+	}
+
+	// Embedding model validation
+	if c.Embedding.Model == "" {
+		errs = append(errs, errors.New("embedding.model is required"))
+	}
+
+	// Reranker agent validation
+	r := &c.Agents.Reranker
+	if r.Candidates <= 0 {
+		errs = append(errs, fmt.Errorf("agents.reranker.candidates must be positive, got %d", r.Candidates))
+	}
+	if r.MaxTopics <= 0 {
+		errs = append(errs, fmt.Errorf("agents.reranker.max_topics must be positive, got %d", r.MaxTopics))
+	}
+	if r.MaxToolCalls <= 0 {
+		errs = append(errs, fmt.Errorf("agents.reranker.max_tool_calls must be positive, got %d", r.MaxToolCalls))
+	}
+	if r.LargeTopicThreshold <= 0 {
+		r.LargeTopicThreshold = 25000
+	}
+	if r.Timeout != "" {
+		if _, err := time.ParseDuration(r.Timeout); err != nil {
+			errs = append(errs, fmt.Errorf("agents.reranker.timeout: invalid duration format %q: %w", r.Timeout, err))
+		}
+	}
+	if r.TurnTimeout != "" {
+		if _, err := time.ParseDuration(r.TurnTimeout); err != nil {
+			errs = append(errs, fmt.Errorf("agents.reranker.turn_timeout: invalid duration format %q: %w", r.TurnTimeout, err))
+		}
+	}
+	if r.ThinkingLevel != "" {
+		validLevels := map[string]bool{"off": true, "minimal": true, "low": true, "medium": true, "high": true}
+		if !validLevels[r.ThinkingLevel] {
+			errs = append(errs, fmt.Errorf("agents.reranker.thinking_level: must be one of 'off', 'minimal', 'low', 'medium', 'high', got %q", r.ThinkingLevel))
 		}
 	}
 

@@ -188,7 +188,7 @@ func (s *Service) splitTopic(ctx context.Context, topic storage.Topic) ([]int64,
 	}
 
 	embResp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-		Model: s.cfg.RAG.EmbeddingModel,
+		Model: s.cfg.Embedding.Model,
 		Input: embeddingInputs,
 	})
 	if err != nil {
@@ -340,10 +340,7 @@ func (s *Service) extractTopicsWithPrompt(ctx context.Context, userID int64, chu
 
 	fullPrompt := fmt.Sprintf("%s\n\nChat Log JSON:\n%s", prompt, string(itemsBytes))
 
-	model := s.cfg.RAG.TopicModel
-	if model == "" {
-		model = "google/gemini-3-flash-preview"
-	}
+	model := s.cfg.Agents.Splitter.GetModel(s.cfg.Agents.Default.Model)
 
 	schema := map[string]interface{}{
 		"type": "json_schema",

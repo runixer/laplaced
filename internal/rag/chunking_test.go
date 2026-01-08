@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 
@@ -21,12 +23,17 @@ func TestProcessChunk_HallucinatedIDs(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	cfg := &config.Config{}
 	cfg.RAG.Enabled = true
-	cfg.RAG.TopicExtractionPrompt = "Extract topics"
-	cfg.RAG.TopicModel = "test-model"
-	cfg.RAG.EmbeddingModel = "test-model"
+	cfg.Embedding.Model = "test-model"
+	cfg.Agents.Archivist.Model = "test-model"
+	cfg.Agents.Default.Model = "test-model"
 
 	mockStore := new(MockStorage)
 	mockClient := new(MockClient)
+
+	// Create test translator
+	tmpDir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("rag.topic_extraction_prompt: 'Extract topics'"), 0644)
+	translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
 
 	userID := int64(123)
 	messages := []storage.Message{
@@ -90,7 +97,7 @@ func TestProcessChunk_HallucinatedIDs(t *testing.T) {
 	mockStore.On("AddRAGLog", mock.Anything).Return(nil).Maybe()
 
 	// Run
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, nil, nil)
+	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, nil, translator)
 	_, err := svc.ForceProcessUser(context.Background(), userID)
 
 	// Now we expect an error because of incomplete coverage
@@ -109,12 +116,17 @@ func TestProcessChunk_ValidIDs(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	cfg := &config.Config{}
 	cfg.RAG.Enabled = true
-	cfg.RAG.TopicExtractionPrompt = "Extract topics"
-	cfg.RAG.TopicModel = "test-model"
-	cfg.RAG.EmbeddingModel = "test-model"
+	cfg.Embedding.Model = "test-model"
+	cfg.Agents.Archivist.Model = "test-model"
+	cfg.Agents.Default.Model = "test-model"
 
 	mockStore := new(MockStorage)
 	mockClient := new(MockClient)
+
+	// Create test translator
+	tmpDir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("rag.topic_extraction_prompt: 'Extract topics'"), 0644)
+	translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
 
 	userID := int64(123)
 	messages := []storage.Message{
@@ -181,7 +193,7 @@ func TestProcessChunk_ValidIDs(t *testing.T) {
 	mockStore.On("AddRAGLog", mock.Anything).Return(nil).Maybe()
 
 	// Run
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, nil, nil)
+	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, nil, translator)
 	_, err := svc.ForceProcessUser(context.Background(), userID)
 	assert.NoError(t, err)
 

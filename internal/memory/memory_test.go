@@ -996,7 +996,7 @@ func TestGetEmbedding(t *testing.T) {
 	mockOR := new(MockOpenRouterClient)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
-	cfg.RAG.EmbeddingModel = "test-model"
+	cfg.Embedding.Model = "test-model"
 	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
 
 	svc := NewService(logger, cfg, nil, nil, nil, mockOR, translator)

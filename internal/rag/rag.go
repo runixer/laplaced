@@ -406,19 +406,19 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 	// Embedding for query
 	embeddingStart := time.Now()
 	resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-		Model: s.cfg.RAG.EmbeddingModel,
+		Model: s.cfg.Embedding.Model,
 		Input: []string{enrichedQuery},
 	})
 	embeddingDuration := time.Since(embeddingStart).Seconds()
 	if err != nil {
-		RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, searchTypeTopics, embeddingDuration, false, 0, nil)
+		RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeTopics, embeddingDuration, false, 0, nil)
 		return nil, debugInfo, err
 	}
 	if len(resp.Data) == 0 {
-		RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, searchTypeTopics, embeddingDuration, false, 0, nil)
+		RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeTopics, embeddingDuration, false, 0, nil)
 		return nil, debugInfo, fmt.Errorf("no embedding returned")
 	}
-	RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, searchTypeTopics, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
+	RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeTopics, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
 	qVec := resp.Data[0].Embedding
 
 	// Search topics
@@ -455,7 +455,7 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 	})
 
 	// Determine how many candidates to consider
-	rerankerCfg := s.cfg.RAG.Reranker
+	rerankerCfg := s.cfg.Agents.Reranker
 	useReranker := rerankerCfg.Enabled && len(matches) > 0
 
 	var maxCandidates int
@@ -989,15 +989,15 @@ func (s *Service) processChunkWithStats(ctx context.Context, userID int64, chunk
 	if len(embeddingInputs) > 0 {
 		embeddingStart := time.Now()
 		resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-			Model: s.cfg.RAG.EmbeddingModel,
+			Model: s.cfg.Embedding.Model,
 			Input: embeddingInputs,
 		})
 		embeddingDuration := time.Since(embeddingStart).Seconds()
 		if err != nil {
-			RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, searchTypeTopics, embeddingDuration, false, 0, nil)
+			RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeTopics, embeddingDuration, false, 0, nil)
 			return nil, fmt.Errorf("create embeddings: %w", err)
 		}
-		RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, searchTypeTopics, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
+		RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeTopics, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
 		stats.AddEmbeddingUsage(resp.Usage.TotalTokens, resp.Usage.Cost)
 
 		if len(resp.Data) != len(validTopics) {
@@ -1293,16 +1293,16 @@ func (s *Service) processChunk(ctx context.Context, userID int64, chunk []storag
 	if len(embeddingInputs) > 0 {
 		embeddingStart := time.Now()
 		resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-			Model: s.cfg.RAG.EmbeddingModel,
+			Model: s.cfg.Embedding.Model,
 			Input: embeddingInputs,
 		})
 		embeddingDuration := time.Since(embeddingStart).Seconds()
 		if err != nil {
-			RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, searchTypeTopics, embeddingDuration, false, 0, nil)
+			RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeTopics, embeddingDuration, false, 0, nil)
 			s.logger.Error("failed to create embeddings for topics", "error", err)
 			return fmt.Errorf("create embeddings: %w", err)
 		}
-		RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, searchTypeTopics, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
+		RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeTopics, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
 
 		if len(resp.Data) != len(validTopics) {
 			s.logger.Error("embedding count mismatch", "expected", len(validTopics), "got", len(resp.Data))
@@ -1447,19 +1447,19 @@ func (s *Service) RetrieveFacts(ctx context.Context, userID int64, query string)
 	// Embedding for query
 	embeddingStart := time.Now()
 	resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-		Model: s.cfg.RAG.EmbeddingModel,
+		Model: s.cfg.Embedding.Model,
 		Input: []string{query},
 	})
 	embeddingDuration := time.Since(embeddingStart).Seconds()
 	if err != nil {
-		RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, searchTypeFacts, embeddingDuration, false, 0, nil)
+		RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeFacts, embeddingDuration, false, 0, nil)
 		return nil, err
 	}
 	if len(resp.Data) == 0 {
-		RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, searchTypeFacts, embeddingDuration, false, 0, nil)
+		RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeFacts, embeddingDuration, false, 0, nil)
 		return nil, fmt.Errorf("no embedding returned")
 	}
-	RecordEmbeddingRequest(userID, s.cfg.RAG.EmbeddingModel, searchTypeFacts, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
+	RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeFacts, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
 	qVec := resp.Data[0].Embedding
 
 	searchStart := time.Now()
@@ -1576,17 +1576,11 @@ func (s *Service) extractTopics(ctx context.Context, userID int64, chunk []stora
 	}
 	itemsBytes, _ := json.Marshal(items)
 
-	prompt := s.cfg.RAG.TopicExtractionPrompt
-	if prompt == "" {
-		prompt = s.translator.Get(s.cfg.Bot.Language, "rag.topic_extraction_prompt")
-	}
+	prompt := s.translator.Get(s.cfg.Bot.Language, "rag.topic_extraction_prompt")
 
 	fullPrompt := fmt.Sprintf("%s\n\nChat Log JSON:\n%s", prompt, string(itemsBytes))
 
-	model := s.cfg.RAG.TopicModel
-	if model == "" {
-		model = "google/gemini-3-flash-preview"
-	}
+	model := s.cfg.Agents.Archivist.GetModel(s.cfg.Agents.Default.Model)
 
 	// Define JSON Schema for Structured Outputs
 	schema := map[string]interface{}{
@@ -1683,10 +1677,7 @@ func (s *Service) extractTopics(ctx context.Context, userID int64, chunk []stora
 }
 
 func (s *Service) enrichQuery(ctx context.Context, userID int64, query string, history []storage.Message, mediaParts []interface{}) (string, string, int, error) {
-	model := s.cfg.RAG.QueryModel
-	if model == "" {
-		return query, "", 0, nil
-	}
+	model := s.cfg.Agents.Enricher.GetModel(s.cfg.Agents.Default.Model)
 
 	var historyStr strings.Builder
 	for _, msg := range history {
@@ -1698,10 +1689,7 @@ func (s *Service) enrichQuery(ctx context.Context, userID int64, query string, h
 		historyStr.WriteString(fmt.Sprintf("- [%s]: %s\n", msg.Role, content))
 	}
 
-	promptTmpl := s.cfg.RAG.EnrichmentPrompt
-	if promptTmpl == "" {
-		promptTmpl = s.translator.Get(s.cfg.Bot.Language, "rag.enrichment_prompt")
-	}
+	promptTmpl := s.translator.Get(s.cfg.Bot.Language, "rag.enrichment_prompt")
 
 	prompt := fmt.Sprintf(promptTmpl, time.Now().Format("2006-01-02"), historyStr.String(), query)
 

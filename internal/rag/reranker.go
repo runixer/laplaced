@@ -97,7 +97,7 @@ func (s *Service) rerankCandidates(
 	userProfile string,
 	mediaParts []interface{}, // Multimodal content (images, audio) from current message
 ) (*RerankerResult, error) {
-	cfg := s.cfg.RAG.Reranker
+	cfg := s.cfg.Agents.Reranker
 	if !cfg.Enabled || len(candidates) == 0 {
 		// Return top-N by vector score
 		return s.fallbackToVectorTop(candidates, cfg.MaxTopics), nil
@@ -267,7 +267,7 @@ func (s *Service) rerankCandidates(
 		}
 
 		resp, err := s.client.CreateChatCompletion(turnCtx, openrouter.ChatCompletionRequest{
-			Model:          cfg.Model,
+			Model:          cfg.GetModel(s.cfg.Agents.Default.Model),
 			Messages:       messages,
 			Tools:          tools,
 			ToolChoice:     toolChoice,
@@ -853,9 +853,9 @@ func (s *Service) loadTopicsContentWithSize(
 		}
 
 		fmt.Fprintf(&sb, "=== Topic %d ===\n", id)
-		threshold := s.cfg.RAG.Reranker.LargeTopicThreshold
+		threshold := s.cfg.Agents.Reranker.LargeTopicThreshold
 		// Only show LARGE TOPIC warning when excerpts are enabled
-		if charCount > threshold && !s.cfg.RAG.Reranker.IgnoreExcerpts {
+		if charCount > threshold && !s.cfg.Agents.Reranker.IgnoreExcerpts {
 			fmt.Fprintf(&sb, "Date: %s | %d msgs | ~%dK chars ⚠️ LARGE TOPIC - PROVIDE EXCERPT IN RESPONSE!\n", date, len(msgs), charCount/1000)
 		} else {
 			fmt.Fprintf(&sb, "Date: %s | %d msgs | ~%dK chars\n", date, len(msgs), charCount/1000)

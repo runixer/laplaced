@@ -143,7 +143,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		tools := b.getTools()
 
 		req := openrouter.ChatCompletionRequest{
-			Model:    b.cfg.OpenRouter.Model,
+			Model:    b.cfg.Agents.Chat.GetModel(b.cfg.Agents.Default.Model),
 			Messages: orMessages,
 			Plugins:  plugins,
 			Tools:    tools,

@@ -399,7 +399,7 @@ func (b *Bot) formatRAGResults(results []rag.TopicSearchResult, query string) st
 
 		// Use excerpt if available (for large topics filtered by reranker)
 		// Can be disabled with ignore_excerpts config option
-		if topicRes.Excerpt != nil && !b.cfg.RAG.Reranker.IgnoreExcerpts {
+		if topicRes.Excerpt != nil && !b.cfg.Agents.Reranker.IgnoreExcerpts {
 			ragContent.WriteString(b.translator.Get(b.cfg.Bot.Language, "rag.excerpt_marker"))
 			ragContent.WriteString("\n")
 			ragContent.WriteString(*topicRes.Excerpt)
@@ -638,17 +638,14 @@ func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageCont
 	var orMessages []openrouter.Message
 
 	// System Prompt + Core Identity
-	baseSystemPrompt := b.cfg.Bot.SystemPrompt
-	if baseSystemPrompt == "" {
-		botName := b.cfg.Bot.BotName
-		if botName == "" {
-			botName = "Bot"
-		}
-		baseSystemPrompt = b.translator.Get(b.cfg.Bot.Language, "bot.system_prompt", botName)
+	botName := b.cfg.Agents.Chat.Name
+	if botName == "" {
+		botName = "Bot"
+	}
+	baseSystemPrompt := b.translator.Get(b.cfg.Bot.Language, "bot.system_prompt", botName)
 
-		if b.cfg.Bot.SystemPromptExtra != "" {
-			baseSystemPrompt += " " + b.cfg.Bot.SystemPromptExtra
-		}
+	if b.cfg.Bot.SystemPromptExtra != "" {
+		baseSystemPrompt += " " + b.cfg.Bot.SystemPromptExtra
 	}
 	fullSystemPrompt := baseSystemPrompt
 	if memoryBankFormatted != "" {
@@ -840,7 +837,7 @@ func (b *Bot) performAddFact(ctx context.Context, userID int64, p memoryOpParams
 	}
 
 	resp, err := b.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-		Model: b.cfg.RAG.EmbeddingModel,
+		Model: b.cfg.Embedding.Model,
 		Input: []string{p.Content},
 	})
 	if err != nil || len(resp.Data) == 0 {
@@ -948,7 +945,7 @@ func (b *Bot) performUpdateFact(ctx context.Context, userID int64, p memoryOpPar
 	}
 
 	resp, err := b.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-		Model: b.cfg.RAG.EmbeddingModel,
+		Model: b.cfg.Embedding.Model,
 		Input: []string{p.Content},
 	})
 	if err != nil || len(resp.Data) == 0 {
@@ -1153,7 +1150,7 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, sa
 		toolIterations++
 
 		req := openrouter.ChatCompletionRequest{
-			Model:    b.cfg.OpenRouter.Model,
+			Model:    b.cfg.Agents.Chat.GetModel(b.cfg.Agents.Default.Model),
 			Messages: orMessages,
 			Plugins:  plugins,
 			Tools:    tools,

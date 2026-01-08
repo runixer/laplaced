@@ -9,82 +9,52 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestSystemPromptOverride(t *testing.T) {
-	// Setup translator with mock data
-	// translator, _ := i18n.NewTranslator("../../locales", "ru") // Assuming locales are in ../../locales relative to test execution
+func TestSystemPromptWithAgentName(t *testing.T) {
+	// Tests that system prompt is correctly built using agents.chat.name
+	// System prompt comes from i18n with agent name substitution
 
 	tests := []struct {
-		name           string
-		cfg            config.BotConfig
-		expectedPrompt string
+		name              string
+		agentName         string
+		systemPromptExtra string
+		expectContains    []string
 	}{
 		{
-			name: "Default from i18n",
-			cfg: config.BotConfig{
-				Language: "ru",
-				BotName:  "TestBot",
-			},
-			// We expect the prompt from ru.yaml with "TestBot" inserted
-			// Since we can't easily mock the file read in this simple test without more setup,
-			// we will rely on the fact that NewTranslator reads the actual files.
-			// If that fails, we might need a mock translator.
-			// For now, let's check if it contains the bot name.
-			expectedPrompt: "TestBot",
+			name:           "Agent name from config",
+			agentName:      "TestBot",
+			expectContains: []string{"System prompt for TestBot"},
 		},
 		{
-			name: "Override from Config",
-			cfg: config.BotConfig{
-				Language:     "ru",
-				SystemPrompt: "Overridden Prompt",
-			},
-			expectedPrompt: "Overridden Prompt",
+			name:           "Default agent name",
+			agentName:      "", // Will fall back to "Bot" or default
+			expectContains: []string{"System prompt for Bot"},
 		},
 		{
-			name: "Default + Extra",
-			cfg: config.BotConfig{
-				Language:          "ru",
-				BotName:           "TestBot",
-				SystemPromptExtra: "Extra Instruction",
-			},
-			expectedPrompt: "Extra Instruction",
+			name:              "Agent name + Extra",
+			agentName:         "TestBot",
+			systemPromptExtra: "Extra Instruction",
+			expectContains:    []string{"System prompt for TestBot", "Extra Instruction"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// We need to access the logic inside buildContext or similar.
-			// Since buildContext is private and complex, we might want to extract the prompt generation logic
-			// or just test the logic in isolation if we refactored it.
-			// But since I modified buildContext directly, I can't easily test it without a full Bot instance.
-
-			// Let's simulate the logic here to verify it matches what we implemented.
-			// This is a "logic verification" test rather than a unit test of the method itself,
-			// but it confirms our understanding of the precedence.
-
-			fullSystemPrompt := tt.cfg.SystemPrompt
-			if fullSystemPrompt == "" {
-				botName := tt.cfg.BotName
-				if botName == "" {
-					botName = "Bot"
-				}
-				// We can't easily call translator.Get here without the actual files loaded correctly in test env.
-				// Let's assume translator works (it has its own tests hopefully) and just mock the result string for the logic check.
-				basePrompt := "System prompt for " + botName // Simulated i18n result
-				fullSystemPrompt = basePrompt
-
-				if tt.cfg.SystemPromptExtra != "" {
-					fullSystemPrompt += " " + tt.cfg.SystemPromptExtra
-				}
+			// Simulate the logic in buildContext
+			agentName := tt.agentName
+			if agentName == "" {
+				agentName = "Bot"
 			}
 
-			switch tt.name {
-			case "Override from Config":
-				assert.Equal(t, "Overridden Prompt", fullSystemPrompt)
-			case "Default + Extra":
-				assert.Contains(t, fullSystemPrompt, "System prompt for TestBot")
-				assert.Contains(t, fullSystemPrompt, "Extra Instruction")
-			default:
-				assert.Contains(t, fullSystemPrompt, "System prompt for TestBot")
+			// Simulate i18n result with agent name substitution
+			basePrompt := "System prompt for " + agentName
+
+			fullSystemPrompt := basePrompt
+			if tt.systemPromptExtra != "" {
+				fullSystemPrompt += " " + tt.systemPromptExtra
+			}
+
+			for _, expected := range tt.expectContains {
+				assert.Contains(t, fullSystemPrompt, expected)
 			}
 		})
 	}

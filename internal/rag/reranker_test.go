@@ -487,8 +487,8 @@ func TestRerankCandidates_Disabled(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
 	cfg := &config.Config{}
-	cfg.RAG.Reranker.Enabled = false
-	cfg.RAG.Reranker.MaxTopics = 3
+	cfg.Agents.Reranker.Enabled = false
+	cfg.Agents.Reranker.MaxTopics = 3
 
 	s := &Service{
 		logger: logger,
@@ -512,8 +512,8 @@ func TestRerankCandidates_EmptyCandidates(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
 	cfg := &config.Config{}
-	cfg.RAG.Reranker.Enabled = true
-	cfg.RAG.Reranker.MaxTopics = 5
+	cfg.Agents.Reranker.Enabled = true
+	cfg.Agents.Reranker.MaxTopics = 5
 
 	s := &Service{
 		logger: logger,
@@ -537,12 +537,12 @@ func TestRerankCandidates_ProtocolViolation_NoToolCalls(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
-	cfg.RAG.Reranker.Enabled = true
-	cfg.RAG.Reranker.Model = "test-model"
-	cfg.RAG.Reranker.MaxTopics = 5
-	cfg.RAG.Reranker.MaxPeople = 10
-	cfg.RAG.Reranker.Timeout = "10s"
-	cfg.RAG.Reranker.MaxToolCalls = 3
+	cfg.Agents.Reranker.Enabled = true
+	cfg.Agents.Reranker.Model = "test-model"
+	cfg.Agents.Reranker.MaxTopics = 5
+	cfg.Agents.Reranker.MaxPeople = 10
+	cfg.Agents.Reranker.Timeout = "10s"
+	cfg.Agents.Reranker.MaxToolCalls = 3
 	cfg.Bot.Language = "en"
 
 	s := &Service{
@@ -611,12 +611,12 @@ func TestRerankCandidates_WithToolCall(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
-	cfg.RAG.Reranker.Enabled = true
-	cfg.RAG.Reranker.Model = "test-model"
-	cfg.RAG.Reranker.MaxTopics = 5
-	cfg.RAG.Reranker.MaxPeople = 10
-	cfg.RAG.Reranker.Timeout = "10s"
-	cfg.RAG.Reranker.MaxToolCalls = 3
+	cfg.Agents.Reranker.Enabled = true
+	cfg.Agents.Reranker.Model = "test-model"
+	cfg.Agents.Reranker.MaxTopics = 5
+	cfg.Agents.Reranker.MaxPeople = 10
+	cfg.Agents.Reranker.Timeout = "10s"
+	cfg.Agents.Reranker.MaxToolCalls = 3
 	cfg.Bot.Language = "en"
 
 	s := &Service{
@@ -734,12 +734,12 @@ func TestRerankCandidates_LLMError_FallbackToVector(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
-	cfg.RAG.Reranker.Enabled = true
-	cfg.RAG.Reranker.Model = "test-model"
-	cfg.RAG.Reranker.MaxTopics = 2
-	cfg.RAG.Reranker.MaxPeople = 10
-	cfg.RAG.Reranker.Timeout = "10s"
-	cfg.RAG.Reranker.MaxToolCalls = 3
+	cfg.Agents.Reranker.Enabled = true
+	cfg.Agents.Reranker.Model = "test-model"
+	cfg.Agents.Reranker.MaxTopics = 2
+	cfg.Agents.Reranker.MaxPeople = 10
+	cfg.Agents.Reranker.Timeout = "10s"
+	cfg.Agents.Reranker.MaxToolCalls = 3
 	cfg.Bot.Language = "en"
 
 	s := &Service{

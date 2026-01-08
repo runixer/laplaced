@@ -208,10 +208,7 @@ func (s *Service) verifyMerge(ctx context.Context, candidate storage.MergeCandid
 	promptTmpl := s.translator.Get(s.cfg.Bot.Language, "rag.topic_consolidation_prompt")
 	prompt := fmt.Sprintf(promptTmpl, profile, candidate.Topic1.Summary, candidate.Topic2.Summary)
 
-	model := s.cfg.RAG.TopicModel // Use same model as topic extraction
-	if model == "" {
-		model = "google/gemini-3-flash-preview"
-	}
+	model := s.cfg.Agents.Merger.GetModel(s.cfg.Agents.Default.Model)
 
 	resp, err := s.client.CreateChatCompletion(ctx, openrouter.ChatCompletionRequest{
 		Model: model,
@@ -279,7 +276,7 @@ func (s *Service) mergeTopics(ctx context.Context, candidate storage.MergeCandid
 
 	// Generate embedding
 	resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-		Model: s.cfg.RAG.EmbeddingModel,
+		Model: s.cfg.Embedding.Model,
 		Input: []string{embeddingInput},
 	})
 	if err != nil {

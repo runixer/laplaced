@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 
@@ -77,11 +76,8 @@ func TestPerformManageMemory_Add(t *testing.T) {
 	// Setup
 	mockStore := new(MockStorage)
 	mockORClient := new(MockOpenRouterClient)
-	cfg := &config.Config{
-		RAG: config.RAGConfig{
-			EmbeddingModel: "test-embedding-model",
-		},
-	}
+	cfg := createTestConfig()
+	cfg.Embedding.Model = "test-embedding-model"
 	bot := &Bot{
 		userRepo:        mockStore,
 		msgRepo:         mockStore,

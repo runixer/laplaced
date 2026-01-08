@@ -54,7 +54,6 @@ database:
 	assert.Equal(t, "https://test.com/webhook", cfg.Telegram.WebhookURL)
 	assert.Equal(t, "test_api_key", cfg.OpenRouter.APIKey)
 	assert.Equal(t, []int64{123, 456}, cfg.Bot.AllowedUserIDs)
-	assert.Equal(t, "You are a test assistant.", cfg.Bot.SystemPrompt)
 	assert.Equal(t, "test.db", cfg.Database.Path)
 
 	// Assert tools
@@ -125,7 +124,6 @@ database:
 	// Assert that the environment variables were expanded
 	assert.Equal(t, "secret-from-env", cfg.Telegram.Token)
 	assert.Equal(t, "api-key-from-env", cfg.OpenRouter.APIKey)
-	assert.Equal(t, "You are a test assistant from env.", cfg.Bot.SystemPrompt)
 	assert.Equal(t, "https://test.com/webhook", cfg.Telegram.WebhookURL) // Ensure other values are still correct
 }
 
