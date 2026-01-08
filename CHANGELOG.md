@@ -13,6 +13,7 @@ _Next version: v0.5 (Social) — People Table, Social Graph_
 - **Archivist prompt restructured** — XML tags for sections, clearer output format specification (per Google prompting guidelines)
 
 ### Fixed
+- **Fixed race condition with sequential messages** — when a user sends multiple messages in quick succession (e.g., voice + text), the bot now processes them in strict FIFO order. Previously, a fast-to-process message could finish before a slow one (like a long voice memo), causing the bot to respond out of order.
 - Fixed reranker JSON parsing when LLM wraps response in array
 - Fixed bot outputting raw JSON for memory updates instead of calling manage_memory tool (added explicit prohibition in system prompt and tool description)
 - Fixed fact extraction blocked by consolidation deadlock — merged topics (`is_consolidated=true`) now proceed immediately; orphan topics without merge partners are auto-marked as checked

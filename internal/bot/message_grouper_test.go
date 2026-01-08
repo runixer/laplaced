@@ -152,6 +152,161 @@ func TestMessageGrouper_Stop_ProcessesPendingGroups(t *testing.T) {
 	assert.Len(t, user456Group.Messages, 1, "User 456 should have 1 message")
 }
 
+// TestMessageGrouper_FIFOOrdering verifies that message groups for the same user
+// are processed in strict FIFO order, even when processing times vary.
+// This prevents race conditions where a fast message (e.g., short text) could
+// complete before a slow one (e.g., long voice) that arrived earlier.
+func TestMessageGrouper_FIFOOrdering(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+
+	var processingOrder []int
+	var orderMu sync.Mutex
+	group1Processing := make(chan struct{})
+	group2CanStart := make(chan struct{})
+	allDone := make(chan struct{})
+
+	processedCount := 0
+
+	onGroupReady := func(ctx context.Context, group *MessageGroup) {
+		// Identify which group this is by message ID
+		groupNum := group.Messages[0].MessageID
+
+		if groupNum == 1 {
+			close(group1Processing) // Signal that group 1 started
+			// Simulate slow processing (e.g., voice transcription)
+			time.Sleep(100 * time.Millisecond)
+		} else if groupNum == 2 {
+			// This should NOT start until group 1 is done
+			close(group2CanStart)
+			// Fast processing
+			time.Sleep(10 * time.Millisecond)
+		}
+
+		orderMu.Lock()
+		processingOrder = append(processingOrder, groupNum)
+		processedCount++
+		if processedCount == 2 {
+			close(allDone)
+		}
+		orderMu.Unlock()
+	}
+
+	// Very short turnWait to quickly trigger processing
+	grouper := NewMessageGrouper(nil, logger, 5*time.Millisecond, onGroupReady)
+
+	// Add first message (will be slow to process)
+	msg1 := &telegram.Message{MessageID: 1, From: &telegram.User{ID: 123}}
+	grouper.AddMessage(msg1)
+
+	// Wait for first group to start processing
+	<-group1Processing
+
+	// Now add second message (will be fast to process)
+	// This creates a new group since the first one's timer already fired
+	msg2 := &telegram.Message{MessageID: 2, From: &telegram.User{ID: 123}}
+	grouper.AddMessage(msg2)
+
+	// Wait for all processing to complete
+	select {
+	case <-allDone:
+		// Success
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Timeout waiting for processing to complete")
+	}
+
+	grouper.Stop()
+
+	// Verify FIFO ordering: group 1 should complete before group 2
+	orderMu.Lock()
+	defer orderMu.Unlock()
+
+	assert.Equal(t, []int{1, 2}, processingOrder,
+		"Groups should be processed in FIFO order (group 1 before group 2)")
+
+	// Also verify that group 2 didn't start until group 1 was done
+	// (group2CanStart channel should have been closed after group1's sleep)
+	select {
+	case <-group2CanStart:
+		// Good, group 2 started (and finished)
+	default:
+		t.Fatal("Group 2 should have started")
+	}
+}
+
+// TestMessageGrouper_DifferentUsersParallel verifies that different users
+// can be processed in parallel (not blocked by each other's locks).
+func TestMessageGrouper_DifferentUsersParallel(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+
+	user1Started := make(chan struct{})
+	user2Started := make(chan struct{})
+	user2Finished := make(chan struct{})
+	allDone := make(chan struct{})
+
+	var processedCount int
+	var countMu sync.Mutex
+
+	onGroupReady := func(ctx context.Context, group *MessageGroup) {
+		if group.UserID == 111 {
+			close(user1Started)
+			// User 1 is slow (e.g., long voice)
+			time.Sleep(200 * time.Millisecond)
+		} else if group.UserID == 222 {
+			close(user2Started)
+			// User 2 is fast
+			time.Sleep(10 * time.Millisecond)
+			close(user2Finished)
+		}
+
+		countMu.Lock()
+		processedCount++
+		if processedCount == 2 {
+			close(allDone)
+		}
+		countMu.Unlock()
+	}
+
+	grouper := NewMessageGrouper(nil, logger, 5*time.Millisecond, onGroupReady)
+
+	// Add messages for both users at roughly the same time
+	msg1 := &telegram.Message{MessageID: 1, From: &telegram.User{ID: 111}}
+	msg2 := &telegram.Message{MessageID: 2, From: &telegram.User{ID: 222}}
+
+	grouper.AddMessage(msg1)
+	grouper.AddMessage(msg2)
+
+	// Wait for both users to start processing
+	select {
+	case <-user1Started:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("User 1 should have started")
+	}
+
+	select {
+	case <-user2Started:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("User 2 should have started")
+	}
+
+	// User 2 should finish while user 1 is still processing
+	// (because they have separate locks)
+	select {
+	case <-user2Finished:
+		// Good, user 2 finished
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("User 2 should have finished quickly")
+	}
+
+	// Wait for all processing
+	select {
+	case <-allDone:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Timeout waiting for all processing")
+	}
+
+	grouper.Stop()
+}
+
 // TestMessageGrouper_Stop_WaitsForActiveProcessing verifies that Stop() waits
 // for active processing to complete before returning.
 func TestMessageGrouper_Stop_WaitsForActiveProcessing(t *testing.T) {

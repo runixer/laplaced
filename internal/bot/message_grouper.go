@@ -26,6 +26,12 @@ type MessageGroup struct {
 	StartedAt  time.Time // When the first message in this group was received
 }
 
+// userProcessingLock tracks a per-user mutex and its last usage time for cleanup.
+type userProcessingLock struct {
+	mu       sync.Mutex
+	lastUsed time.Time
+}
+
 // MessageGrouper handles the grouping of incoming messages from users.
 type MessageGrouper struct {
 	mu           sync.Mutex
@@ -37,19 +43,25 @@ type MessageGrouper struct {
 	onGroupReady func(ctx context.Context, group *MessageGroup)
 	parentCtx    context.Context
 	parentCancel context.CancelFunc
+
+	// Per-user processing locks ensure strict FIFO ordering.
+	// A user's next message group won't start processing until the previous one completes.
+	processingLocks   map[int64]*userProcessingLock
+	processingLocksMu sync.Mutex
 }
 
 // NewMessageGrouper creates a new MessageGrouper.
 func NewMessageGrouper(b *Bot, logger *slog.Logger, turnWait time.Duration, onGroupReady func(ctx context.Context, group *MessageGroup)) *MessageGrouper {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &MessageGrouper{
-		groups:       make(map[int64]*MessageGroup),
-		bot:          b,
-		logger:       logger.With(slog.String("component", "message_grouper")),
-		turnWait:     turnWait,
-		onGroupReady: onGroupReady,
-		parentCtx:    ctx,
-		parentCancel: cancel,
+		groups:          make(map[int64]*MessageGroup),
+		bot:             b,
+		logger:          logger.With(slog.String("component", "message_grouper")),
+		turnWait:        turnWait,
+		onGroupReady:    onGroupReady,
+		parentCtx:       ctx,
+		parentCancel:    cancel,
+		processingLocks: make(map[int64]*userProcessingLock),
 	}
 }
 
@@ -87,6 +99,15 @@ func (mg *MessageGrouper) Stop() {
 		// The wg.Add(1) was already called in AddMessage, wg.Done() will be called after processing
 		go func(g *MessageGroup) {
 			defer mg.wg.Done()
+
+			// Acquire per-user lock to ensure FIFO ordering during shutdown
+			userLock := mg.getProcessingLock(g.UserID)
+			userLock.mu.Lock()
+			defer func() {
+				userLock.lastUsed = time.Now()
+				userLock.mu.Unlock()
+			}()
+
 			mg.logger.Info("processing message group on shutdown",
 				slog.Int64("user_id", g.UserID),
 				slog.Int("message_count", len(g.Messages)))
@@ -155,6 +176,19 @@ func (mg *MessageGrouper) AddMessage(msg *telegram.Message) {
 	})
 }
 
+// getProcessingLock returns the processing lock for a user, creating one if needed.
+func (mg *MessageGrouper) getProcessingLock(userID int64) *userProcessingLock {
+	mg.processingLocksMu.Lock()
+	defer mg.processingLocksMu.Unlock()
+
+	lock, ok := mg.processingLocks[userID]
+	if !ok {
+		lock = &userProcessingLock{}
+		mg.processingLocks[userID] = lock
+	}
+	return lock
+}
+
 func (mg *MessageGrouper) processGroup(ctx context.Context, userID int64) {
 	mg.mu.Lock()
 	group, ok := mg.groups[userID]
@@ -182,9 +216,19 @@ func (mg *MessageGrouper) processGroup(ctx context.Context, userID int64) {
 	// Create a new group object for the handler to own, so the handler can't
 	// accidentally modify the original group's state.
 	processingGroup := &MessageGroup{
-		Messages: messagesToProcess,
-		UserID:   userID,
+		Messages:  messagesToProcess,
+		UserID:    userID,
+		StartedAt: group.StartedAt,
 	}
+
+	// Acquire per-user processing lock to ensure FIFO ordering.
+	// This blocks until any previous message group for this user finishes processing.
+	userLock := mg.getProcessingLock(userID)
+	userLock.mu.Lock()
+	defer func() {
+		userLock.lastUsed = time.Now()
+		userLock.mu.Unlock()
+	}()
 
 	mg.logger.Info("processing message group", slog.Int64("user_id", processingGroup.UserID), slog.Int("message_count", len(processingGroup.Messages)))
 
@@ -261,6 +305,15 @@ func (mg *MessageGrouper) ForceCloseSession(userID int64) bool {
 	mg.wg.Add(1)
 	go func() {
 		defer mg.wg.Done()
+
+		// Acquire per-user lock to ensure FIFO ordering
+		userLock := mg.getProcessingLock(processingGroup.UserID)
+		userLock.mu.Lock()
+		defer func() {
+			userLock.lastUsed = time.Now()
+			userLock.mu.Unlock()
+		}()
+
 		mg.onGroupReady(context.Background(), processingGroup)
 	}()
 
