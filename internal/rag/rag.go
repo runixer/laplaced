@@ -1678,6 +1678,9 @@ func (s *Service) extractTopics(ctx context.Context, userID int64, chunk []stora
 
 func (s *Service) enrichQuery(ctx context.Context, userID int64, query string, history []storage.Message, mediaParts []interface{}) (string, string, int, error) {
 	model := s.cfg.Agents.Enricher.GetModel(s.cfg.Agents.Default.Model)
+	if model == "" {
+		return query, "", 0, nil
+	}
 
 	var historyStr strings.Builder
 	for _, msg := range history {

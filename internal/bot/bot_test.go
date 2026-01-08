@@ -520,7 +520,7 @@ bot:
   voice_recognition_prefix: "(Распознано из аудио):"
   voice_message_marker: "[Voice message]"
   voice_instruction: "The user sent a voice message (audio file below). Listen to it and respond in English. Do not describe the listening process — just respond to the content."
-  system_prompt: "System"
+  system_prompt: "System %s"
 memory:
   facts_user_header: "=== Facts about User ==="
   facts_others_header: "=== Facts about Others ==="
@@ -722,7 +722,6 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 }
 
 func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
-	t.Skip("FIXME: Временный скип для релиза. Падает RAG инициализация")
 	// Setup
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -730,6 +729,9 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 	mockStore := new(MockStorage)
 	mockORClient := new(MockOpenRouterClient)
 	cfg := createTestConfig()
+	cfg.RAG.Enabled = false
+
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	mockDownloader := new(MockFileDownloader)
 	bot := &Bot{
@@ -741,6 +743,7 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
+		ragService:      ragService,
 		downloader:      mockDownloader,
 		fileProcessor:   createTestFileProcessor(t, mockDownloader, translator),
 		cfg:             cfg,
@@ -855,7 +858,6 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 }
 
 func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
-	t.Skip("FIXME: Временный скип для релиза. Падает RAG")
 	// Setup
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -863,6 +865,9 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 	mockStore := new(MockStorage)
 	mockORClient := new(MockOpenRouterClient)
 	cfg := createTestConfig()
+	cfg.RAG.Enabled = false
+
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	mockDownloader := new(MockFileDownloader)
 	bot := &Bot{
@@ -874,6 +879,7 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
+		ragService:      ragService,
 		downloader:      mockDownloader,
 		fileProcessor:   createTestFileProcessor(t, mockDownloader, translator),
 		cfg:             cfg,
@@ -989,7 +995,6 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 }
 
 func TestProcessMessageGroup_PDFMessage(t *testing.T) {
-	t.Skip("FIXME: Временный скип для релиза. Падает RAG")
 	// Setup
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -997,7 +1002,10 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 	mockStore := new(MockStorage)
 	mockORClient := new(MockOpenRouterClient)
 	cfg := createTestConfig()
+	cfg.RAG.Enabled = false
 	cfg.OpenRouter.PDFParserEngine = "native"
+
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	mockDownloader := new(MockFileDownloader)
 	bot := &Bot{
@@ -1009,6 +1017,7 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
+		ragService:      ragService,
 		downloader:      mockDownloader,
 		fileProcessor:   createTestFileProcessor(t, mockDownloader, translator),
 		cfg:             cfg,
@@ -1130,7 +1139,6 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 }
 
 func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
-	t.Skip("FIXME: Временный скип для релиза. Падает RAG")
 	// Setup
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -1138,6 +1146,9 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 	mockStore := new(MockStorage)
 	mockORClient := new(MockOpenRouterClient)
 	cfg := createTestConfig()
+	cfg.RAG.Enabled = false
+
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	mockDownloader := new(MockFileDownloader)
 	bot := &Bot{
@@ -1149,6 +1160,7 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
+		ragService:      ragService,
 		downloader:      mockDownloader,
 		fileProcessor:   createTestFileProcessor(t, mockDownloader, translator),
 		cfg:             cfg,
@@ -1269,7 +1281,6 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 // TestProcessMessageGroup_VoiceMessage tests that voice messages are properly
 // sent as native audio to the LLM (Gemini supports audio directly).
 func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
-	t.Skip("FIXME: Временный скип для релиза. Падает RAG")
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	mockAPI := new(MockBotAPI)
@@ -1278,6 +1289,9 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 	mockDownloader := new(MockFileDownloader)
 
 	cfg := createTestConfig()
+	cfg.RAG.Enabled = false
+
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,
@@ -1288,6 +1302,7 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
+		ragService:      ragService,
 		downloader:      mockDownloader,
 		fileProcessor:   createTestFileProcessor(t, mockDownloader, translator),
 		cfg:             cfg,
@@ -1556,7 +1571,6 @@ func TestGetTieredCost(t *testing.T) {
 }
 
 func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
-	t.Skip("FIXME: Временный скип для релиза. Падает RAG")
 	// Setup
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -1564,6 +1578,10 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 	mockStore := new(MockStorage)
 	mockORClient := new(MockOpenRouterClient)
 	cfg := createTestConfig()
+	cfg.RAG.Enabled = false
+
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
@@ -1573,6 +1591,7 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
+		ragService:      ragService,
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
@@ -1665,7 +1684,7 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 	// Check system prompt
 	systemContent, ok := capturedRequest.Messages[0].Content.([]interface{})[0].(openrouter.TextPart)
 	assert.True(t, ok)
-	assert.Equal(t, "System", systemContent.Text)
+	assert.Equal(t, "System TestBot", systemContent.Text)
 
 	// Check that all historical messages were passed correctly
 	for i, hMsg := range fullHistory {

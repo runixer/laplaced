@@ -8,6 +8,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
 	"github.com/stretchr/testify/assert"
@@ -15,7 +16,6 @@ import (
 )
 
 func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
-	t.Skip("FIXME: Временный скип для релиза. Падает RAG")
 	// Setup
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -23,12 +23,15 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 	mockStore := new(MockStorage)
 	mockORClient := new(MockOpenRouterClient)
 	cfg := createTestConfig()
+	cfg.RAG.Enabled = false
 	cfg.Tools = []config.ToolConfig{
 		{
 			Name:  "test_tool",
 			Model: "test-tool-model",
 		},
 	}
+
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,
@@ -39,6 +42,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
+		ragService:      ragService,
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,

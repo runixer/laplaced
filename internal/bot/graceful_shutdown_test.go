@@ -10,6 +10,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
 	"github.com/stretchr/testify/assert"
@@ -57,7 +58,6 @@ func createSimpleChatResponse(content string) openrouter.ChatCompletionResponse 
 // This is critical for graceful shutdown - users should receive responses
 // for requests that were already being processed.
 func TestProcessMessageGroup_CompletesOnContextCancel(t *testing.T) {
-	t.Skip("FIXME: Временный скип для релиза. Падает RAG")
 	// Setup
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -66,6 +66,9 @@ func TestProcessMessageGroup_CompletesOnContextCancel(t *testing.T) {
 	mockORClient := new(MockOpenRouterClient)
 
 	cfg := createTestConfig()
+	cfg.RAG.Enabled = false
+
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,
@@ -76,6 +79,7 @@ func TestProcessMessageGroup_CompletesOnContextCancel(t *testing.T) {
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
+		ragService:      ragService,
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
@@ -161,7 +165,6 @@ func TestProcessMessageGroup_CompletesOnContextCancel(t *testing.T) {
 // TestProcessMessageGroup_LLMContextNotCancelled verifies that the context
 // passed to CreateChatCompletion is not cancelled when parent context is cancelled.
 func TestProcessMessageGroup_LLMContextNotCancelled(t *testing.T) {
-	t.Skip("FIXME: Временный скип для релиза. Падает RAG")
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	mockAPI := new(MockBotAPI)
@@ -169,6 +172,9 @@ func TestProcessMessageGroup_LLMContextNotCancelled(t *testing.T) {
 	mockORClient := new(MockOpenRouterClient)
 
 	cfg := createTestConfig()
+	cfg.RAG.Enabled = false
+
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,
@@ -179,6 +185,7 @@ func TestProcessMessageGroup_LLMContextNotCancelled(t *testing.T) {
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
+		ragService:      ragService,
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
@@ -258,7 +265,6 @@ func TestProcessMessageGroup_LLMContextNotCancelled(t *testing.T) {
 // processing (download, LLM generation) completes even when the parent context
 // is cancelled. This is critical for graceful shutdown.
 func TestProcessMessageGroup_VoiceCompletesOnContextCancel(t *testing.T) {
-	t.Skip("FIXME: Временный скип для релиза. Падает RAG")
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	mockAPI := new(MockBotAPI)
@@ -267,6 +273,9 @@ func TestProcessMessageGroup_VoiceCompletesOnContextCancel(t *testing.T) {
 	mockDownloader := new(MockFileDownloader)
 
 	cfg := createTestConfig()
+	cfg.RAG.Enabled = false
+
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,
@@ -277,6 +286,7 @@ func TestProcessMessageGroup_VoiceCompletesOnContextCancel(t *testing.T) {
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
+		ragService:      ragService,
 		downloader:      mockDownloader,
 		fileProcessor:   files.NewProcessor(mockDownloader, translator, "en", logger),
 		cfg:             cfg,
@@ -360,7 +370,6 @@ func TestProcessMessageGroup_VoiceCompletesOnContextCancel(t *testing.T) {
 // TestProcessMessageGroup_VoiceDownloadContextNotCancelled verifies that the context
 // passed to file download is not cancelled when parent context is cancelled.
 func TestProcessMessageGroup_VoiceDownloadContextNotCancelled(t *testing.T) {
-	t.Skip("FIXME: Временный скип для релиза. Падает RAG")
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	mockAPI := new(MockBotAPI)
@@ -369,6 +378,9 @@ func TestProcessMessageGroup_VoiceDownloadContextNotCancelled(t *testing.T) {
 	mockDownloader := new(MockFileDownloader)
 
 	cfg := createTestConfig()
+	cfg.RAG.Enabled = false
+
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,
@@ -379,6 +391,7 @@ func TestProcessMessageGroup_VoiceDownloadContextNotCancelled(t *testing.T) {
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
+		ragService:      ragService,
 		downloader:      mockDownloader,
 		fileProcessor:   files.NewProcessor(mockDownloader, translator, "en", logger),
 		cfg:             cfg,

@@ -1328,7 +1328,6 @@ func TestCosineSimilarity(t *testing.T) {
 }
 
 func TestEnrichQuery(t *testing.T) {
-	t.Skip("FIXME: Временный скип для релиза. Mock unexpected call")
 	t.Run("returns original query when model is empty", func(t *testing.T) {
 		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 		cfg := &config.Config{
@@ -1850,7 +1849,6 @@ func TestProcessChunk(t *testing.T) {
 }
 
 func TestRetrieve_NilOptions(t *testing.T) {
-	t.Skip("FIXME: Временный скип для релиза. Mock unexpected call")
 	t.Run("handles nil options", func(t *testing.T) {
 		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 		cfg := &config.Config{
