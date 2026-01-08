@@ -28,7 +28,9 @@ const (
 )
 
 var (
-	availableReactions = []string{"👍", "❤️", "😂", "😮", "😢", "🤔"}
+	// Telegram allowed reaction emoji (Bot API validated list)
+	// See: https://gist.github.com/Soulter/3f22c8e5f9c7e152e967e8bc28c97fc9
+	availableReactions = []string{"👍", "❤️", "🤣", "😱", "😢", "🤔", "🔥", "👏"}
 )
 
 type Bot struct {
