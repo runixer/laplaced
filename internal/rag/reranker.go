@@ -512,6 +512,62 @@ func (s *Service) parseToolCallIDs(arguments string) ([]int64, error) {
 	return args.TopicIDs, nil
 }
 
+// extractJSONFromResponse extracts the first JSON array or object from the response.
+// LLM sometimes adds text before/after JSON (e.g., "Here are the results:\n[...]\nGreat!")
+// Returns the original content if no extraction is needed.
+func extractJSONFromResponse(content string) string {
+	// Find the first [ or { which starts the JSON
+	startArray := strings.Index(content, "[")
+	startObj := strings.Index(content, "{")
+
+	var startIdx int
+	var openBrace, closeBrace byte
+	if startArray >= 0 && (startObj < 0 || startArray < startObj) {
+		startIdx = startArray
+		openBrace = '['
+		closeBrace = ']'
+	} else if startObj >= 0 {
+		startIdx = startObj
+		openBrace = '{'
+		closeBrace = '}'
+	} else {
+		return content // No JSON found, return as-is
+	}
+
+	// Find the matching closing bracket using brace counting
+	depth := 0
+	inString := false
+	escaped := false
+	for i := startIdx; i < len(content); i++ {
+		c := content[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if c == '\\' && inString {
+			escaped = true
+			continue
+		}
+		if c == '"' {
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		if c == openBrace {
+			depth++
+		} else if c == closeBrace {
+			depth--
+			if depth == 0 {
+				return content[startIdx : i+1]
+			}
+		}
+	}
+
+	return content // Unbalanced braces, return as-is and let JSON parser handle it
+}
+
 // parseRerankerResponse parses the JSON response from Flash
 // Supports: [{"id": 42, "reason": "..."}] (bare array)
 //
@@ -521,6 +577,9 @@ func (s *Service) parseToolCallIDs(arguments string) ([]int64, error) {
 //	{"topics": [...]} (fallback)
 //	{"ids": [...]} (fallback)
 func (s *Service) parseRerankerResponse(content string) (*RerankerResult, error) {
+	// Extract JSON from response (LLM may add text before/after)
+	content = extractJSONFromResponse(content)
+
 	// First, try bare array format: [{"id": 42, "reason": "..."}]
 	var bareArray []TopicSelection
 	if err := json.Unmarshal([]byte(content), &bareArray); err == nil && len(bareArray) > 0 && bareArray[0].ID != 0 {

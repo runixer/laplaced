@@ -987,3 +987,74 @@ func TestRequestedIDsDeduplication(t *testing.T) {
 	addIDs([]int64{1, 1, 1, 5})
 	assert.Equal(t, []int64{1, 2, 3, 4, 5}, state.requestedIDs)
 }
+
+func TestExtractJSONFromResponse(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "clean array",
+			input:    `[{"id": 1}, {"id": 2}]`,
+			expected: `[{"id": 1}, {"id": 2}]`,
+		},
+		{
+			name:     "clean object",
+			input:    `{"topic_ids": [1, 2]}`,
+			expected: `{"topic_ids": [1, 2]}`,
+		},
+		{
+			name:     "text before array",
+			input:    "Here are the results:\n[{\"id\": 42}]",
+			expected: `[{"id": 42}]`,
+		},
+		{
+			name:     "text after array (Cyrillic)",
+			input:    "[{\"id\": 42}]\nОтличный результат!",
+			expected: `[{"id": 42}]`,
+		},
+		{
+			name:     "text before and after",
+			input:    "Results:\n[{\"id\": 1}]\nDone!",
+			expected: `[{"id": 1}]`,
+		},
+		{
+			name:     "nested braces",
+			input:    `[{"id": 1, "data": {"nested": true}}] extra`,
+			expected: `[{"id": 1, "data": {"nested": true}}]`,
+		},
+		{
+			name:     "braces in string",
+			input:    `[{"id": 1, "reason": "has {braces}"}] extra`,
+			expected: `[{"id": 1, "reason": "has {braces}"}]`,
+		},
+		{
+			name:     "escaped quotes in string",
+			input:    `[{"id": 1, "reason": "say \"hi\""}] extra`,
+			expected: `[{"id": 1, "reason": "say \"hi\""}]`,
+		},
+		{
+			name:     "markdown code block",
+			input:    "```json\n[{\"id\": 1}]\n```",
+			expected: `[{"id": 1}]`,
+		},
+		{
+			name:     "no JSON",
+			input:    "Just some text without JSON",
+			expected: "Just some text without JSON",
+		},
+		{
+			name:     "object with reason in Russian",
+			input:    "[{\"id\": 4549, \"reason\": \"Обсуждение нативной обработки аудио\"}]\nВот результаты!",
+			expected: `[{"id": 4549, "reason": "Обсуждение нативной обработки аудио"}]`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractJSONFromResponse(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
