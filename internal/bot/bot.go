@@ -699,13 +699,14 @@ func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageCont
 		}
 	}
 
-	// Add Recent History
+	// Add RAG context before session (historical context first, then current conversation)
+	if ragContextMsg != nil {
+		orMessages = append(orMessages, *ragContextMsg)
+	}
+
+	// Add Recent History (active session)
 	var sessionChars int
-	for i, hMsg := range recentHistory {
-		// If this is the last message (current request) and we have RAG context, inject it before
-		if i == len(recentHistory)-1 && ragContextMsg != nil {
-			orMessages = append(orMessages, *ragContextMsg)
-		}
+	for _, hMsg := range recentHistory {
 		var contentParts []interface{}
 
 		if hMsg.Content == currentMessageContent && currentUserMessageParts != nil && hMsg.Role == "user" {
