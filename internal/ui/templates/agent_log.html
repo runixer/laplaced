@@ -789,7 +789,7 @@ function renderConversationTurns(logIdx, turnsDataStr) {
         return;
     }
 
-    if (!data.turns || !data.turns.length) {
+    if (!data || !data.turns || !data.turns.length) {
         container.style.display = 'none';
         return;
     }

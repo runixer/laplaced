@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"reflect"
 	"time"
 
 	"github.com/runixer/laplaced/internal/storage"
@@ -169,6 +170,13 @@ func serializeJSON(v interface{}) string {
 	// If already a string, return as-is
 	if s, ok := v.(string); ok {
 		return s
+	}
+
+	// Check for nil pointer wrapped in interface{}
+	// This is needed because a nil pointer converted to interface{} is NOT nil
+	rv := reflect.ValueOf(v)
+	if rv.Kind() == reflect.Ptr && rv.IsNil() {
+		return ""
 	}
 
 	data, err := json.Marshal(v)
