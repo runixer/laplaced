@@ -70,19 +70,14 @@ type RerankerReasoningEntry struct {
 
 // rerankerTrace collects debug data for the reranker UI
 type rerankerTrace struct {
-	candidates       []storage.RerankerCandidate
-	toolCalls        []storage.RerankerToolCall
-	selectedTopics   []TopicSelection
-	fallbackReason   string
-	reasoning        []RerankerReasoningEntry
-	systemPrompt     string                      // Full system prompt for debug UI
-	userPrompt       string                      // Full user prompt for debug UI
-	rawRequestBody   string                      // Raw JSON request body sent to OpenRouter (first request)
-	rawResponseBody  string                      // Raw JSON response body from OpenRouter (last response)
-	promptTokens     int                         // Accumulated prompt tokens across all LLM calls
-	completionTokens int                         // Accumulated completion tokens across all LLM calls
-	totalCost        float64                     // Accumulated cost across all LLM calls
-	turns            []agentlog.ConversationTurn // All request/response turns for multi-turn visualization
+	candidates     []storage.RerankerCandidate
+	toolCalls      []storage.RerankerToolCall
+	selectedTopics []TopicSelection
+	fallbackReason string
+	reasoning      []RerankerReasoningEntry
+	systemPrompt   string                // Full system prompt for debug UI
+	userPrompt     string                // Full user prompt for debug UI
+	tracker        *agentlog.TurnTracker // Unified turn tracking for multi-turn visualization
 }
 
 // rerankerResponse is the expected JSON response from Flash
@@ -144,11 +139,10 @@ func (s *Service) rerankCandidates(
 	state := &rerankerState{
 		loadedContents: make(map[int64]string),
 	}
-	trace := &rerankerTrace{}
+	trace := &rerankerTrace{
+		tracker: agentlog.NewTurnTracker(),
+	}
 	startTime := time.Now()
-	var totalCost float64         // Accumulate cost across all LLM calls
-	var totalPromptTokens int     // Accumulate prompt tokens across all LLM calls
-	var totalCompletionTokens int // Accumulate completion tokens across all LLM calls
 
 	// Build candidate map and collect trace data
 	candidateMap := s.buildCandidateMap(candidates)
@@ -275,7 +269,7 @@ func (s *Service) rerankCandidates(
 		}
 
 		// Track turn timing for multi-turn visualization
-		turnStart := time.Now()
+		trace.tracker.StartTurn()
 
 		// Per-turn timeout to prevent one slow turn from eating entire budget
 		turnCtx, turnCancel := context.WithTimeout(ctx, turnTimeout)
@@ -320,34 +314,18 @@ func (s *Service) rerankCandidates(
 			result := s.fallbackFromState(state, candidates, cfg.MaxTopics)
 			trace.selectedTopics = result.Topics
 			s.saveRerankerTrace(userID, originalQuery, contextualizedQuery, trace, startTime)
-			s.recordRerankerMetrics(userID, startTime, toolCallCount, len(result.Topics), totalCost)
+			s.recordRerankerMetrics(userID, startTime, toolCallCount, len(result.Topics), trace.tracker.TotalCostValue())
 			return result, nil
 		}
 
-		// Accumulate usage from this LLM call
-		totalPromptTokens += resp.Usage.PromptTokens
-		totalCompletionTokens += resp.Usage.CompletionTokens
-		if resp.Usage.Cost != nil {
-			totalCost += *resp.Usage.Cost
-		}
-		// Update trace for logging
-		trace.promptTokens = totalPromptTokens
-		trace.completionTokens = totalCompletionTokens
-		trace.totalCost = totalCost
-
-		// Capture this turn for multi-turn visualization
-		trace.turns = append(trace.turns, agentlog.ConversationTurn{
-			Iteration:  toolCallCount + 1,
-			Request:    resp.DebugRequestBody,
-			Response:   resp.DebugResponseBody,
-			DurationMs: int(time.Since(turnStart).Milliseconds()),
-		})
-
-		// Store first request and last response for backward compatibility
-		if trace.rawRequestBody == "" {
-			trace.rawRequestBody = resp.DebugRequestBody
-		}
-		trace.rawResponseBody = resp.DebugResponseBody
+		// Record turn with TurnTracker (captures request/response, tokens, cost, duration)
+		trace.tracker.EndTurn(
+			resp.DebugRequestBody,
+			resp.DebugResponseBody,
+			resp.Usage.PromptTokens,
+			resp.Usage.CompletionTokens,
+			resp.Usage.Cost,
+		)
 
 		if len(resp.Choices) == 0 {
 			s.logger.Warn("reranker got empty response")
@@ -355,7 +333,7 @@ func (s *Service) rerankCandidates(
 			result := s.fallbackFromState(state, candidates, cfg.MaxTopics)
 			trace.selectedTopics = result.Topics
 			s.saveRerankerTrace(userID, originalQuery, contextualizedQuery, trace, startTime)
-			s.recordRerankerMetrics(userID, startTime, toolCallCount, len(result.Topics), totalCost)
+			s.recordRerankerMetrics(userID, startTime, toolCallCount, len(result.Topics), trace.tracker.TotalCostValue())
 			return result, nil
 		}
 
@@ -455,7 +433,7 @@ func (s *Service) rerankCandidates(
 			fallbackResult := s.fallbackToVectorTop(candidates, cfg.MaxTopics)
 			trace.selectedTopics = fallbackResult.Topics
 			s.saveRerankerTrace(userID, originalQuery, contextualizedQuery, trace, startTime)
-			s.recordRerankerMetrics(userID, startTime, toolCallCount, len(fallbackResult.Topics), totalCost)
+			s.recordRerankerMetrics(userID, startTime, toolCallCount, len(fallbackResult.Topics), trace.tracker.TotalCostValue())
 			return fallbackResult, nil
 		}
 
@@ -466,7 +444,7 @@ func (s *Service) rerankCandidates(
 			fallbackResult := s.fallbackFromState(state, candidates, cfg.MaxTopics)
 			trace.selectedTopics = fallbackResult.Topics
 			s.saveRerankerTrace(userID, originalQuery, contextualizedQuery, trace, startTime)
-			s.recordRerankerMetrics(userID, startTime, toolCallCount, len(fallbackResult.Topics), totalCost)
+			s.recordRerankerMetrics(userID, startTime, toolCallCount, len(fallbackResult.Topics), trace.tracker.TotalCostValue())
 			return fallbackResult, nil
 		}
 
@@ -476,14 +454,14 @@ func (s *Service) rerankCandidates(
 		}
 
 		// Record metrics and log success
-		s.recordRerankerMetrics(userID, startTime, toolCallCount, len(result.Topics), totalCost)
+		s.recordRerankerMetrics(userID, startTime, toolCallCount, len(result.Topics), trace.tracker.TotalCostValue())
 		s.logger.Info("reranker completed",
 			"user_id", userID,
 			"candidates_in", len(candidates),
 			"candidates_out", len(result.Topics),
 			"tool_calls", toolCallCount,
 			"duration_ms", int(time.Since(startTime).Milliseconds()),
-			"cost_usd", totalCost,
+			"cost_usd", trace.tracker.TotalCostValue(),
 		)
 
 		// Save trace on success
@@ -500,7 +478,7 @@ func (s *Service) rerankCandidates(
 	result := s.fallbackFromState(state, candidates, cfg.MaxTopics)
 	trace.selectedTopics = result.Topics
 	s.saveRerankerTrace(userID, originalQuery, contextualizedQuery, trace, startTime)
-	s.recordRerankerMetrics(userID, startTime, cfg.MaxToolCalls, len(result.Topics), totalCost)
+	s.recordRerankerMetrics(userID, startTime, cfg.MaxToolCalls, len(result.Topics), trace.tracker.TotalCostValue())
 	return result, nil
 }
 
@@ -1021,32 +999,23 @@ func (s *Service) saveRerankerTrace(
 		fullPrompt := fmt.Sprintf("=== SYSTEM PROMPT ===\n%s\n\n=== USER PROMPT ===\n%s",
 			trace.systemPrompt, trace.userPrompt)
 
-		// Build ConversationTurns if we have multiple turns
-		var conversationTurns *agentlog.ConversationTurns
-		if len(trace.turns) > 0 {
-			conversationTurns = &agentlog.ConversationTurns{
-				Turns:                 trace.turns,
-				TotalDurationMs:       int(duration.Milliseconds()),
-				TotalPromptTokens:     trace.promptTokens,
-				TotalCompletionTokens: trace.completionTokens,
-				TotalCost:             &trace.totalCost,
-			}
-		}
+		// Get token totals from tracker
+		promptTokens, completionTokens := trace.tracker.TotalTokens()
 
 		s.agentLogger.Log(context.Background(), agentlog.Entry{
 			UserID:            userID,
 			AgentType:         agentlog.AgentReranker,
 			InputPrompt:       fullPrompt,
-			InputContext:      trace.rawRequestBody, // Full API request JSON (first request)
+			InputContext:      trace.tracker.FirstRequest(), // Full API request JSON (first request)
 			OutputResponse:    string(selectedIDsJSON),
 			OutputParsed:      string(reasoningJSON),
-			OutputContext:     trace.rawResponseBody, // Full API response JSON (last response)
+			OutputContext:     trace.tracker.LastResponse(), // Full API response JSON (last response)
 			Model:             s.cfg.Agents.Reranker.GetModel(s.cfg.Agents.Default.Model),
-			PromptTokens:      trace.promptTokens,
-			CompletionTokens:  trace.completionTokens,
-			TotalCost:         &trace.totalCost,
+			PromptTokens:      promptTokens,
+			CompletionTokens:  completionTokens,
+			TotalCost:         trace.tracker.TotalCost(),
 			DurationMs:        int(duration.Milliseconds()),
-			ConversationTurns: conversationTurns,
+			ConversationTurns: trace.tracker.Build(), // All turns for multi-turn visualization
 			Metadata: map[string]interface{}{
 				"original_query": originalQuery,
 				"enriched_query": contextualizedQuery,

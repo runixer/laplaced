@@ -1119,12 +1119,8 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, sa
 	}
 
 	tools := b.getTools()
-	totalPromptTokens := 0
-	totalCompletionTokens := 0
+	tracker := agentlog.NewTurnTracker() // Unified turn tracking
 	var finalResponse string
-	var lastRawRequestBody string
-	var lastRawResponseBody string
-	var totalCost *float64 // Accumulated cost from OpenRouter
 	toolIterations := 0
 	const maxToolIterations = 10
 
@@ -1142,6 +1138,7 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, sa
 			Tools:    tools,
 		}
 
+		tracker.StartTurn()
 		resp, err := b.orClient.CreateChatCompletion(ctx, req)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get completion: %w", err)
@@ -1151,17 +1148,14 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, sa
 			return nil, fmt.Errorf("empty response from OpenRouter")
 		}
 
-		totalPromptTokens += resp.Usage.PromptTokens
-		totalCompletionTokens += resp.Usage.CompletionTokens
-		lastRawRequestBody = resp.DebugRequestBody
-		lastRawResponseBody = resp.DebugResponseBody
-		// Accumulate cost from OpenRouter
-		if resp.Usage.Cost != nil {
-			if totalCost == nil {
-				totalCost = new(float64)
-			}
-			*totalCost += *resp.Usage.Cost
-		}
+		// Record turn with TurnTracker
+		tracker.EndTurn(
+			resp.DebugRequestBody,
+			resp.DebugResponseBody,
+			resp.Usage.PromptTokens,
+			resp.Usage.CompletionTokens,
+			resp.Usage.Cost,
+		)
 
 		choice := resp.Choices[0].Message
 
@@ -1197,14 +1191,15 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, sa
 		finalResponse = b.translator.Get(b.cfg.Bot.Language, "bot.empty_response")
 	}
 
+	promptTokens, completionTokens := tracker.TotalTokens()
 	result.Response = finalResponse
-	result.PromptTokens = totalPromptTokens
-	result.CompletionTokens = totalCompletionTokens
+	result.PromptTokens = promptTokens
+	result.CompletionTokens = completionTokens
 	// Use OpenRouter cost if available, otherwise fall back to our calculation
-	if totalCost != nil {
+	if totalCost := tracker.TotalCost(); totalCost != nil {
 		result.TotalCost = *totalCost
 	} else {
-		result.TotalCost = b.getTieredCost(totalPromptTokens, totalCompletionTokens, logger)
+		result.TotalCost = b.getTieredCost(promptTokens, completionTokens, logger)
 	}
 	result.TimingTotal = time.Since(startTotal)
 
@@ -1215,7 +1210,7 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, sa
 		}
 
 		// Record metrics
-		b.recordMetrics(userID, totalPromptTokens, totalCompletionTokens, totalCost, ragInfo, orMessages, finalResponse, lastRawRequestBody, lastRawResponseBody, result.TimingLLM, logger)
+		b.recordMetrics(userID, promptTokens, completionTokens, tracker.TotalCost(), ragInfo, orMessages, finalResponse, tracker, result.TimingLLM, logger)
 	}
 
 	return result, nil

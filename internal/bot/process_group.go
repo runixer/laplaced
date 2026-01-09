@@ -111,8 +111,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	}
 
 	// Tool Handling Loop
-	totalPromptTokens := 0
-	totalCompletionTokens := 0
+	tracker := agentlog.NewTurnTracker() // Unified turn tracking
 	var finalResponse string
 	toolIterations := 0
 	const maxToolIterations = 10
@@ -126,9 +125,6 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	llmCallCount := 0
 	toolCallCount := 0
 	telegramCallCount := 0
-	var lastRawRequestBody string  // Capture last LLM request for debugging
-	var lastRawResponseBody string // Capture last LLM response for debugging
-	var totalCost *float64         // Accumulated cost from OpenRouter
 
 	// Defer Telegram metrics recording to capture early returns
 	defer func() {
@@ -154,6 +150,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 			UserID:   user.ID,
 		}
 
+		tracker.StartTurn()
 		llmStart := time.Now()
 		resp, err := b.orClient.CreateChatCompletion(shutdownSafeCtx, req)
 		llmDuration := time.Since(llmStart)
@@ -183,17 +180,14 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 			return
 		}
 
-		totalPromptTokens += resp.Usage.PromptTokens
-		totalCompletionTokens += resp.Usage.CompletionTokens
-		lastRawRequestBody = resp.DebugRequestBody   // Capture for logging
-		lastRawResponseBody = resp.DebugResponseBody // Capture for logging
-		// Accumulate cost from OpenRouter
-		if resp.Usage.Cost != nil {
-			if totalCost == nil {
-				totalCost = new(float64)
-			}
-			*totalCost += *resp.Usage.Cost
-		}
+		// Record turn with TurnTracker
+		tracker.EndTurn(
+			resp.DebugRequestBody,
+			resp.DebugResponseBody,
+			resp.Usage.PromptTokens,
+			resp.Usage.CompletionTokens,
+			resp.Usage.Cost,
+		)
 
 		choice := resp.Choices[0]
 
@@ -297,10 +291,11 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		logger.Error("failed to finalize response", "error", err)
 	}
 
-	b.recordMetrics(userID, totalPromptTokens, totalCompletionTokens, totalCost, ragInfo, orMessages, finalResponse, lastRawRequestBody, lastRawResponseBody, totalLLMDuration, logger)
+	promptTokens, completionTokens := tracker.TotalTokens()
+	b.recordMetrics(userID, promptTokens, completionTokens, tracker.TotalCost(), ragInfo, orMessages, finalResponse, tracker, totalLLMDuration, logger)
 
 	// Record context tokens for metrics (approximate based on prompt tokens)
-	RecordContextTokens(totalPromptTokens)
+	RecordContextTokens(promptTokens)
 
 	tgStart := time.Now()
 	b.sendResponses(shutdownSafeCtx, chatID, responses, logger)
@@ -719,7 +714,7 @@ func (b *Bot) finalizeResponse(chatID int64, messageThreadID int, userID int64, 
 	return responses, nil
 }
 
-func (b *Bot) recordMetrics(userID int64, promptTokens, completionTokens int, openRouterCost *float64, ragInfo *rag.RetrievalDebugInfo, orMessages []openrouter.Message, finalResponse string, rawRequestBody, rawResponseBody string, totalLLMDuration time.Duration, logger *slog.Logger) {
+func (b *Bot) recordMetrics(userID int64, promptTokens, completionTokens int, openRouterCost *float64, ragInfo *rag.RetrievalDebugInfo, orMessages []openrouter.Message, finalResponse string, tracker *agentlog.TurnTracker, totalLLMDuration time.Duration, logger *slog.Logger) {
 	// Use OpenRouter cost if available, otherwise fall back to our calculation
 	var cost float64
 	if openRouterCost != nil {
@@ -750,17 +745,18 @@ func (b *Bot) recordMetrics(userID int64, promptTokens, completionTokens int, op
 		// Log to agent_logs for debugging
 		if b.agentLogger != nil {
 			b.agentLogger.Log(context.Background(), agentlog.Entry{
-				UserID:           userID,
-				AgentType:        agentlog.AgentLaplace,
-				InputPrompt:      fullPrompt,
-				InputContext:     rawRequestBody, // Full API request JSON
-				OutputResponse:   finalResponse,
-				OutputContext:    rawResponseBody, // Full API response JSON
-				Model:            b.cfg.Agents.Chat.GetModel(b.cfg.Agents.Default.Model),
-				PromptTokens:     promptTokens,
-				CompletionTokens: completionTokens,
-				TotalCost:        &cost,
-				DurationMs:       int(totalLLMDuration.Milliseconds()),
+				UserID:            userID,
+				AgentType:         agentlog.AgentLaplace,
+				InputPrompt:       fullPrompt,
+				InputContext:      tracker.FirstRequest(), // First API request JSON
+				OutputResponse:    finalResponse,
+				OutputContext:     tracker.LastResponse(), // Last API response JSON
+				Model:             b.cfg.Agents.Chat.GetModel(b.cfg.Agents.Default.Model),
+				PromptTokens:      promptTokens,
+				CompletionTokens:  completionTokens,
+				TotalCost:         &cost,
+				DurationMs:        int(totalLLMDuration.Milliseconds()),
+				ConversationTurns: tracker.Build(), // All turns for multi-turn visualization
 				Metadata: map[string]interface{}{
 					"original_query":    ragInfo.OriginalQuery,
 					"enriched_query":    ragInfo.EnrichedQuery,
