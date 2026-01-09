@@ -32,14 +32,13 @@ type ConversationTurns struct {
 }
 
 const (
-	AgentLaplace      AgentType = "laplace"
-	AgentReranker     AgentType = "reranker"
-	AgentSplitter     AgentType = "splitter"
-	AgentMerger       AgentType = "merger"
-	AgentEnricher     AgentType = "enricher"
-	AgentArchivist    AgentType = "archivist"
-	AgentDeduplicator AgentType = "deduplicator"
-	AgentScout        AgentType = "scout"
+	AgentLaplace   AgentType = "laplace"
+	AgentReranker  AgentType = "reranker"
+	AgentSplitter  AgentType = "splitter"
+	AgentMerger    AgentType = "merger"
+	AgentEnricher  AgentType = "enricher"
+	AgentArchivist AgentType = "archivist"
+	AgentScout     AgentType = "scout"
 )
 
 // Entry represents a log entry for an agent call.

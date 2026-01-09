@@ -448,6 +448,19 @@ func (s *Service) rerankCandidates(
 			return fallbackResult, nil
 		}
 
+		// Validate that selected topics exist in candidates (filter out hallucinated IDs)
+		result = s.filterValidTopics(userID, result, candidateMap)
+		if len(result.Topics) == 0 {
+			s.logger.Warn("reranker returned no valid topics (all hallucinated)", "user_id", userID)
+			trace.fallbackReason = "all_hallucinated"
+			RecordRerankerFallback(userID, "all_hallucinated")
+			fallbackResult := s.fallbackFromState(state, candidates, cfg.MaxTopics)
+			trace.selectedTopics = fallbackResult.Topics
+			s.saveRerankerTrace(userID, originalQuery, contextualizedQuery, trace, startTime)
+			s.recordRerankerMetrics(userID, startTime, toolCallCount, len(fallbackResult.Topics), trace.tracker.TotalCostValue())
+			return fallbackResult, nil
+		}
+
 		// Validate excerpts for large topics (warning only, skip if excerpts disabled)
 		if !cfg.IgnoreExcerpts {
 			s.validateExcerpts(userID, result, candidateMap, state.loadedContents)
@@ -666,6 +679,36 @@ func (s *Service) parseTopicArray(data json.RawMessage) []TopicSelection {
 	}
 
 	return nil
+}
+
+// filterValidTopics removes hallucinated topic IDs that don't exist in candidates.
+// Returns a new result with only valid topics.
+func (s *Service) filterValidTopics(userID int64, result *RerankerResult, candidateMap map[int64]rerankerCandidate) *RerankerResult {
+	var validTopics []TopicSelection
+	var hallucinatedIDs []int64
+
+	for _, topic := range result.Topics {
+		if _, ok := candidateMap[topic.ID]; ok {
+			validTopics = append(validTopics, topic)
+		} else {
+			hallucinatedIDs = append(hallucinatedIDs, topic.ID)
+		}
+	}
+
+	if len(hallucinatedIDs) > 0 {
+		s.logger.Warn("reranker hallucinated topic IDs",
+			"user_id", userID,
+			"hallucinated_ids", hallucinatedIDs,
+			"valid_count", len(validTopics),
+			"total_returned", len(result.Topics),
+		)
+		RecordRerankerHallucination(userID, len(hallucinatedIDs))
+	}
+
+	return &RerankerResult{
+		Topics:    validTopics,
+		PeopleIDs: result.PeopleIDs,
+	}
 }
 
 // validateExcerpts logs warnings for invalid excerpts (soft validation - monitoring only)

@@ -220,7 +220,6 @@ func (s *Server) Start(ctx context.Context) error {
 		mux.HandleFunc("/ui/agents/laplace", instrumentHandler("agent_laplace", s.agentLogHandler("laplace", "Laplace", "robot", "Main chat bot - processes user messages and generates responses")))
 		mux.HandleFunc("/ui/agents/reranker", instrumentHandler("agent_reranker", s.agentLogHandler("reranker", "Reranker", "funnel", "Filters and ranks retrieved topics by relevance")))
 		mux.HandleFunc("/ui/agents/archivist", instrumentHandler("agent_archivist", s.agentLogHandler("archivist", "Archivist", "archive", "Extracts facts from conversations for long-term memory")))
-		mux.HandleFunc("/ui/agents/deduplicator", instrumentHandler("agent_deduplicator", s.agentLogHandler("deduplicator", "Deduplicator", "layers", "Resolves conflicting facts and decides what to keep")))
 		mux.HandleFunc("/ui/agents/splitter", instrumentHandler("agent_splitter", s.agentLogHandler("splitter", "Splitter", "scissors", "Splits conversations into topics")))
 		mux.HandleFunc("/ui/agents/merger", instrumentHandler("agent_merger", s.agentLogHandler("merger", "Merger", "intersect", "Verifies if topics should be merged")))
 		mux.HandleFunc("/ui/agents/enricher", instrumentHandler("agent_enricher", s.agentLogHandler("enricher", "Enricher", "magic", "Expands user queries for better retrieval")))

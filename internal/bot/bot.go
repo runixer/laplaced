@@ -376,6 +376,7 @@ func (b *Bot) performModelTool(ctx context.Context, userID int64, modelName stri
 			InputPrompt:      query,
 			InputContext:     resp.DebugRequestBody, // Full API request JSON
 			OutputResponse:   result,
+			OutputContext:    resp.DebugResponseBody, // Full API response JSON
 			Model:            modelName,
 			PromptTokens:     resp.Usage.PromptTokens,
 			CompletionTokens: resp.Usage.CompletionTokens,

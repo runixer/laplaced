@@ -111,6 +111,11 @@
         background: #dbeafe;
         border-left: 3px solid #3b82f6;
     }
+    .or-message-tool pre {
+        white-space: pre-wrap;
+        word-break: break-word;
+        margin: 0;
+    }
     .or-role {
         font-weight: 600;
         font-size: 0.75rem;
@@ -171,6 +176,8 @@
         border-radius: 0.25rem;
         max-height: 150px;
         overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
     }
     .or-multimodal-badge {
         display: inline-flex;
@@ -775,6 +782,24 @@ function toggleORSection(header) {
     }
 }
 
+function toggleTurnRawJSON(turnId, type) {
+    const raw = document.getElementById('or-turn-' + type + '-raw-' + turnId);
+    const viewer = document.getElementById('or-turn-' + type + '-' + turnId);
+    if (raw.style.display === 'none') {
+        raw.style.display = 'block';
+        viewer.style.display = 'none';
+    } else {
+        raw.style.display = 'none';
+        viewer.style.display = 'block';
+    }
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
 // Render multi-turn conversation accordion
 function renderConversationTurns(logIdx, turnsDataStr) {
     const container = document.getElementById('conv-turns-' + logIdx);
@@ -826,6 +851,13 @@ function renderConversationTurns(logIdx, turnsDataStr) {
             typeBadge = '<span class="badge bg-success"><i class="bi bi-check"></i> Final response</span>';
         }
 
+        // Prepare JSON for raw view
+        const reqJson = typeof turn.request === 'string' ? turn.request : JSON.stringify(turn.request, null, 2);
+        const respJson = typeof turn.response === 'string' ? turn.response : JSON.stringify(turn.response, null, 2);
+        let prettyReqJson, prettyRespJson;
+        try { prettyReqJson = JSON.stringify(JSON.parse(reqJson), null, 2); } catch(e) { prettyReqJson = reqJson; }
+        try { prettyRespJson = JSON.stringify(JSON.parse(respJson), null, 2); } catch(e) { prettyRespJson = respJson; }
+
         html += '<div class="accordion-item">' +
             '<h2 class="accordion-header">' +
                 '<button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#' + turnId + '">' +
@@ -838,12 +870,22 @@ function renderConversationTurns(logIdx, turnsDataStr) {
                 '<div class="accordion-body">' +
                     '<div class="row">' +
                         '<div class="col-md-6 turn-request">' +
-                            '<h6><i class="bi bi-arrow-up-right"></i> Request</h6>' +
+                            '<h6><i class="bi bi-arrow-up-right"></i> Request ' +
+                                '<button class="btn btn-sm btn-outline-secondary ms-2" onclick="toggleTurnRawJSON(\'' + logIdx + '-' + i + '\', \'req\')">' +
+                                    '<i class="bi bi-code"></i> Raw' +
+                                '</button>' +
+                            '</h6>' +
                             '<div id="or-turn-req-' + logIdx + '-' + i + '"></div>' +
+                            '<pre class="json-view mt-2" id="or-turn-req-raw-' + logIdx + '-' + i + '" style="display:none;max-height:400px;overflow:auto;">' + escapeHtml(prettyReqJson) + '</pre>' +
                         '</div>' +
                         '<div class="col-md-6 turn-response">' +
-                            '<h6><i class="bi bi-arrow-down-left"></i> Response</h6>' +
+                            '<h6><i class="bi bi-arrow-down-left"></i> Response ' +
+                                '<button class="btn btn-sm btn-outline-secondary ms-2" onclick="toggleTurnRawJSON(\'' + logIdx + '-' + i + '\', \'resp\')">' +
+                                    '<i class="bi bi-code"></i> Raw' +
+                                '</button>' +
+                            '</h6>' +
                             '<div id="or-turn-resp-' + logIdx + '-' + i + '"></div>' +
+                            '<pre class="json-view mt-2" id="or-turn-resp-raw-' + logIdx + '-' + i + '" style="display:none;max-height:400px;overflow:auto;">' + escapeHtml(prettyRespJson) + '</pre>' +
                         '</div>' +
                     '</div>' +
                 '</div>' +
@@ -927,15 +969,25 @@ class OpenRouterRequestViewer {
             return '<div class="text-muted">No messages</div>';
         }
 
+        // Find last user message index for default expansion
+        let lastUserIdx = -1;
+        for (let i = this.data.messages.length - 1; i >= 0; i--) {
+            if (this.data.messages[i].role === 'user') {
+                lastUserIdx = i;
+                break;
+            }
+        }
+
         let html = '<div class="or-messages">';
         for (let i = 0; i < this.data.messages.length; i++) {
-            html += this.renderMessage(this.data.messages[i], i);
+            const isLastUser = (i === lastUserIdx);
+            html += this.renderMessage(this.data.messages[i], i, isLastUser);
         }
         html += '</div>';
         return html;
     }
 
-    renderMessage(msg, idx) {
+    renderMessage(msg, idx, isLastUser) {
         const role = msg.role || 'unknown';
 
         if (role === 'system') {
@@ -943,23 +995,34 @@ class OpenRouterRequestViewer {
         }
 
         if (role === 'tool') {
-            return this.renderToolMessage(msg);
+            return this.renderToolMessage(msg, idx);
         }
 
         if (role === 'user') {
-            return this.renderUserMessage(msg, idx);
+            return this.renderUserMessage(msg, idx, isLastUser);
         }
 
-        const roleClass = 'or-message-' + role;
+        // Assistant message - collapsible
         const contentHtml = this.renderContent(msg.content);
         const toolCallsHtml = (msg.tool_calls && msg.tool_calls.length) ? this.renderToolCalls(msg.tool_calls) : '';
+        const content = this.getTextContent(msg.content);
+        const preview = content.substring(0, 100).trim() + (content.length > 100 ? '...' : '');
 
-        return '<div class="or-message ' + roleClass + '"><div class="or-role">' + this.escapeHtml(role) + '</div><div class="or-message-content">' + contentHtml + toolCallsHtml + '</div></div>';
+        return '<div class="or-message or-message-assistant">' +
+            '<div class="or-message-header" onclick="toggleORMessage(this)">' +
+                '<span class="or-role">Assistant</span>' +
+                '<span class="or-preview">' + this.escapeHtml(preview) + '</span>' +
+                '<i class="bi bi-chevron-down"></i>' +
+            '</div>' +
+            '<div class="or-message-content collapsed">' + contentHtml + toolCallsHtml + '</div>' +
+        '</div>';
     }
 
-    renderUserMessage(msg, idx) {
+    renderUserMessage(msg, idx, isLastUser) {
         const content = this.getTextContent(msg.content);
         const hasXmlTags = /<\w+[^>]*>[\s\S]*?<\/\w+>/g.test(content);
+        const collapsedClass = isLastUser ? '' : ' collapsed';
+        const chevronClass = isLastUser ? 'bi-chevron-up' : 'bi-chevron-down';
 
         // If content has XML tags (like RAG context), visualize them
         if (hasXmlTags) {
@@ -970,17 +1033,22 @@ class OpenRouterRequestViewer {
                 '<div class="or-message-header" onclick="toggleORMessage(this)">' +
                     '<span class="or-role">User</span>' +
                     '<span class="or-preview">' + this.escapeHtml(preview) + '</span>' +
-                    '<i class="bi bi-chevron-down"></i>' +
+                    '<i class="bi ' + chevronClass + '"></i>' +
                 '</div>' +
-                '<div class="or-message-content collapsed">' + contentHtml + '</div>' +
+                '<div class="or-message-content' + collapsedClass + '">' + contentHtml + '</div>' +
             '</div>';
         }
 
-        // For multimodal content or simple text, render normally
+        // For multimodal content or simple text - also collapsible
+        const preview = content.substring(0, 100).trim() + (content.length > 100 ? '...' : '');
         const contentHtml = this.renderContent(msg.content);
         return '<div class="or-message or-message-user">' +
-            '<div class="or-role">User</div>' +
-            '<div class="or-message-content">' + contentHtml + '</div>' +
+            '<div class="or-message-header" onclick="toggleORMessage(this)">' +
+                '<span class="or-role">User</span>' +
+                '<span class="or-preview">' + this.escapeHtml(preview) + '</span>' +
+                '<i class="bi ' + chevronClass + '"></i>' +
+            '</div>' +
+            '<div class="or-message-content' + collapsedClass + '">' + contentHtml + '</div>' +
         '</div>';
     }
 
@@ -1011,7 +1079,6 @@ class OpenRouterRequestViewer {
 
             const colorClass = this.getTagColorClass(tagName);
             const attrs = this.parseAttributes(attrString);
-            const isLong = tagContent.length > 200;
 
             let attrHtml = '';
             for (const [key, value] of Object.entries(attrs)) {
@@ -1028,9 +1095,9 @@ class OpenRouterRequestViewer {
                 '<div class="or-xml-header" onclick="toggleORSection(this)">' +
                     '<span>' + this.escapeHtml(tagName) + '</span>' +
                     attrHtml +
-                    (isLong || hasNestedTags ? '<i class="bi bi-chevron-down"></i>' : '') +
+                    '<i class="bi bi-chevron-down"></i>' +
                 '</div>' +
-                '<div class="or-xml-content' + (isLong ? ' collapsed' : '') + '">' + innerHtml + '</div>' +
+                '<div class="or-xml-content collapsed">' + innerHtml + '</div>' +
             '</div>';
 
             lastIndex = match.index + match[0].length;
@@ -1165,7 +1232,7 @@ class OpenRouterRequestViewer {
         return attrs;
     }
 
-    renderToolMessage(msg) {
+    renderToolMessage(msg, idx) {
         const content = this.getTextContent(msg.content);
         const toolCallId = msg.tool_call_id || '';
 
@@ -1175,9 +1242,17 @@ class OpenRouterRequestViewer {
             displayContent = JSON.stringify(parsed, null, 2);
         } catch (e) {}
 
+        // Show preview of tool result
+        const preview = displayContent.substring(0, 80).replace(/\n/g, ' ').trim() + (displayContent.length > 80 ? '...' : '');
+
         return '<div class="or-message or-message-tool">' +
-            '<div class="or-role">Tool Result' + (toolCallId ? ' <code class="or-tool-id">' + this.escapeHtml(toolCallId) + '</code>' : '') + '</div>' +
-            '<div class="or-message-content"><pre>' + this.escapeHtml(displayContent) + '</pre></div>' +
+            '<div class="or-message-header" onclick="toggleORMessage(this)">' +
+                '<span class="or-role">Tool Result</span>' +
+                (toolCallId ? '<code class="or-tool-id">' + this.escapeHtml(toolCallId) + '</code>' : '') +
+                '<span class="or-preview">' + this.escapeHtml(preview) + '</span>' +
+                '<i class="bi bi-chevron-down"></i>' +
+            '</div>' +
+            '<div class="or-message-content collapsed"><pre>' + this.escapeHtml(displayContent) + '</pre></div>' +
         '</div>';
     }
 
@@ -1230,6 +1305,34 @@ class OpenRouterRequestViewer {
         return '<pre>' + this.escapeHtml(JSON.stringify(part, null, 2)) + '</pre>';
     }
 
+    // Recursively parse JSON strings inside objects
+    deepParseJson(obj) {
+        if (typeof obj === 'string') {
+            // Try to parse string as JSON
+            const trimmed = obj.trim();
+            if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+                (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+                try {
+                    return this.deepParseJson(JSON.parse(trimmed));
+                } catch (e) {
+                    return obj;
+                }
+            }
+            return obj;
+        }
+        if (Array.isArray(obj)) {
+            return obj.map(item => this.deepParseJson(item));
+        }
+        if (obj && typeof obj === 'object') {
+            const result = {};
+            for (const key of Object.keys(obj)) {
+                result[key] = this.deepParseJson(obj[key]);
+            }
+            return result;
+        }
+        return obj;
+    }
+
     renderToolCalls(toolCalls) {
         let html = '';
         for (let i = 0; i < toolCalls.length; i++) {
@@ -1238,7 +1341,9 @@ class OpenRouterRequestViewer {
             let args = (tc.function && tc.function.arguments) || '{}';
 
             try {
-                args = JSON.stringify(JSON.parse(args), null, 2);
+                const parsed = JSON.parse(args);
+                const expanded = this.deepParseJson(parsed);
+                args = JSON.stringify(expanded, null, 2);
             } catch (e) {}
 
             html += '<div class="or-tool-call">' +
@@ -1431,6 +1536,33 @@ class OpenRouterResponseViewer {
         return html;
     }
 
+    // Recursively parse JSON strings inside objects
+    deepParseJson(obj) {
+        if (typeof obj === 'string') {
+            const trimmed = obj.trim();
+            if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+                (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+                try {
+                    return this.deepParseJson(JSON.parse(trimmed));
+                } catch (e) {
+                    return obj;
+                }
+            }
+            return obj;
+        }
+        if (Array.isArray(obj)) {
+            return obj.map(item => this.deepParseJson(item));
+        }
+        if (obj && typeof obj === 'object') {
+            const result = {};
+            for (const key of Object.keys(obj)) {
+                result[key] = this.deepParseJson(obj[key]);
+            }
+            return result;
+        }
+        return obj;
+    }
+
     renderToolCalls(toolCalls) {
         let html = '';
         for (let i = 0; i < toolCalls.length; i++) {
@@ -1439,7 +1571,9 @@ class OpenRouterResponseViewer {
             let args = (tc.function && tc.function.arguments) || '{}';
 
             try {
-                args = JSON.stringify(JSON.parse(args), null, 2);
+                const parsed = JSON.parse(args);
+                const expanded = this.deepParseJson(parsed);
+                args = JSON.stringify(expanded, null, 2);
             } catch (e) {}
 
             html += '<div class="or-tool-call">' +

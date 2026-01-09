@@ -32,20 +32,6 @@ var (
 		[]string{"user_id", "operation"},
 	)
 
-	// dedupDecisionsTotal считает решения дедупликации.
-	// Labels:
-	//   - user_id: идентификатор пользователя
-	//   - decision: решение (ignore, merge, replace, add)
-	dedupDecisionsTotal = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: metricsNamespace,
-			Subsystem: "memory",
-			Name:      "dedup_decisions_total",
-			Help:      "Total number of deduplication decisions",
-		},
-		[]string{"user_id", "decision"},
-	)
-
 	// memoryExtractionDuration измеряет время извлечения фактов из сообщений.
 	memoryExtractionDuration = promauto.NewHistogram(
 		prometheus.HistogramOpts{
@@ -91,14 +77,6 @@ const (
 	OperationDelete = "delete"
 )
 
-// Константы для решений дедупликации
-const (
-	DecisionIgnore  = "ignore"
-	DecisionMerge   = "merge"
-	DecisionReplace = "replace"
-	DecisionAdd     = "add"
-)
-
 // formatUserID converts user ID to string for metric labels.
 func formatUserID(userID int64) string {
 	return strconv.FormatInt(userID, 10)
@@ -107,11 +85,6 @@ func formatUserID(userID int64) string {
 // RecordFactOperation записывает операцию с фактом.
 func RecordFactOperation(userID int64, operation string) {
 	factOperationsTotal.WithLabelValues(formatUserID(userID), operation).Inc()
-}
-
-// RecordDedupDecision записывает решение дедупликации.
-func RecordDedupDecision(userID int64, decision string) {
-	dedupDecisionsTotal.WithLabelValues(formatUserID(userID), decision).Inc()
 }
 
 // RecordMemoryExtraction записывает время извлечения фактов.

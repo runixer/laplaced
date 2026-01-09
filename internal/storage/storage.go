@@ -163,7 +163,7 @@ type RerankerToolCallTopic struct {
 type AgentLog struct {
 	ID                int64
 	UserID            int64
-	AgentType         string // laplace, reranker, splitter, merger, enricher, archivist, deduplicator, scout
+	AgentType         string // laplace, reranker, splitter, merger, enricher, archivist, scout
 	InputPrompt       string
 	InputContext      string // JSON - full OpenRouter API request
 	OutputResponse    string

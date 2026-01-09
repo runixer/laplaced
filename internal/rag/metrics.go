@@ -377,6 +377,17 @@ var (
 		},
 		[]string{"user_id", "reason"},
 	)
+
+	// rerankerHallucinationTotal - галлюцинированные topic IDs.
+	rerankerHallucinationTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: "reranker",
+			Name:      "hallucination_total",
+			Help:      "Total number of hallucinated topic IDs returned by reranker",
+		},
+		[]string{"user_id"},
+	)
 )
 
 // RecordRerankerDuration записывает время reranker операции.
@@ -410,8 +421,14 @@ func RecordRerankerCost(userID int64, cost float64) {
 }
 
 // RecordRerankerFallback записывает срабатывание fallback.
-// reason: "timeout", "error", "max_tool_calls", "invalid_json", "requested_ids", "vector_top"
+// reason: "timeout", "error", "max_tool_calls", "invalid_json", "requested_ids", "vector_top", "all_hallucinated"
 func RecordRerankerFallback(userID int64, reason string) {
 	uid := formatUserID(userID)
 	rerankerFallbackTotal.WithLabelValues(uid, reason).Inc()
+}
+
+// RecordRerankerHallucination записывает количество галлюцинированных topic IDs.
+func RecordRerankerHallucination(userID int64, count int) {
+	uid := formatUserID(userID)
+	rerankerHallucinationTotal.WithLabelValues(uid).Add(float64(count))
 }

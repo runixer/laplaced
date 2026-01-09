@@ -1711,6 +1711,7 @@ func (s *Service) extractTopics(ctx context.Context, userID int64, chunk []stora
 			InputPrompt:      systemPrompt, // System prompt for display
 			InputContext:     resp.DebugRequestBody,
 			OutputResponse:   content,
+			OutputContext:    resp.DebugResponseBody,
 			Model:            model,
 			PromptTokens:     resp.Usage.PromptTokens,
 			CompletionTokens: resp.Usage.CompletionTokens,
