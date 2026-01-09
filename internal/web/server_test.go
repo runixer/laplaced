@@ -14,452 +14,30 @@ import (
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
+	"github.com/runixer/laplaced/internal/testutil"
+
 	"github.com/runixer/laplaced/internal/telegram"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
 
-// MockBotAPI is a mock for the telegram.BotAPI interface
-type MockBotAPI struct {
+// MockBotInterface implements BotInterface for tests.
+// This mock is kept in web package to avoid import cycles (rag <-> testutil).
+type MockBotInterface struct {
 	mock.Mock
 }
 
-func (m *MockBotAPI) SendMessage(ctx context.Context, req telegram.SendMessageRequest) (*telegram.Message, error) {
-	args := m.Called(ctx, req)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*telegram.Message), args.Error(1)
-}
-
-func (m *MockBotAPI) SetMyCommands(ctx context.Context, req telegram.SetMyCommandsRequest) error {
-	args := m.Called(ctx, req)
-	return args.Error(0)
-}
-
-func (m *MockBotAPI) SetWebhook(ctx context.Context, req telegram.SetWebhookRequest) error {
-	args := m.Called(ctx, req)
-	return args.Error(0)
-}
-
-func (m *MockBotAPI) SendChatAction(ctx context.Context, req telegram.SendChatActionRequest) error {
-	args := m.Called(ctx, req)
-	return args.Error(0)
-}
-
-func (m *MockBotAPI) GetFile(ctx context.Context, req telegram.GetFileRequest) (*telegram.File, error) {
-	args := m.Called(ctx, req)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*telegram.File), args.Error(1)
-}
-
-func (m *MockBotAPI) SetMessageReaction(ctx context.Context, req telegram.SetMessageReactionRequest) error {
-	args := m.Called(ctx, req)
-	return args.Error(0)
-}
-
-func (m *MockBotAPI) GetToken() string {
-	args := m.Called()
-	return args.String(0)
-}
-
-func (m *MockBotAPI) GetUpdates(ctx context.Context, req telegram.GetUpdatesRequest) ([]telegram.Update, error) {
-	args := m.Called(ctx, req)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]telegram.Update), args.Error(1)
-}
-
-// MockStorage is a mock type for the Storage interface
-type MockStorage struct {
-	mock.Mock
-}
-
-func (m *MockStorage) AddMessageToHistory(userID int64, message storage.Message) error {
-	args := m.Called(userID, message)
-	return args.Error(0)
-}
-
-func (m *MockStorage) ImportMessage(userID int64, message storage.Message) error {
-	args := m.Called(userID, message)
-	return args.Error(0)
-}
-
-func (m *MockStorage) GetHistory(userID int64) ([]storage.Message, error) {
-	args := m.Called(userID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]storage.Message), args.Error(1)
-}
-
-func (m *MockStorage) GetRecentHistory(userID int64, limit int) ([]storage.Message, error) {
-	args := m.Called(userID, limit)
-	return args.Get(0).([]storage.Message), args.Error(1)
-}
-
-func (m *MockStorage) GetMessagesByIDs(ids []int64) ([]storage.Message, error) {
-	args := m.Called(ids)
-	return args.Get(0).([]storage.Message), args.Error(1)
-}
-
-func (m *MockStorage) GetFactsByIDs(ids []int64) ([]storage.Fact, error) {
-	args := m.Called(ids)
-	return args.Get(0).([]storage.Fact), args.Error(1)
-}
-
-func (m *MockStorage) ClearHistory(userID int64) error {
-	args := m.Called(userID)
-	return args.Error(0)
-}
-
-func (m *MockStorage) AddStat(stat storage.Stat) error {
-	args := m.Called(stat)
-	return args.Error(0)
-}
-
-func (m *MockStorage) GetStats() (map[int64]storage.Stat, error) {
-	args := m.Called()
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(map[int64]storage.Stat), args.Error(1)
-}
-
-func (m *MockStorage) GetDashboardStats(userID int64) (*storage.DashboardStats, error) {
-	args := m.Called(userID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*storage.DashboardStats), args.Error(1)
-}
-
-func (m *MockStorage) AddTopic(topic storage.Topic) (int64, error) {
-	args := m.Called(topic)
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) CreateTopic(topic storage.Topic) (int64, error) {
-	args := m.Called(topic)
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) ResetUserData(userID int64) error {
-	args := m.Called(userID)
-	return args.Error(0)
-}
-
-func (m *MockStorage) DeleteTopic(id int64) error {
-	args := m.Called(id)
-	return args.Error(0)
-}
-
-func (m *MockStorage) DeleteTopicCascade(id int64) error {
-	args := m.Called(id)
-	return args.Error(0)
-}
-
-func (m *MockStorage) GetLastTopicEndMessageID(userID int64) (int64, error) {
-	args := m.Called(userID)
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) GetAllTopics() ([]storage.Topic, error) {
-	args := m.Called()
-	return args.Get(0).([]storage.Topic), args.Error(1)
-}
-
-func (m *MockStorage) GetTopicsByIDs(ids []int64) ([]storage.Topic, error) {
-	args := m.Called(ids)
-	return args.Get(0).([]storage.Topic), args.Error(1)
-}
-
-func (m *MockStorage) GetTopicsAfterID(minID int64) ([]storage.Topic, error) {
-	args := m.Called(minID)
-	return args.Get(0).([]storage.Topic), args.Error(1)
-}
-
-func (m *MockStorage) GetTopics(userID int64) ([]storage.Topic, error) {
-	args := m.Called(userID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]storage.Topic), args.Error(1)
-}
-
-func (m *MockStorage) GetTopicsPendingFacts(userID int64) ([]storage.Topic, error) {
-	args := m.Called(userID)
-	return args.Get(0).([]storage.Topic), args.Error(1)
-}
-
-func (m *MockStorage) GetTopicsExtended(filter storage.TopicFilter, limit, offset int, sortBy, sortDir string) (storage.TopicResult, error) {
-	args := m.Called(filter, limit, offset, sortBy, sortDir)
-	return args.Get(0).(storage.TopicResult), args.Error(1)
-}
-
-func (m *MockStorage) UpdateMessageTopic(messageID, topicID int64) error {
-	args := m.Called(messageID, topicID)
-	return args.Error(0)
-}
-
-func (m *MockStorage) SetTopicFactsExtracted(topicID int64, extracted bool) error {
-	args := m.Called(topicID, extracted)
-	return args.Error(0)
-}
-
-func (m *MockStorage) SetTopicConsolidationChecked(topicID int64, checked bool) error {
-	args := m.Called(topicID, checked)
-	return args.Error(0)
-}
-
-func (m *MockStorage) GetMessagesInRange(ctx context.Context, userID int64, startID, endID int64) ([]storage.Message, error) {
-	args := m.Called(ctx, userID, startID, endID)
-	return args.Get(0).([]storage.Message), args.Error(1)
-}
-
-func (m *MockStorage) GetMemoryBank(userID int64) (string, error) {
-	args := m.Called(userID)
-	return args.String(0), args.Error(1)
-}
-
-func (m *MockStorage) UpdateMemoryBank(userID int64, content string) error {
-	args := m.Called(userID, content)
-	return args.Error(0)
-}
-
-func (m *MockStorage) UpsertUser(user storage.User) error {
-	args := m.Called(user)
-	return args.Error(0)
-}
-
-func (m *MockStorage) GetAllUsers() ([]storage.User, error) {
-	args := m.Called()
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]storage.User), args.Error(1)
-}
-
-func (m *MockStorage) UpdateFact(fact storage.Fact) error {
-	args := m.Called(fact)
-	return args.Error(0)
-}
-
-func (m *MockStorage) UpdateFactTopic(oldTopicID, newTopicID int64) error {
-	args := m.Called(oldTopicID, newTopicID)
-	return args.Error(0)
-}
-
-func (m *MockStorage) DeleteFact(userID, factID int64) error {
-	args := m.Called(userID, factID)
-	return args.Error(0)
-}
-
-func (m *MockStorage) AddFact(fact storage.Fact) (int64, error) {
-	args := m.Called(fact)
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) AddFactHistory(history storage.FactHistory) error {
-	args := m.Called(history)
-	return args.Error(0)
-}
-
-func (m *MockStorage) UpdateFactHistoryTopic(oldTopicID, newTopicID int64) error {
-	args := m.Called(oldTopicID, newTopicID)
-	return args.Error(0)
-}
-
-func (m *MockStorage) GetFactHistory(userID int64, limit int) ([]storage.FactHistory, error) {
-	args := m.Called(userID, limit)
-	return args.Get(0).([]storage.FactHistory), args.Error(1)
-}
-
-func (m *MockStorage) GetFactHistoryExtended(filter storage.FactHistoryFilter, limit, offset int, sortBy, sortDir string) (storage.FactHistoryResult, error) {
-	args := m.Called(filter, limit, offset, sortBy, sortDir)
-	return args.Get(0).(storage.FactHistoryResult), args.Error(1)
-}
-
-func (m *MockStorage) GetAllFacts() ([]storage.Fact, error) {
-	args := m.Called()
-	return args.Get(0).([]storage.Fact), args.Error(1)
-}
-
-func (m *MockStorage) GetFactsAfterID(minID int64) ([]storage.Fact, error) {
-	args := m.Called(minID)
-	return args.Get(0).([]storage.Fact), args.Error(1)
-}
-
-func (m *MockStorage) GetFactStats() (storage.FactStats, error) {
-	args := m.Called()
-	return args.Get(0).(storage.FactStats), args.Error(1)
-}
-
-func (m *MockStorage) GetFactStatsByUser(userID int64) (storage.FactStats, error) {
-	args := m.Called(userID)
-	return args.Get(0).(storage.FactStats), args.Error(1)
-}
-
-func (m *MockStorage) GetFacts(userID int64) ([]storage.Fact, error) {
-	args := m.Called(userID)
-	if args.Get(0) == nil {
-		return []storage.Fact{}, args.Error(1)
-	}
-	return args.Get(0).([]storage.Fact), args.Error(1)
-}
-
-func (m *MockStorage) GetUnprocessedMessages(userID int64) ([]storage.Message, error) {
-	args := m.Called(userID)
-	return args.Get(0).([]storage.Message), args.Error(1)
-}
-
-func (m *MockStorage) GetMergeCandidates(userID int64) ([]storage.MergeCandidate, error) {
-	args := m.Called(userID)
-	return args.Get(0).([]storage.MergeCandidate), args.Error(1)
-}
-
-func (m *MockStorage) GetFactsByTopicID(topicID int64) ([]storage.Fact, error) {
-	args := m.Called(topicID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]storage.Fact), args.Error(1)
-}
-
-func (m *MockStorage) AddTopicWithoutMessageUpdate(topic storage.Topic) (int64, error) {
-	args := m.Called(topic)
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) GetMessagesByTopicID(ctx context.Context, topicID int64) ([]storage.Message, error) {
-	args := m.Called(ctx, topicID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]storage.Message), args.Error(1)
-}
-
-func (m *MockStorage) UpdateMessagesTopicInRange(ctx context.Context, userID, startMsgID, endMsgID, topicID int64) error {
-	args := m.Called(ctx, userID, startMsgID, endMsgID, topicID)
-	return args.Error(0)
-}
-
-func (m *MockStorage) GetDBSize() (int64, error) {
-	args := m.Called()
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) GetTableSizes() ([]storage.TableSize, error) {
-	args := m.Called()
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]storage.TableSize), args.Error(1)
-}
-
-func (m *MockStorage) CleanupFactHistory(keepPerUser int) (int64, error) {
-	args := m.Called(keepPerUser)
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) CleanupAgentLogs(keepPerUserPerAgent int) (int64, error) {
-	args := m.Called(keepPerUserPerAgent)
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) CountAgentLogs() (int64, error) {
-	args := m.Called()
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) CountFactHistory() (int64, error) {
-	args := m.Called()
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) CountOrphanedTopics(userID int64) (int, error) {
-	args := m.Called(userID)
-	return args.Int(0), args.Error(1)
-}
-
-func (m *MockStorage) GetOrphanedTopicIDs(userID int64) ([]int64, error) {
-	args := m.Called(userID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]int64), args.Error(1)
-}
-
-func (m *MockStorage) CountOverlappingTopics(userID int64) (int, error) {
-	args := m.Called(userID)
-	return args.Int(0), args.Error(1)
-}
-
-func (m *MockStorage) GetOverlappingTopics(userID int64) ([]storage.OverlappingPair, error) {
-	args := m.Called(userID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]storage.OverlappingPair), args.Error(1)
-}
-
-func (m *MockStorage) CountFactsOnOrphanedTopics(userID int64) (int, error) {
-	args := m.Called(userID)
-	return args.Int(0), args.Error(1)
-}
-
-func (m *MockStorage) RecalculateTopicRanges(userID int64) (int, error) {
-	args := m.Called(userID)
-	return args.Int(0), args.Error(1)
-}
-
-func (m *MockStorage) RecalculateTopicSizes(userID int64) (int, error) {
-	args := m.Called(userID)
-	return args.Int(0), args.Error(1)
-}
-
-func (m *MockStorage) GetContaminatedTopics(userID int64) ([]storage.ContaminatedTopic, error) {
-	args := m.Called(userID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]storage.ContaminatedTopic), args.Error(1)
-}
-
-func (m *MockStorage) CountContaminatedTopics(userID int64) (int, error) {
-	args := m.Called(userID)
-	return args.Int(0), args.Error(1)
-}
-
-func (m *MockStorage) FixContaminatedTopics(userID int64) (int64, error) {
-	args := m.Called(userID)
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) Checkpoint() error {
-	args := m.Called()
-	return args.Error(0)
-}
-
-// MockBot is a mock type for the Bot interface
-type MockBot struct {
-	mock.Mock
-}
-
-func (m *MockBot) API() telegram.BotAPI {
+func (m *MockBotInterface) API() telegram.BotAPI {
 	args := m.Called()
 	return args.Get(0).(telegram.BotAPI)
 }
 
-func (m *MockBot) HandleUpdateAsync(ctx context.Context, update json.RawMessage, remoteAddr string) {
+func (m *MockBotInterface) HandleUpdateAsync(ctx context.Context, update json.RawMessage, remoteAddr string) {
 	m.Called(ctx, update, remoteAddr)
 }
 
-func (m *MockBot) GetActiveSessions() ([]rag.ActiveSessionInfo, error) {
+func (m *MockBotInterface) GetActiveSessions() ([]rag.ActiveSessionInfo, error) {
 	args := m.Called()
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -467,12 +45,12 @@ func (m *MockBot) GetActiveSessions() ([]rag.ActiveSessionInfo, error) {
 	return args.Get(0).([]rag.ActiveSessionInfo), args.Error(1)
 }
 
-func (m *MockBot) ForceCloseSession(ctx context.Context, userID int64) (int, error) {
+func (m *MockBotInterface) ForceCloseSession(ctx context.Context, userID int64) (int, error) {
 	args := m.Called(ctx, userID)
 	return args.Int(0), args.Error(1)
 }
 
-func (m *MockBot) ForceCloseSessionWithProgress(ctx context.Context, userID int64, onProgress rag.ProgressCallback) (*rag.ProcessingStats, error) {
+func (m *MockBotInterface) ForceCloseSessionWithProgress(ctx context.Context, userID int64, onProgress rag.ProgressCallback) (*rag.ProcessingStats, error) {
 	args := m.Called(ctx, userID, onProgress)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -480,7 +58,7 @@ func (m *MockBot) ForceCloseSessionWithProgress(ctx context.Context, userID int6
 	return args.Get(0).(*rag.ProcessingStats), args.Error(1)
 }
 
-func (m *MockBot) SendTestMessage(ctx context.Context, userID int64, text string, saveToHistory bool) (*rag.TestMessageResult, error) {
+func (m *MockBotInterface) SendTestMessage(ctx context.Context, userID int64, text string, saveToHistory bool) (*rag.TestMessageResult, error) {
 	args := m.Called(ctx, userID, text, saveToHistory)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -490,8 +68,8 @@ func (m *MockBot) SendTestMessage(ctx context.Context, userID int64, text string
 
 func TestStatsHandler(t *testing.T) {
 	// Arrange
-	mockStorage := new(MockStorage)
-	mockBot := new(MockBot)
+	mockStorage := new(testutil.MockStorage)
+	mockBot := new(MockBotInterface)
 
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
@@ -527,7 +105,7 @@ func TestStatsHandler(t *testing.T) {
 
 func TestHealthzHandler(t *testing.T) {
 	// Arrange
-	mockBot := new(MockBot)
+	mockBot := new(MockBotInterface)
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -549,7 +127,7 @@ func TestHealthzHandler(t *testing.T) {
 
 func TestWebhookHandler(t *testing.T) {
 	// Arrange
-	mockBot := new(MockBot)
+	mockBot := new(MockBotInterface)
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -583,7 +161,7 @@ func TestWebhookHandler(t *testing.T) {
 
 func TestWebhookHandler_TooLarge(t *testing.T) {
 	// Arrange
-	mockBot := new(MockBot)
+	mockBot := new(MockBotInterface)
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -609,9 +187,9 @@ func TestWebhookHandler_TooLarge(t *testing.T) {
 
 func TestServerRouting_CorrectPath(t *testing.T) {
 	// Arrange
-	mockStorage := new(MockStorage)
-	mockBot := new(MockBot)
-	mockAPI := new(MockBotAPI)
+	mockStorage := new(testutil.MockStorage)
+	mockBot := new(MockBotInterface)
+	mockAPI := new(testutil.MockBotAPI)
 	cfg := &config.Config{}
 	token := "test-token"
 
@@ -642,9 +220,9 @@ func TestServerRouting_CorrectPath(t *testing.T) {
 
 func TestServerRouting_IncorrectPath(t *testing.T) {
 	// Arrange
-	mockStorage := new(MockStorage)
-	mockBot := new(MockBot)
-	mockAPI := new(MockBotAPI)
+	mockStorage := new(testutil.MockStorage)
+	mockBot := new(MockBotInterface)
+	mockAPI := new(testutil.MockBotAPI)
 	cfg := &config.Config{}
 	token := "test-token"
 
@@ -684,8 +262,8 @@ func (s *Server) buildTestHandler(token string) http.Handler {
 
 func TestUpdateMetrics(t *testing.T) {
 	// Arrange
-	mockStorage := new(MockStorage)
-	mockBot := new(MockBot)
+	mockStorage := new(testutil.MockStorage)
+	mockBot := new(MockBotInterface)
 	cfg := &config.Config{}
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
@@ -802,7 +380,7 @@ func TestGetClientIP(t *testing.T) {
 }
 
 func TestSessionsHandler_POST_InvalidForm(t *testing.T) {
-	mockBot := new(MockBot)
+	mockBot := new(MockBotInterface)
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -822,7 +400,7 @@ func TestSessionsHandler_POST_InvalidForm(t *testing.T) {
 }
 
 func TestSessionsHandler_POST_Success(t *testing.T) {
-	mockBot := new(MockBot)
+	mockBot := new(MockBotInterface)
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -845,7 +423,7 @@ func TestSessionsHandler_POST_Success(t *testing.T) {
 }
 
 func TestSessionsHandler_GET_Error(t *testing.T) {
-	mockBot := new(MockBot)
+	mockBot := new(MockBotInterface)
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -866,7 +444,7 @@ func TestSessionsHandler_GET_Error(t *testing.T) {
 }
 
 func TestSessionsProcessSSEHandler_MethodNotAllowed(t *testing.T) {
-	mockBot := new(MockBot)
+	mockBot := new(MockBotInterface)
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -884,7 +462,7 @@ func TestSessionsProcessSSEHandler_MethodNotAllowed(t *testing.T) {
 }
 
 func TestSessionsProcessSSEHandler_InvalidUserID(t *testing.T) {
-	mockBot := new(MockBot)
+	mockBot := new(MockBotInterface)
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -902,7 +480,7 @@ func TestSessionsProcessSSEHandler_InvalidUserID(t *testing.T) {
 }
 
 func TestWebhookHandler_InvalidSecret(t *testing.T) {
-	mockBot := new(MockBot)
+	mockBot := new(MockBotInterface)
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	cfg.Telegram.WebhookSecret = "my-secret-token"
@@ -931,7 +509,7 @@ func TestWebhookHandler_InvalidSecret(t *testing.T) {
 }
 
 func TestWebhookHandler_ValidSecret(t *testing.T) {
-	mockBot := new(MockBot)
+	mockBot := new(MockBotInterface)
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	cfg.Telegram.WebhookSecret = "my-secret-token"
@@ -962,8 +540,8 @@ func TestWebhookHandler_ValidSecret(t *testing.T) {
 }
 
 func TestSessionsHandler_GET_Success(t *testing.T) {
-	mockBot := new(MockBot)
-	mockStorage := new(MockStorage)
+	mockBot := new(MockBotInterface)
+	mockStorage := new(testutil.MockStorage)
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	cfg.RAG.ChunkInterval = "4h"
@@ -998,7 +576,7 @@ func TestSessionsHandler_GET_Success(t *testing.T) {
 }
 
 func TestSessionsHandler_POST_ForceCloseError(t *testing.T) {
-	mockBot := new(MockBot)
+	mockBot := new(MockBotInterface)
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -1021,8 +599,8 @@ func TestSessionsHandler_POST_ForceCloseError(t *testing.T) {
 }
 
 func TestSessionsHandler_GET_UsernameOnly(t *testing.T) {
-	mockBot := new(MockBot)
-	mockStorage := new(MockStorage)
+	mockBot := new(MockBotInterface)
+	mockStorage := new(testutil.MockStorage)
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -1056,8 +634,8 @@ func TestSessionsHandler_GET_UsernameOnly(t *testing.T) {
 }
 
 func TestSessionsHandler_GET_CommonDataError(t *testing.T) {
-	mockBot := new(MockBot)
-	mockStorage := new(MockStorage)
+	mockBot := new(MockBotInterface)
+	mockStorage := new(testutil.MockStorage)
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -1079,8 +657,8 @@ func TestSessionsHandler_GET_CommonDataError(t *testing.T) {
 }
 
 func TestDebugChatHandler_GET(t *testing.T) {
-	mockBot := new(MockBot)
-	mockStorage := new(MockStorage)
+	mockBot := new(MockBotInterface)
+	mockStorage := new(testutil.MockStorage)
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -1108,8 +686,8 @@ func TestDebugChatHandler_GET(t *testing.T) {
 }
 
 func TestDebugChatSendHandler_POST_Success(t *testing.T) {
-	mockBot := new(MockBot)
-	mockStorage := new(MockStorage)
+	mockBot := new(MockBotInterface)
+	mockStorage := new(testutil.MockStorage)
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -1155,7 +733,7 @@ func TestDebugChatSendHandler_POST_Success(t *testing.T) {
 }
 
 func TestDebugChatSendHandler_POST_InvalidJSON(t *testing.T) {
-	mockBot := new(MockBot)
+	mockBot := new(MockBotInterface)
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -1175,8 +753,8 @@ func TestDebugChatSendHandler_POST_InvalidJSON(t *testing.T) {
 }
 
 func TestDebugChatSendHandler_POST_BotError(t *testing.T) {
-	mockBot := new(MockBot)
-	mockStorage := new(MockStorage)
+	mockBot := new(MockBotInterface)
+	mockStorage := new(testutil.MockStorage)
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
@@ -1200,7 +778,7 @@ func TestDebugChatSendHandler_POST_BotError(t *testing.T) {
 }
 
 func TestDebugChatSendHandler_MethodNotAllowed(t *testing.T) {
-	mockBot := new(MockBot)
+	mockBot := new(MockBotInterface)
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))

@@ -13,6 +13,7 @@ import (
 	"github.com/runixer/laplaced/internal/memory"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
+	"github.com/runixer/laplaced/internal/testutil"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -26,8 +27,8 @@ func TestGracefulShutdown(t *testing.T) {
 	cfg.RAG.BackfillInterval = "50ms" // Fast interval
 	cfg.Bot.AllowedUserIDs = []int64{123}
 
-	mockStore := new(MockStorage)
-	mockClient := new(MockClient)
+	mockStore := new(testutil.MockStorage)
+	mockClient := new(testutil.MockOpenRouterClient)
 
 	// 2. Expectations
 	// Start loads vectors

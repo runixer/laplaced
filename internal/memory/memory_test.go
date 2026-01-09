@@ -13,230 +13,11 @@ import (
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
+	"github.com/runixer/laplaced/internal/testutil"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
-
-// MockStorage
-type MockStorage struct {
-	mock.Mock
-}
-
-func (m *MockStorage) AddMessageToHistory(userID int64, message storage.Message) error {
-	args := m.Called(userID, message)
-	return args.Error(0)
-}
-func (m *MockStorage) ImportMessage(userID int64, message storage.Message) error {
-	args := m.Called(userID, message)
-	return args.Error(0)
-}
-func (m *MockStorage) GetRecentHistory(userID int64, limit int) ([]storage.Message, error) {
-	args := m.Called(userID, limit)
-	return args.Get(0).([]storage.Message), args.Error(1)
-}
-func (m *MockStorage) GetMessagesByIDs(ids []int64) ([]storage.Message, error) {
-	args := m.Called(ids)
-	return args.Get(0).([]storage.Message), args.Error(1)
-}
-func (m *MockStorage) ClearHistory(userID int64) error {
-	args := m.Called(userID)
-	return args.Error(0)
-}
-func (m *MockStorage) UpsertUser(user storage.User) error {
-	args := m.Called(user)
-	return args.Error(0)
-}
-func (m *MockStorage) GetAllUsers() ([]storage.User, error) {
-	args := m.Called()
-	return args.Get(0).([]storage.User), args.Error(1)
-}
-func (m *MockStorage) AddStat(stat storage.Stat) error {
-	args := m.Called(stat)
-	return args.Error(0)
-}
-func (m *MockStorage) GetStats() (map[int64]storage.Stat, error) {
-	args := m.Called()
-	return args.Get(0).(map[int64]storage.Stat), args.Error(1)
-}
-func (m *MockStorage) GetDashboardStats(userID int64) (*storage.DashboardStats, error) {
-	args := m.Called(userID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*storage.DashboardStats), args.Error(1)
-}
-func (m *MockStorage) AddTopic(topic storage.Topic) (int64, error) {
-	args := m.Called(topic)
-	return args.Get(0).(int64), args.Error(1)
-}
-func (m *MockStorage) CreateTopic(topic storage.Topic) (int64, error) {
-	args := m.Called(topic)
-	return args.Get(0).(int64), args.Error(1)
-}
-func (m *MockStorage) DeleteTopic(id int64) error {
-	args := m.Called(id)
-	return args.Error(0)
-}
-func (m *MockStorage) DeleteTopicCascade(id int64) error {
-	args := m.Called(id)
-	return args.Error(0)
-}
-func (m *MockStorage) GetLastTopicEndMessageID(userID int64) (int64, error) {
-	args := m.Called(userID)
-	return args.Get(0).(int64), args.Error(1)
-}
-func (m *MockStorage) GetAllTopics() ([]storage.Topic, error) {
-	args := m.Called()
-	return args.Get(0).([]storage.Topic), args.Error(1)
-}
-func (m *MockStorage) GetTopicsByIDs(ids []int64) ([]storage.Topic, error) {
-	args := m.Called(ids)
-	return args.Get(0).([]storage.Topic), args.Error(1)
-}
-func (m *MockStorage) GetTopicsAfterID(minID int64) ([]storage.Topic, error) {
-	args := m.Called(minID)
-	return args.Get(0).([]storage.Topic), args.Error(1)
-}
-func (m *MockStorage) GetTopics(userID int64) ([]storage.Topic, error) {
-	args := m.Called(userID)
-	return args.Get(0).([]storage.Topic), args.Error(1)
-}
-func (m *MockStorage) GetMessagesInRange(ctx context.Context, userID int64, startID, endID int64) ([]storage.Message, error) {
-	args := m.Called(ctx, userID, startID, endID)
-	return args.Get(0).([]storage.Message), args.Error(1)
-}
-func (m *MockStorage) UpdateMessageTopic(messageID, topicID int64) error {
-	args := m.Called(messageID, topicID)
-	return args.Error(0)
-}
-func (m *MockStorage) SetTopicFactsExtracted(topicID int64, extracted bool) error {
-	args := m.Called(topicID, extracted)
-	return args.Error(0)
-}
-func (m *MockStorage) SetTopicConsolidationChecked(topicID int64, checked bool) error {
-	args := m.Called(topicID, checked)
-	return args.Error(0)
-}
-func (m *MockStorage) GetTopicsPendingFacts(userID int64) ([]storage.Topic, error) {
-	args := m.Called(userID)
-	return args.Get(0).([]storage.Topic), args.Error(1)
-}
-func (m *MockStorage) GetTopicsExtended(filter storage.TopicFilter, limit, offset int, sortBy, sortDir string) (storage.TopicResult, error) {
-	args := m.Called(filter, limit, offset, sortBy, sortDir)
-	return args.Get(0).(storage.TopicResult), args.Error(1)
-}
-func (m *MockStorage) GetMemoryBank(userID int64) (string, error) {
-	args := m.Called(userID)
-	return args.String(0), args.Error(1)
-}
-func (m *MockStorage) UpdateMemoryBank(userID int64, content string) error {
-	args := m.Called(userID, content)
-	return args.Error(0)
-}
-func (m *MockStorage) AddFact(fact storage.Fact) (int64, error) {
-	args := m.Called(fact)
-	return args.Get(0).(int64), args.Error(1)
-}
-func (m *MockStorage) GetFacts(userID int64) ([]storage.Fact, error) {
-	args := m.Called(userID)
-	return args.Get(0).([]storage.Fact), args.Error(1)
-}
-func (m *MockStorage) GetFactsByIDs(ids []int64) ([]storage.Fact, error) {
-	args := m.Called(ids)
-	return args.Get(0).([]storage.Fact), args.Error(1)
-}
-func (m *MockStorage) GetAllFacts() ([]storage.Fact, error) {
-	args := m.Called()
-	return args.Get(0).([]storage.Fact), args.Error(1)
-}
-func (m *MockStorage) GetFactsAfterID(minID int64) ([]storage.Fact, error) {
-	args := m.Called(minID)
-	return args.Get(0).([]storage.Fact), args.Error(1)
-}
-func (m *MockStorage) GetFactStats() (storage.FactStats, error) {
-	args := m.Called()
-	return args.Get(0).(storage.FactStats), args.Error(1)
-}
-func (m *MockStorage) GetFactStatsByUser(userID int64) (storage.FactStats, error) {
-	args := m.Called(userID)
-	return args.Get(0).(storage.FactStats), args.Error(1)
-}
-func (m *MockStorage) UpdateFact(fact storage.Fact) error {
-	args := m.Called(fact)
-	return args.Error(0)
-}
-func (m *MockStorage) UpdateFactTopic(oldTopicID, newTopicID int64) error {
-	args := m.Called(oldTopicID, newTopicID)
-	return args.Error(0)
-}
-func (m *MockStorage) DeleteFact(userID, id int64) error {
-	args := m.Called(userID, id)
-	return args.Error(0)
-}
-func (m *MockStorage) GetUnprocessedMessages(userID int64) ([]storage.Message, error) {
-	args := m.Called(userID)
-	return args.Get(0).([]storage.Message), args.Error(1)
-}
-func (m *MockStorage) AddFactHistory(history storage.FactHistory) error {
-	args := m.Called(history)
-	return args.Error(0)
-}
-func (m *MockStorage) UpdateFactHistoryTopic(oldTopicID, newTopicID int64) error {
-	args := m.Called(oldTopicID, newTopicID)
-	return args.Error(0)
-}
-func (m *MockStorage) GetFactHistory(userID int64, limit int) ([]storage.FactHistory, error) {
-	args := m.Called(userID, limit)
-	return args.Get(0).([]storage.FactHistory), args.Error(1)
-}
-func (m *MockStorage) GetFactHistoryExtended(filter storage.FactHistoryFilter, limit, offset int, sortBy, sortDir string) (storage.FactHistoryResult, error) {
-	args := m.Called(filter, limit, offset, sortBy, sortDir)
-	return args.Get(0).(storage.FactHistoryResult), args.Error(1)
-}
-func (m *MockStorage) ResetUserData(userID int64) error {
-	args := m.Called(userID)
-	return args.Error(0)
-}
-
-func (m *MockStorage) GetFactsByTopicID(topicID int64) ([]storage.Fact, error) {
-	args := m.Called(topicID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]storage.Fact), args.Error(1)
-}
-
-// MockOpenRouterClient
-type MockOpenRouterClient struct {
-	mock.Mock
-}
-
-// MockVectorSearcher
-type MockVectorSearcher struct {
-	mock.Mock
-}
-
-func (m *MockVectorSearcher) FindSimilarFacts(ctx context.Context, userID int64, embedding []float32, threshold float32) ([]storage.Fact, error) {
-	args := m.Called(ctx, userID, embedding, threshold)
-	return args.Get(0).([]storage.Fact), args.Error(1)
-}
-
-func (m *MockOpenRouterClient) CreateChatCompletion(ctx context.Context, req openrouter.ChatCompletionRequest) (openrouter.ChatCompletionResponse, error) {
-	args := m.Called(ctx, req)
-	if args.Get(0) == nil {
-		return openrouter.ChatCompletionResponse{}, args.Error(1)
-	}
-	return *args.Get(0).(*openrouter.ChatCompletionResponse), args.Error(1)
-}
-
-func (m *MockOpenRouterClient) CreateEmbeddings(ctx context.Context, req openrouter.EmbeddingRequest) (openrouter.EmbeddingResponse, error) {
-	args := m.Called(ctx, req)
-	if args.Get(0) == nil {
-		return openrouter.EmbeddingResponse{}, args.Error(1)
-	}
-	return *args.Get(0).(*openrouter.EmbeddingResponse), args.Error(1)
-}
 
 func TestAddFactWithHistory(t *testing.T) {
 	tests := []struct {
@@ -271,7 +52,7 @@ func TestAddFactWithHistory(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockStore := new(MockStorage)
+			mockStore := new(testutil.MockStorage)
 			logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 			cfg := &config.Config{}
 			cfg.Server.DebugMode = tt.debugMode
@@ -312,8 +93,8 @@ func TestAddFactWithHistory(t *testing.T) {
 
 func TestProcessSession_AddFact_RecordsHistory(t *testing.T) {
 	// Arrange
-	mockStore := new(MockStorage)
-	mockOR := new(MockOpenRouterClient)
+	mockStore := new(testutil.MockStorage)
+	mockOR := new(testutil.MockOpenRouterClient)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
 	cfg.Server.DebugMode = true
@@ -401,8 +182,8 @@ func TestProcessSession_AddFact_RecordsHistory(t *testing.T) {
 
 func TestProcessSession_UpdateFact_RecordsHistory(t *testing.T) {
 	// Arrange
-	mockStore := new(MockStorage)
-	mockOR := new(MockOpenRouterClient)
+	mockStore := new(testutil.MockStorage)
+	mockOR := new(testutil.MockOpenRouterClient)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
 	cfg.Server.DebugMode = true
@@ -489,8 +270,8 @@ func TestProcessSession_UpdateFact_RecordsHistory(t *testing.T) {
 
 func TestProcessSession_RemoveFact_RecordsHistory(t *testing.T) {
 	// Arrange
-	mockStore := new(MockStorage)
-	mockOR := new(MockOpenRouterClient)
+	mockStore := new(testutil.MockStorage)
+	mockOR := new(testutil.MockOpenRouterClient)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
 	cfg.Server.DebugMode = true
@@ -571,7 +352,7 @@ func TestSetVectorSearcher(t *testing.T) {
 
 	assert.Nil(t, svc.vectorSearcher)
 
-	mockVS := new(MockVectorSearcher)
+	mockVS := new(testutil.MockVectorSearcher)
 	svc.SetVectorSearcher(mockVS)
 
 	assert.NotNil(t, svc.vectorSearcher)
@@ -579,7 +360,7 @@ func TestSetVectorSearcher(t *testing.T) {
 }
 
 func TestGetEmbedding(t *testing.T) {
-	mockOR := new(MockOpenRouterClient)
+	mockOR := new(testutil.MockOpenRouterClient)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
 	cfg.Embedding.Model = "test-model"
@@ -601,7 +382,7 @@ func TestGetEmbedding(t *testing.T) {
 }
 
 func TestGetEmbedding_EmptyResponse(t *testing.T) {
-	mockOR := new(MockOpenRouterClient)
+	mockOR := new(testutil.MockOpenRouterClient)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
 	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
@@ -618,7 +399,7 @@ func TestGetEmbedding_EmptyResponse(t *testing.T) {
 }
 
 func TestGetEmbedding_Error(t *testing.T) {
-	mockOR := new(MockOpenRouterClient)
+	mockOR := new(testutil.MockOpenRouterClient)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
 	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")

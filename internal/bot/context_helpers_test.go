@@ -12,6 +12,7 @@ import (
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
+	"github.com/runixer/laplaced/internal/testutil"
 )
 
 func TestIntPtrOrNil(t *testing.T) {
@@ -277,14 +278,14 @@ func TestSetMessageReactionConfigMethod(t *testing.T) {
 }
 
 func TestBotAPIGetter(t *testing.T) {
-	mockAPI := new(MockBotAPI)
+	mockAPI := new(testutil.MockBotAPI)
 	bot := &Bot{api: mockAPI}
 	assert.Equal(t, mockAPI, bot.API())
 }
 
 func TestBotStop(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	mockAPI := new(MockBotAPI)
+	mockAPI := new(testutil.MockBotAPI)
 
 	bot := &Bot{
 		api:    mockAPI,
@@ -349,7 +350,7 @@ func TestMessageOriginUnmarshalJSON(t *testing.T) {
 }
 
 func TestFormatRAGResults(t *testing.T) {
-	translator := createTestTranslator(t)
+	translator := testutil.TestTranslator(t)
 	cfg := &config.Config{Bot: config.BotConfig{Language: "en"}}
 	bot := &Bot{translator: translator, cfg: cfg}
 

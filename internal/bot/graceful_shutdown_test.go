@@ -13,6 +13,7 @@ import (
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
+	"github.com/runixer/laplaced/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -59,13 +60,13 @@ func createSimpleChatResponse(content string) openrouter.ChatCompletionResponse 
 // for requests that were already being processed.
 func TestProcessMessageGroup_CompletesOnContextCancel(t *testing.T) {
 	// Setup
-	translator := createTestTranslator(t)
+	translator := testutil.TestTranslator(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	mockAPI := new(MockBotAPI)
-	mockStore := new(MockStorage)
-	mockORClient := new(MockOpenRouterClient)
+	mockAPI := new(testutil.MockBotAPI)
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
 
-	cfg := createTestConfig()
+	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
@@ -164,13 +165,13 @@ func TestProcessMessageGroup_CompletesOnContextCancel(t *testing.T) {
 // TestProcessMessageGroup_LLMContextNotCancelled verifies that the context
 // passed to CreateChatCompletion is not cancelled when parent context is cancelled.
 func TestProcessMessageGroup_LLMContextNotCancelled(t *testing.T) {
-	translator := createTestTranslator(t)
+	translator := testutil.TestTranslator(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	mockAPI := new(MockBotAPI)
-	mockStore := new(MockStorage)
-	mockORClient := new(MockOpenRouterClient)
+	mockAPI := new(testutil.MockBotAPI)
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
 
-	cfg := createTestConfig()
+	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
@@ -263,14 +264,14 @@ func TestProcessMessageGroup_LLMContextNotCancelled(t *testing.T) {
 // processing (download, LLM generation) completes even when the parent context
 // is cancelled. This is critical for graceful shutdown.
 func TestProcessMessageGroup_VoiceCompletesOnContextCancel(t *testing.T) {
-	translator := createTestTranslator(t)
+	translator := testutil.TestTranslator(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	mockAPI := new(MockBotAPI)
-	mockStore := new(MockStorage)
-	mockORClient := new(MockOpenRouterClient)
-	mockDownloader := new(MockFileDownloader)
+	mockAPI := new(testutil.MockBotAPI)
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
+	mockDownloader := new(testutil.MockFileDownloader)
 
-	cfg := createTestConfig()
+	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
@@ -367,14 +368,14 @@ func TestProcessMessageGroup_VoiceCompletesOnContextCancel(t *testing.T) {
 // TestProcessMessageGroup_VoiceDownloadContextNotCancelled verifies that the context
 // passed to file download is not cancelled when parent context is cancelled.
 func TestProcessMessageGroup_VoiceDownloadContextNotCancelled(t *testing.T) {
-	translator := createTestTranslator(t)
+	translator := testutil.TestTranslator(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	mockAPI := new(MockBotAPI)
-	mockStore := new(MockStorage)
-	mockORClient := new(MockOpenRouterClient)
-	mockDownloader := new(MockFileDownloader)
+	mockAPI := new(testutil.MockBotAPI)
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
+	mockDownloader := new(testutil.MockFileDownloader)
 
-	cfg := createTestConfig()
+	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)

@@ -41,6 +41,7 @@ internal/
   memory/                # Facts extraction, topic processing, long-term memory
   openrouter/            # LLM client (Gemini/OpenRouter API)
   telegram/              # Telegram API client wrapper
+  testutil/              # Centralized test mocks, fixtures, and helpers
   yandex/                # Yandex SpeechKit client (legacy, unused)
   web/                   # HTTP server for dashboard and webhooks
   i18n/                  # Localization (en/ru)
@@ -147,20 +148,35 @@ go test ./internal/bot/... -v    # Specific package with verbose output
 - **Pattern**: Table-driven tests with subtests (`t.Run`)
 - **Location**: `*_test.go` files alongside source code
 
-### Available Test Helpers (`internal/bot/bot_test.go`)
+### Available Test Helpers (`internal/testutil/`)
 
-- `createTestTranslator(t)` — creates `*i18n.Translator` with test translations
+All test mocks are centralized in `internal/testutil/` package:
+
+**Mocks (`mocks.go`):**
 - `MockBotAPI` — mock for Telegram API
-- `MockStorage` — mock for all storage repositories
+- `MockStorage` — mock for all storage repositories (implements all repo interfaces)
 - `MockOpenRouterClient` — mock for LLM client
 - `MockFileDownloader` — mock for file downloads
 - `MockYandexClient` — mock for speech recognition
+- `MockVectorSearcher` — mock for vector search interface
+
+**Fixtures (`fixtures.go`):**
+- `TestUser()`, `TestUsers()` — sample users
+- `TestFacts()` — sample facts
+- `TestTopic()`, `TestTopics()` — sample topics
+- `TestMessages()` — sample conversation messages
+
+**Helpers (`helpers.go`):**
+- `TestLogger()` — discarding logger for tests
+- `TestConfig()` — default test configuration
+- `TestTranslator(t)` — translator with test locale files
+- `Ptr[T](v)` — generic helper to create pointer from value
 
 ### Writing Tests for New Functions
 
 1. For pure functions (no dependencies): test directly with table-driven tests
-2. For methods with dependencies: use existing mocks from `bot_test.go`
-3. Add translations to `createTestTranslator` if function uses `translator.Get()`
+2. For methods with dependencies: use mocks from `internal/testutil/`
+3. Add translations to test locale files if function uses `translator.Get()`
 
 Example structure:
 ```go

@@ -11,18 +11,19 @@ import (
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
+	"github.com/runixer/laplaced/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
 
 func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 	// Setup
-	translator := createTestTranslator(t)
+	translator := testutil.TestTranslator(t)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	mockAPI := new(MockBotAPI)
-	mockStore := new(MockStorage)
-	mockORClient := new(MockOpenRouterClient)
-	cfg := createTestConfig()
+	mockAPI := new(testutil.MockBotAPI)
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
+	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 	cfg.Tools = []config.ToolConfig{
 		{

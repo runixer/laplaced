@@ -12,6 +12,7 @@ import (
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
+	"github.com/runixer/laplaced/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -416,7 +417,7 @@ func TestFallbackFromState(t *testing.T) {
 
 func TestFormatUserProfileForReranker(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	mockStore := new(MockStorage)
+	mockStore := new(testutil.MockStorage)
 
 	s := &Service{
 		logger:   logger,
@@ -528,8 +529,8 @@ func TestRerankCandidates_EmptyCandidates(t *testing.T) {
 
 func TestRerankCandidates_ProtocolViolation_NoToolCalls(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	mockClient := new(MockClient)
-	mockStore := new(MockStorage)
+	mockClient := new(testutil.MockOpenRouterClient)
+	mockStore := new(testutil.MockStorage)
 
 	translator, err := i18n.NewTranslator("../../internal/i18n/locales")
 	if err != nil {
@@ -602,8 +603,8 @@ func TestRerankCandidates_ProtocolViolation_NoToolCalls(t *testing.T) {
 
 func TestRerankCandidates_WithToolCall(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	mockClient := new(MockClient)
-	mockStore := new(MockStorage)
+	mockClient := new(testutil.MockOpenRouterClient)
+	mockStore := new(testutil.MockStorage)
 
 	translator, err := i18n.NewTranslator("../../internal/i18n/locales")
 	if err != nil {
@@ -726,7 +727,7 @@ func TestRerankCandidates_WithToolCall(t *testing.T) {
 
 func TestRerankCandidates_LLMError_FallbackToVector(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	mockClient := new(MockClient)
+	mockClient := new(testutil.MockOpenRouterClient)
 
 	translator, err := i18n.NewTranslator("../../internal/i18n/locales")
 	if err != nil {

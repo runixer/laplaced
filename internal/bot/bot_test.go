@@ -4,557 +4,31 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/runixer/laplaced/internal/config"
-	"github.com/runixer/laplaced/internal/files"
-	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
+	"github.com/runixer/laplaced/internal/testutil"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
 
-// Mock BotAPI
-type MockBotAPI struct {
-	mock.Mock
-}
-
-func (m *MockBotAPI) SendMessage(ctx context.Context, req telegram.SendMessageRequest) (*telegram.Message, error) {
-	args := m.Called(ctx, req)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*telegram.Message), args.Error(1)
-}
-
-func (m *MockBotAPI) SetMyCommands(ctx context.Context, req telegram.SetMyCommandsRequest) error {
-	args := m.Called(ctx, req)
-	return args.Error(0)
-}
-
-func (m *MockBotAPI) SetWebhook(ctx context.Context, req telegram.SetWebhookRequest) error {
-	args := m.Called(ctx, req)
-	return args.Error(0)
-}
-
-func (m *MockBotAPI) SendChatAction(ctx context.Context, req telegram.SendChatActionRequest) error {
-	args := m.Called(ctx, req)
-	return args.Error(0)
-}
-
-func (m *MockBotAPI) GetFile(ctx context.Context, req telegram.GetFileRequest) (*telegram.File, error) {
-	args := m.Called(ctx, req)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*telegram.File), args.Error(1)
-}
-
-func (m *MockBotAPI) SetMessageReaction(ctx context.Context, req telegram.SetMessageReactionRequest) error {
-	args := m.Called(ctx, req)
-	return args.Error(0)
-}
-
-func (m *MockBotAPI) GetToken() string {
-	args := m.Called()
-	return args.String(0)
-}
-
-func (m *MockBotAPI) GetUpdates(ctx context.Context, req telegram.GetUpdatesRequest) ([]telegram.Update, error) {
-	args := m.Called(ctx, req)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]telegram.Update), args.Error(1)
-}
-
-// Mock Storage
-type MockStorage struct {
-	mock.Mock
-}
-
-func (m *MockStorage) AddMessageToHistory(userID int64, message storage.Message) error {
-	args := m.Called(userID, message)
-	return args.Error(0)
-}
-
-func (m *MockStorage) ImportMessage(userID int64, message storage.Message) error {
-	args := m.Called(userID, message)
-	return args.Error(0)
-}
-
-func (m *MockStorage) GetHistory(userID int64) ([]storage.Message, error) {
-	args := m.Called(userID)
-	return args.Get(0).([]storage.Message), args.Error(1)
-}
-
-func (m *MockStorage) GetRecentHistory(userID int64, limit int) ([]storage.Message, error) {
-	args := m.Called(userID, limit)
-	return args.Get(0).([]storage.Message), args.Error(1)
-}
-
-func (m *MockStorage) GetMessagesByIDs(ids []int64) ([]storage.Message, error) {
-	args := m.Called(ids)
-	return args.Get(0).([]storage.Message), args.Error(1)
-}
-
-func (m *MockStorage) GetFactsByIDs(ids []int64) ([]storage.Fact, error) {
-	args := m.Called(ids)
-	return args.Get(0).([]storage.Fact), args.Error(1)
-}
-
-func (m *MockStorage) ClearHistory(userID int64) error {
-	args := m.Called(userID)
-	return args.Error(0)
-}
-
-func (m *MockStorage) UpsertUser(user storage.User) error {
-	args := m.Called(user)
-	return args.Error(0)
-}
-
-func (m *MockStorage) GetAllUsers() ([]storage.User, error) {
-	args := m.Called()
-	return args.Get(0).([]storage.User), args.Error(1)
-}
-
-func (m *MockStorage) AddStat(stat storage.Stat) error {
-	args := m.Called(stat)
-	return args.Error(0)
-}
-
-func (m *MockStorage) GetStats() (map[int64]storage.Stat, error) {
-	args := m.Called()
-	return args.Get(0).(map[int64]storage.Stat), args.Error(1)
-}
-
-func (m *MockStorage) GetDashboardStats(userID int64) (*storage.DashboardStats, error) {
-	args := m.Called(userID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*storage.DashboardStats), args.Error(1)
-}
-
-func (m *MockStorage) AddTopic(topic storage.Topic) (int64, error) {
-	args := m.Called(topic)
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) CreateTopic(topic storage.Topic) (int64, error) {
-	args := m.Called(topic)
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) ResetUserData(userID int64) error {
-	args := m.Called(userID)
-	return args.Error(0)
-}
-
-func (m *MockStorage) DeleteTopic(id int64) error {
-	args := m.Called(id)
-	return args.Error(0)
-}
-
-func (m *MockStorage) DeleteTopicCascade(id int64) error {
-	args := m.Called(id)
-	return args.Error(0)
-}
-
-func (m *MockStorage) GetLastTopicEndMessageID(userID int64) (int64, error) {
-	args := m.Called(userID)
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) GetAllTopics() ([]storage.Topic, error) {
-	args := m.Called()
-	return args.Get(0).([]storage.Topic), args.Error(1)
-}
-
-func (m *MockStorage) GetTopicsByIDs(ids []int64) ([]storage.Topic, error) {
-	args := m.Called(ids)
-	return args.Get(0).([]storage.Topic), args.Error(1)
-}
-
-func (m *MockStorage) GetTopicsAfterID(minID int64) ([]storage.Topic, error) {
-	args := m.Called(minID)
-	return args.Get(0).([]storage.Topic), args.Error(1)
-}
-
-func (m *MockStorage) GetTopics(userID int64) ([]storage.Topic, error) {
-	args := m.Called(userID)
-	return args.Get(0).([]storage.Topic), args.Error(1)
-}
-
-func (m *MockStorage) GetTopicsPendingFacts(userID int64) ([]storage.Topic, error) {
-	args := m.Called(userID)
-	return args.Get(0).([]storage.Topic), args.Error(1)
-}
-
-func (m *MockStorage) GetTopicsExtended(filter storage.TopicFilter, limit, offset int, sortBy, sortDir string) (storage.TopicResult, error) {
-	args := m.Called(filter, limit, offset, sortBy, sortDir)
-	return args.Get(0).(storage.TopicResult), args.Error(1)
-}
-
-func (m *MockStorage) UpdateMessageTopic(messageID, topicID int64) error {
-	args := m.Called(messageID, topicID)
-	return args.Error(0)
-}
-
-func (m *MockStorage) SetTopicFactsExtracted(topicID int64, extracted bool) error {
-	args := m.Called(topicID, extracted)
-	return args.Error(0)
-}
-
-func (m *MockStorage) SetTopicConsolidationChecked(topicID int64, checked bool) error {
-	args := m.Called(topicID, checked)
-	return args.Error(0)
-}
-
-func (m *MockStorage) GetMergeCandidates(userID int64) ([]storage.MergeCandidate, error) {
-	args := m.Called(userID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]storage.MergeCandidate), args.Error(1)
-}
-
-func (m *MockStorage) GetMessagesInRange(ctx context.Context, userID int64, startID, endID int64) ([]storage.Message, error) {
-	args := m.Called(ctx, userID, startID, endID)
-	return args.Get(0).([]storage.Message), args.Error(1)
-}
-
-func (m *MockStorage) GetMemoryBank(userID int64) (string, error) {
-	args := m.Called(userID)
-	return args.String(0), args.Error(1)
-}
-
-func (m *MockStorage) UpdateMemoryBank(userID int64, content string) error {
-	args := m.Called(userID, content)
-	return args.Error(0)
-}
-
-func (m *MockStorage) AddFact(fact storage.Fact) (int64, error) {
-	args := m.Called(fact)
-	if args.Get(0) == nil {
-		return 0, args.Error(1)
-	}
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) AddFactHistory(history storage.FactHistory) error {
-	args := m.Called(history)
-	return args.Error(0)
-}
-
-func (m *MockStorage) UpdateFactHistoryTopic(oldTopicID, newTopicID int64) error {
-	args := m.Called(oldTopicID, newTopicID)
-	return args.Error(0)
-}
-
-func (m *MockStorage) GetFactHistory(userID int64, limit int) ([]storage.FactHistory, error) {
-	args := m.Called(userID, limit)
-	return args.Get(0).([]storage.FactHistory), args.Error(1)
-}
-
-func (m *MockStorage) GetFactHistoryExtended(filter storage.FactHistoryFilter, limit, offset int, sortBy, sortDir string) (storage.FactHistoryResult, error) {
-	args := m.Called(filter, limit, offset, sortBy, sortDir)
-	return args.Get(0).(storage.FactHistoryResult), args.Error(1)
-}
-
-func (m *MockStorage) DeleteFact(userID, id int64) error {
-	args := m.Called(userID, id)
-	return args.Error(0)
-}
-
-func (m *MockStorage) UpdateFact(fact storage.Fact) error {
-	args := m.Called(fact)
-	return args.Error(0)
-}
-
-func (m *MockStorage) UpdateFactTopic(oldTopicID, newTopicID int64) error {
-	args := m.Called(oldTopicID, newTopicID)
-	return args.Error(0)
-}
-
-func (m *MockStorage) GetAllFacts() ([]storage.Fact, error) {
-	args := m.Called()
-	return args.Get(0).([]storage.Fact), args.Error(1)
-}
-
-func (m *MockStorage) GetFactsAfterID(minID int64) ([]storage.Fact, error) {
-	args := m.Called(minID)
-	return args.Get(0).([]storage.Fact), args.Error(1)
-}
-
-func (m *MockStorage) GetFactStats() (storage.FactStats, error) {
-	args := m.Called()
-	return args.Get(0).(storage.FactStats), args.Error(1)
-}
-
-func (m *MockStorage) GetFactStatsByUser(userID int64) (storage.FactStats, error) {
-	args := m.Called(userID)
-	return args.Get(0).(storage.FactStats), args.Error(1)
-}
-
-func (m *MockStorage) GetFacts(userID int64) ([]storage.Fact, error) {
-	args := m.Called(userID)
-	return args.Get(0).([]storage.Fact), args.Error(1)
-}
-
-func (m *MockStorage) GetUnprocessedMessages(userID int64) ([]storage.Message, error) {
-	// Fallback to avoid updating every single test expectation
-	// This is a temporary measure because `m.Called` panics if no expectation is set.
-	// We can't check m.ExpectedCalls easily.
-	// But `Called` is the standard way.
-	// The panic happens because we updated `buildContext` to call `GetUnprocessedMessages`
-	// but the tests don't expect it.
-	// I will update the tests to expect it.
-	// But first, let's revert this method to standard form.
-	args := m.Called(userID)
-	if args.Get(0) == nil {
-		return []storage.Message{}, args.Error(1)
-	}
-	return args.Get(0).([]storage.Message), args.Error(1)
-}
-
-func (m *MockStorage) GetFactsByTopicID(topicID int64) ([]storage.Fact, error) {
-	args := m.Called(topicID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]storage.Fact), args.Error(1)
-}
-
-func (m *MockStorage) AddTopicWithoutMessageUpdate(topic storage.Topic) (int64, error) {
-	args := m.Called(topic)
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) GetMessagesByTopicID(ctx context.Context, topicID int64) ([]storage.Message, error) {
-	args := m.Called(ctx, topicID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]storage.Message), args.Error(1)
-}
-
-func (m *MockStorage) UpdateMessagesTopicInRange(ctx context.Context, userID, startMsgID, endMsgID, topicID int64) error {
-	args := m.Called(ctx, userID, startMsgID, endMsgID, topicID)
-	return args.Error(0)
-}
-
-// MaintenanceRepository methods
-func (m *MockStorage) GetDBSize() (int64, error) {
-	args := m.Called()
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) GetTableSizes() ([]storage.TableSize, error) {
-	args := m.Called()
-	return args.Get(0).([]storage.TableSize), args.Error(1)
-}
-
-func (m *MockStorage) CleanupFactHistory(keepPerUser int) (int64, error) {
-	args := m.Called(keepPerUser)
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) CleanupAgentLogs(keepPerUserPerAgent int) (int64, error) {
-	args := m.Called(keepPerUserPerAgent)
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) CountAgentLogs() (int64, error) {
-	args := m.Called()
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) CountFactHistory() (int64, error) {
-	args := m.Called()
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) CountOrphanedTopics(userID int64) (int, error) {
-	args := m.Called(userID)
-	return args.Get(0).(int), args.Error(1)
-}
-
-func (m *MockStorage) GetOrphanedTopicIDs(userID int64) ([]int64, error) {
-	args := m.Called(userID)
-	return args.Get(0).([]int64), args.Error(1)
-}
-
-func (m *MockStorage) CountOverlappingTopics(userID int64) (int, error) {
-	args := m.Called(userID)
-	return args.Get(0).(int), args.Error(1)
-}
-
-func (m *MockStorage) GetOverlappingTopics(userID int64) ([]storage.OverlappingPair, error) {
-	args := m.Called(userID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]storage.OverlappingPair), args.Error(1)
-}
-
-func (m *MockStorage) CountFactsOnOrphanedTopics(userID int64) (int, error) {
-	args := m.Called(userID)
-	return args.Get(0).(int), args.Error(1)
-}
-
-func (m *MockStorage) RecalculateTopicRanges(userID int64) (int, error) {
-	args := m.Called(userID)
-	return args.Get(0).(int), args.Error(1)
-}
-
-func (m *MockStorage) RecalculateTopicSizes(userID int64) (int, error) {
-	args := m.Called(userID)
-	return args.Get(0).(int), args.Error(1)
-}
-
-func (m *MockStorage) GetContaminatedTopics(userID int64) ([]storage.ContaminatedTopic, error) {
-	args := m.Called(userID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]storage.ContaminatedTopic), args.Error(1)
-}
-
-func (m *MockStorage) CountContaminatedTopics(userID int64) (int, error) {
-	args := m.Called(userID)
-	return args.Get(0).(int), args.Error(1)
-}
-
-func (m *MockStorage) FixContaminatedTopics(userID int64) (int64, error) {
-	args := m.Called(userID)
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockStorage) Checkpoint() error {
-	args := m.Called()
-	return args.Error(0)
-}
-
-// Mock OpenRouter Client
-type MockOpenRouterClient struct {
-	mock.Mock
-}
-
-func (m *MockOpenRouterClient) CreateChatCompletion(ctx context.Context, req openrouter.ChatCompletionRequest) (openrouter.ChatCompletionResponse, error) {
-	args := m.Called(ctx, req)
-	return args.Get(0).(openrouter.ChatCompletionResponse), args.Error(1)
-}
-
-func (m *MockOpenRouterClient) CreateEmbeddings(ctx context.Context, req openrouter.EmbeddingRequest) (openrouter.EmbeddingResponse, error) {
-	args := m.Called(ctx, req)
-	return args.Get(0).(openrouter.EmbeddingResponse), args.Error(1)
-}
-
-// Mock FileDownloader
-type MockFileDownloader struct {
-	mock.Mock
-}
-
-func (m *MockFileDownloader) DownloadFile(ctx context.Context, fileID string) ([]byte, error) {
-	args := m.Called(ctx, fileID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]byte), args.Error(1)
-}
-
-func (m *MockFileDownloader) DownloadFileAsBase64(ctx context.Context, fileID string) (string, error) {
-	args := m.Called(ctx, fileID)
-	return args.String(0), args.Error(1)
-}
-
-// Mock YandexClient
-type MockYandexClient struct {
-	mock.Mock
-}
-
-func (m *MockYandexClient) Recognize(ctx context.Context, audioData []byte) (string, error) {
-	args := m.Called(ctx, audioData)
-	return args.String(0), args.Error(1)
-}
-
-func createTestTranslator(t *testing.T) *i18n.Translator {
-	tmpDir := t.TempDir()
-	content := `
-telegram:
-  forwarded_from: "[Переслано от %s пользователем %s в %s]"
-bot:
-  voice_recognition_prefix: "(Распознано из аудио):"
-  voice_message_marker: "[Voice message]"
-  voice_instruction: "The user sent a voice message (audio file below). Listen to it and respond in English. Do not describe the listening process — just respond to the content."
-  system_prompt: "System %s"
-`
-	_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte(content), 0644)
-	tr, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
-	return tr
-}
-
-func createTestFileProcessor(t *testing.T, downloader *MockFileDownloader, translator *i18n.Translator) *files.Processor {
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	return files.NewProcessor(downloader, translator, "en", logger)
-}
-
-// createTestConfig creates a config with sensible test defaults.
-func createTestConfig() *config.Config {
-	return &config.Config{
-		Bot: config.BotConfig{
-			Language: "en",
-		},
-		Agents: config.AgentsConfig{
-			Default: config.AgentConfig{
-				Name:  "TestAgent",
-				Model: "test-model",
-			},
-			Chat: config.AgentConfig{
-				Name:  "TestBot",
-				Model: "test-model",
-			},
-			Archivist: config.AgentConfig{Name: "Archivist"},
-			Enricher:  config.AgentConfig{Name: "Enricher"},
-			Reranker: config.RerankerAgentConfig{
-				AgentConfig: config.AgentConfig{Name: "Reranker"},
-				Enabled:     true,
-				MaxTopics:   5,
-			},
-			Splitter: config.AgentConfig{Name: "Splitter"},
-			Merger:   config.AgentConfig{Name: "Merger"},
-		},
-		Embedding: config.EmbeddingConfig{
-			Model: "test-embedding-model",
-		},
-		RAG: config.RAGConfig{
-			Enabled:            true,
-			MaxContextMessages: 50,
-			MaxProfileFacts:    50,
-		},
-	}
-}
-
 func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 	// Setup
-	translator := createTestTranslator(t)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	mockAPI := new(MockBotAPI)
-	mockStore := new(MockStorage)
-	mockORClient := new(MockOpenRouterClient)
-	cfg := createTestConfig()
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
+	cfg := testutil.TestConfig()
 
-	mockDownloader := new(MockFileDownloader)
+	mockDownloader := new(testutil.MockFileDownloader)
 	cfg.RAG.Enabled = false // Disable RAG for this test
 
 	bot := &Bot{
@@ -566,7 +40,7 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
 		downloader:      mockDownloader,
-		fileProcessor:   createTestFileProcessor(t, mockDownloader, translator),
+		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
@@ -696,17 +170,17 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 
 func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 	// Setup
-	translator := createTestTranslator(t)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	mockAPI := new(MockBotAPI)
-	mockStore := new(MockStorage)
-	mockORClient := new(MockOpenRouterClient)
-	cfg := createTestConfig()
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
+	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
-	mockDownloader := new(MockFileDownloader)
+	mockDownloader := new(testutil.MockFileDownloader)
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
@@ -717,7 +191,7 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 		orClient:        mockORClient,
 		ragService:      ragService,
 		downloader:      mockDownloader,
-		fileProcessor:   createTestFileProcessor(t, mockDownloader, translator),
+		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
@@ -831,17 +305,17 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 
 func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 	// Setup
-	translator := createTestTranslator(t)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	mockAPI := new(MockBotAPI)
-	mockStore := new(MockStorage)
-	mockORClient := new(MockOpenRouterClient)
-	cfg := createTestConfig()
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
+	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
-	mockDownloader := new(MockFileDownloader)
+	mockDownloader := new(testutil.MockFileDownloader)
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
@@ -852,7 +326,7 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 		orClient:        mockORClient,
 		ragService:      ragService,
 		downloader:      mockDownloader,
-		fileProcessor:   createTestFileProcessor(t, mockDownloader, translator),
+		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
@@ -967,18 +441,18 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 
 func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 	// Setup
-	translator := createTestTranslator(t)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	mockAPI := new(MockBotAPI)
-	mockStore := new(MockStorage)
-	mockORClient := new(MockOpenRouterClient)
-	cfg := createTestConfig()
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
+	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 	cfg.OpenRouter.PDFParserEngine = "native"
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
-	mockDownloader := new(MockFileDownloader)
+	mockDownloader := new(testutil.MockFileDownloader)
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
@@ -989,7 +463,7 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 		orClient:        mockORClient,
 		ragService:      ragService,
 		downloader:      mockDownloader,
-		fileProcessor:   createTestFileProcessor(t, mockDownloader, translator),
+		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
@@ -1110,17 +584,17 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 
 func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 	// Setup
-	translator := createTestTranslator(t)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	mockAPI := new(MockBotAPI)
-	mockStore := new(MockStorage)
-	mockORClient := new(MockOpenRouterClient)
-	cfg := createTestConfig()
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
+	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
-	mockDownloader := new(MockFileDownloader)
+	mockDownloader := new(testutil.MockFileDownloader)
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
@@ -1131,7 +605,7 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 		orClient:        mockORClient,
 		ragService:      ragService,
 		downloader:      mockDownloader,
-		fileProcessor:   createTestFileProcessor(t, mockDownloader, translator),
+		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
@@ -1250,14 +724,14 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 // TestProcessMessageGroup_VoiceMessage tests that voice messages are properly
 // sent as native audio to the LLM (Gemini supports audio directly).
 func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
-	translator := createTestTranslator(t)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	mockAPI := new(MockBotAPI)
-	mockStore := new(MockStorage)
-	mockORClient := new(MockOpenRouterClient)
-	mockDownloader := new(MockFileDownloader)
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
+	mockDownloader := new(testutil.MockFileDownloader)
 
-	cfg := createTestConfig()
+	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
@@ -1272,7 +746,7 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 		orClient:        mockORClient,
 		ragService:      ragService,
 		downloader:      mockDownloader,
-		fileProcessor:   createTestFileProcessor(t, mockDownloader, translator),
+		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
@@ -1380,10 +854,10 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 
 func TestProcessUpdate(t *testing.T) {
 	// Setup
-	translator := createTestTranslator(t)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	mockAPI := new(MockBotAPI)
-	mockStore := new(MockStorage)
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
+	mockStore := new(testutil.MockStorage)
 	cfg := &config.Config{
 		Bot: config.BotConfig{
 			AllowedUserIDs: []int64{123},
@@ -1438,7 +912,7 @@ func TestGetTieredCost(t *testing.T) {
 	baseCfg.OpenRouter.RequestCost = requestCost
 	baseCfg.OpenRouter.PriceTiers = testTiers
 
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	logger := testutil.TestLogger()
 
 	testCases := []struct {
 		name               string
@@ -1539,12 +1013,12 @@ func TestGetTieredCost(t *testing.T) {
 
 func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 	// Setup
-	translator := createTestTranslator(t)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	mockAPI := new(MockBotAPI)
-	mockStore := new(MockStorage)
-	mockORClient := new(MockOpenRouterClient)
-	cfg := createTestConfig()
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
+	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
@@ -1674,9 +1148,9 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 }
 
 func TestSendResponses_Success(t *testing.T) {
-	translator := createTestTranslator(t)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	mockAPI := new(MockBotAPI)
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
 	cfg := &config.Config{}
 
 	bot := &Bot{
@@ -1701,9 +1175,9 @@ func TestSendResponses_Success(t *testing.T) {
 }
 
 func TestSendResponses_ParseError_RetrySuccess(t *testing.T) {
-	translator := createTestTranslator(t)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	mockAPI := new(MockBotAPI)
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
 	cfg := &config.Config{
 		Bot: config.BotConfig{Language: "en"},
 	}
@@ -1733,9 +1207,9 @@ func TestSendResponses_ParseError_RetrySuccess(t *testing.T) {
 }
 
 func TestSendResponses_OtherError_SendGenericError(t *testing.T) {
-	translator := createTestTranslator(t)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	mockAPI := new(MockBotAPI)
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
 	cfg := &config.Config{
 		Bot: config.BotConfig{Language: "en"},
 	}
@@ -1766,13 +1240,13 @@ func TestSendResponses_OtherError_SendGenericError(t *testing.T) {
 }
 
 func TestSendTestMessage_Success(t *testing.T) {
-	translator := createTestTranslator(t)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	mockAPI := new(MockBotAPI)
-	mockStore := new(MockStorage)
-	mockORClient := new(MockOpenRouterClient)
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
 
-	cfg := createTestConfig()
+	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false // Disable RAG for testing
 
 	// Create a minimal RAG service with RAG disabled
@@ -1854,13 +1328,13 @@ func TestSendTestMessage_Success(t *testing.T) {
 }
 
 func TestSendTestMessage_SaveToHistoryFalse(t *testing.T) {
-	translator := createTestTranslator(t)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	mockAPI := new(MockBotAPI)
-	mockStore := new(MockStorage)
-	mockORClient := new(MockOpenRouterClient)
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
 
-	cfg := createTestConfig()
+	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
@@ -1930,13 +1404,13 @@ func TestSendTestMessage_SaveToHistoryFalse(t *testing.T) {
 }
 
 func TestSendTestMessage_OpenRouterError(t *testing.T) {
-	translator := createTestTranslator(t)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	mockAPI := new(MockBotAPI)
-	mockStore := new(MockStorage)
-	mockORClient := new(MockOpenRouterClient)
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
 
-	cfg := createTestConfig()
+	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)

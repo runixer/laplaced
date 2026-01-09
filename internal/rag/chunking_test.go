@@ -13,6 +13,7 @@ import (
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
+	"github.com/runixer/laplaced/internal/testutil"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -27,8 +28,8 @@ func TestProcessChunk_HallucinatedIDs(t *testing.T) {
 	cfg.Agents.Archivist.Model = "test-model"
 	cfg.Agents.Default.Model = "test-model"
 
-	mockStore := new(MockStorage)
-	mockClient := new(MockClient)
+	mockStore := new(testutil.MockStorage)
+	mockClient := new(testutil.MockOpenRouterClient)
 
 	// Create test translator (use %s placeholders for profile/topics)
 	tmpDir := t.TempDir()
@@ -122,8 +123,8 @@ func TestProcessChunk_ValidIDs(t *testing.T) {
 	cfg.Agents.Archivist.Model = "test-model"
 	cfg.Agents.Default.Model = "test-model"
 
-	mockStore := new(MockStorage)
-	mockClient := new(MockClient)
+	mockStore := new(testutil.MockStorage)
+	mockClient := new(testutil.MockOpenRouterClient)
 
 	// Create test translator (use %s placeholders for profile/topics)
 	tmpDir := t.TempDir()

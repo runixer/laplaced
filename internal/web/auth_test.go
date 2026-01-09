@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/testutil"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -112,8 +113,8 @@ func TestServer_Start_GeneratesPassword(t *testing.T) {
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 
-	mockBot := new(MockBot)
-	mockAPI := new(MockBotAPI)
+	mockBot := new(MockBotInterface)
+	mockAPI := new(testutil.MockBotAPI)
 
 	// Setup mocks for logging middleware
 	mockBot.On("API").Return(mockAPI)

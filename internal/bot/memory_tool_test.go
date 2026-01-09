@@ -6,6 +6,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
+	"github.com/runixer/laplaced/internal/testutil"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -74,9 +75,9 @@ func TestParseMemoryOpParams(t *testing.T) {
 
 func TestPerformManageMemory_Add(t *testing.T) {
 	// Setup
-	mockStore := new(MockStorage)
-	mockORClient := new(MockOpenRouterClient)
-	cfg := createTestConfig()
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
+	cfg := testutil.TestConfig()
 	cfg.Embedding.Model = "test-embedding-model"
 	bot := &Bot{
 		userRepo:        mockStore,
