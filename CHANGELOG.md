@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Next version: v0.5 (Social) — People Table, Social Graph_
 
+## [0.4.8] - 2026-01-09
+
+**Agent Debug UI: Full visibility into LLM conversations.**
+
+### Added
+- **Agent Debug UI** — unified visualization for all agents showing full OpenRouter API requests/responses with syntax-highlighted JSON
+- **Multi-turn conversation viewer** — collapsible accordions showing all LLM iterations for Laplace (tool calls) and Reranker (agentic loop)
+- **Reranker hallucination filter** — detects and removes invalid topic IDs returned by LLM, with dedicated metric
+
+### Changed
+- **Prompt structure improved** — system prompt sections reordered for better LLM comprehension, enhanced XML formatting
+
+### Fixed
+- **Tests restored** — 13 tests temporarily skipped in v0.4.7 now working again
+- **Telegram reactions** — fixed invalid emoji causing API errors
+
+### Removed
+- **Deduplicator agent** — removed non-functional fact deduplication logic (~400 lines)
+
 ## [0.4.7] - 2026-01-08
 
 **FIFO message processing, prompt engineering updates, and stability fixes.**
@@ -314,7 +333,10 @@ _Next version: v0.5 (Social) — People Table, Social Graph_
 - Multi-language support (en, ru)
 - Docker deployment
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.4.5...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.4.8...HEAD
+[0.4.8]: https://github.com/runixer/laplaced/compare/v0.4.7...v0.4.8
+[0.4.7]: https://github.com/runixer/laplaced/compare/v0.4.6...v0.4.7
+[0.4.6]: https://github.com/runixer/laplaced/compare/v0.4.5...v0.4.6
 [0.4.5]: https://github.com/runixer/laplaced/compare/v0.4.3...v0.4.5
 [0.4.3]: https://github.com/runixer/laplaced/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/runixer/laplaced/compare/v0.4.1...v0.4.2
