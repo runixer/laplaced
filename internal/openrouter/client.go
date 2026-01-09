@@ -249,6 +249,10 @@ type ChatCompletionResponse struct {
 	// DebugRequestBody contains the raw JSON request body sent to OpenRouter.
 	// Not part of API response - populated by client for debugging purposes.
 	DebugRequestBody string `json:"-"`
+
+	// DebugResponseBody contains the raw JSON response body from OpenRouter.
+	// Not part of API response - populated by client for debugging purposes.
+	DebugResponseBody string `json:"-"`
 }
 
 type EmbeddingRequest struct {
@@ -488,8 +492,9 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		return ChatCompletionResponse{}, err
 	}
 
-	// Store raw request body for debugging (available via response.DebugRequestBody)
+	// Store raw request/response bodies for debugging
 	chatResp.DebugRequestBody = string(body)
+	chatResp.DebugResponseBody = string(responseBody)
 
 	if len(chatResp.Choices) > 0 {
 		msg := chatResp.Choices[0].Message

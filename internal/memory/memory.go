@@ -373,7 +373,7 @@ func (s *Service) extractMemoryUpdate(ctx context.Context, userID int64, session
 	// Log success
 	if s.agentLogger != nil {
 		s.agentLogger.LogSuccess(ctx, userID, agentlog.AgentArchivist, prompt, resp.DebugRequestBody,
-			resp.Choices[0].Message.Content, &update, req.Model, usage.PromptTokens, usage.CompletionTokens, usage.Cost, durationMs, map[string]interface{}{
+			resp.Choices[0].Message.Content, &update, resp.DebugResponseBody, req.Model, usage.PromptTokens, usage.CompletionTokens, usage.Cost, durationMs, map[string]interface{}{
 				"added_count":   len(update.Added),
 				"updated_count": len(update.Updated),
 				"removed_count": len(update.Removed),
@@ -809,7 +809,7 @@ func (s *Service) arbitrateFact(ctx context.Context, newFact storage.Fact, exist
 	// Log success
 	if s.agentLogger != nil {
 		s.agentLogger.LogSuccess(ctx, newFact.UserID, agentlog.AgentDeduplicator, prompt, resp.DebugRequestBody,
-			resp.Choices[0].Message.Content, &result, req.Model,
+			resp.Choices[0].Message.Content, &result, resp.DebugResponseBody, req.Model,
 			resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.Cost, durationMs,
 			map[string]interface{}{
 				"action":    result.Action,

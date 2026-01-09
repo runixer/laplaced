@@ -1827,7 +1827,7 @@ func (s *Service) enrichQuery(ctx context.Context, userID int64, query string, h
 	// Log success
 	if s.agentLogger != nil {
 		s.agentLogger.LogSuccess(ctx, userID, agentlog.AgentEnricher, systemPrompt, resp.DebugRequestBody,
-			enrichedQuery, nil, model,
+			enrichedQuery, nil, resp.DebugResponseBody, model,
 			resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.Cost, durationMs,
 			map[string]interface{}{
 				"original_query":  query,

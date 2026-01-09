@@ -328,14 +328,268 @@
 
     /* Nested XML sections (e.g., topics inside retrieved_context) */
     .or-xml-section .or-xml-section {
-        margin: 0.25rem 0;
-        border-radius: 0.375rem;
+        margin: 0.5rem 0;
+        border-radius: 0.5rem;
     }
     .or-xml-content > .or-xml-section:first-child {
         margin-top: 0;
     }
     .or-xml-content > .or-xml-section:last-child {
         margin-bottom: 0;
+    }
+
+    /* Special styling for topic cards inside retrieved_context */
+    .or-xml-topic-card {
+        background: #fffbeb;
+        border: 1px solid #fcd34d;
+        border-left: 4px solid #f59e0b;
+        border-radius: 0.5rem;
+        margin: 0.75rem 0;
+        overflow: hidden;
+    }
+    .or-xml-topic-card .or-xml-header {
+        background: linear-gradient(135deg, #fef3c7, #fde68a);
+        padding: 0.5rem 0.75rem;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+        border-bottom: 1px solid #fcd34d;
+    }
+    .or-xml-topic-card .or-xml-header .topic-id {
+        background: #f59e0b;
+        color: white;
+        padding: 0.2rem 0.5rem;
+        border-radius: 0.25rem;
+        font-weight: 600;
+        font-size: 0.75rem;
+    }
+    .or-xml-topic-card .or-xml-header .topic-meta {
+        display: flex;
+        gap: 0.5rem;
+        margin-left: auto;
+    }
+    .or-xml-topic-card .or-xml-header .topic-relevance {
+        background: #dcfce7;
+        color: #166534;
+        padding: 0.2rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.7rem;
+        font-weight: 500;
+    }
+    .or-xml-topic-card .or-xml-header .topic-relevance.high { background: #bbf7d0; }
+    .or-xml-topic-card .or-xml-header .topic-relevance.medium { background: #fef08a; color: #854d0e; }
+    .or-xml-topic-card .or-xml-header .topic-relevance.low { background: #fecaca; color: #991b1b; }
+    .or-xml-topic-card .or-xml-header .topic-date {
+        background: #e0e7ff;
+        color: #3730a3;
+        padding: 0.2rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.7rem;
+    }
+    .or-xml-topic-card .topic-summary {
+        padding: 0.75rem;
+        font-size: 0.9rem;
+        line-height: 1.4;
+        color: #1f2937;
+    }
+    .or-xml-topic-card .topic-content-toggle {
+        background: #fef3c7;
+        padding: 0.5rem 0.75rem;
+        border-top: 1px solid #fcd34d;
+        cursor: pointer;
+        font-size: 0.8rem;
+        color: #92400e;
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+    }
+    .or-xml-topic-card .topic-content-toggle:hover {
+        background: #fde68a;
+    }
+    .or-xml-topic-card .topic-content {
+        background: #fffef5;
+        padding: 0.75rem;
+        border-top: 1px solid #fcd34d;
+        font-size: 0.85rem;
+        white-space: pre-wrap;
+        max-height: 300px;
+        overflow: auto;
+    }
+    .or-xml-topic-card .topic-content.collapsed {
+        display: none;
+    }
+
+    /* OpenRouter Response Viewer */
+    .openrouter-response {
+        background: #fff;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        border: 1px solid #dee2e6;
+    }
+    .orr-header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid #e9ecef;
+        align-items: center;
+    }
+    .orr-id-badge {
+        background: #6b7280;
+        color: white;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.7rem;
+        font-family: monospace;
+    }
+    .orr-model-badge {
+        background: linear-gradient(135deg, #8b5cf6, #6366f1);
+        color: white;
+        padding: 0.25rem 0.75rem;
+        border-radius: 1rem;
+        font-weight: 600;
+        font-size: 0.875rem;
+    }
+    .orr-finish-badge {
+        padding: 0.2rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.75rem;
+        font-weight: 500;
+    }
+    .orr-finish-stop { background: #d1fae5; color: #065f46; }
+    .orr-finish-tool_calls { background: #fef3c7; color: #92400e; }
+    .orr-finish-length, .orr-finish-max_tokens { background: #fee2e2; color: #991b1b; }
+    .orr-finish-content_filter { background: #fecaca; color: #b91c1c; }
+    .orr-finish-default { background: #e5e7eb; color: #374151; }
+
+    .orr-usage {
+        display: flex;
+        gap: 0.5rem;
+        margin-left: auto;
+    }
+    .orr-usage-badge {
+        padding: 0.2rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.75rem;
+        background: #dbeafe;
+        color: #1e40af;
+    }
+    .orr-cost-badge {
+        background: #d1fae5;
+        color: #065f46;
+    }
+
+    .orr-choices {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+    .orr-choice {
+        background: #d1fae5;
+        border-left: 3px solid #10b981;
+        border-radius: 0.5rem;
+        padding: 0.75rem;
+    }
+    .orr-choice-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.5rem;
+    }
+    .orr-choice-index {
+        background: #10b981;
+        color: white;
+        padding: 0.125rem 0.375rem;
+        border-radius: 0.25rem;
+        font-size: 0.65rem;
+        font-weight: 600;
+    }
+    .orr-role {
+        font-weight: 600;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #047857;
+    }
+    .orr-content {
+        font-size: 0.9rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 300px;
+        overflow: auto;
+    }
+    .orr-reasoning {
+        background: #fef3c7;
+        border-left: 3px solid #f59e0b;
+        border-radius: 0.375rem;
+        padding: 0.5rem;
+        margin-top: 0.5rem;
+    }
+    .orr-reasoning-header {
+        font-weight: 600;
+        font-size: 0.75rem;
+        color: #92400e;
+        margin-bottom: 0.25rem;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+    }
+    .orr-reasoning-content {
+        font-size: 0.85rem;
+        white-space: pre-wrap;
+        max-height: 200px;
+        overflow: auto;
+    }
+    .orr-reasoning-content.collapsed {
+        display: none;
+    }
+
+    /* Multi-turn conversation styles */
+    .conversation-turns {
+        border: 2px solid #6366f1;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        background: #f8f9ff;
+    }
+    .conversation-turns h6 {
+        color: #4338ca;
+        margin-bottom: 0.75rem;
+    }
+    .conversation-turns .badge {
+        font-size: 0.7rem;
+    }
+    .conversation-turns .accordion-item {
+        border: 1px solid #c7d2fe;
+        margin-bottom: 0.5rem;
+        border-radius: 0.375rem;
+        overflow: hidden;
+    }
+    .conversation-turns .accordion-button {
+        padding: 0.5rem 1rem;
+        font-size: 0.85rem;
+        background: #eef2ff;
+    }
+    .conversation-turns .accordion-button:not(.collapsed) {
+        background: #e0e7ff;
+        color: #3730a3;
+    }
+    .conversation-turns .accordion-button .badge {
+        margin-left: 0.5rem;
+    }
+    .conversation-turns .accordion-body {
+        padding: 0.75rem;
+        background: white;
+    }
+    .turn-request, .turn-response {
+        margin-bottom: 0.75rem;
+    }
+    .turn-request h6, .turn-response h6 {
+        font-size: 0.8rem;
+        color: #6b7280;
+        margin-bottom: 0.5rem;
     }
 </style>
 {{end}}
@@ -402,6 +656,28 @@
             </div>
             {{end}}
 
+            {{if $log.ConversationTurns}}
+            <!-- Multi-turn conversation display -->
+            <div class="conversation-turns mb-3" id="conv-turns-{{$idx}}">
+                <h6>
+                    <i class="bi bi-arrow-repeat"></i> Multi-Turn Conversation
+                    <span class="badge bg-info turns-count">Loading...</span>
+                </h6>
+                <div class="accordion" id="turns-accordion-{{$idx}}">
+                    <!-- Turns will be rendered by JavaScript -->
+                </div>
+            </div>
+            <script>
+            (function() {
+                try {
+                    const turnsData = {{$log.ConversationTurns | jsString}};
+                    renderConversationTurns({{$idx}}, turnsData);
+                } catch(e) {
+                    console.error('Failed to render conversation turns:', e);
+                }
+            })();
+            </script>
+            {{else}}
             {{if $log.InputContext}}
             <div class="mb-3">
                 <h6>
@@ -415,24 +691,25 @@
             </div>
             {{end}}
 
+            {{if $log.OutputContext}}
+            <div class="mb-3">
+                <h6>
+                    API Response
+                    <button class="btn btn-sm btn-outline-secondary ms-2" onclick="toggleRawResponseJSON({{$idx}}); event.stopPropagation();">
+                        <i class="bi bi-code"></i> Raw JSON
+                    </button>
+                </h6>
+                <div class="openrouter-response" id="or-response-{{$idx}}"></div>
+                <div class="json-view mt-2" id="or-response-raw-{{$idx}}" style="display: none;">{{$log.OutputContext | prettyJSON}}</div>
+            </div>
+            {{else}}
             <div class="mb-3">
                 <h6>Output Response</h6>
                 <div class="response-view">{{if $log.OutputResponse}}{{$log.OutputResponse}}{{else}}<em>No response</em>{{end}}</div>
             </div>
-
-            {{if $log.OutputParsed}}
-            <div class="mb-3">
-                <h6>Parsed Output <small class="text-muted">(JSON)</small></h6>
-                <div class="json-view">{{$log.OutputParsed | prettyJSON}}</div>
-            </div>
+            {{end}}
             {{end}}
 
-            {{if $log.Metadata}}
-            <div class="mb-3">
-                <h6>Metadata <small class="text-muted">(JSON)</small></h6>
-                <div class="json-view">{{$log.Metadata | prettyJSON}}</div>
-            </div>
-            {{end}}
         </div>
     </div>
     {{end}}
@@ -460,6 +737,18 @@ function toggleRawJSON(idx) {
     }
 }
 
+function toggleRawResponseJSON(idx) {
+    const raw = document.getElementById('or-response-raw-' + idx);
+    const response = document.getElementById('or-response-' + idx);
+    if (raw.style.display === 'none') {
+        raw.style.display = 'block';
+        response.style.display = 'none';
+    } else {
+        raw.style.display = 'none';
+        response.style.display = 'block';
+    }
+}
+
 function toggleORMessage(header) {
     const content = header.nextElementSibling;
     const icon = header.querySelector('i.bi');
@@ -477,6 +766,95 @@ function toggleORSection(header) {
     if (icon) {
         icon.classList.toggle('bi-chevron-down');
         icon.classList.toggle('bi-chevron-up');
+    }
+}
+
+// Render multi-turn conversation accordion
+function renderConversationTurns(logIdx, turnsDataStr) {
+    const container = document.getElementById('conv-turns-' + logIdx);
+    const accordion = document.getElementById('turns-accordion-' + logIdx);
+    if (!container || !accordion) return;
+
+    let data;
+    try {
+        data = JSON.parse(turnsDataStr);
+    } catch(e) {
+        console.error('Failed to parse conversation turns:', e);
+        return;
+    }
+
+    if (!data.turns || !data.turns.length) {
+        container.style.display = 'none';
+        return;
+    }
+
+    // Update badge with turns count
+    const badge = container.querySelector('.turns-count');
+    if (badge) {
+        badge.textContent = data.turns.length + ' turns';
+    }
+
+    // Build accordion HTML
+    let html = '';
+    for (let i = 0; i < data.turns.length; i++) {
+        const turn = data.turns[i];
+        const isLast = i === data.turns.length - 1;
+        const turnId = 'turn-' + logIdx + '-' + i;
+
+        // Detect if response has tool_calls
+        let hasToolCalls = false;
+        let toolCallCount = 0;
+        try {
+            const respData = typeof turn.response === 'string' ? JSON.parse(turn.response) : turn.response;
+            if (respData && respData.choices && respData.choices[0] && respData.choices[0].message && respData.choices[0].message.tool_calls) {
+                hasToolCalls = true;
+                toolCallCount = respData.choices[0].message.tool_calls.length;
+            }
+        } catch(e) {}
+
+        // Badge for turn type
+        let typeBadge = '';
+        if (hasToolCalls) {
+            typeBadge = '<span class="badge bg-warning text-dark"><i class="bi bi-gear"></i> ' + toolCallCount + ' tool call' + (toolCallCount > 1 ? 's' : '') + '</span>';
+        } else if (isLast) {
+            typeBadge = '<span class="badge bg-success"><i class="bi bi-check"></i> Final response</span>';
+        }
+
+        html += '<div class="accordion-item">' +
+            '<h2 class="accordion-header">' +
+                '<button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#' + turnId + '">' +
+                    '<strong>Turn ' + turn.iteration + '</strong>' +
+                    '<span class="badge bg-secondary">' + turn.duration_ms + 'ms</span>' +
+                    typeBadge +
+                '</button>' +
+            '</h2>' +
+            '<div id="' + turnId + '" class="accordion-collapse collapse">' +
+                '<div class="accordion-body">' +
+                    '<div class="row">' +
+                        '<div class="col-md-6 turn-request">' +
+                            '<h6><i class="bi bi-arrow-up-right"></i> Request</h6>' +
+                            '<div id="or-turn-req-' + logIdx + '-' + i + '"></div>' +
+                        '</div>' +
+                        '<div class="col-md-6 turn-response">' +
+                            '<h6><i class="bi bi-arrow-down-left"></i> Response</h6>' +
+                            '<div id="or-turn-resp-' + logIdx + '-' + i + '"></div>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>' +
+            '</div>' +
+        '</div>';
+    }
+
+    accordion.innerHTML = html;
+
+    // Initialize viewers for each turn
+    for (let i = 0; i < data.turns.length; i++) {
+        const turn = data.turns[i];
+        const reqStr = typeof turn.request === 'string' ? turn.request : JSON.stringify(turn.request);
+        const respStr = typeof turn.response === 'string' ? turn.response : JSON.stringify(turn.response);
+
+        new OpenRouterRequestViewer('or-turn-req-' + logIdx + '-' + i, reqStr);
+        new OpenRouterResponseViewer('or-turn-resp-' + logIdx + '-' + i, respStr);
     }
 }
 
@@ -618,6 +996,13 @@ class OpenRouterRequestViewer {
             const attrString = match[2];
             const tagContent = match[3].trim();
 
+            // Special rendering for <topic> tags (RAG results)
+            if (tagName === 'topic') {
+                html += this.renderTopicCard(attrString, tagContent);
+                lastIndex = match.index + match[0].length;
+                continue;
+            }
+
             const colorClass = this.getTagColorClass(tagName);
             const attrs = this.parseAttributes(attrString);
             const isLong = tagContent.length > 200;
@@ -651,6 +1036,54 @@ class OpenRouterRequestViewer {
         }
 
         return html || '<pre>' + this.escapeHtml(content) + '</pre>';
+    }
+
+    renderTopicCard(attrString, tagContent) {
+        const attrs = this.parseAttributes(attrString);
+        const topicId = attrs.id || '?';
+        const relevance = parseFloat(attrs.relevance) || 0;
+        const date = attrs.date || '';
+        const summary = attrs.summary || ''; // Summary is an attribute, not nested tag
+        const isExcerpt = attrs.excerpt === 'true';
+
+        // tagContent is the raw message content (not wrapped in <content>)
+        const content = tagContent.trim();
+
+        // Relevance color class
+        let relevanceClass = 'low';
+        if (relevance >= 0.8) relevanceClass = 'high';
+        else if (relevance >= 0.6) relevanceClass = 'medium';
+
+        const uniqueId = 'topic-content-' + Math.random().toString(36).substr(2, 9);
+
+        let html = '<div class="or-xml-topic-card">';
+
+        // Header with ID, relevance, date
+        html += '<div class="or-xml-header">' +
+            '<span class="topic-id"><i class="bi bi-chat-square-text"></i> Topic #' + this.escapeHtml(topicId) + '</span>' +
+            '<div class="topic-meta">' +
+                (isExcerpt ? '<span class="topic-relevance" style="background:#e0e7ff;color:#4338ca;"><i class="bi bi-scissors"></i> excerpt</span>' : '') +
+                '<span class="topic-relevance ' + relevanceClass + '">' + (relevance * 100).toFixed(0) + '%</span>' +
+                (date ? '<span class="topic-date"><i class="bi bi-calendar3"></i> ' + this.escapeHtml(date) + '</span>' : '') +
+            '</div>' +
+        '</div>';
+
+        // Summary
+        if (summary) {
+            html += '<div class="topic-summary">' + this.escapeHtml(summary) + '</div>';
+        }
+
+        // Content toggle and content
+        if (content) {
+            const lineCount = (content.match(/\n/g) || []).length + 1;
+            html += '<div class="topic-content-toggle" onclick="document.getElementById(\'' + uniqueId + '\').classList.toggle(\'collapsed\'); this.querySelector(\'i\').classList.toggle(\'bi-chevron-down\'); this.querySelector(\'i\').classList.toggle(\'bi-chevron-up\');">' +
+                '<i class="bi bi-chevron-down"></i> Show conversation (' + lineCount + ' messages)' +
+            '</div>';
+            html += '<div id="' + uniqueId + '" class="topic-content collapsed">' + this.escapeHtml(content) + '</div>';
+        }
+
+        html += '</div>';
+        return html;
     }
 
     renderSystemMessage(msg, idx) {
@@ -866,11 +1299,198 @@ class OpenRouterRequestViewer {
     }
 }
 
+class OpenRouterResponseViewer {
+    constructor(containerId, jsonString) {
+        this.container = document.getElementById(containerId);
+        this.data = null;
+
+        try {
+            this.data = JSON.parse(jsonString);
+        } catch (e) {
+            this.container.innerHTML = '<div class="or-error"><i class="bi bi-exclamation-triangle"></i> Invalid JSON: ' + this.escapeHtml(e.message) + '</div>';
+            return;
+        }
+
+        this.render();
+    }
+
+    render() {
+        const html = `
+            ${this.renderHeader()}
+            ${this.renderChoices()}
+        `;
+        this.container.innerHTML = html;
+    }
+
+    renderHeader() {
+        const badges = [];
+
+        // Response ID
+        if (this.data.id) {
+            badges.push('<span class="orr-id-badge">' + this.escapeHtml(this.data.id) + '</span>');
+        }
+
+        // Model
+        if (this.data.model) {
+            const modelDisplay = this.data.model.split('/').pop();
+            badges.push('<span class="orr-model-badge">' + this.escapeHtml(modelDisplay) + '</span>');
+        }
+
+        // Finish reason from first choice
+        if (this.data.choices && this.data.choices.length > 0) {
+            const finishReason = this.data.choices[0].finish_reason || '';
+            if (finishReason) {
+                const finishClass = this.getFinishReasonClass(finishReason);
+                badges.push('<span class="orr-finish-badge ' + finishClass + '"><i class="bi bi-check-circle"></i> ' + this.escapeHtml(finishReason) + '</span>');
+            }
+        }
+
+        // Usage stats
+        let usageHtml = '<div class="orr-usage">';
+        if (this.data.usage) {
+            if (this.data.usage.prompt_tokens !== undefined) {
+                usageHtml += '<span class="orr-usage-badge"><i class="bi bi-arrow-up"></i> ' + this.data.usage.prompt_tokens + '</span>';
+            }
+            if (this.data.usage.completion_tokens !== undefined) {
+                usageHtml += '<span class="orr-usage-badge"><i class="bi bi-arrow-down"></i> ' + this.data.usage.completion_tokens + '</span>';
+            }
+            if (this.data.usage.total_tokens !== undefined) {
+                usageHtml += '<span class="orr-usage-badge"><i class="bi bi-calculator"></i> ' + this.data.usage.total_tokens + '</span>';
+            }
+            if (this.data.usage.cost !== undefined && this.data.usage.cost !== null) {
+                usageHtml += '<span class="orr-usage-badge orr-cost-badge"><i class="bi bi-currency-dollar"></i> ' + this.data.usage.cost.toFixed(6) + '</span>';
+            }
+        }
+        usageHtml += '</div>';
+
+        return '<div class="orr-header">' + badges.join('') + usageHtml + '</div>';
+    }
+
+    getFinishReasonClass(reason) {
+        const classes = {
+            'stop': 'orr-finish-stop',
+            'end_turn': 'orr-finish-stop',
+            'tool_calls': 'orr-finish-tool_calls',
+            'length': 'orr-finish-length',
+            'max_tokens': 'orr-finish-max_tokens',
+            'content_filter': 'orr-finish-content_filter'
+        };
+        return classes[reason] || 'orr-finish-default';
+    }
+
+    renderChoices() {
+        if (!this.data.choices || !this.data.choices.length) {
+            return '<div class="text-muted">No choices in response</div>';
+        }
+
+        let html = '<div class="orr-choices">';
+        for (let i = 0; i < this.data.choices.length; i++) {
+            html += this.renderChoice(this.data.choices[i], i);
+        }
+        html += '</div>';
+        return html;
+    }
+
+    renderChoice(choice, idx) {
+        const message = choice.message || {};
+        const role = message.role || 'assistant';
+        const content = message.content || '';
+        const toolCalls = message.tool_calls || [];
+        const reasoningDetails = message.reasoning_details || null;
+
+        let html = '<div class="orr-choice">';
+        html += '<div class="orr-choice-header">';
+        if (this.data.choices.length > 1) {
+            html += '<span class="orr-choice-index">Choice ' + idx + '</span>';
+        }
+        html += '<span class="orr-role">' + this.escapeHtml(role) + '</span>';
+        html += '</div>';
+
+        // Content
+        if (content) {
+            html += '<div class="orr-content">' + this.escapeHtml(content) + '</div>';
+        }
+
+        // Tool calls
+        if (toolCalls.length > 0) {
+            html += this.renderToolCalls(toolCalls);
+        }
+
+        // Reasoning details (extended thinking)
+        if (reasoningDetails) {
+            html += this.renderReasoningDetails(reasoningDetails);
+        }
+
+        html += '</div>';
+        return html;
+    }
+
+    renderToolCalls(toolCalls) {
+        let html = '';
+        for (let i = 0; i < toolCalls.length; i++) {
+            const tc = toolCalls[i];
+            const name = (tc.function && tc.function.name) || 'unknown';
+            let args = (tc.function && tc.function.arguments) || '{}';
+
+            try {
+                args = JSON.stringify(JSON.parse(args), null, 2);
+            } catch (e) {}
+
+            html += '<div class="or-tool-call">' +
+                '<span class="or-tool-badge"><i class="bi bi-gear"></i> Tool Call</span> ' +
+                '<code>' + this.escapeHtml(name) + '</code>' +
+                (tc.id ? '<span class="or-tool-id">' + this.escapeHtml(tc.id) + '</span>' : '') +
+                '<pre class="or-tool-args">' + this.escapeHtml(args) + '</pre>' +
+            '</div>';
+        }
+        return html;
+    }
+
+    renderReasoningDetails(details) {
+        // Details can be array or string depending on provider
+        let content = '';
+        if (Array.isArray(details)) {
+            for (let i = 0; i < details.length; i++) {
+                const d = details[i];
+                if (d.type === 'thinking' && d.thinking) {
+                    content += d.thinking + '\n';
+                } else if (typeof d === 'string') {
+                    content += d + '\n';
+                }
+            }
+        } else if (typeof details === 'string') {
+            content = details;
+        } else {
+            content = JSON.stringify(details, null, 2);
+        }
+
+        if (!content.trim()) return '';
+
+        const uniqueId = 'reasoning-' + Math.random().toString(36).substr(2, 9);
+        return '<div class="orr-reasoning">' +
+            '<div class="orr-reasoning-header" onclick="document.getElementById(\'' + uniqueId + '\').classList.toggle(\'collapsed\')">' +
+                '<i class="bi bi-lightbulb"></i> Reasoning / Extended Thinking' +
+            '</div>' +
+            '<div id="' + uniqueId + '" class="orr-reasoning-content collapsed">' + this.escapeHtml(content.trim()) + '</div>' +
+        '</div>';
+    }
+
+    escapeHtml(text) {
+        if (text === null || text === undefined) return '';
+        const div = document.createElement('div');
+        div.textContent = String(text);
+        return div.innerHTML;
+    }
+}
+
 // Initialize viewers on page load
 document.addEventListener('DOMContentLoaded', function() {
     {{range $idx, $log := .Data.Logs}}
     {{if $log.InputContext}}
     new OpenRouterRequestViewer('or-request-{{$idx}}', {{$log.InputContext | jsString}});
+    {{end}}
+    {{if $log.OutputContext}}
+    new OpenRouterResponseViewer('or-response-{{$idx}}', {{$log.OutputContext | jsString}});
     {{end}}
     {{end}}
 });

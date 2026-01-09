@@ -11,9 +11,9 @@ func (s *SQLiteStore) AddAgentLog(log AgentLog) error {
 	query := `
 		INSERT INTO agent_logs (
 			user_id, agent_type, input_prompt, input_context, output_response,
-			output_parsed, model, prompt_tokens, completion_tokens, total_cost,
-			duration_ms, metadata, success, error_message
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			output_parsed, output_context, model, prompt_tokens, completion_tokens,
+			total_cost, duration_ms, metadata, success, error_message, conversation_turns
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	_, err := s.db.Exec(query,
 		log.UserID,
@@ -22,6 +22,7 @@ func (s *SQLiteStore) AddAgentLog(log AgentLog) error {
 		log.InputContext,
 		log.OutputResponse,
 		log.OutputParsed,
+		log.OutputContext,
 		log.Model,
 		log.PromptTokens,
 		log.CompletionTokens,
@@ -30,6 +31,7 @@ func (s *SQLiteStore) AddAgentLog(log AgentLog) error {
 		log.Metadata,
 		log.Success,
 		log.ErrorMessage,
+		log.ConversationTurns,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to add agent log: %w", err)
@@ -46,8 +48,8 @@ func (s *SQLiteStore) GetAgentLogs(agentType string, userID int64, limit int) ([
 	if userID > 0 {
 		query = `
 			SELECT id, user_id, agent_type, input_prompt, input_context, output_response,
-				   output_parsed, model, prompt_tokens, completion_tokens, total_cost,
-				   duration_ms, metadata, success, error_message, created_at
+				   output_parsed, output_context, model, prompt_tokens, completion_tokens,
+				   total_cost, duration_ms, metadata, success, error_message, conversation_turns, created_at
 			FROM agent_logs
 			WHERE agent_type = ? AND user_id = ?
 			ORDER BY created_at DESC
@@ -57,8 +59,8 @@ func (s *SQLiteStore) GetAgentLogs(agentType string, userID int64, limit int) ([
 	} else {
 		query = `
 			SELECT id, user_id, agent_type, input_prompt, input_context, output_response,
-				   output_parsed, model, prompt_tokens, completion_tokens, total_cost,
-				   duration_ms, metadata, success, error_message, created_at
+				   output_parsed, output_context, model, prompt_tokens, completion_tokens,
+				   total_cost, duration_ms, metadata, success, error_message, conversation_turns, created_at
 			FROM agent_logs
 			WHERE agent_type = ?
 			ORDER BY created_at DESC
@@ -119,8 +121,8 @@ func (s *SQLiteStore) GetAgentLogsExtended(filter AgentLogFilter, limit, offset 
 	// Fetch data
 	dataQuery := fmt.Sprintf(`
 		SELECT id, user_id, agent_type, input_prompt, input_context, output_response,
-			   output_parsed, model, prompt_tokens, completion_tokens, total_cost,
-			   duration_ms, metadata, success, error_message, created_at
+			   output_parsed, output_context, model, prompt_tokens, completion_tokens,
+			   total_cost, duration_ms, metadata, success, error_message, conversation_turns, created_at
 		FROM agent_logs
 		%s
 		ORDER BY created_at DESC
@@ -148,6 +150,7 @@ func (s *SQLiteStore) scanAgentLogs(rows *sql.Rows) ([]AgentLog, error) {
 
 	for rows.Next() {
 		var log AgentLog
+		var conversationTurns sql.NullString
 		err := rows.Scan(
 			&log.ID,
 			&log.UserID,
@@ -156,6 +159,7 @@ func (s *SQLiteStore) scanAgentLogs(rows *sql.Rows) ([]AgentLog, error) {
 			&log.InputContext,
 			&log.OutputResponse,
 			&log.OutputParsed,
+			&log.OutputContext,
 			&log.Model,
 			&log.PromptTokens,
 			&log.CompletionTokens,
@@ -164,10 +168,14 @@ func (s *SQLiteStore) scanAgentLogs(rows *sql.Rows) ([]AgentLog, error) {
 			&log.Metadata,
 			&log.Success,
 			&log.ErrorMessage,
+			&conversationTurns,
 			&log.CreatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan agent log: %w", err)
+		}
+		if conversationTurns.Valid {
+			log.ConversationTurns = conversationTurns.String
 		}
 		logs = append(logs, log)
 	}

@@ -13,6 +13,23 @@ import (
 // AgentType represents the type of LLM agent.
 type AgentType string
 
+// ConversationTurn represents one request-response cycle in a multi-turn conversation.
+type ConversationTurn struct {
+	Iteration  int         `json:"iteration"`
+	Request    interface{} `json:"request"`  // Raw OpenRouter request
+	Response   interface{} `json:"response"` // Raw OpenRouter response
+	DurationMs int         `json:"duration_ms"`
+}
+
+// ConversationTurns holds all turns for multi-turn agents (e.g., Reranker with tool calls).
+type ConversationTurns struct {
+	Turns                 []ConversationTurn `json:"turns"`
+	TotalDurationMs       int                `json:"total_duration_ms"`
+	TotalPromptTokens     int                `json:"total_prompt_tokens"`
+	TotalCompletionTokens int                `json:"total_completion_tokens"`
+	TotalCost             *float64           `json:"total_cost,omitempty"`
+}
+
 const (
 	AgentLaplace      AgentType = "laplace"
 	AgentReranker     AgentType = "reranker"
@@ -29,9 +46,10 @@ type Entry struct {
 	UserID           int64
 	AgentType        AgentType
 	InputPrompt      string
-	InputContext     interface{} // Will be JSON serialized
+	InputContext     interface{} // Will be JSON serialized (full API request)
 	OutputResponse   string
 	OutputParsed     interface{} // Will be JSON serialized
+	OutputContext    interface{} // Will be JSON serialized (full API response)
 	Model            string
 	PromptTokens     int
 	CompletionTokens int
@@ -40,6 +58,10 @@ type Entry struct {
 	Metadata         interface{} // Agent-specific data, will be JSON serialized
 	Success          bool
 	ErrorMessage     string
+
+	// ConversationTurns holds all request/response pairs for multi-turn agents.
+	// Used by Reranker (tool calls) and potentially Laplace (agentic mode).
+	ConversationTurns *ConversationTurns
 }
 
 // Logger handles logging for LLM agents.
@@ -69,24 +91,28 @@ func (l *Logger) Log(ctx context.Context, entry Entry) {
 	// Serialize JSON fields
 	inputContext := serializeJSON(entry.InputContext)
 	outputParsed := serializeJSON(entry.OutputParsed)
+	outputContext := serializeJSON(entry.OutputContext)
 	metadata := serializeJSON(entry.Metadata)
+	conversationTurns := serializeJSON(entry.ConversationTurns)
 
 	log := storage.AgentLog{
-		UserID:           entry.UserID,
-		AgentType:        string(entry.AgentType),
-		InputPrompt:      entry.InputPrompt,
-		InputContext:     inputContext,
-		OutputResponse:   entry.OutputResponse,
-		OutputParsed:     outputParsed,
-		Model:            entry.Model,
-		PromptTokens:     entry.PromptTokens,
-		CompletionTokens: entry.CompletionTokens,
-		TotalCost:        entry.TotalCost,
-		DurationMs:       entry.DurationMs,
-		Metadata:         metadata,
-		Success:          entry.Success,
-		ErrorMessage:     entry.ErrorMessage,
-		CreatedAt:        time.Now(),
+		UserID:            entry.UserID,
+		AgentType:         string(entry.AgentType),
+		InputPrompt:       entry.InputPrompt,
+		InputContext:      inputContext,
+		OutputResponse:    entry.OutputResponse,
+		OutputParsed:      outputParsed,
+		OutputContext:     outputContext,
+		Model:             entry.Model,
+		PromptTokens:      entry.PromptTokens,
+		CompletionTokens:  entry.CompletionTokens,
+		TotalCost:         entry.TotalCost,
+		DurationMs:        entry.DurationMs,
+		Metadata:          metadata,
+		Success:           entry.Success,
+		ErrorMessage:      entry.ErrorMessage,
+		ConversationTurns: conversationTurns,
+		CreatedAt:         time.Now(),
 	}
 
 	if err := l.repo.AddAgentLog(log); err != nil {
@@ -99,7 +125,7 @@ func (l *Logger) Log(ctx context.Context, entry Entry) {
 }
 
 // LogSuccess is a convenience method for logging successful agent calls.
-func (l *Logger) LogSuccess(ctx context.Context, userID int64, agentType AgentType, inputPrompt string, inputContext interface{}, outputResponse string, outputParsed interface{}, model string, promptTokens, completionTokens int, totalCost *float64, durationMs int, metadata interface{}) {
+func (l *Logger) LogSuccess(ctx context.Context, userID int64, agentType AgentType, inputPrompt string, inputContext interface{}, outputResponse string, outputParsed interface{}, outputContext interface{}, model string, promptTokens, completionTokens int, totalCost *float64, durationMs int, metadata interface{}) {
 	l.Log(ctx, Entry{
 		UserID:           userID,
 		AgentType:        agentType,
@@ -107,6 +133,7 @@ func (l *Logger) LogSuccess(ctx context.Context, userID int64, agentType AgentTy
 		InputContext:     inputContext,
 		OutputResponse:   outputResponse,
 		OutputParsed:     outputParsed,
+		OutputContext:    outputContext,
 		Model:            model,
 		PromptTokens:     promptTokens,
 		CompletionTokens: completionTokens,

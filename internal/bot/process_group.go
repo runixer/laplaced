@@ -126,7 +126,9 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	llmCallCount := 0
 	toolCallCount := 0
 	telegramCallCount := 0
-	var lastRawRequestBody string // Capture last LLM request for debugging
+	var lastRawRequestBody string  // Capture last LLM request for debugging
+	var lastRawResponseBody string // Capture last LLM response for debugging
+	var totalCost *float64         // Accumulated cost from OpenRouter
 
 	// Defer Telegram metrics recording to capture early returns
 	defer func() {
@@ -183,7 +185,15 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 
 		totalPromptTokens += resp.Usage.PromptTokens
 		totalCompletionTokens += resp.Usage.CompletionTokens
-		lastRawRequestBody = resp.DebugRequestBody // Capture for logging
+		lastRawRequestBody = resp.DebugRequestBody   // Capture for logging
+		lastRawResponseBody = resp.DebugResponseBody // Capture for logging
+		// Accumulate cost from OpenRouter
+		if resp.Usage.Cost != nil {
+			if totalCost == nil {
+				totalCost = new(float64)
+			}
+			*totalCost += *resp.Usage.Cost
+		}
 
 		choice := resp.Choices[0]
 
@@ -287,7 +297,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		logger.Error("failed to finalize response", "error", err)
 	}
 
-	b.recordMetrics(userID, totalPromptTokens, totalCompletionTokens, ragInfo, orMessages, finalResponse, lastRawRequestBody, totalLLMDuration, logger)
+	b.recordMetrics(userID, totalPromptTokens, totalCompletionTokens, totalCost, ragInfo, orMessages, finalResponse, lastRawRequestBody, lastRawResponseBody, totalLLMDuration, logger)
 
 	// Record context tokens for metrics (approximate based on prompt tokens)
 	RecordContextTokens(totalPromptTokens)
@@ -709,8 +719,14 @@ func (b *Bot) finalizeResponse(chatID int64, messageThreadID int, userID int64, 
 	return responses, nil
 }
 
-func (b *Bot) recordMetrics(userID int64, promptTokens, completionTokens int, ragInfo *rag.RetrievalDebugInfo, orMessages []openrouter.Message, finalResponse string, rawRequestBody string, totalLLMDuration time.Duration, logger *slog.Logger) {
-	cost := b.getTieredCost(promptTokens, completionTokens, logger)
+func (b *Bot) recordMetrics(userID int64, promptTokens, completionTokens int, openRouterCost *float64, ragInfo *rag.RetrievalDebugInfo, orMessages []openrouter.Message, finalResponse string, rawRequestBody, rawResponseBody string, totalLLMDuration time.Duration, logger *slog.Logger) {
+	// Use OpenRouter cost if available, otherwise fall back to our calculation
+	var cost float64
+	if openRouterCost != nil {
+		cost = *openRouterCost
+	} else {
+		cost = b.getTieredCost(promptTokens, completionTokens, logger)
+	}
 
 	stat := storage.Stat{
 		UserID:     userID,
@@ -739,6 +755,7 @@ func (b *Bot) recordMetrics(userID int64, promptTokens, completionTokens int, ra
 				InputPrompt:      fullPrompt,
 				InputContext:     rawRequestBody, // Full API request JSON
 				OutputResponse:   finalResponse,
+				OutputContext:    rawResponseBody, // Full API response JSON
 				Model:            b.cfg.Agents.Chat.GetModel(b.cfg.Agents.Default.Model),
 				PromptTokens:     promptTokens,
 				CompletionTokens: completionTokens,

@@ -161,22 +161,24 @@ type RerankerToolCallTopic struct {
 
 // AgentLog stores debug traces from LLM agent calls (unified logging for all agents)
 type AgentLog struct {
-	ID               int64
-	UserID           int64
-	AgentType        string // laplace, reranker, splitter, merger, enricher, archivist, deduplicator, scout
-	InputPrompt      string
-	InputContext     string // JSON - messages, facts, topics, etc.
-	OutputResponse   string
-	OutputParsed     string // JSON - structured output
-	Model            string
-	PromptTokens     int
-	CompletionTokens int
-	TotalCost        *float64
-	DurationMs       int
-	Metadata         string // JSON - agent-specific data
-	Success          bool
-	ErrorMessage     string
-	CreatedAt        time.Time
+	ID                int64
+	UserID            int64
+	AgentType         string // laplace, reranker, splitter, merger, enricher, archivist, deduplicator, scout
+	InputPrompt       string
+	InputContext      string // JSON - full OpenRouter API request
+	OutputResponse    string
+	OutputParsed      string // JSON - structured output
+	OutputContext     string // JSON - full OpenRouter API response
+	Model             string
+	PromptTokens      int
+	CompletionTokens  int
+	TotalCost         *float64
+	DurationMs        int
+	Metadata          string // JSON - agent-specific data
+	Success           bool
+	ErrorMessage      string
+	ConversationTurns string // JSON - all request/response turns for multi-turn agents
+	CreatedAt         time.Time
 }
 
 // AgentLogFilter for filtering agent logs
@@ -582,6 +584,7 @@ func (s *SQLiteStore) migrate() error {
 			input_context TEXT,
 			output_response TEXT,
 			output_parsed TEXT,
+			output_context TEXT,
 			model TEXT,
 			prompt_tokens INTEGER,
 			completion_tokens INTEGER,
@@ -598,6 +601,23 @@ func (s *SQLiteStore) migrate() error {
 	`
 	if _, err := s.db.Exec(agentLogsQuery); err != nil {
 		return fmt.Errorf("failed to create agent_logs table: %w", err)
+	}
+
+	// Add output_context column if it doesn't exist (migration for existing databases)
+	var outputContextColExists int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('agent_logs') WHERE name='output_context'`).Scan(&outputContextColExists); err == nil && outputContextColExists == 0 {
+		if _, err := s.db.Exec(`ALTER TABLE agent_logs ADD COLUMN output_context TEXT`); err != nil {
+			s.logger.Warn("failed to add output_context column", "error", err)
+		}
+	}
+
+	// Add conversation_turns column for multi-turn agent logs (e.g., Reranker with tool calls)
+	var convTurnsColExists int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('agent_logs') WHERE name='conversation_turns'`).Scan(&convTurnsColExists); err == nil && convTurnsColExists == 0 {
+		s.logger.Info("migrating agent_logs table: adding conversation_turns")
+		if _, err := s.db.Exec(`ALTER TABLE agent_logs ADD COLUMN conversation_turns TEXT`); err != nil {
+			s.logger.Warn("failed to add conversation_turns column", "error", err)
+		}
 	}
 
 	return nil

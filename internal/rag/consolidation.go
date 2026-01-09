@@ -287,7 +287,7 @@ func (s *Service) verifyMerge(ctx context.Context, candidate storage.MergeCandid
 	// Log success
 	if s.agentLogger != nil {
 		s.agentLogger.LogSuccess(ctx, candidate.Topic1.UserID, agentlog.AgentMerger, systemPrompt, resp.DebugRequestBody,
-			resp.Choices[0].Message.Content, &result, model,
+			resp.Choices[0].Message.Content, &result, resp.DebugResponseBody, model,
 			usage.PromptTokens, usage.CompletionTokens, usage.Cost, durationMs,
 			map[string]interface{}{
 				"should_merge": result.ShouldMerge,

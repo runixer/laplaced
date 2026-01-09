@@ -1123,6 +1123,8 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, sa
 	totalCompletionTokens := 0
 	var finalResponse string
 	var lastRawRequestBody string
+	var lastRawResponseBody string
+	var totalCost *float64 // Accumulated cost from OpenRouter
 	toolIterations := 0
 	const maxToolIterations = 10
 
@@ -1152,6 +1154,14 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, sa
 		totalPromptTokens += resp.Usage.PromptTokens
 		totalCompletionTokens += resp.Usage.CompletionTokens
 		lastRawRequestBody = resp.DebugRequestBody
+		lastRawResponseBody = resp.DebugResponseBody
+		// Accumulate cost from OpenRouter
+		if resp.Usage.Cost != nil {
+			if totalCost == nil {
+				totalCost = new(float64)
+			}
+			*totalCost += *resp.Usage.Cost
+		}
 
 		choice := resp.Choices[0].Message
 
@@ -1190,7 +1200,12 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, sa
 	result.Response = finalResponse
 	result.PromptTokens = totalPromptTokens
 	result.CompletionTokens = totalCompletionTokens
-	result.TotalCost = b.getTieredCost(totalPromptTokens, totalCompletionTokens, logger)
+	// Use OpenRouter cost if available, otherwise fall back to our calculation
+	if totalCost != nil {
+		result.TotalCost = *totalCost
+	} else {
+		result.TotalCost = b.getTieredCost(totalPromptTokens, totalCompletionTokens, logger)
+	}
 	result.TimingTotal = time.Since(startTotal)
 
 	// Save assistant response to history if requested
@@ -1200,7 +1215,7 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, sa
 		}
 
 		// Record metrics
-		b.recordMetrics(userID, totalPromptTokens, totalCompletionTokens, ragInfo, orMessages, finalResponse, lastRawRequestBody, result.TimingLLM, logger)
+		b.recordMetrics(userID, totalPromptTokens, totalCompletionTokens, totalCost, ragInfo, orMessages, finalResponse, lastRawRequestBody, lastRawResponseBody, result.TimingLLM, logger)
 	}
 
 	return result, nil

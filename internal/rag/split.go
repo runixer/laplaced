@@ -422,7 +422,7 @@ func (s *Service) extractTopicsWithPrompt(ctx context.Context, userID int64, chu
 	// Log success
 	if s.agentLogger != nil {
 		s.agentLogger.LogSuccess(ctx, userID, agentlog.AgentSplitter, systemPrompt, resp.DebugRequestBody,
-			resp.Choices[0].Message.Content, &result, model,
+			resp.Choices[0].Message.Content, &result, resp.DebugResponseBody, model,
 			usage.PromptTokens, usage.CompletionTokens, usage.Cost, durationMs,
 			map[string]interface{}{
 				"topics_count": len(result.Topics),
