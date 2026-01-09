@@ -4,12 +4,10 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/runixer/laplaced/internal/config"
-	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/memory"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
@@ -147,10 +145,8 @@ func TestGracefulShutdown(t *testing.T) {
 		},
 	}, nil)
 
-	// Create dummy translator (with prompt placeholders for profile/topics)
-	tmpDir := t.TempDir()
-	_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("rag.topic_extraction_prompt: '%s\n%s\nExtract topics'"), 0644)
-	translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+	// Create translator with required template keys
+	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)

@@ -4,13 +4,11 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/runixer/laplaced/internal/config"
-	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/memory"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
@@ -144,10 +142,8 @@ func TestRetrieve_TopicsGrouping(t *testing.T) {
 	// Topic C matches (similarity 0.9 > 0.5) - ID=3
 	mockStore.On("GetMessagesByTopicID", mock.Anything, int64(3)).Return(msgsC, nil)
 
-	// Create dummy translator
-	tmpDir := t.TempDir()
-	_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("key: value"), 0644)
-	translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+	// Create translator with required template keys
+	translator := testutil.TestTranslator(t)
 
 	// 4. Run Logic
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
@@ -192,9 +188,7 @@ func TestRetrieveFacts(t *testing.T) {
 		mockStore.On("GetAllTopics").Return([]storage.Topic{}, nil)
 		mockStore.On("GetAllFacts").Return([]storage.Fact{}, nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("key: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, disabledCfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, disabledCfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -229,9 +223,7 @@ func TestRetrieveFacts(t *testing.T) {
 		// GetFacts for fetching full fact data
 		mockStore.On("GetFacts", userID).Return(facts, nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("key: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -252,9 +244,7 @@ func TestRetrieveFacts(t *testing.T) {
 		mockStore.On("GetAllFacts").Return([]storage.Fact{}, nil)
 		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{}, assert.AnError)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("key: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -274,9 +264,7 @@ func TestRetrieveFacts(t *testing.T) {
 			openrouter.EmbeddingResponse{Data: []openrouter.EmbeddingObject{}}, nil,
 		)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("key: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -307,9 +295,7 @@ func TestFindSimilarFacts(t *testing.T) {
 		mockStore.On("GetAllTopics").Return([]storage.Topic{}, nil)
 		mockStore.On("GetAllFacts").Return(facts, nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("key: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -334,9 +320,7 @@ func TestFindSimilarFacts(t *testing.T) {
 		mockStore.On("GetAllFacts").Return(facts, nil)
 		mockStore.On("GetFactsByIDs", []int64{1}).Return([]storage.Fact{facts[0]}, nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("key: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -374,9 +358,7 @@ func TestFindMergeCandidates(t *testing.T) {
 		mockStore.On("GetMergeCandidates", userID).Return(candidates, nil)
 		mockStore.On("SetTopicConsolidationChecked", int64(1), true).Return(nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("key: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -403,9 +385,7 @@ func TestFindMergeCandidates(t *testing.T) {
 		mockStore.On("GetAllFacts").Return([]storage.Fact{}, nil)
 		mockStore.On("GetMergeCandidates", userID).Return(candidates, nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("key: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -432,9 +412,7 @@ func TestFindMergeCandidates(t *testing.T) {
 		mockStore.On("GetAllFacts").Return([]storage.Fact{}, nil)
 		mockStore.On("GetMergeCandidates", userID).Return(candidates, nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("key: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -483,9 +461,7 @@ func TestVerifyMerge(t *testing.T) {
 			},
 		}, nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("rag.topic_consolidation_prompt: test %s %s %s"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -531,9 +507,7 @@ func TestVerifyMerge(t *testing.T) {
 			},
 		}, nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("rag.topic_consolidation_prompt: test %s %s %s"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -559,9 +533,7 @@ func TestVerifyMerge(t *testing.T) {
 		mockStore.On("GetTopicsExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(storage.TopicResult{}, nil)
 		mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(openrouter.ChatCompletionResponse{}, assert.AnError)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("rag.topic_consolidation_prompt: test %s %s %s"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -626,9 +598,7 @@ func TestMergeTopics(t *testing.T) {
 		mockStore.On("DeleteTopicCascade", int64(1)).Return(nil)
 		mockStore.On("DeleteTopicCascade", int64(2)).Return(nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -652,9 +622,7 @@ func TestMergeTopics(t *testing.T) {
 		mockStore.On("GetAllFacts").Return([]storage.Fact{}, nil)
 		mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return([]storage.Message{}, assert.AnError)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -683,9 +651,7 @@ func TestMergeTopics(t *testing.T) {
 		}, nil)
 		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{}, assert.AnError)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -716,9 +682,7 @@ func TestMergeTopics(t *testing.T) {
 			Data: []openrouter.EmbeddingObject{},
 		}, nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -762,9 +726,7 @@ func TestGetActiveSessions(t *testing.T) {
 		// User 456 has no unprocessed messages
 		mockStore.On("GetUnprocessedMessages", int64(456)).Return([]storage.Message{}, nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -793,9 +755,7 @@ func TestGetActiveSessions(t *testing.T) {
 
 		mockStore.On("GetUnprocessedMessages", int64(123)).Return([]storage.Message{}, nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -980,9 +940,7 @@ func TestEnrichQuery(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1017,12 +975,7 @@ func TestEnrichQuery(t *testing.T) {
 			openrouter.ChatCompletionResponse{}, assert.AnError,
 		)
 
-		tmpDir := t.TempDir()
-		yamlContent := `rag:
-  enrichment_system_prompt: "Date: %[1]s\n%[2]s\n%[3]s"
-  enrichment_user_prompt: "History: %[1]s\nQuery: %[2]s"`
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte(yamlContent), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1065,12 +1018,7 @@ func TestEnrichQuery(t *testing.T) {
 			}, nil,
 		)
 
-		tmpDir := t.TempDir()
-		yamlContent := `rag:
-  enrichment_system_prompt: "Date: %[1]s\n%[2]s\n%[3]s"
-  enrichment_user_prompt: "History: %[1]s\nQuery: %[2]s"`
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte(yamlContent), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1130,12 +1078,7 @@ func TestEnrichQuery(t *testing.T) {
 			}, nil,
 		)
 
-		tmpDir := t.TempDir()
-		yamlContent := `rag:
-  enrichment_system_prompt: "Date: %[1]s\n%[2]s\n%[3]s"
-  enrichment_user_prompt: "History: %[1]s\nQuery: %[2]s"`
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte(yamlContent), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1197,12 +1140,7 @@ func TestEnrichQuery(t *testing.T) {
 			}, nil,
 		)
 
-		tmpDir := t.TempDir()
-		yamlContent := `rag:
-  enrichment_system_prompt: "Date: %[1]s\n%[2]s\n%[3]s"
-  enrichment_user_prompt: "History: %[1]s\nQuery: %[2]s"`
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte(yamlContent), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1242,9 +1180,7 @@ func TestLoadNewVectors(t *testing.T) {
 			{ID: 1, UserID: 123, Content: "Fact 1", Embedding: embedding},
 		}, nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1267,9 +1203,7 @@ func TestLoadNewVectors(t *testing.T) {
 		mockStore.On("GetTopicsAfterID", int64(0)).Return([]storage.Topic{}, nil)
 		mockStore.On("GetFactsAfterID", int64(0)).Return([]storage.Fact{}, nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1291,9 +1225,7 @@ func TestLoadNewVectors(t *testing.T) {
 
 		mockStore.On("GetTopicsAfterID", int64(0)).Return([]storage.Topic{}, assert.AnError)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1316,9 +1248,7 @@ func TestLoadNewVectors(t *testing.T) {
 		mockStore.On("GetTopicsAfterID", int64(0)).Return([]storage.Topic{}, nil)
 		mockStore.On("GetFactsAfterID", int64(0)).Return([]storage.Fact{}, assert.AnError)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1345,9 +1275,7 @@ func TestLoadNewVectors(t *testing.T) {
 		}, nil)
 		mockStore.On("GetFactsAfterID", int64(0)).Return([]storage.Fact{}, nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1370,9 +1298,7 @@ func TestProcessConsolidation(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1400,9 +1326,7 @@ func TestProcessConsolidation(t *testing.T) {
 		// Return error for GetMergeCandidates
 		mockStore.On("GetMergeCandidates", int64(123)).Return([]storage.MergeCandidate{}, assert.AnError)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1427,9 +1351,7 @@ func TestProcessConsolidation(t *testing.T) {
 		// Return empty pending topics (for orphan check)
 		mockStore.On("GetTopicsPendingFacts", int64(123)).Return([]storage.Topic{}, nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1468,9 +1390,7 @@ func TestRetrieve_SkipEnrichment(t *testing.T) {
 			}, nil,
 		)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1496,9 +1416,7 @@ func TestProcessChunk(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1532,9 +1450,7 @@ func TestRetrieve_NilOptions(t *testing.T) {
 			}, nil,
 		)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1559,9 +1475,7 @@ func TestForceProcessUserWithProgress(t *testing.T) {
 
 		mockStore.On("GetUnprocessedMessages", int64(123)).Return([]storage.Message{}, nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1592,9 +1506,7 @@ func TestForceProcessUserWithProgress(t *testing.T) {
 
 		mockStore.On("GetUnprocessedMessages", int64(123)).Return([]storage.Message{}, assert.AnError)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1620,9 +1532,7 @@ func TestForceProcessUser(t *testing.T) {
 
 		mockStore.On("GetUnprocessedMessages", int64(123)).Return([]storage.Message{}, nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1644,9 +1554,7 @@ func TestForceProcessUser(t *testing.T) {
 
 		mockStore.On("GetUnprocessedMessages", int64(123)).Return([]storage.Message{}, assert.AnError)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1669,9 +1577,7 @@ func TestProcessAllUsers(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1696,9 +1602,7 @@ func TestProcessAllUsers(t *testing.T) {
 		// Mock GetUnprocessedMessages returning empty (no work to do)
 		mockStore.On("GetUnprocessedMessages", int64(123)).Return([]storage.Message{}, nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1721,9 +1625,7 @@ func TestProcessTopicChunking(t *testing.T) {
 
 		mockStore.On("GetUnprocessedMessages", int64(123)).Return([]storage.Message{}, assert.AnError)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1744,9 +1646,7 @@ func TestProcessTopicChunking(t *testing.T) {
 
 		mockStore.On("GetUnprocessedMessages", int64(123)).Return([]storage.Message{}, nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1770,9 +1670,7 @@ func TestProcessTopicChunking(t *testing.T) {
 
 		mockStore.On("GetUnprocessedMessages", int64(123)).Return([]storage.Message{}, nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1795,9 +1693,7 @@ func TestProcessFactExtraction(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1824,9 +1720,7 @@ func TestProcessFactExtraction(t *testing.T) {
 
 		mockStore.On("GetTopicsPendingFacts", int64(123)).Return([]storage.Topic{}, assert.AnError)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1851,9 +1745,7 @@ func TestProcessFactExtraction(t *testing.T) {
 			{ID: 1, UserID: 123, ConsolidationChecked: false},
 		}, nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1880,9 +1772,7 @@ func TestProcessFactExtraction(t *testing.T) {
 		mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return([]storage.Message{}, nil)
 		mockStore.On("SetTopicFactsExtracted", int64(1), true).Return(nil)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1903,9 +1793,7 @@ func TestProcessChunkWithStats(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -1935,9 +1823,7 @@ func TestProcessChunkWithStats(t *testing.T) {
 		// Mock extractTopics to fail via CreateChatCompletion error
 		mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(openrouter.ChatCompletionResponse{}, assert.AnError)
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("rag.topic_extraction_prompt: '%s\n%s\nExtract topics'"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -2024,9 +1910,7 @@ func TestProcessChunkWithStats(t *testing.T) {
 
 		// Mock RAG logging
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("rag.topic_extraction_prompt: '%s\n%s\nExtract topics'"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -2096,9 +1980,7 @@ func TestProcessChunkWithStats(t *testing.T) {
 
 		// Mock RAG logging
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("rag.topic_extraction_prompt: '%s\n%s\nExtract topics'"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -2125,9 +2007,7 @@ func TestRunConsolidationSync(t *testing.T) {
 		mockStore.On("GetMergeCandidates", int64(123), mock.Anything).Return([]storage.MergeCandidate{}, nil)
 		mockStore.On("SetTopicConsolidationChecked", mock.Anything, true).Return(nil).Maybe()
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -2151,9 +2031,7 @@ func TestRunConsolidationSync(t *testing.T) {
 		mockStore.On("GetMergeCandidates", int64(123), mock.Anything).Return([]storage.MergeCandidate{}, assert.AnError)
 		mockStore.On("SetTopicConsolidationChecked", mock.Anything, true).Return(nil).Maybe()
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
@@ -2180,9 +2058,7 @@ func TestRunConsolidationSync(t *testing.T) {
 		mockStore.On("GetMergeCandidates", int64(123), mock.Anything).Return(candidates, nil)
 		mockStore.On("SetTopicConsolidationChecked", mock.Anything, true).Return(nil).Maybe()
 
-		tmpDir := t.TempDir()
-		_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("test: value"), 0644)
-		translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
+		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)

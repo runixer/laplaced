@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/jobtype"
 	"github.com/runixer/laplaced/internal/openrouter"
@@ -302,9 +303,15 @@ func (s *Service) extractTopicsForSplit(ctx context.Context, userID int64, messa
 	}
 
 	// Use unified prompt with goal section for split mode
-	promptTmpl := s.translator.Get(s.cfg.Bot.Language, "rag.topic_extraction_prompt")
 	goalSection := s.translator.Get(s.cfg.Bot.Language, "rag.topic_extraction_goal_split")
-	systemPrompt := fmt.Sprintf(promptTmpl, profile, recentTopics, goalSection)
+	systemPrompt, err := s.translator.GetTemplate(s.cfg.Bot.Language, "rag.topic_extraction_prompt", prompts.SplitterParams{
+		Profile:      profile,
+		RecentTopics: recentTopics,
+		Goal:         goalSection,
+	})
+	if err != nil {
+		return nil, UsageInfo{}, fmt.Errorf("failed to build splitter system prompt: %w", err)
+	}
 
 	return s.extractTopicsWithPrompt(ctx, userID, messages, systemPrompt)
 }

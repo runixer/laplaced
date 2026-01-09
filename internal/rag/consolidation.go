@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/jobtype"
 	"github.com/runixer/laplaced/internal/openrouter"
@@ -230,12 +231,22 @@ func (s *Service) verifyMerge(ctx context.Context, candidate storage.MergeCandid
 	}
 
 	// Build system prompt with profile and recent topics
-	systemPromptTmpl := s.translator.Get(s.cfg.Bot.Language, "rag.topic_consolidation_system_prompt")
-	systemPrompt := fmt.Sprintf(systemPromptTmpl, profile, recentTopics)
+	systemPrompt, err := s.translator.GetTemplate(s.cfg.Bot.Language, "rag.topic_consolidation_system_prompt", prompts.MergerParams{
+		Profile:      profile,
+		RecentTopics: recentTopics,
+	})
+	if err != nil {
+		return false, "", UsageInfo{}, fmt.Errorf("failed to build merger system prompt: %w", err)
+	}
 
 	// Build user message with topic summaries
-	userPromptTmpl := s.translator.Get(s.cfg.Bot.Language, "rag.topic_consolidation_user_prompt")
-	userMessage := fmt.Sprintf(userPromptTmpl, candidate.Topic1.Summary, candidate.Topic2.Summary)
+	userMessage, err := s.translator.GetTemplate(s.cfg.Bot.Language, "rag.topic_consolidation_user_prompt", prompts.MergerUserParams{
+		Topic1Summary: candidate.Topic1.Summary,
+		Topic2Summary: candidate.Topic2.Summary,
+	})
+	if err != nil {
+		return false, "", UsageInfo{}, fmt.Errorf("failed to build merger user prompt: %w", err)
+	}
 
 	model := s.cfg.Agents.Merger.GetModel(s.cfg.Agents.Default.Model)
 

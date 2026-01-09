@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
@@ -168,39 +169,41 @@ func (s *Service) rerankCandidates(
 	var systemPrompt string
 	if cfg.IgnoreExcerpts {
 		// Simplified prompt without excerpt requirements
-		// Positional placeholders: %[1]s=profile, %[2]s=topics, %[3]d-%[6]d=numbers (at bottom of prompt)
-		systemPrompt = fmt.Sprintf(
-			s.translator.Get(lang, "rag.reranker_system_prompt_simple"),
-			userProfile,                        // %[1]s user profile (at bottom)
-			recentTopics,                       // %[2]s recent topics (at bottom)
-			cfg.MaxTopics,                      // %[3]d in constraints (max topics)
-			cfg.MaxTopics,                      // %[4]d in algorithm (don't stop at first N)
-			cfg.MaxTopics, selectCandidatesMax, // %[5]d-%[6]d in algorithm (select N-M candidates)
-		)
+		systemPrompt, err = s.translator.GetTemplate(lang, "rag.reranker_system_prompt_simple", prompts.RerankerSimpleParams{
+			Profile:       userProfile,
+			RecentTopics:  recentTopics,
+			MaxTopics:     cfg.MaxTopics,
+			MinCandidates: cfg.MaxTopics,
+			MaxCandidates: selectCandidatesMax,
+		})
 	} else {
 		// Full prompt with excerpt policy
-		// Positional placeholders: %[1]s=profile, %[2]s=topics, %[3]d-%[8]d=numbers (profile/topics at bottom)
-		systemPrompt = fmt.Sprintf(
-			s.translator.Get(lang, "rag.reranker_system_prompt"),
-			userProfile,                        // %[1]s user profile (at bottom)
-			recentTopics,                       // %[2]s recent topics (at bottom)
-			cfg.MaxTopics,                      // %[3]d in constraints (max topics)
-			budgetK,                            // %[4]d in constraints (budget)
-			cfg.MaxTopics,                      // %[5]d in algorithm (don't stop at first N)
-			cfg.MaxTopics, selectCandidatesMax, // %[6]d-%[7]d in algorithm (select N-M candidates)
-			budgetK, // %[8]d in excerpt_policy (budget)
-		)
+		systemPrompt, err = s.translator.GetTemplate(lang, "rag.reranker_system_prompt", prompts.RerankerParams{
+			Profile:       userProfile,
+			RecentTopics:  recentTopics,
+			MaxTopics:     cfg.MaxTopics,
+			TargetCharsK:  budgetK,
+			MinCandidates: cfg.MaxTopics,
+			MaxCandidates: selectCandidatesMax,
+			LargeBudgetK:  budgetK,
+		})
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to build reranker system prompt: %w", err)
 	}
 
 	candidatesList := s.formatCandidatesForReranker(candidates)
-	userPrompt := fmt.Sprintf(
-		s.translator.Get(lang, "rag.reranker_user_prompt"),
-		time.Now().Format("2006-01-02"),
-		originalQuery,
-		contextualizedQuery,
-		currentMessages,
-		candidatesList,
-	)
+	var userPrompt string
+	userPrompt, err = s.translator.GetTemplate(lang, "rag.reranker_user_prompt", prompts.RerankerUserParams{
+		Date:            time.Now().Format("2006-01-02"),
+		Query:           originalQuery,
+		EnrichedQuery:   contextualizedQuery,
+		CurrentMessages: currentMessages,
+		Candidates:      candidatesList,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to build reranker user prompt: %w", err)
+	}
 
 	// Store prompts in trace for debug UI
 	trace.systemPrompt = systemPrompt

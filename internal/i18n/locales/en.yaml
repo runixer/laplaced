@@ -68,7 +68,7 @@ tools:
 
 rag:
   # Unified Splitter prompt - used for both regular extraction and split mode
-  # Placeholders: %[1]s = profile, %[2]s = recent_topics, %[3]s = optional goal section
+  # Template fields: Profile, RecentTopics, Goal (optional)
   topic_extraction_prompt: |
     <role>
     You are the Splitter, a specialist in organizing dialogue archives.
@@ -93,14 +93,14 @@ rag:
     4. NEVER split a user message from its assistant response — they must stay together.
     5. Language: English (keep brand names/software as-is).
     </rules>
-    %[3]s
+    {{.Goal}}
     <output>
     JSON: {"topics": [{"summary": "topic description", "start_msg_id": N, "end_msg_id": M}]}
     </output>
 
-    %[1]s
+    {{.Profile}}
 
-    %[2]s
+    {{.RecentTopics}}
 
   # Goal section for split mode (large topic splitting)
   topic_extraction_goal_split: |
@@ -113,11 +113,11 @@ rag:
     DO NOT CREATE ONE LARGE TOPIC — split forcefully.
     </goal>
   # Enricher system prompt
-  # Placeholders: %[1]s = date, %[2]s = profile, %[3]s = recent_topics
+  # Template fields: Date, Profile, RecentTopics
   enrichment_system_prompt: |
     <role>
     You are the Enricher, a context analyst for vector search (Memory Retrieval).
-    Current date: %[1]s
+    Current date: {{.Date}}
     Task: Formulate a search query to find relevant discussion history.
     </role>
 
@@ -134,18 +134,18 @@ rag:
     Short search query with keywords (personalities, technologies, brands).
     </output>
 
-    %[2]s
+    {{.Profile}}
 
-    %[3]s
+    {{.RecentTopics}}
 
   # Enricher user message template
-  # Placeholders: %[1]s = history, %[2]s = query
+  # Template fields: History, Query
   enrichment_user_prompt: |
     Dialogue History:
-    %[1]s
+    {{.History}}
 
     Current query:
-    %[2]s
+    {{.Query}}
 
     Formulate search query:
 
@@ -153,7 +153,7 @@ rag:
     The user's message contains media (image or audio). When formulating the search query, describe what you see/hear in the media — objects, people, places, text, spoken words — if it helps find relevant conversation history.
 
   # Merger system prompt
-  # Placeholders: %[1]s = profile, %[2]s = recent_topics
+  # Template fields: Profile, RecentTopics
   topic_consolidation_system_prompt: |
     <role>
     You are the Merger, a specialist in combining related topics in dialogue archives.
@@ -169,23 +169,25 @@ rag:
     JSON: {"should_merge": true, "new_summary": "merged description"} or {"should_merge": false}
     </output>
 
-    %[1]s
+    {{.Profile}}
 
-    %[2]s
+    {{.RecentTopics}}
 
   # Merger user message template
-  # Placeholders: %[1]s = topic1 summary, %[2]s = topic2 summary
+  # Template fields: Topic1Summary, Topic2Summary
   topic_consolidation_user_prompt: |
     <topics>
     Topic 1 (Beginning):
-    %[1]s
+    {{.Topic1Summary}}
 
     Topic 2 (Continuation):
-    %[2]s
+    {{.Topic2Summary}}
     </topics>
 
     Should these topics be merged?
 
+  # Reranker system prompt
+  # Template fields: Profile, RecentTopics, MaxTopics, TargetCharsK, MinCandidates, MaxCandidates, LargeBudgetK
   reranker_system_prompt: |
     <role>
     You are the Reranker, a relevance filter for a personal AI assistant.
@@ -193,16 +195,16 @@ rag:
     </role>
 
     <constraints>
-    - Limit: maximum %[3]d topics in final selection
-    - Budget: aim for ~%[4]dK chars total output (excerpts + small topics as-is)
+    - Limit: maximum {{.MaxTopics}} topics in final selection
+    - Budget: aim for ~{{.TargetCharsK}}K chars total output (excerpts + small topics as-is)
     - MUST call get_topics_content() before final response
     - Return JSON with selection reasons
     </constraints>
 
     <algorithm>
     MANDATORY WORKFLOW:
-    1. **SCAN**: Read ALL titles from start to end. DO NOT stop at first %[5]d.
-    2. **SELECT**: Mark %[6]d-%[7]d potentially relevant candidates. Better to include extra than miss important.
+    1. **SCAN**: Read ALL titles from start to end. DO NOT stop at first {{.MinCandidates}}.
+    2. **SELECT**: Mark {{.MinCandidates}}-{{.MaxCandidates}} potentially relevant candidates. Better to include extra than miss important.
     3. **LOAD**: Call get_topics_content([ids]) for ALL candidates in ONE call.
     4. **FILTER**: After reading full text — select final topics.
 
@@ -261,7 +263,7 @@ rag:
     This gives several advantages..."
     (and then the FULL message text)
 
-    🎯 BUDGET: ~%[8]dK chars for ALL excerpts
+    🎯 BUDGET: ~{{.LargeBudgetK}}K chars for ALL excerpts
     - 5 topics selected → ~6K for each excerpt
     - Excerpt < 1K chars = ERROR, add more text!
 
@@ -331,11 +333,12 @@ rag:
     - DO NOT assume content by title — LOAD and read
     </grounding>
 
-    %[1]s
+    {{.Profile}}
 
-    %[2]s
+    {{.RecentTopics}}
 
   # Simplified prompt without excerpt requirements (used when ignore_excerpts: true)
+  # Template fields: Profile, RecentTopics, MaxTopics, MinCandidates, MaxCandidates
   reranker_system_prompt_simple: |
     <role>
     You are the Reranker, a relevance filter for a personal AI assistant.
@@ -343,15 +346,15 @@ rag:
     </role>
 
     <constraints>
-    - Limit: maximum %[3]d topics in final selection
+    - Limit: maximum {{.MaxTopics}} topics in final selection
     - MUST call get_topics_content() before final response
     - Return JSON with selection reasons
     </constraints>
 
     <algorithm>
     MANDATORY WORKFLOW:
-    1. **SCAN**: Read ALL titles from start to end. DO NOT stop at first %[4]d.
-    2. **SELECT**: Mark %[5]d-%[6]d potentially relevant candidates. Better to include extra than miss important.
+    1. **SCAN**: Read ALL titles from start to end. DO NOT stop at first {{.MinCandidates}}.
+    2. **SELECT**: Mark {{.MinCandidates}}-{{.MaxCandidates}} potentially relevant candidates. Better to include extra than miss important.
     3. **LOAD**: Call get_topics_content([ids]) for ALL candidates in ONE call.
     4. **FILTER**: After reading full text — select final topics.
 
@@ -407,38 +410,42 @@ rag:
     - DO NOT assume content by title — LOAD and read
     </grounding>
 
-    %[1]s
+    {{.Profile}}
 
-    %[2]s
+    {{.RecentTopics}}
 
+  # Reranker user prompt
+  # Template fields: Date, Query, EnrichedQuery, CurrentMessages, Candidates
   reranker_user_prompt: |
-    Current date: %s
+    Current date: {{.Date}}
 
     ORIGINAL USER QUERY (search for exactly this!):
-    %s
+    {{.Query}}
 
     Extended search context:
-    %s
+    {{.EnrichedQuery}}
 
     Current messages:
-    %s
+    {{.CurrentMessages}}
 
     Memory candidates (ID | Date | Size | Topic):
-    %s
+    {{.Candidates}}
 
   reranker_tool_description: "Load full content of topics for detailed study. Consider size — load large topics (>10K chars) only if the topic is very relevant."
   reranker_tool_param_description: "Topic IDs to load"
 
 memory:
+  # Archivist system prompt
+  # Template fields: Date, UserFactsLimit, UserFactsCount, OtherFactsCount, UserFacts, OtherFacts, Conversation
   system_prompt: |
     <role>
     You are the Archivist, a strict system keeper of facts. Task: maintain a CONCISE but ACCURATE fact log, ignoring noise and speculation.
     </role>
 
     <context>
-    Current date: %[1]s
-    User facts limit: %[2]d (current: %[3]d)
-    Others facts limit: 30 (current: %[4]d)
+    Current date: {{.Date}}
+    User facts limit: {{.UserFactsLimit}} (current: {{.UserFactsCount}})
+    Others facts limit: 30 (current: {{.OtherFactsCount}})
     </context>
 
     <truth_protocol>
@@ -487,15 +494,15 @@ memory:
     </instructions>
 
     <current_facts entity="User">
-    %[5]s
+    {{.UserFacts}}
     </current_facts>
 
     <current_facts entity="Others">
-    %[6]s
+    {{.OtherFacts}}
     </current_facts>
 
     <conversation>
-    %[7]s
+    {{.Conversation}}
     </conversation>
 
   consolidation_prompt: |

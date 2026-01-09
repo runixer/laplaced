@@ -33,7 +33,7 @@ func TestProcessChunk_HallucinatedIDs(t *testing.T) {
 
 	// Create test translator (use %s placeholders for profile/topics)
 	tmpDir := t.TempDir()
-	_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("rag.topic_extraction_prompt: '%s\n%s\nExtract topics'"), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("rag.topic_extraction_prompt: '{{.Profile}}\n{{.RecentTopics}}\n{{.Goal}}\nExtract topics'"), 0644)
 	translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
 
 	userID := int64(123)
@@ -128,7 +128,7 @@ func TestProcessChunk_ValidIDs(t *testing.T) {
 
 	// Create test translator (use %s placeholders for profile/topics)
 	tmpDir := t.TempDir()
-	_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("rag.topic_extraction_prompt: '%s\n%s\nExtract topics'"), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("rag.topic_extraction_prompt: '{{.Profile}}\n{{.RecentTopics}}\n{{.Goal}}\nExtract topics'"), 0644)
 	translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
 
 	userID := int64(123)

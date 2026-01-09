@@ -1,2 +1,2 @@
-memory.system_prompt: 'System Prompt %s %s %s %s'
+memory.system_prompt: 'System Prompt {{.Date}} {{.UserFactsLimit}} {{.UserFactsCount}} {{.OtherFactsCount}}'
 memory.consolidation_prompt: 'Consolidation Prompt'

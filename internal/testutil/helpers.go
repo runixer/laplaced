@@ -75,8 +75,18 @@ bot:
   system_prompt: "System %s"
 rag:
   no_context: "No relevant context found"
+  enrichment_system_prompt: "Enricher System {{.Date}} {{.Profile}} {{.RecentTopics}}"
+  enrichment_user_prompt: "History: {{.History}}\nQuery: {{.Query}}"
+  topic_extraction_prompt: "Extract topics {{.Profile}} {{.RecentTopics}} {{.Goal}}"
+  topic_consolidation_system_prompt: "Consolidation System {{.Profile}} {{.RecentTopics}}"
+  topic_consolidation_user_prompt: "Topic1: {{.Topic1Summary}}\nTopic2: {{.Topic2Summary}}"
+  reranker_system_prompt: "Reranker System {{.Profile}} {{.RecentTopics}} max={{.MaxTopics}} budget={{.TargetCharsK}}K min={{.MinCandidates}} max={{.MaxCandidates}} large={{.LargeBudgetK}}K"
+  reranker_system_prompt_simple: "Reranker Simple {{.Profile}} {{.RecentTopics}} max={{.MaxTopics}} min={{.MinCandidates}} max={{.MaxCandidates}}"
+  reranker_user_prompt: "Date: {{.Date}}\nQuery: {{.Query}}\nEnriched: {{.EnrichedQuery}}\nMessages: {{.CurrentMessages}}\nCandidates: {{.Candidates}}"
+  reranker_tool_description: "Load topic content"
+  reranker_tool_param_description: "Topic IDs"
 memory:
-  system_prompt: "Extract facts from conversation"
+  system_prompt: "Archivist {{.Date}} limit={{.UserFactsLimit}} user={{.UserFactsCount}} other={{.OtherFactsCount}}\nUser: {{.UserFacts}}\nOther: {{.OtherFacts}}\nConversation: {{.Conversation}}"
 `
 	err := os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte(content), 0600)
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
@@ -305,8 +306,19 @@ func (s *Service) extractMemoryUpdate(ctx context.Context, userID int64, session
 	}
 
 	maxFacts := s.cfg.RAG.MaxProfileFacts
-	// Args: currentDate, maxFacts, len(userFacts), len(otherFacts), userFactsJSON, otherFactsJSON, conversation
-	prompt := s.translator.Get(s.cfg.Bot.Language, "memory.system_prompt", currentDate, maxFacts, len(userFacts), len(otherFacts), string(userFactsJSON), string(otherFactsJSON), sb.String())
+	// Build system prompt with typed parameters
+	prompt, err := s.translator.GetTemplate(s.cfg.Bot.Language, "memory.system_prompt", prompts.ArchivistParams{
+		Date:            currentDate,
+		UserFactsLimit:  maxFacts,
+		UserFactsCount:  len(userFacts),
+		OtherFactsCount: len(otherFacts),
+		UserFacts:       string(userFactsJSON),
+		OtherFacts:      string(otherFactsJSON),
+		Conversation:    sb.String(),
+	})
+	if err != nil {
+		return nil, "", chatUsage{}, fmt.Errorf("failed to build archivist system prompt: %w", err)
+	}
 	if len(userFacts) > maxFacts {
 		warning := fmt.Sprintf("\n\n<limit_exceeded>\nCRITICAL: You have %d facts about User. The limit is %d.\nYou MUST delete or consolidate at least %d facts in this response.\n</limit_exceeded>", len(userFacts), maxFacts, len(userFacts)-maxFacts+1)
 		prompt += warning

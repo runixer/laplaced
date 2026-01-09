@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
@@ -1626,8 +1627,14 @@ func (s *Service) extractTopics(ctx context.Context, userID int64, chunk []stora
 	itemsBytes, _ := json.Marshal(items)
 
 	// Build system prompt with profile and recent topics (empty goal for regular mode)
-	promptTmpl := s.translator.Get(s.cfg.Bot.Language, "rag.topic_extraction_prompt")
-	systemPrompt := fmt.Sprintf(promptTmpl, profile, recentTopics, "") // %[3]s = empty goal
+	systemPrompt, err := s.translator.GetTemplate(s.cfg.Bot.Language, "rag.topic_extraction_prompt", prompts.SplitterParams{
+		Profile:      profile,
+		RecentTopics: recentTopics,
+		Goal:         "", // empty goal for regular mode
+	})
+	if err != nil {
+		return nil, UsageInfo{}, fmt.Errorf("failed to build splitter system prompt: %w", err)
+	}
 
 	// User message is just the chat log
 	userMessage := fmt.Sprintf("Chat Log JSON:\n%s", string(itemsBytes))
@@ -1773,12 +1780,23 @@ func (s *Service) enrichQuery(ctx context.Context, userID int64, query string, h
 	}
 
 	// Build system prompt with date, profile and recent topics
-	systemPromptTmpl := s.translator.Get(s.cfg.Bot.Language, "rag.enrichment_system_prompt")
-	systemPrompt := fmt.Sprintf(systemPromptTmpl, time.Now().Format("2006-01-02"), profile, recentTopics)
+	systemPrompt, err := s.translator.GetTemplate(s.cfg.Bot.Language, "rag.enrichment_system_prompt", prompts.EnricherParams{
+		Date:         time.Now().Format("2006-01-02"),
+		Profile:      profile,
+		RecentTopics: recentTopics,
+	})
+	if err != nil {
+		return "", "", 0, fmt.Errorf("failed to build enricher system prompt: %w", err)
+	}
 
 	// Build user message with history and query
-	userPromptTmpl := s.translator.Get(s.cfg.Bot.Language, "rag.enrichment_user_prompt")
-	userMessage := fmt.Sprintf(userPromptTmpl, historyStr.String(), query)
+	userMessage, err := s.translator.GetTemplate(s.cfg.Bot.Language, "rag.enrichment_user_prompt", prompts.EnricherUserParams{
+		History: historyStr.String(),
+		Query:   query,
+	})
+	if err != nil {
+		return "", "", 0, fmt.Errorf("failed to build enricher user prompt: %w", err)
+	}
 
 	// Build user message content - multimodal if mediaParts provided
 	var userContent interface{}

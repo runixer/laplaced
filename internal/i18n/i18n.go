@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"strings"
 	"sync"
+	"text/template"
 
 	"gopkg.in/yaml.v3"
 )
@@ -118,4 +120,30 @@ func (t *Translator) Get(lang, key string, args ...interface{}) string {
 		return fmt.Sprintf(val, args...)
 	}
 	return val
+}
+
+// GetTemplate returns a localized string with named placeholders filled from data.
+// Uses text/template syntax: {{.FieldName}}
+// This is preferred over Get() with positional args for complex prompts.
+func (t *Translator) GetTemplate(lang, key string, data any) (string, error) {
+	// Get the raw template string
+	tmplStr := t.Get(lang, key)
+
+	// If key wasn't found, Get returns the key itself
+	if tmplStr == key {
+		return "", fmt.Errorf("translation key not found: %s", key)
+	}
+
+	// Parse and execute template
+	tmpl, err := template.New(key).Parse(tmplStr)
+	if err != nil {
+		return "", fmt.Errorf("parse template %s: %w", key, err)
+	}
+
+	var buf strings.Builder
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute template %s: %w", key, err)
+	}
+
+	return buf.String(), nil
 }
