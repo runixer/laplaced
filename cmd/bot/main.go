@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/bot"
 	"github.com/runixer/laplaced/internal/config"
@@ -179,6 +180,11 @@ func main() {
 
 	// Create agent logger for debugging LLM calls (only logs when debug mode is enabled)
 	agentLogger := agentlog.NewLogger(store, logger, cfg.Server.DebugMode)
+
+	// Create context service for shared user context across agents (Phase 1 - foundation)
+	// Will be integrated with bot/rag in Phase 2
+	contextService := agent.NewContextService(store, store, cfg, logger)
+	_ = contextService // TODO: wire into bot/rag in Phase 2
 
 	memoryService := memory.NewService(logger, cfg, store, store, store, openrouterClient, translator)
 	memoryService.SetAgentLogger(agentLogger)
