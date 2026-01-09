@@ -669,11 +669,17 @@
             </div>
             <script>
             (function() {
-                try {
-                    const turnsData = {{$log.ConversationTurns | jsString}};
-                    renderConversationTurns({{$idx}}, turnsData);
-                } catch(e) {
-                    console.error('Failed to render conversation turns:', e);
+                const turnsData = {{$log.ConversationTurns | jsString}};
+                // Defer until DOM is ready and renderConversationTurns is defined
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', function() {
+                        renderConversationTurns({{$idx}}, turnsData);
+                    });
+                } else {
+                    // DOM already loaded, but function may not be defined yet - defer to next tick
+                    setTimeout(function() {
+                        renderConversationTurns({{$idx}}, turnsData);
+                    }, 0);
                 }
             })();
             </script>
