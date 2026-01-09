@@ -138,32 +138,6 @@ func (m *MockStorage) GetDashboardStats(userID int64) (*storage.DashboardStats, 
 	return args.Get(0).(*storage.DashboardStats), args.Error(1)
 }
 
-func (m *MockStorage) AddRAGLog(log storage.RAGLog) error {
-	args := m.Called(log)
-	return args.Error(0)
-}
-
-func (m *MockStorage) GetRAGLogs(userID int64, limit int) ([]storage.RAGLog, error) {
-	args := m.Called(userID, limit)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]storage.RAGLog), args.Error(1)
-}
-
-func (m *MockStorage) AddRerankerLog(log storage.RerankerLog) error {
-	args := m.Called(log)
-	return args.Error(0)
-}
-
-func (m *MockStorage) GetRerankerLogs(userID int64, limit int) ([]storage.RerankerLog, error) {
-	args := m.Called(userID, limit)
-	if args.Get(0) == nil {
-		return []storage.RerankerLog{}, args.Error(1)
-	}
-	return args.Get(0).([]storage.RerankerLog), args.Error(1)
-}
-
 func (m *MockStorage) AddTopic(topic storage.Topic) (int64, error) {
 	args := m.Called(topic)
 	return args.Get(0).(int64), args.Error(1)
@@ -343,11 +317,6 @@ func (m *MockStorage) GetUnprocessedMessages(userID int64) ([]storage.Message, e
 	return args.Get(0).([]storage.Message), args.Error(1)
 }
 
-func (m *MockStorage) GetTopicExtractionLogs(limit, offset int) ([]storage.RAGLog, int, error) {
-	args := m.Called(limit, offset)
-	return args.Get(0).([]storage.RAGLog), args.Int(1), args.Error(2)
-}
-
 func (m *MockStorage) GetMergeCandidates(userID int64) ([]storage.MergeCandidate, error) {
 	args := m.Called(userID)
 	return args.Get(0).([]storage.MergeCandidate), args.Error(1)
@@ -397,13 +366,18 @@ func (m *MockStorage) CleanupFactHistory(keepPerUser int) (int64, error) {
 	return args.Get(0).(int64), args.Error(1)
 }
 
-func (m *MockStorage) CleanupRagLogs(keepPerUser int) (int64, error) {
-	args := m.Called(keepPerUser)
+func (m *MockStorage) CleanupAgentLogs(keepPerUserPerAgent int) (int64, error) {
+	args := m.Called(keepPerUserPerAgent)
 	return args.Get(0).(int64), args.Error(1)
 }
 
-func (m *MockStorage) CleanupRerankerLogs(keepPerUser int) (int64, error) {
-	args := m.Called(keepPerUser)
+func (m *MockStorage) CountAgentLogs() (int64, error) {
+	args := m.Called()
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockStorage) CountFactHistory() (int64, error) {
+	args := m.Called()
 	return args.Get(0).(int64), args.Error(1)
 }
 
@@ -522,7 +496,7 @@ func TestStatsHandler(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	stats := map[int64]storage.Stat{
@@ -557,7 +531,7 @@ func TestHealthzHandler(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
 	assert.NoError(t, err)
 
 	req, err := http.NewRequest("GET", "/healthz", nil)
@@ -579,7 +553,7 @@ func TestWebhookHandler(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
 	assert.NoError(t, err)
 
 	updateJSON := `{"update_id":1,"message":{"text":"hello"}}`
@@ -613,7 +587,7 @@ func TestWebhookHandler_TooLarge(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
 	assert.NoError(t, err)
 
 	// Create a body larger than 10MB
@@ -646,7 +620,7 @@ func TestServerRouting_CorrectPath(t *testing.T) {
 	mockStorage.On("GetStats").Return(map[int64]storage.Stat{}, nil) // For stats handler
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 	handler := server.buildTestHandler(token)
 	testServer := httptest.NewServer(handler)
@@ -679,7 +653,7 @@ func TestServerRouting_IncorrectPath(t *testing.T) {
 	mockStorage.On("GetStats").Return(map[int64]storage.Stat{}, nil) // For stats handler
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 	handler := server.buildTestHandler(token)
 	testServer := httptest.NewServer(handler)
@@ -708,109 +682,13 @@ func (s *Server) buildTestHandler(token string) http.Handler {
 	return s.loggingMiddleware(mux)
 }
 
-func TestFactsHistoryHandler(t *testing.T) {
-	// Arrange
-	mockStorage := new(MockStorage)
-	mockBot := new(MockBot)
-	cfg := &config.Config{}
-	cfg.Server.ListenPort = "8080"
-	cfg.Server.DebugMode = true // Enable debug routes
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
-	assert.NoError(t, err)
-
-	topicID := int64(123)
-	history := []storage.FactHistory{
-		{
-			ID: 1, FactID: 1, UserID: 1, Action: "add", NewContent: "test", TopicID: &topicID,
-		},
-		{
-			ID: 2, FactID: 2, UserID: 1, Action: "update", OldContent: "old", NewContent: "new", TopicID: nil,
-		},
-	}
-	result := storage.FactHistoryResult{
-		Data:       history,
-		TotalCount: 2,
-	}
-
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 1, Username: "user1"}}, nil)
-	mockStorage.On("GetFactHistoryExtended", mock.Anything, 50, 0, "", "DESC").Return(result, nil)
-
-	req, err := http.NewRequest("GET", "/ui/facts/history", nil)
-	assert.NoError(t, err)
-
-	rr := httptest.NewRecorder()
-	handler := http.HandlerFunc(server.factsHistoryHandler)
-
-	// Act
-	handler.ServeHTTP(rr, req)
-
-	// Assert
-	assert.Equal(t, http.StatusOK, rr.Code)
-	assert.Contains(t, rr.Body.String(), "#123") // Check if TopicID link is rendered
-	mockStorage.AssertExpectations(t)
-}
-
-func TestTopicsHandler(t *testing.T) {
-	// Arrange
-	mockStorage := new(MockStorage)
-	mockBot := new(MockBot)
-	cfg := &config.Config{}
-	cfg.Server.ListenPort = "8080"
-	cfg.Server.DebugMode = true
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
-	assert.NoError(t, err)
-
-	topics := []storage.Topic{
-		{ID: 1, UserID: 123, Summary: "Topic 1", StartMsgID: 1, EndMsgID: 2, CreatedAt: time.Now()},
-	}
-	messages := []storage.Message{
-		{ID: 1, UserID: 123, Role: "user", Content: "Hello", TopicID: &topics[0].ID},
-		{ID: 2, UserID: 123, Role: "assistant", Content: "Hi", TopicID: &topics[0].ID},
-	}
-
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123, Username: "testuser"}}, nil)
-
-	result := storage.TopicResult{
-		Data: []storage.TopicExtended{
-			{Topic: topics[0], MessageCount: 2, FactsCount: 0},
-		},
-		TotalCount: 1,
-	}
-	mockStorage.On("GetTopicsExtended", mock.Anything, 20, 0, mock.Anything, "DESC").Return(result, nil)
-
-	mockStorage.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return(messages, nil)
-
-	req, err := http.NewRequest("GET", "/ui/topics", nil)
-	assert.NoError(t, err)
-
-	rr := httptest.NewRecorder()
-	handler := http.HandlerFunc(server.topicsHandler)
-
-	// Act
-	handler.ServeHTTP(rr, req)
-
-	// Assert
-	assert.Equal(t, http.StatusOK, rr.Code)
-	assert.Contains(t, rr.Body.String(), "Topic 1")
-	assert.Contains(t, rr.Body.String(), "Hello")
-	// Check if the accordion ID is rendered correctly (this was the bug)
-	// The bug was data-bs-parent="#accordion-{{$.ID}}" failing.
-	// If it renders, it means the template execution succeeded.
-	// We can also check if the correct ID is in the output.
-	assert.Contains(t, rr.Body.String(), `data-bs-parent="#accordion-1"`)
-
-	mockStorage.AssertExpectations(t)
-}
-
 func TestUpdateMetrics(t *testing.T) {
 	// Arrange
 	mockStorage := new(MockStorage)
 	mockBot := new(MockBot)
 	cfg := &config.Config{}
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	// Mock users
@@ -849,8 +727,7 @@ func TestUpdateMetrics(t *testing.T) {
 		{Name: "facts", Bytes: 300000},
 	}, nil)
 	mockStorage.On("CleanupFactHistory", 100).Return(int64(50), nil)
-	mockStorage.On("CleanupRagLogs", 20).Return(int64(10), nil)
-	mockStorage.On("CleanupRerankerLogs", 20).Return(int64(5), nil)
+	mockStorage.On("CleanupAgentLogs", 50).Return(int64(25), nil)
 
 	// Act
 	server.updateMetrics()
@@ -929,7 +806,7 @@ func TestSessionsHandler_POST_InvalidForm(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
 	assert.NoError(t, err)
 
 	// POST with invalid user_id
@@ -949,7 +826,7 @@ func TestSessionsHandler_POST_Success(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
 	assert.NoError(t, err)
 
 	mockBot.On("ForceCloseSession", mock.Anything, int64(123)).Return(5, nil)
@@ -972,7 +849,7 @@ func TestSessionsHandler_GET_Error(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
 	assert.NoError(t, err)
 
 	mockBot.On("GetActiveSessions").Return(nil, assert.AnError)
@@ -993,7 +870,7 @@ func TestSessionsProcessSSEHandler_MethodNotAllowed(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
 	assert.NoError(t, err)
 
 	req, err := http.NewRequest("POST", "/ui/debug/sessions/process", nil)
@@ -1011,7 +888,7 @@ func TestSessionsProcessSSEHandler_InvalidUserID(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
 	assert.NoError(t, err)
 
 	req, err := http.NewRequest("GET", "/ui/debug/sessions/process?user_id=invalid", nil)
@@ -1030,7 +907,7 @@ func TestWebhookHandler_InvalidSecret(t *testing.T) {
 	cfg.Server.ListenPort = "8080"
 	cfg.Telegram.WebhookSecret = "my-secret-token"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
 	assert.NoError(t, err)
 
 	updateJSON := `{"update_id":1,"message":{"text":"hello"}}`
@@ -1059,7 +936,7 @@ func TestWebhookHandler_ValidSecret(t *testing.T) {
 	cfg.Server.ListenPort = "8080"
 	cfg.Telegram.WebhookSecret = "my-secret-token"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
 	assert.NoError(t, err)
 
 	updateJSON := `{"update_id":1,"message":{"text":"hello"}}`
@@ -1091,7 +968,7 @@ func TestSessionsHandler_GET_Success(t *testing.T) {
 	cfg.Server.ListenPort = "8080"
 	cfg.RAG.ChunkInterval = "4h"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	now := time.Now()
@@ -1125,7 +1002,7 @@ func TestSessionsHandler_POST_ForceCloseError(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
 	assert.NoError(t, err)
 
 	mockBot.On("ForceCloseSession", mock.Anything, int64(123)).Return(0, assert.AnError)
@@ -1149,7 +1026,7 @@ func TestSessionsHandler_GET_UsernameOnly(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	now := time.Now()
@@ -1184,7 +1061,7 @@ func TestSessionsHandler_GET_CommonDataError(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	sessions := []rag.ActiveSessionInfo{}
@@ -1207,7 +1084,7 @@ func TestDebugChatHandler_GET(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	// Mock common data
@@ -1236,7 +1113,7 @@ func TestDebugChatSendHandler_POST_Success(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	// Mock bot.SendTestMessage
@@ -1282,7 +1159,7 @@ func TestDebugChatSendHandler_POST_InvalidJSON(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
 	assert.NoError(t, err)
 
 	body := `{invalid json}`
@@ -1303,7 +1180,7 @@ func TestDebugChatSendHandler_POST_BotError(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockBot, nil)
 	assert.NoError(t, err)
 
 	// Mock bot.SendTestMessage returning error
@@ -1327,7 +1204,7 @@ func TestDebugChatSendHandler_MethodNotAllowed(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.ListenPort = "8080"
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
 	assert.NoError(t, err)
 
 	req, err := http.NewRequest("GET", "/ui/debug/chat/send", nil)

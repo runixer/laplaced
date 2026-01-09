@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/jobtype"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
@@ -277,50 +278,41 @@ func (s *Service) splitTopic(ctx context.Context, topic storage.Topic) ([]int64,
 
 // extractTopicsForSplit extracts topics with emphasis on splitting large conversations.
 func (s *Service) extractTopicsForSplit(ctx context.Context, userID int64, messages []storage.Message) ([]ExtractedTopic, UsageInfo, error) {
-	// Load user profile for context
-	profile := s.formatUserProfileCompact(userID)
-
-	// Use the split-specific prompt with profile
-	promptTmpl := s.translator.Get(s.cfg.Bot.Language, "rag.topic_split_prompt")
-	if promptTmpl == "" {
-		// Fallback to regular extraction prompt with hint
-		promptTmpl = s.translator.Get(s.cfg.Bot.Language, "rag.topic_extraction_prompt")
-		promptTmpl = "%s\n\n" + promptTmpl + "\n\nIMPORTANT: This is a LARGE conversation. Break it into multiple smaller topics (aim for 10-25 messages per topic). Find natural boundaries: topic changes, time gaps, or shifts in focus."
-	}
-	prompt := fmt.Sprintf(promptTmpl, profile)
-
-	return s.extractTopicsWithPrompt(ctx, userID, messages, prompt)
-}
-
-// formatUserProfileCompact creates a compact profile summary for splitter/merger.
-func (s *Service) formatUserProfileCompact(userID int64) string {
-	facts, err := s.factRepo.GetFacts(userID)
-	if err != nil {
-		s.logger.Warn("failed to load facts for profile", "error", err)
-		return "(профиль не загружен)"
+	// Load user profile for context (unified format with tags)
+	allFacts, err := s.factRepo.GetFacts(userID)
+	var profile string
+	if err == nil {
+		profile = FormatUserProfile(FilterProfileFacts(allFacts))
+	} else {
+		s.logger.Warn("failed to load facts for splitter", "error", err)
+		profile = FormatUserProfile(nil)
 	}
 
-	// Filter to identity and high-importance facts only
-	var relevant []storage.Fact
-	for _, f := range facts {
-		if f.Type == "identity" || f.Importance >= 80 {
-			relevant = append(relevant, f)
+	// Load recent topics for context
+	var recentTopics string
+	recentTopicsCount := s.cfg.RAG.GetRecentTopicsInContext()
+	if recentTopicsCount > 0 {
+		topics, err := s.GetRecentTopics(userID, recentTopicsCount)
+		if err != nil {
+			s.logger.Warn("failed to get recent topics for splitter", "error", err)
 		}
+		recentTopics = FormatRecentTopics(topics)
+	} else {
+		recentTopics = FormatRecentTopics(nil)
 	}
 
-	if len(relevant) == 0 {
-		return "(профиль пуст)"
-	}
+	// Use unified prompt with goal section for split mode
+	promptTmpl := s.translator.Get(s.cfg.Bot.Language, "rag.topic_extraction_prompt")
+	goalSection := s.translator.Get(s.cfg.Bot.Language, "rag.topic_extraction_goal_split")
+	systemPrompt := fmt.Sprintf(promptTmpl, profile, recentTopics, goalSection)
 
-	var sb strings.Builder
-	for _, f := range relevant {
-		fmt.Fprintf(&sb, "- [%s] %s\n", f.Entity, f.Content)
-	}
-	return sb.String()
+	return s.extractTopicsWithPrompt(ctx, userID, messages, systemPrompt)
 }
 
 // extractTopicsWithPrompt is like extractTopics but with custom prompt.
-func (s *Service) extractTopicsWithPrompt(ctx context.Context, userID int64, chunk []storage.Message, prompt string) ([]ExtractedTopic, UsageInfo, error) {
+func (s *Service) extractTopicsWithPrompt(ctx context.Context, userID int64, chunk []storage.Message, systemPrompt string) ([]ExtractedTopic, UsageInfo, error) {
+	startTime := time.Now()
+
 	type MsgItem struct {
 		ID      int64  `json:"id"`
 		Role    string `json:"role"`
@@ -338,7 +330,8 @@ func (s *Service) extractTopicsWithPrompt(ctx context.Context, userID int64, chu
 	}
 	itemsBytes, _ := json.Marshal(items)
 
-	fullPrompt := fmt.Sprintf("%s\n\nChat Log JSON:\n%s", prompt, string(itemsBytes))
+	// User message is just the chat log
+	userMessage := fmt.Sprintf("Chat Log JSON:\n%s", string(itemsBytes))
 
 	model := s.cfg.Agents.Splitter.GetModel(s.cfg.Agents.Default.Model)
 
@@ -385,12 +378,18 @@ func (s *Service) extractTopicsWithPrompt(ctx context.Context, userID int64, chu
 	resp, err := s.client.CreateChatCompletion(ctx, openrouter.ChatCompletionRequest{
 		Model: model,
 		Messages: []openrouter.Message{
-			{Role: "user", Content: fullPrompt},
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userMessage},
 		},
 		ResponseFormat: schema,
 		UserID:         userID,
 	})
+	durationMs := int(time.Since(startTime).Milliseconds())
+
 	if err != nil {
+		if s.agentLogger != nil {
+			s.agentLogger.LogError(ctx, userID, agentlog.AgentSplitter, systemPrompt, nil, err.Error(), model, durationMs, nil)
+		}
 		return nil, UsageInfo{}, err
 	}
 
@@ -402,6 +401,9 @@ func (s *Service) extractTopicsWithPrompt(ctx context.Context, userID int64, chu
 	}
 
 	if len(resp.Choices) == 0 {
+		if s.agentLogger != nil {
+			s.agentLogger.LogError(ctx, userID, agentlog.AgentSplitter, systemPrompt, resp.DebugRequestBody, "empty response", model, durationMs, nil)
+		}
 		return nil, usage, fmt.Errorf("empty response")
 	}
 
@@ -409,7 +411,22 @@ func (s *Service) extractTopicsWithPrompt(ctx context.Context, userID int64, chu
 		Topics []ExtractedTopic `json:"topics"`
 	}
 	if err := json.Unmarshal([]byte(resp.Choices[0].Message.Content), &result); err != nil {
+		if s.agentLogger != nil {
+			s.agentLogger.LogError(ctx, userID, agentlog.AgentSplitter, systemPrompt, resp.DebugRequestBody, fmt.Sprintf("json parse error: %v", err), model, durationMs, map[string]interface{}{
+				"raw_response": resp.Choices[0].Message.Content,
+			})
+		}
 		return nil, usage, fmt.Errorf("json parse error: %w", err)
+	}
+
+	// Log success
+	if s.agentLogger != nil {
+		s.agentLogger.LogSuccess(ctx, userID, agentlog.AgentSplitter, systemPrompt, resp.DebugRequestBody,
+			resp.Choices[0].Message.Content, &result, model,
+			usage.PromptTokens, usage.CompletionTokens, usage.Cost, durationMs,
+			map[string]interface{}{
+				"topics_count": len(result.Topics),
+			})
 	}
 
 	return result.Topics, usage, nil

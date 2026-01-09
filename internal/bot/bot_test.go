@@ -145,29 +145,6 @@ func (m *MockStorage) GetDashboardStats(userID int64) (*storage.DashboardStats, 
 	return args.Get(0).(*storage.DashboardStats), args.Error(1)
 }
 
-func (m *MockStorage) AddRAGLog(log storage.RAGLog) error {
-	args := m.Called(log)
-	return args.Error(0)
-}
-
-func (m *MockStorage) GetRAGLogs(userID int64, limit int) ([]storage.RAGLog, error) {
-	args := m.Called(userID, limit)
-	return args.Get(0).([]storage.RAGLog), args.Error(1)
-}
-
-func (m *MockStorage) AddRerankerLog(log storage.RerankerLog) error {
-	args := m.Called(log)
-	return args.Error(0)
-}
-
-func (m *MockStorage) GetRerankerLogs(userID int64, limit int) ([]storage.RerankerLog, error) {
-	args := m.Called(userID, limit)
-	if args.Get(0) == nil {
-		return []storage.RerankerLog{}, args.Error(1)
-	}
-	return args.Get(0).([]storage.RerankerLog), args.Error(1)
-}
-
 func (m *MockStorage) AddTopic(topic storage.Topic) (int64, error) {
 	args := m.Called(topic)
 	return args.Get(0).(int64), args.Error(1)
@@ -350,11 +327,6 @@ func (m *MockStorage) GetUnprocessedMessages(userID int64) ([]storage.Message, e
 	return args.Get(0).([]storage.Message), args.Error(1)
 }
 
-func (m *MockStorage) GetTopicExtractionLogs(limit, offset int) ([]storage.RAGLog, int, error) {
-	args := m.Called(limit, offset)
-	return args.Get(0).([]storage.RAGLog), args.Int(1), args.Error(2)
-}
-
 func (m *MockStorage) GetFactsByTopicID(topicID int64) ([]storage.Fact, error) {
 	args := m.Called(topicID)
 	if args.Get(0) == nil {
@@ -397,13 +369,18 @@ func (m *MockStorage) CleanupFactHistory(keepPerUser int) (int64, error) {
 	return args.Get(0).(int64), args.Error(1)
 }
 
-func (m *MockStorage) CleanupRagLogs(keepPerUser int) (int64, error) {
-	args := m.Called(keepPerUser)
+func (m *MockStorage) CleanupAgentLogs(keepPerUserPerAgent int) (int64, error) {
+	args := m.Called(keepPerUserPerAgent)
 	return args.Get(0).(int64), args.Error(1)
 }
 
-func (m *MockStorage) CleanupRerankerLogs(keepPerUser int) (int64, error) {
-	args := m.Called(keepPerUser)
+func (m *MockStorage) CountAgentLogs() (int64, error) {
+	args := m.Called()
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockStorage) CountFactHistory() (int64, error) {
+	args := m.Called()
 	return args.Get(0).(int64), args.Error(1)
 }
 
@@ -521,9 +498,6 @@ bot:
   voice_message_marker: "[Voice message]"
   voice_instruction: "The user sent a voice message (audio file below). Listen to it and respond in English. Do not describe the listening process — just respond to the content."
   system_prompt: "System %s"
-memory:
-  facts_user_header: "=== Facts about User ==="
-  facts_others_header: "=== Facts about Others ==="
 `
 	_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte(content), 0644)
 	tr, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
@@ -588,7 +562,6 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 		userRepo:        mockStore,
 		msgRepo:         mockStore,
 		statsRepo:       mockStore,
-		logRepo:         mockStore,
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
@@ -731,7 +704,7 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 	cfg := createTestConfig()
 	cfg.RAG.Enabled = false
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	mockDownloader := new(MockFileDownloader)
 	bot := &Bot{
@@ -739,7 +712,6 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 		userRepo:        mockStore,
 		msgRepo:         mockStore,
 		statsRepo:       mockStore,
-		logRepo:         mockStore,
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
@@ -867,7 +839,7 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 	cfg := createTestConfig()
 	cfg.RAG.Enabled = false
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	mockDownloader := new(MockFileDownloader)
 	bot := &Bot{
@@ -875,7 +847,6 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 		userRepo:        mockStore,
 		msgRepo:         mockStore,
 		statsRepo:       mockStore,
-		logRepo:         mockStore,
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
@@ -1005,7 +976,7 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 	cfg.RAG.Enabled = false
 	cfg.OpenRouter.PDFParserEngine = "native"
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	mockDownloader := new(MockFileDownloader)
 	bot := &Bot{
@@ -1013,7 +984,6 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 		userRepo:        mockStore,
 		msgRepo:         mockStore,
 		statsRepo:       mockStore,
-		logRepo:         mockStore,
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
@@ -1148,7 +1118,7 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 	cfg := createTestConfig()
 	cfg.RAG.Enabled = false
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	mockDownloader := new(MockFileDownloader)
 	bot := &Bot{
@@ -1156,7 +1126,6 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 		userRepo:        mockStore,
 		msgRepo:         mockStore,
 		statsRepo:       mockStore,
-		logRepo:         mockStore,
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
@@ -1291,14 +1260,13 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 	cfg := createTestConfig()
 	cfg.RAG.Enabled = false
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
 		msgRepo:         mockStore,
 		statsRepo:       mockStore,
-		logRepo:         mockStore,
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
@@ -1427,7 +1395,6 @@ func TestProcessUpdate(t *testing.T) {
 		userRepo:        mockStore,
 		msgRepo:         mockStore,
 		statsRepo:       mockStore,
-		logRepo:         mockStore,
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		cfg:             cfg,
@@ -1580,14 +1547,13 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 	cfg := createTestConfig()
 	cfg.RAG.Enabled = false
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
 		msgRepo:         mockStore,
 		statsRepo:       mockStore,
-		logRepo:         mockStore,
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
@@ -1681,10 +1647,11 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 	// Check that the history sent to the model is correct and complete
 	assert.Len(t, capturedRequest.Messages, len(fullHistory)+1) // +1 for system prompt
 
-	// Check system prompt
+	// Check system prompt (includes empty user_profile tag when no facts)
 	systemContent, ok := capturedRequest.Messages[0].Content.([]interface{})[0].(openrouter.TextPart)
 	assert.True(t, ok)
-	assert.Equal(t, "System TestBot", systemContent.Text)
+	assert.Contains(t, systemContent.Text, "System TestBot")
+	assert.Contains(t, systemContent.Text, "<user_profile>")
 
 	// Check that all historical messages were passed correctly
 	for i, hMsg := range fullHistory {
@@ -1809,14 +1776,13 @@ func TestSendTestMessage_Success(t *testing.T) {
 	cfg.RAG.Enabled = false // Disable RAG for testing
 
 	// Create a minimal RAG service with RAG disabled
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
 		msgRepo:         mockStore,
 		statsRepo:       mockStore,
-		logRepo:         mockStore,
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
@@ -1897,14 +1863,13 @@ func TestSendTestMessage_SaveToHistoryFalse(t *testing.T) {
 	cfg := createTestConfig()
 	cfg.RAG.Enabled = false
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
 		msgRepo:         mockStore,
 		statsRepo:       mockStore,
-		logRepo:         mockStore,
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
@@ -1974,14 +1939,13 @@ func TestSendTestMessage_OpenRouterError(t *testing.T) {
 	cfg := createTestConfig()
 	cfg.RAG.Enabled = false
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
 		msgRepo:         mockStore,
 		statsRepo:       mockStore,
-		logRepo:         mockStore,
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,

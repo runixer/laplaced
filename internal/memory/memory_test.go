@@ -66,14 +66,6 @@ func (m *MockStorage) GetDashboardStats(userID int64) (*storage.DashboardStats, 
 	}
 	return args.Get(0).(*storage.DashboardStats), args.Error(1)
 }
-func (m *MockStorage) AddRAGLog(log storage.RAGLog) error {
-	args := m.Called(log)
-	return args.Error(0)
-}
-func (m *MockStorage) GetRAGLogs(userID int64, limit int) ([]storage.RAGLog, error) {
-	args := m.Called(userID, limit)
-	return args.Get(0).([]storage.RAGLog), args.Error(1)
-}
 func (m *MockStorage) AddTopic(topic storage.Topic) (int64, error) {
 	args := m.Called(topic)
 	return args.Get(0).(int64), args.Error(1)
@@ -201,10 +193,6 @@ func (m *MockStorage) GetFactHistory(userID int64, limit int) ([]storage.FactHis
 func (m *MockStorage) GetFactHistoryExtended(filter storage.FactHistoryFilter, limit, offset int, sortBy, sortDir string) (storage.FactHistoryResult, error) {
 	args := m.Called(filter, limit, offset, sortBy, sortDir)
 	return args.Get(0).(storage.FactHistoryResult), args.Error(1)
-}
-func (m *MockStorage) GetTopicExtractionLogs(limit, offset int) ([]storage.RAGLog, int, error) {
-	args := m.Called(limit, offset)
-	return args.Get(0).([]storage.RAGLog), args.Int(1), args.Error(2)
 }
 func (m *MockStorage) ResetUserData(userID int64) error {
 	args := m.Called(userID)
@@ -667,6 +655,7 @@ func TestDeduplicateAndAddFact_SimilarFactsIgnore(t *testing.T) {
 	}
 
 	mockVS.On("FindSimilarFacts", mock.Anything, int64(123), mock.Anything, float32(0.85)).Return([]storage.Fact{existingFact}, nil)
+	// Note: GetFacts no longer called in arbitrateFact (profile removed from deduplicator)
 
 	// Mock arbitration response - IGNORE
 	arbitrationResp := `{"action": "IGNORE"}`
@@ -719,6 +708,7 @@ func TestDeduplicateAndAddFact_SimilarFactsMerge(t *testing.T) {
 	}
 
 	mockVS.On("FindSimilarFacts", mock.Anything, int64(123), mock.Anything, float32(0.85)).Return([]storage.Fact{existingFact}, nil)
+	// Note: GetFacts no longer called in arbitrateFact (profile removed from deduplicator)
 
 	// Mock arbitration response - MERGE
 	arbitrationResp := `{"action": "MERGE", "target_id": 1, "new_content": "User likes coffee, especially iced"}`
@@ -778,6 +768,7 @@ func TestDeduplicateAndAddFact_SimilarFactsAdd(t *testing.T) {
 	}
 
 	mockVS.On("FindSimilarFacts", mock.Anything, int64(123), mock.Anything, float32(0.85)).Return([]storage.Fact{existingFact}, nil)
+	// Note: GetFacts no longer called in arbitrateFact (profile removed from deduplicator)
 
 	// Mock arbitration response - ADD (facts are different)
 	arbitrationResp := `{"action": "ADD"}`
@@ -868,11 +859,12 @@ func TestArbitrateFact(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockOR := new(MockOpenRouterClient)
+			mockStore := new(MockStorage)
 			logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 			cfg := &config.Config{}
 			translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
 
-			svc := NewService(logger, cfg, nil, nil, nil, mockOR, translator)
+			svc := NewService(logger, cfg, mockStore, nil, nil, mockOR, translator)
 
 			newFact := storage.Fact{
 				UserID:    123,
@@ -894,6 +886,7 @@ func TestArbitrateFact(t *testing.T) {
 			respBytes, _ := json.Marshal(respJSON)
 			_ = json.Unmarshal(respBytes, &resp)
 
+			// Note: GetFacts no longer called in arbitrateFact (profile removed from deduplicator)
 			mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(&resp, nil)
 
 			action, targetID, newContent, err := svc.arbitrateFact(context.Background(), newFact, existingFacts)
@@ -908,15 +901,17 @@ func TestArbitrateFact(t *testing.T) {
 
 func TestArbitrateFact_EmptyResponse(t *testing.T) {
 	mockOR := new(MockOpenRouterClient)
+	mockStore := new(MockStorage)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
 	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
 
-	svc := NewService(logger, cfg, nil, nil, nil, mockOR, translator)
+	svc := NewService(logger, cfg, mockStore, nil, nil, mockOR, translator)
 
-	newFact := storage.Fact{Content: "Test"}
+	newFact := storage.Fact{UserID: 123, Content: "Test"}
 	existingFacts := []storage.Fact{{ID: 1, Content: "Existing", CreatedAt: time.Now()}}
 
+	// Note: GetFacts no longer called in arbitrateFact (profile removed from deduplicator)
 	resp := openrouter.ChatCompletionResponse{} // Empty choices
 	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(&resp, nil)
 
@@ -928,15 +923,17 @@ func TestArbitrateFact_EmptyResponse(t *testing.T) {
 
 func TestArbitrateFact_LLMError(t *testing.T) {
 	mockOR := new(MockOpenRouterClient)
+	mockStore := new(MockStorage)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
 	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
 
-	svc := NewService(logger, cfg, nil, nil, nil, mockOR, translator)
+	svc := NewService(logger, cfg, mockStore, nil, nil, mockOR, translator)
 
-	newFact := storage.Fact{Content: "Test"}
+	newFact := storage.Fact{UserID: 123, Content: "Test"}
 	existingFacts := []storage.Fact{{ID: 1, Content: "Existing", CreatedAt: time.Now()}}
 
+	// Note: GetFacts no longer called in arbitrateFact (profile removed from deduplicator)
 	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(nil, assert.AnError)
 
 	_, _, _, err := svc.arbitrateFact(context.Background(), newFact, existingFacts)
@@ -971,6 +968,7 @@ func TestDeduplicateAndAddFact_ReplaceTargetNotFound(t *testing.T) {
 	}
 
 	mockVS.On("FindSimilarFacts", mock.Anything, int64(123), mock.Anything, float32(0.85)).Return([]storage.Fact{existingFact}, nil)
+	// Note: GetFacts no longer called in arbitrateFact (profile removed from deduplicator)
 
 	// Mock arbitration response - REPLACE with wrong target_id
 	arbitrationResp := `{"action": "REPLACE", "target_id": 999, "new_content": "Merged"}`

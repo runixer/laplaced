@@ -35,12 +35,23 @@
                     <li class="nav-item"><a class="nav-link" href="/ui/stats">Stats</a></li>
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            Memory
+                            Agents
                         </a>
                         <ul class="dropdown-menu">
-                            <li><a class="dropdown-item" href="/ui/topics">Topics</a></li>
-                            <li><a class="dropdown-item" href="/ui/facts">Facts</a></li>
-                            <li><a class="dropdown-item" href="/ui/facts/history">Facts History</a></li>
+                            <li><a class="dropdown-item" href="/ui/agents/laplace"><i class="bi bi-robot"></i> Laplace</a></li>
+                            <li><a class="dropdown-item" href="/ui/agents/reranker"><i class="bi bi-funnel"></i> Reranker</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><span class="dropdown-header">Memory</span></li>
+                            <li><a class="dropdown-item" href="/ui/agents/archivist"><i class="bi bi-archive"></i> Archivist</a></li>
+                            <li><a class="dropdown-item" href="/ui/agents/deduplicator"><i class="bi bi-layers"></i> Deduplicator</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><span class="dropdown-header">Topics</span></li>
+                            <li><a class="dropdown-item" href="/ui/agents/splitter"><i class="bi bi-scissors"></i> Splitter</a></li>
+                            <li><a class="dropdown-item" href="/ui/agents/merger"><i class="bi bi-intersect"></i> Merger</a></li>
+                            <li><a class="dropdown-item" href="/ui/agents/enricher"><i class="bi bi-magic"></i> Enricher</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><span class="dropdown-header">Tools</span></li>
+                            <li><a class="dropdown-item" href="/ui/agents/scout"><i class="bi bi-search"></i> Scout</a></li>
                         </ul>
                     </li>
                     <li class="nav-item dropdown">
@@ -50,10 +61,6 @@
                         <ul class="dropdown-menu">
                             <li><a class="dropdown-item" href="/ui/debug/sessions"><i class="bi bi-broadcast"></i> Sessions</a></li>
                             <li><a class="dropdown-item" href="/ui/debug/chat"><i class="bi bi-chat-dots"></i> Test Chat</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="/ui/inspector">Context Inspector</a></li>
-                            <li><a class="dropdown-item" href="/ui/debug/reranker"><i class="bi bi-funnel"></i> Reranker</a></li>
-                            <li><a class="dropdown-item" href="/ui/debug/topics">Topic Extraction</a></li>
                             <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item" href="/ui/debug/database"><i class="bi bi-database-gear"></i> Database Maintenance</a></li>
                         </ul>

@@ -502,7 +502,7 @@ func TestRerankCandidates_Disabled(t *testing.T) {
 		{TopicID: 4, Score: 0.6},
 	}
 
-	result, err := s.rerankCandidates(context.Background(), 123, candidates, "contextual_query", "original_query", "current_messages", "profile", nil)
+	result, err := s.rerankCandidates(context.Background(), 123, candidates, "contextual_query", "original_query", "current_messages", "<user_profile></user_profile>", "<recent_topics></recent_topics>", nil)
 
 	assert.NoError(t, err)
 	assert.Equal(t, []int64{1, 2, 3}, result.TopicIDs())
@@ -520,7 +520,7 @@ func TestRerankCandidates_EmptyCandidates(t *testing.T) {
 		cfg:    cfg,
 	}
 
-	result, err := s.rerankCandidates(context.Background(), 123, []rerankerCandidate{}, "contextual_query", "original_query", "current_messages", "profile", nil)
+	result, err := s.rerankCandidates(context.Background(), 123, []rerankerCandidate{}, "contextual_query", "original_query", "current_messages", "<user_profile></user_profile>", "<recent_topics></recent_topics>", nil)
 
 	assert.NoError(t, err)
 	assert.Empty(t, result.TopicIDs())
@@ -587,7 +587,7 @@ func TestRerankCandidates_ProtocolViolation_NoToolCalls(t *testing.T) {
 		}, nil,
 	)
 
-	result, err := s.rerankCandidates(context.Background(), 123, candidates, "contextual_query", "original_query", "current_messages", "profile", nil)
+	result, err := s.rerankCandidates(context.Background(), 123, candidates, "contextual_query", "original_query", "current_messages", "<user_profile></user_profile>", "<recent_topics></recent_topics>", nil)
 
 	assert.NoError(t, err)
 	// Protocol violation: no tool calls → falls back to vector top (all candidates by score)
@@ -716,7 +716,7 @@ func TestRerankCandidates_WithToolCall(t *testing.T) {
 		}, nil,
 	).Once()
 
-	result, err := s.rerankCandidates(context.Background(), 123, candidates, "contextual_query", "original_query", "current_messages", "profile", nil)
+	result, err := s.rerankCandidates(context.Background(), 123, candidates, "contextual_query", "original_query", "current_messages", "<user_profile></user_profile>", "<recent_topics></recent_topics>", nil)
 
 	assert.NoError(t, err)
 	assert.Equal(t, []int64{1}, result.TopicIDs())
@@ -760,7 +760,7 @@ func TestRerankCandidates_LLMError_FallbackToVector(t *testing.T) {
 		openrouter.ChatCompletionResponse{}, assert.AnError,
 	)
 
-	result, err := s.rerankCandidates(context.Background(), 123, candidates, "contextual_query", "original_query", "current_messages", "profile", nil)
+	result, err := s.rerankCandidates(context.Background(), 123, candidates, "contextual_query", "original_query", "current_messages", "<user_profile></user_profile>", "<recent_topics></recent_topics>", nil)
 
 	// Should not error, should fallback
 	assert.NoError(t, err)

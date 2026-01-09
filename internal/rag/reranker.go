@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -69,11 +70,17 @@ type RerankerReasoningEntry struct {
 
 // rerankerTrace collects debug data for the reranker UI
 type rerankerTrace struct {
-	candidates     []storage.RerankerCandidate
-	toolCalls      []storage.RerankerToolCall
-	selectedTopics []TopicSelection
-	fallbackReason string
-	reasoning      []RerankerReasoningEntry
+	candidates       []storage.RerankerCandidate
+	toolCalls        []storage.RerankerToolCall
+	selectedTopics   []TopicSelection
+	fallbackReason   string
+	reasoning        []RerankerReasoningEntry
+	systemPrompt     string  // Full system prompt for debug UI
+	userPrompt       string  // Full user prompt for debug UI
+	rawRequestBody   string  // Raw JSON request body sent to OpenRouter
+	promptTokens     int     // Accumulated prompt tokens across all LLM calls
+	completionTokens int     // Accumulated completion tokens across all LLM calls
+	totalCost        float64 // Accumulated cost across all LLM calls
 }
 
 // rerankerResponse is the expected JSON response from Flash
@@ -95,6 +102,7 @@ func (s *Service) rerankCandidates(
 	originalQuery string,
 	currentMessages string,
 	userProfile string,
+	recentTopics string,
 	mediaParts []interface{}, // Multimodal content (images, audio) from current message
 ) (*RerankerResult, error) {
 	cfg := s.cfg.Agents.Reranker
@@ -136,7 +144,9 @@ func (s *Service) rerankCandidates(
 	}
 	trace := &rerankerTrace{}
 	startTime := time.Now()
-	var totalCost float64 // Accumulate cost across all LLM calls
+	var totalCost float64         // Accumulate cost across all LLM calls
+	var totalPromptTokens int     // Accumulate prompt tokens across all LLM calls
+	var totalCompletionTokens int // Accumulate completion tokens across all LLM calls
 
 	// Build candidate map and collect trace data
 	candidateMap := s.buildCandidateMap(candidates)
@@ -161,22 +171,28 @@ func (s *Service) rerankCandidates(
 	// Choose prompt based on ignore_excerpts config
 	var systemPrompt string
 	if cfg.IgnoreExcerpts {
-		// Simplified prompt without excerpt requirements (4 placeholders)
+		// Simplified prompt without excerpt requirements
+		// Positional placeholders: %[1]s=profile, %[2]s=topics, %[3]d-%[6]d=numbers (at bottom of prompt)
 		systemPrompt = fmt.Sprintf(
 			s.translator.Get(lang, "rag.reranker_system_prompt_simple"),
-			cfg.MaxTopics,                      // %d in constraints (max topics)
-			cfg.MaxTopics,                      // %d in algorithm (don't stop at first N)
-			cfg.MaxTopics, selectCandidatesMax, // %d-%d in algorithm (select N-M candidates)
+			userProfile,                        // %[1]s user profile (at bottom)
+			recentTopics,                       // %[2]s recent topics (at bottom)
+			cfg.MaxTopics,                      // %[3]d in constraints (max topics)
+			cfg.MaxTopics,                      // %[4]d in algorithm (don't stop at first N)
+			cfg.MaxTopics, selectCandidatesMax, // %[5]d-%[6]d in algorithm (select N-M candidates)
 		)
 	} else {
-		// Full prompt with excerpt policy (6 placeholders)
+		// Full prompt with excerpt policy
+		// Positional placeholders: %[1]s=profile, %[2]s=topics, %[3]d-%[8]d=numbers (profile/topics at bottom)
 		systemPrompt = fmt.Sprintf(
 			s.translator.Get(lang, "rag.reranker_system_prompt"),
-			cfg.MaxTopics,                      // %d in constraints (max topics)
-			budgetK,                            // %d in constraints (budget)
-			cfg.MaxTopics,                      // %d in algorithm (don't stop at first N)
-			cfg.MaxTopics, selectCandidatesMax, // %d-%d in algorithm (select N-M candidates)
-			budgetK, // %d in excerpt_policy (budget)
+			userProfile,                        // %[1]s user profile (at bottom)
+			recentTopics,                       // %[2]s recent topics (at bottom)
+			cfg.MaxTopics,                      // %[3]d in constraints (max topics)
+			budgetK,                            // %[4]d in constraints (budget)
+			cfg.MaxTopics,                      // %[5]d in algorithm (don't stop at first N)
+			cfg.MaxTopics, selectCandidatesMax, // %[6]d-%[7]d in algorithm (select N-M candidates)
+			budgetK, // %[8]d in excerpt_policy (budget)
 		)
 	}
 
@@ -187,9 +203,12 @@ func (s *Service) rerankCandidates(
 		originalQuery,
 		contextualizedQuery,
 		currentMessages,
-		userProfile,
 		candidatesList,
 	)
+
+	// Store prompts in trace for debug UI
+	trace.systemPrompt = systemPrompt
+	trace.userPrompt = userPrompt
 
 	// Define tool for loading topic content
 	tools := []openrouter.Tool{
@@ -300,9 +319,20 @@ func (s *Service) rerankCandidates(
 			return result, nil
 		}
 
-		// Accumulate cost from this LLM call
+		// Accumulate usage from this LLM call
+		totalPromptTokens += resp.Usage.PromptTokens
+		totalCompletionTokens += resp.Usage.CompletionTokens
 		if resp.Usage.Cost != nil {
 			totalCost += *resp.Usage.Cost
+		}
+		// Update trace for logging
+		trace.promptTokens = totalPromptTokens
+		trace.completionTokens = totalCompletionTokens
+		trace.totalCost = totalCost
+
+		// Store raw request body for debugging (capture first successful request)
+		if trace.rawRequestBody == "" {
+			trace.rawRequestBody = resp.DebugRequestBody
 		}
 
 		if len(resp.Choices) == 0 {
@@ -939,15 +969,8 @@ func (s *Service) saveRerankerTrace(
 	trace *rerankerTrace,
 	startTime time.Time,
 ) {
-	if s.rerankerLogRepo == nil {
+	if s.agentLogger == nil {
 		return
-	}
-
-	// Serialize candidates
-	candidatesJSON, err := json.Marshal(trace.candidates)
-	if err != nil {
-		s.logger.Warn("failed to marshal reranker candidates", "error", err)
-		candidatesJSON = []byte("[]")
 	}
 
 	// Serialize tool calls
@@ -971,23 +994,41 @@ func (s *Service) saveRerankerTrace(
 		reasoningJSON = []byte("[]")
 	}
 
-	log := storage.RerankerLog{
-		UserID:          userID,
-		OriginalQuery:   originalQuery,
-		EnrichedQuery:   contextualizedQuery,
-		CandidatesJSON:  string(candidatesJSON),
-		ToolCallsJSON:   string(toolCallsJSON),
-		SelectedIDsJSON: string(selectedIDsJSON),
-		ReasoningJSON:   string(reasoningJSON),
-		DurationTotalMs: int(time.Since(startTime).Milliseconds()),
-	}
+	// Log to agent_logs for unified debug UI
+	if s.agentLogger != nil {
+		duration := time.Since(startTime)
+		isSuccess := trace.fallbackReason == ""
+		errorMsg := ""
+		if !isSuccess {
+			errorMsg = "fallback: " + trace.fallbackReason
+		}
 
-	if trace.fallbackReason != "" {
-		log.FallbackReason = &trace.fallbackReason
-	}
+		// Combine system and user prompts for full LLM input visibility
+		fullPrompt := fmt.Sprintf("=== SYSTEM PROMPT ===\n%s\n\n=== USER PROMPT ===\n%s",
+			trace.systemPrompt, trace.userPrompt)
 
-	if err := s.rerankerLogRepo.AddRerankerLog(log); err != nil {
-		s.logger.Warn("failed to save reranker trace", "error", err)
+		s.agentLogger.Log(context.Background(), agentlog.Entry{
+			UserID:           userID,
+			AgentType:        agentlog.AgentReranker,
+			InputPrompt:      fullPrompt,
+			InputContext:     trace.rawRequestBody, // Full API request JSON
+			OutputResponse:   string(selectedIDsJSON),
+			OutputParsed:     string(reasoningJSON),
+			Model:            s.cfg.Agents.Reranker.GetModel(s.cfg.Agents.Default.Model),
+			PromptTokens:     trace.promptTokens,
+			CompletionTokens: trace.completionTokens,
+			TotalCost:        &trace.totalCost,
+			DurationMs:       int(duration.Milliseconds()),
+			Metadata: map[string]interface{}{
+				"original_query": originalQuery,
+				"enriched_query": contextualizedQuery,
+				"tool_calls":     string(toolCallsJSON),
+				"candidates_in":  len(trace.candidates),
+				"candidates_out": len(trace.selectedTopics),
+			},
+			Success:      isSuccess,
+			ErrorMessage: errorMsg,
+		})
 	}
 }
 

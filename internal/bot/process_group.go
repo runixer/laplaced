@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/markdown"
@@ -125,6 +126,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	llmCallCount := 0
 	toolCallCount := 0
 	telegramCallCount := 0
+	var lastRawRequestBody string // Capture last LLM request for debugging
 
 	// Defer Telegram metrics recording to capture early returns
 	defer func() {
@@ -181,6 +183,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 
 		totalPromptTokens += resp.Usage.PromptTokens
 		totalCompletionTokens += resp.Usage.CompletionTokens
+		lastRawRequestBody = resp.DebugRequestBody // Capture for logging
 
 		choice := resp.Choices[0]
 
@@ -284,7 +287,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		logger.Error("failed to finalize response", "error", err)
 	}
 
-	b.recordMetrics(userID, totalPromptTokens, totalCompletionTokens, ragInfo, orMessages, finalResponse, logger)
+	b.recordMetrics(userID, totalPromptTokens, totalCompletionTokens, ragInfo, orMessages, finalResponse, lastRawRequestBody, totalLLMDuration, logger)
 
 	// Record context tokens for metrics (approximate based on prompt tokens)
 	RecordContextTokens(totalPromptTokens)
@@ -706,7 +709,7 @@ func (b *Bot) finalizeResponse(chatID int64, messageThreadID int, userID int64, 
 	return responses, nil
 }
 
-func (b *Bot) recordMetrics(userID int64, promptTokens, completionTokens int, ragInfo *rag.RetrievalDebugInfo, orMessages []openrouter.Message, finalResponse string, logger *slog.Logger) {
+func (b *Bot) recordMetrics(userID int64, promptTokens, completionTokens int, ragInfo *rag.RetrievalDebugInfo, orMessages []openrouter.Message, finalResponse string, rawRequestBody string, totalLLMDuration time.Duration, logger *slog.Logger) {
 	cost := b.getTieredCost(promptTokens, completionTokens, logger)
 
 	stat := storage.Stat{
@@ -720,44 +723,34 @@ func (b *Bot) recordMetrics(userID int64, promptTokens, completionTokens int, ra
 
 	// Save RAG Log
 	if ragInfo != nil {
-		sysPrompt := ""
-		if len(orMessages) > 0 && orMessages[0].Role == "system" {
-			if str, ok := orMessages[0].Content.(string); ok {
-				sysPrompt = str
-			} else if parts, ok := orMessages[0].Content.([]interface{}); ok {
-				// extract text parts
-				for _, p := range parts {
-					if tp, ok := p.(openrouter.TextPart); ok {
-						sysPrompt += tp.Text
-					}
-				}
-			}
-		}
-
-		// JSON marshaling
-		contextBytes, _ := json.Marshal(orMessages)
+		// Format full prompt as human-readable text
+		fullPrompt := formatMessagesForLog(orMessages)
 
 		var resultsJSON []byte
 		if len(ragInfo.Results) > 0 {
 			resultsJSON, _ = json.Marshal(ragInfo.Results)
 		}
 
-		ragLog := storage.RAGLog{
-			UserID:           userID,
-			OriginalQuery:    ragInfo.OriginalQuery,
-			EnrichedQuery:    ragInfo.EnrichedQuery,
-			EnrichmentPrompt: ragInfo.EnrichmentPrompt,
-			ContextUsed:      string(contextBytes),
-			SystemPrompt:     sysPrompt,
-			RetrievalResults: string(resultsJSON),
-			LLMResponse:      finalResponse,
-			EnrichmentTokens: ragInfo.EnrichmentTokens,
-			GenerationTokens: promptTokens + completionTokens,
-			TotalCostUSD:     cost,
-		}
-
-		if err := b.logRepo.AddRAGLog(ragLog); err != nil {
-			logger.Error("failed to add rag log", "error", err)
+		// Log to agent_logs for debugging
+		if b.agentLogger != nil {
+			b.agentLogger.Log(context.Background(), agentlog.Entry{
+				UserID:           userID,
+				AgentType:        agentlog.AgentLaplace,
+				InputPrompt:      fullPrompt,
+				InputContext:     rawRequestBody, // Full API request JSON
+				OutputResponse:   finalResponse,
+				Model:            b.cfg.Agents.Chat.GetModel(b.cfg.Agents.Default.Model),
+				PromptTokens:     promptTokens,
+				CompletionTokens: completionTokens,
+				TotalCost:        &cost,
+				DurationMs:       int(totalLLMDuration.Milliseconds()),
+				Metadata: map[string]interface{}{
+					"original_query":    ragInfo.OriginalQuery,
+					"enriched_query":    ragInfo.EnrichedQuery,
+					"retrieval_results": string(resultsJSON),
+				},
+				Success: true,
+			})
 		}
 	}
 
@@ -767,4 +760,50 @@ func (b *Bot) recordMetrics(userID int64, promptTokens, completionTokens int, ra
 		"total_tokens", stat.TokensUsed,
 		"cost_usd", stat.CostUSD,
 	)
+}
+
+// formatMessagesForLog formats OpenRouter messages into a human-readable string for logging.
+// Format is designed for easy visual parsing in debug UI.
+func formatMessagesForLog(messages []openrouter.Message) string {
+	var sb strings.Builder
+	for i, msg := range messages {
+		if i > 0 {
+			sb.WriteString("\n\n")
+		}
+		// Role header
+		role := strings.ToUpper(msg.Role)
+		sb.WriteString(fmt.Sprintf("=== %s ===\n", role))
+
+		// Extract text content
+		switch content := msg.Content.(type) {
+		case string:
+			sb.WriteString(content)
+		case []interface{}:
+			// Multimodal content - extract text parts
+			for _, part := range content {
+				if tp, ok := part.(openrouter.TextPart); ok {
+					sb.WriteString(tp.Text)
+				} else if m, ok := part.(map[string]interface{}); ok {
+					if t, ok := m["type"].(string); ok && t == "text" {
+						if text, ok := m["text"].(string); ok {
+							sb.WriteString(text)
+						}
+					} else if t == "image_url" {
+						sb.WriteString("[IMAGE]")
+					} else if t == "input_audio" {
+						sb.WriteString("[AUDIO]")
+					}
+				}
+			}
+		}
+
+		// Show tool calls if present
+		if len(msg.ToolCalls) > 0 {
+			sb.WriteString("\n\n[TOOL CALLS]")
+			for _, tc := range msg.ToolCalls {
+				sb.WriteString(fmt.Sprintf("\n- %s(%s)", tc.Function.Name, tc.Function.Arguments))
+			}
+		}
+	}
+	return sb.String()
 }

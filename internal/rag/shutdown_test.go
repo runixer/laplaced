@@ -110,6 +110,8 @@ func TestGracefulShutdown(t *testing.T) {
 
 	// 2. memoryService.ProcessSession (LLM)
 	mockStore.On("GetFacts", int64(123)).Return([]storage.Fact{}, nil)
+	// Mock GetTopicsExtended for recent topics (now called in extractTopics)
+	mockStore.On("GetTopicsExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(storage.TopicResult{}, nil).Maybe()
 	mockStore.On("GetAllUsers").Return([]storage.User{}, nil).Maybe()
 
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req openrouter.ChatCompletionRequest) bool {
@@ -144,13 +146,13 @@ func TestGracefulShutdown(t *testing.T) {
 		},
 	}, nil)
 
-	// Create dummy translator
+	// Create dummy translator (with prompt placeholders for profile/topics)
 	tmpDir := t.TempDir()
-	_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("key: value"), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("rag.topic_extraction_prompt: '%s\n%s\nExtract topics'"), 0644)
 	translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
 
 	// Start
 	ctx, cancel := context.WithCancel(context.Background())

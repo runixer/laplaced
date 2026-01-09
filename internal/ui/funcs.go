@@ -48,6 +48,12 @@ func GetFuncMap() template.FuncMap {
 			}
 			return *b
 		},
+		"deref": func(f *float64) float64 {
+			if f == nil {
+				return 0
+			}
+			return *f
+		},
 		"isTopicList": func(v interface{}) bool {
 			_, ok := v.([]rag.TopicSearchResult)
 			return ok
@@ -83,6 +89,16 @@ func GetFuncMap() template.FuncMap {
 				return jsonStr
 			}
 			return string(pretty)
+		},
+		// jsString safely encodes a string for use in JavaScript.
+		// It wraps the string in JSON encoding which handles all escaping.
+		"jsString": func(s string) template.JS {
+			// Use JSON encoding to properly escape the string
+			encoded, err := json.Marshal(s)
+			if err != nil {
+				return template.JS(`""`) //nolint:gosec // JSON encoding is safe
+			}
+			return template.JS(encoded) //nolint:gosec // JSON encoding is safe
 		},
 	}
 }

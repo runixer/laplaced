@@ -68,14 +68,13 @@ func TestProcessMessageGroup_CompletesOnContextCancel(t *testing.T) {
 	cfg := createTestConfig()
 	cfg.RAG.Enabled = false
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
 		msgRepo:         mockStore,
 		statsRepo:       mockStore,
-		logRepo:         mockStore,
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
@@ -174,14 +173,13 @@ func TestProcessMessageGroup_LLMContextNotCancelled(t *testing.T) {
 	cfg := createTestConfig()
 	cfg.RAG.Enabled = false
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
 		msgRepo:         mockStore,
 		statsRepo:       mockStore,
-		logRepo:         mockStore,
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
@@ -275,14 +273,13 @@ func TestProcessMessageGroup_VoiceCompletesOnContextCancel(t *testing.T) {
 	cfg := createTestConfig()
 	cfg.RAG.Enabled = false
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
 		msgRepo:         mockStore,
 		statsRepo:       mockStore,
-		logRepo:         mockStore,
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
@@ -380,14 +377,13 @@ func TestProcessMessageGroup_VoiceDownloadContextNotCancelled(t *testing.T) {
 	cfg := createTestConfig()
 	cfg.RAG.Enabled = false
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
 		msgRepo:         mockStore,
 		statsRepo:       mockStore,
-		logRepo:         mockStore,
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,

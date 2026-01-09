@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/jobtype"
@@ -112,12 +113,11 @@ type Service struct {
 	factRepo             storage.FactRepository
 	factHistoryRepo      storage.FactHistoryRepository
 	msgRepo              storage.MessageRepository
-	logRepo              storage.LogRepository
-	rerankerLogRepo      storage.RerankerLogRepository
 	maintenanceRepo      storage.MaintenanceRepository
 	client               openrouter.Client
 	memoryService        *memory.Service
 	translator           *i18n.Translator
+	agentLogger          *agentlog.Logger
 	topicVectors         map[int64][]TopicVectorItem // UserID -> []TopicVectorItem
 	factVectors          map[int64][]FactVectorItem  // UserID -> []FactVectorItem
 	maxLoadedTopicID     int64                       // Track max loaded topic ID for incremental loading
@@ -128,7 +128,7 @@ type Service struct {
 	wg                   sync.WaitGroup
 }
 
-func NewService(logger *slog.Logger, cfg *config.Config, topicRepo storage.TopicRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, msgRepo storage.MessageRepository, logRepo storage.LogRepository, rerankerLogRepo storage.RerankerLogRepository, maintenanceRepo storage.MaintenanceRepository, client openrouter.Client, memoryService *memory.Service, translator *i18n.Translator) *Service {
+func NewService(logger *slog.Logger, cfg *config.Config, topicRepo storage.TopicRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, msgRepo storage.MessageRepository, maintenanceRepo storage.MaintenanceRepository, client openrouter.Client, memoryService *memory.Service, translator *i18n.Translator) *Service {
 	return &Service{
 		logger:               logger.With("component", "rag"),
 		cfg:                  cfg,
@@ -136,8 +136,6 @@ func NewService(logger *slog.Logger, cfg *config.Config, topicRepo storage.Topic
 		factRepo:             factRepo,
 		factHistoryRepo:      factHistoryRepo,
 		msgRepo:              msgRepo,
-		logRepo:              logRepo,
-		rerankerLogRepo:      rerankerLogRepo,
 		maintenanceRepo:      maintenanceRepo,
 		client:               client,
 		memoryService:        memoryService,
@@ -147,6 +145,10 @@ func NewService(logger *slog.Logger, cfg *config.Config, topicRepo storage.Topic
 		stopChan:             make(chan struct{}),
 		consolidationTrigger: make(chan struct{}, 1),
 	}
+}
+
+func (s *Service) SetAgentLogger(logger *agentlog.Logger) {
+	s.agentLogger = logger
 }
 
 func (s *Service) Start(ctx context.Context) error {
@@ -522,11 +524,33 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		if contextualizedQuery == "" {
 			contextualizedQuery = query
 		}
-		// Load user profile for reranker context
-		userProfile := s.formatUserProfileForReranker(ctx, userID)
+
+		// Load user profile for reranker context (unified format with tags)
+		allFacts, err := s.factRepo.GetFacts(userID)
+		var userProfile string
+		if err == nil {
+			userProfile = FormatUserProfile(FilterProfileFacts(allFacts))
+		} else {
+			s.logger.Warn("failed to load facts for reranker", "error", err)
+			userProfile = FormatUserProfile(nil)
+		}
+
+		// Load recent topics for reranker context
+		var recentTopics string
+		recentTopicsCount := s.cfg.RAG.GetRecentTopicsInContext()
+		if recentTopicsCount > 0 {
+			topics, err := s.GetRecentTopics(userID, recentTopicsCount)
+			if err != nil {
+				s.logger.Warn("failed to get recent topics for reranker", "error", err)
+			}
+			recentTopics = FormatRecentTopics(topics)
+		} else {
+			recentTopics = FormatRecentTopics(nil)
+		}
+
 		// Format current session messages for reranker
 		currentMessages := s.formatSessionMessages(opts.History)
-		result, err := s.rerankCandidates(ctx, userID, candidates, contextualizedQuery, query, currentMessages, userProfile, opts.MediaParts)
+		result, err := s.rerankCandidates(ctx, userID, candidates, contextualizedQuery, query, currentMessages, userProfile, recentTopics, opts.MediaParts)
 		if err != nil {
 			s.logger.Warn("reranker failed, falling back to vector search", "error", err)
 			RecordRerankerFallback(userID, "error")
@@ -1558,6 +1582,31 @@ func (s *Service) FindSimilarFacts(ctx context.Context, userID int64, embedding 
 }
 
 func (s *Service) extractTopics(ctx context.Context, userID int64, chunk []storage.Message) ([]ExtractedTopic, UsageInfo, error) {
+	startTime := time.Now()
+
+	// Load user profile for context (unified format with tags)
+	allFacts, err := s.factRepo.GetFacts(userID)
+	var profile string
+	if err == nil {
+		profile = FormatUserProfile(FilterProfileFacts(allFacts))
+	} else {
+		s.logger.Warn("failed to load facts for splitter", "error", err)
+		profile = FormatUserProfile(nil)
+	}
+
+	// Load recent topics for context
+	var recentTopics string
+	recentTopicsCount := s.cfg.RAG.GetRecentTopicsInContext()
+	if recentTopicsCount > 0 {
+		topics, err := s.GetRecentTopics(userID, recentTopicsCount)
+		if err != nil {
+			s.logger.Warn("failed to get recent topics for splitter", "error", err)
+		}
+		recentTopics = FormatRecentTopics(topics)
+	} else {
+		recentTopics = FormatRecentTopics(nil)
+	}
+
 	// Prepare JSON
 	type MsgItem struct {
 		ID      int64  `json:"id"`
@@ -1576,9 +1625,12 @@ func (s *Service) extractTopics(ctx context.Context, userID int64, chunk []stora
 	}
 	itemsBytes, _ := json.Marshal(items)
 
-	prompt := s.translator.Get(s.cfg.Bot.Language, "rag.topic_extraction_prompt")
+	// Build system prompt with profile and recent topics (empty goal for regular mode)
+	promptTmpl := s.translator.Get(s.cfg.Bot.Language, "rag.topic_extraction_prompt")
+	systemPrompt := fmt.Sprintf(promptTmpl, profile, recentTopics, "") // %[3]s = empty goal
 
-	fullPrompt := fmt.Sprintf("%s\n\nChat Log JSON:\n%s", prompt, string(itemsBytes))
+	// User message is just the chat log
+	userMessage := fmt.Sprintf("Chat Log JSON:\n%s", string(itemsBytes))
 
 	model := s.cfg.Agents.Archivist.GetModel(s.cfg.Agents.Default.Model)
 
@@ -1623,12 +1675,17 @@ func (s *Service) extractTopics(ctx context.Context, userID int64, chunk []stora
 	resp, err := s.client.CreateChatCompletion(ctx, openrouter.ChatCompletionRequest{
 		Model: model,
 		Messages: []openrouter.Message{
-			{Role: "user", Content: fullPrompt},
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userMessage},
 		},
 		ResponseFormat: schema,
 		UserID:         userID,
 	})
 	if err != nil {
+		durationMs := int(time.Since(startTime).Milliseconds())
+		if s.agentLogger != nil {
+			s.agentLogger.LogError(ctx, userID, agentlog.AgentSplitter, systemPrompt, nil, err.Error(), model, durationMs, nil)
+		}
 		return nil, UsageInfo{}, err
 	}
 
@@ -1644,27 +1701,24 @@ func (s *Service) extractTopics(ctx context.Context, userID int64, chunk []stora
 	}
 
 	content := resp.Choices[0].Message.Content
+	duration := time.Since(startTime)
 
-	// Log to DB for debugging
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		userID := int64(0)
-		if len(chunk) > 0 {
-			userID = chunk[0].UserID
-		}
-		log := storage.RAGLog{
+	// Log to agent_logs for debugging
+	if s.agentLogger != nil {
+		s.agentLogger.Log(ctx, agentlog.Entry{
 			UserID:           userID,
-			OriginalQuery:    "Topic Extraction",
-			ContextUsed:      string(itemsBytes),
-			SystemPrompt:     fullPrompt,
-			LLMResponse:      content,
-			GenerationTokens: resp.Usage.PromptTokens + resp.Usage.CompletionTokens,
-		}
-		if err := s.logRepo.AddRAGLog(log); err != nil {
-			s.logger.Error("failed to log topic extraction", "error", err)
-		}
-	}()
+			AgentType:        agentlog.AgentSplitter,
+			InputPrompt:      systemPrompt, // System prompt for display
+			InputContext:     resp.DebugRequestBody,
+			OutputResponse:   content,
+			Model:            model,
+			PromptTokens:     resp.Usage.PromptTokens,
+			CompletionTokens: resp.Usage.CompletionTokens,
+			TotalCost:        resp.Usage.Cost,
+			DurationMs:       int(duration.Milliseconds()),
+			Success:          true,
+		})
+	}
 
 	var result struct {
 		Topics []ExtractedTopic `json:"topics"`
@@ -1677,9 +1731,34 @@ func (s *Service) extractTopics(ctx context.Context, userID int64, chunk []stora
 }
 
 func (s *Service) enrichQuery(ctx context.Context, userID int64, query string, history []storage.Message, mediaParts []interface{}) (string, string, int, error) {
+	startTime := time.Now()
+
 	model := s.cfg.Agents.Enricher.GetModel(s.cfg.Agents.Default.Model)
 	if model == "" {
 		return query, "", 0, nil
+	}
+
+	// Load user profile for context (unified format with tags)
+	allFacts, err := s.factRepo.GetFacts(userID)
+	var profile string
+	if err == nil {
+		profile = FormatUserProfile(FilterProfileFacts(allFacts))
+	} else {
+		s.logger.Warn("failed to load facts for enricher", "error", err)
+		profile = FormatUserProfile(nil)
+	}
+
+	// Load recent topics for context
+	var recentTopics string
+	recentTopicsCount := s.cfg.RAG.GetRecentTopicsInContext()
+	if recentTopicsCount > 0 {
+		topics, err := s.GetRecentTopics(userID, recentTopicsCount)
+		if err != nil {
+			s.logger.Warn("failed to get recent topics for enricher", "error", err)
+		}
+		recentTopics = FormatRecentTopics(topics)
+	} else {
+		recentTopics = FormatRecentTopics(nil)
 	}
 
 	var historyStr strings.Builder
@@ -1692,12 +1771,16 @@ func (s *Service) enrichQuery(ctx context.Context, userID int64, query string, h
 		historyStr.WriteString(fmt.Sprintf("- [%s]: %s\n", msg.Role, content))
 	}
 
-	promptTmpl := s.translator.Get(s.cfg.Bot.Language, "rag.enrichment_prompt")
+	// Build system prompt with date, profile and recent topics
+	systemPromptTmpl := s.translator.Get(s.cfg.Bot.Language, "rag.enrichment_system_prompt")
+	systemPrompt := fmt.Sprintf(systemPromptTmpl, time.Now().Format("2006-01-02"), profile, recentTopics)
 
-	prompt := fmt.Sprintf(promptTmpl, time.Now().Format("2006-01-02"), historyStr.String(), query)
+	// Build user message with history and query
+	userPromptTmpl := s.translator.Get(s.cfg.Bot.Language, "rag.enrichment_user_prompt")
+	userMessage := fmt.Sprintf(userPromptTmpl, historyStr.String(), query)
 
-	// Build message content - multimodal if mediaParts provided
-	var messageContent interface{}
+	// Build user message content - multimodal if mediaParts provided
+	var userContent interface{}
 	if len(mediaParts) > 0 {
 		// Add media description instruction for multimodal queries
 		mediaInstruction := s.translator.Get(s.cfg.Bot.Language, "rag.enrichment_media_instruction")
@@ -1707,30 +1790,53 @@ func (s *Service) enrichQuery(ctx context.Context, userID int64, query string, h
 
 		// Build multimodal content: text prompt + media parts
 		parts := []interface{}{
-			openrouter.TextPart{Type: "text", Text: prompt + "\n\n" + mediaInstruction},
+			openrouter.TextPart{Type: "text", Text: userMessage + "\n\n" + mediaInstruction},
 		}
 		parts = append(parts, mediaParts...)
-		messageContent = parts
+		userContent = parts
 	} else {
-		messageContent = prompt
+		userContent = userMessage
 	}
 
 	resp, err := s.client.CreateChatCompletion(ctx, openrouter.ChatCompletionRequest{
 		Model: model,
 		Messages: []openrouter.Message{
-			{Role: "user", Content: messageContent},
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userContent},
 		},
 		UserID: userID,
 	})
+	durationMs := int(time.Since(startTime).Milliseconds())
+
 	if err != nil {
-		return "", prompt, 0, err
+		if s.agentLogger != nil {
+			s.agentLogger.LogError(ctx, userID, agentlog.AgentEnricher, systemPrompt, nil, err.Error(), model, durationMs, nil)
+		}
+		return "", systemPrompt, 0, err
 	}
 	if len(resp.Choices) == 0 {
-		return "", prompt, 0, fmt.Errorf("empty response")
+		if s.agentLogger != nil {
+			s.agentLogger.LogError(ctx, userID, agentlog.AgentEnricher, systemPrompt, resp.DebugRequestBody, "empty response", model, durationMs, nil)
+		}
+		return "", systemPrompt, 0, fmt.Errorf("empty response")
 	}
 
 	tokens := resp.Usage.PromptTokens + resp.Usage.CompletionTokens
-	return strings.TrimSpace(resp.Choices[0].Message.Content), prompt, tokens, nil
+	enrichedQuery := strings.TrimSpace(resp.Choices[0].Message.Content)
+
+	// Log success
+	if s.agentLogger != nil {
+		s.agentLogger.LogSuccess(ctx, userID, agentlog.AgentEnricher, systemPrompt, resp.DebugRequestBody,
+			enrichedQuery, nil, model,
+			resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.Cost, durationMs,
+			map[string]interface{}{
+				"original_query":  query,
+				"enriched_query":  enrichedQuery,
+				"query_expansion": len(enrichedQuery) - len(query),
+			})
+	}
+
+	return enrichedQuery, systemPrompt, tokens, nil
 }
 
 func cosineSimilarity(a, b []float32) float32 {

@@ -67,13 +67,6 @@ type FactHistoryRepository interface {
 	GetFactHistoryExtended(filter FactHistoryFilter, limit, offset int, sortBy, sortDir string) (FactHistoryResult, error)
 }
 
-// LogRepository handles RAG log operations.
-type LogRepository interface {
-	AddRAGLog(log RAGLog) error
-	GetRAGLogs(userID int64, limit int) ([]RAGLog, error)
-	GetTopicExtractionLogs(limit, offset int) ([]RAGLog, int, error)
-}
-
 // StatsRepository handles usage statistics.
 type StatsRepository interface {
 	AddStat(stat Stat) error
@@ -92,8 +85,9 @@ type MaintenanceRepository interface {
 	GetDBSize() (int64, error)
 	GetTableSizes() ([]TableSize, error)
 	CleanupFactHistory(keepPerUser int) (int64, error)
-	CleanupRagLogs(keepPerUser int) (int64, error)
-	CleanupRerankerLogs(keepPerUser int) (int64, error)
+	CleanupAgentLogs(keepPerUserPerAgent int) (int64, error)
+	CountAgentLogs() (int64, error)
+	CountFactHistory() (int64, error)
 
 	// Database health diagnostics
 	CountOrphanedTopics(userID int64) (int, error)
@@ -113,8 +107,9 @@ type MaintenanceRepository interface {
 	Checkpoint() error
 }
 
-// RerankerLogRepository handles reranker debug log operations.
-type RerankerLogRepository interface {
-	AddRerankerLog(log RerankerLog) error
-	GetRerankerLogs(userID int64, limit int) ([]RerankerLog, error)
+// AgentLogRepository handles unified agent debug log operations.
+type AgentLogRepository interface {
+	AddAgentLog(log AgentLog) error
+	GetAgentLogs(agentType string, userID int64, limit int) ([]AgentLog, error)
+	GetAgentLogsExtended(filter AgentLogFilter, limit, offset int) (AgentLogResult, error)
 }

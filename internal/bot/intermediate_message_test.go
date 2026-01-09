@@ -31,14 +31,13 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 		},
 	}
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
 		msgRepo:         mockStore,
 		statsRepo:       mockStore,
-		logRepo:         mockStore,
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,

@@ -45,6 +45,20 @@ func (s *SQLiteStore) GetTableSizes() ([]TableSize, error) {
 	return sizes, rows.Err()
 }
 
+// CountAgentLogs returns the total number of agent_logs records.
+func (s *SQLiteStore) CountAgentLogs() (int64, error) {
+	var count int64
+	err := s.db.QueryRow("SELECT COUNT(*) FROM agent_logs").Scan(&count)
+	return count, err
+}
+
+// CountFactHistory returns the total number of fact_history records.
+func (s *SQLiteStore) CountFactHistory() (int64, error) {
+	var count int64
+	err := s.db.QueryRow("SELECT COUNT(*) FROM fact_history").Scan(&count)
+	return count, err
+}
+
 // CleanupFactHistory removes old fact_history records, keeping only the N most recent per user.
 // Returns the number of deleted rows.
 func (s *SQLiteStore) CleanupFactHistory(keepPerUser int) (int64, error) {
@@ -65,39 +79,20 @@ func (s *SQLiteStore) CleanupFactHistory(keepPerUser int) (int64, error) {
 	return result.RowsAffected()
 }
 
-// CleanupRagLogs removes old rag_logs records, keeping only the N most recent per user.
+// CleanupAgentLogs removes old agent_logs records, keeping only the N most recent per user per agent type.
 // Returns the number of deleted rows.
-func (s *SQLiteStore) CleanupRagLogs(keepPerUser int) (int64, error) {
-	// Delete records that are not in the top N per user (by id DESC)
+func (s *SQLiteStore) CleanupAgentLogs(keepPerUserPerAgent int) (int64, error) {
+	// Delete records that are not in the top N per (user_id, agent_type) group (by id DESC)
 	query := `
-		DELETE FROM rag_logs
+		DELETE FROM agent_logs
 		WHERE id NOT IN (
 			SELECT id FROM (
-				SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY id DESC) as rn
-				FROM rag_logs
+				SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id, agent_type ORDER BY id DESC) as rn
+				FROM agent_logs
 			) WHERE rn <= ?
 		)
 	`
-	result, err := s.db.Exec(query, keepPerUser)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
-// CleanupRerankerLogs removes old reranker_logs records, keeping only the N most recent per user.
-// Returns the number of deleted rows.
-func (s *SQLiteStore) CleanupRerankerLogs(keepPerUser int) (int64, error) {
-	query := `
-		DELETE FROM reranker_logs
-		WHERE id NOT IN (
-			SELECT id FROM (
-				SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY id DESC) as rn
-				FROM reranker_logs
-			) WHERE rn <= ?
-		)
-	`
-	result, err := s.db.Exec(query, keepPerUser)
+	result, err := s.db.Exec(query, keepPerUserPerAgent)
 	if err != nil {
 		return 0, err
 	}

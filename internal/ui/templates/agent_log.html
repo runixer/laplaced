@@ -1,0 +1,878 @@
+{{define "title"}}{{.Data.AgentName}}{{end}}
+
+{{define "styles"}}
+<style>
+    .log-entry { margin-bottom: 1.5rem; }
+    .log-header { cursor: pointer; }
+    .log-header:hover { background-color: #f8f9fa; }
+    .log-content { display: none; }
+    .log-content.show { display: block; }
+    .json-view {
+        background: #f8f9fa;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        font-family: monospace;
+        font-size: 0.85rem;
+        max-height: 400px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+    .response-view {
+        background: #d1e7dd;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        font-size: 0.9rem;
+        max-height: 300px;
+        overflow: auto;
+        white-space: pre-wrap;
+    }
+    .error-badge { background-color: #dc3545; }
+    .success-badge { background-color: #198754; }
+    .metric-card {
+        text-align: center;
+        padding: 0.5rem;
+    }
+    .metric-value {
+        font-size: 1.25rem;
+        font-weight: bold;
+    }
+    .metric-label {
+        font-size: 0.75rem;
+        color: #6c757d;
+    }
+
+    /* OpenRouter Request Viewer */
+    .openrouter-request {
+        background: #fff;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        border: 1px solid #dee2e6;
+    }
+    .or-error {
+        color: #dc3545;
+        padding: 1rem;
+        background: #f8d7da;
+        border-radius: 0.5rem;
+    }
+    .or-header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid #e9ecef;
+        align-items: center;
+    }
+    .or-model-badge {
+        background: linear-gradient(135deg, #6366f1, #8b5cf6);
+        color: white;
+        padding: 0.25rem 0.75rem;
+        border-radius: 1rem;
+        font-weight: 600;
+        font-size: 0.875rem;
+    }
+    .or-badge {
+        padding: 0.2rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.75rem;
+        font-weight: 500;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+    }
+    .or-badge-reasoning { background: #fef3c7; color: #92400e; }
+    .or-badge-format { background: #dbeafe; color: #1e40af; }
+    .or-badge-plugin { background: #f3e8ff; color: #7c3aed; }
+    .or-badge-tools { background: #e0e7ff; color: #4338ca; }
+
+    .or-messages {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+    .or-message {
+        border-radius: 0.5rem;
+        padding: 0.75rem;
+    }
+    .or-message-system {
+        background: #f3f4f6;
+        border-left: 3px solid #9ca3af;
+    }
+    .or-message-user {
+        background: #fef3c7;
+        border-left: 3px solid #f59e0b;
+    }
+    .or-message-assistant {
+        background: #d1fae5;
+        border-left: 3px solid #10b981;
+    }
+    .or-message-tool {
+        background: #dbeafe;
+        border-left: 3px solid #3b82f6;
+    }
+    .or-role {
+        font-weight: 600;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #6b7280;
+        margin-bottom: 0.25rem;
+    }
+    .or-message-content {
+        font-size: 0.9rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 300px;
+        overflow: auto;
+    }
+    .or-message-content.collapsed {
+        display: none;
+    }
+    .or-message-header {
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    .or-preview {
+        color: #9ca3af;
+        font-size: 0.875rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1;
+    }
+    .or-tool-call {
+        background: #f0fdf4;
+        border: 1px solid #86efac;
+        border-radius: 0.375rem;
+        padding: 0.5rem;
+        margin-top: 0.5rem;
+    }
+    .or-tool-badge {
+        background: #22c55e;
+        color: white;
+        font-size: 0.65rem;
+        padding: 0.125rem 0.375rem;
+        border-radius: 0.25rem;
+        text-transform: uppercase;
+    }
+    .or-tool-id {
+        font-size: 0.7rem;
+        color: #6b7280;
+        margin-left: 0.5rem;
+    }
+    .or-tool-args {
+        margin: 0.5rem 0 0 0;
+        font-size: 0.8rem;
+        background: #f8fafc;
+        padding: 0.5rem;
+        border-radius: 0.25rem;
+        max-height: 150px;
+        overflow: auto;
+    }
+    .or-multimodal-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        background: #fef3c7;
+        color: #92400e;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.8rem;
+        margin-bottom: 0.5rem;
+    }
+    .or-image {
+        margin-top: 0.5rem;
+        position: relative;
+        display: inline-block;
+    }
+    .or-image img {
+        max-width: 200px;
+        max-height: 150px;
+        border-radius: 0.375rem;
+        border: 1px solid #e5e7eb;
+    }
+    .or-image-badge {
+        position: absolute;
+        top: 0.25rem;
+        left: 0.25rem;
+        background: rgba(0,0,0,0.6);
+        color: white;
+        font-size: 0.65rem;
+        padding: 0.125rem 0.375rem;
+        border-radius: 0.25rem;
+    }
+    .or-tools-section {
+        margin-top: 1rem;
+        border-top: 1px solid #e9ecef;
+        padding-top: 0.75rem;
+    }
+    .or-section-header {
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 0.875rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        color: #6b7280;
+    }
+    .or-section-content.collapsed {
+        display: none;
+    }
+    .or-tool {
+        background: #f9fafb;
+        padding: 0.5rem;
+        border-radius: 0.375rem;
+        margin-top: 0.5rem;
+    }
+    .or-tool-name {
+        background: #e0e7ff;
+        color: #4338ca;
+        padding: 0.125rem 0.375rem;
+        border-radius: 0.25rem;
+        font-family: monospace;
+    }
+    .or-tool-desc {
+        font-size: 0.8rem;
+        color: #6b7280;
+        margin-top: 0.25rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+    .or-tool-schema {
+        font-size: 0.75rem;
+        background: #fff;
+        padding: 0.5rem;
+        border-radius: 0.25rem;
+        max-height: 200px;
+        overflow: auto;
+        margin: 0.5rem 0 0 0;
+    }
+
+    /* XML Tag Visualization */
+    .or-xml-section {
+        border-radius: 0.5rem;
+        margin: 0.5rem 0;
+        overflow: hidden;
+    }
+    .or-xml-header {
+        cursor: pointer;
+        font-weight: 600;
+        padding: 0.5rem 0.75rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    .or-xml-header i {
+        font-size: 0.7rem;
+        margin-left: auto;
+    }
+    .or-xml-content {
+        padding: 0.75rem;
+        font-size: 0.85rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+        border-top: 1px solid rgba(0,0,0,0.1);
+    }
+    .or-xml-content.collapsed {
+        display: none;
+    }
+    .or-xml-attr {
+        font-size: 0.7rem;
+        padding: 0.125rem 0.375rem;
+        border-radius: 0.25rem;
+        font-weight: 500;
+        text-transform: none;
+        letter-spacing: 0;
+    }
+    .or-xml-plain {
+        padding: 0.5rem 0;
+        font-size: 0.85rem;
+        white-space: pre-wrap;
+        color: #4b5563;
+    }
+
+    /* Tag type colors */
+    .or-xml-role { background: #f3e8ff; border-left: 3px solid #7c3aed; }
+    .or-xml-role .or-xml-header { color: #7c3aed; }
+    .or-xml-role .or-xml-attr { background: #7c3aed; color: white; }
+
+    .or-xml-critical { background: #fee2e2; border-left: 3px solid #dc2626; }
+    .or-xml-critical .or-xml-header { color: #dc2626; }
+    .or-xml-critical .or-xml-attr { background: #dc2626; color: white; }
+
+    .or-xml-process { background: #dbeafe; border-left: 3px solid #3b82f6; }
+    .or-xml-process .or-xml-header { color: #3b82f6; }
+    .or-xml-process .or-xml-attr { background: #3b82f6; color: white; }
+
+    .or-xml-data { background: #fef3c7; border-left: 3px solid #f59e0b; }
+    .or-xml-data .or-xml-header { color: #92400e; }
+    .or-xml-data .or-xml-attr { background: #f59e0b; color: white; }
+
+    .or-xml-constraints { background: #f3f4f6; border-left: 3px solid #6b7280; }
+    .or-xml-constraints .or-xml-header { color: #6b7280; }
+    .or-xml-constraints .or-xml-attr { background: #6b7280; color: white; }
+
+    .or-xml-output { background: #d1fae5; border-left: 3px solid #10b981; }
+    .or-xml-output .or-xml-header { color: #10b981; }
+    .or-xml-output .or-xml-attr { background: #10b981; color: white; }
+
+    .or-xml-default { background: #f9fafb; border-left: 3px solid #9ca3af; }
+    .or-xml-default .or-xml-header { color: #6b7280; }
+    .or-xml-default .or-xml-attr { background: #9ca3af; color: white; }
+
+    /* Nested XML sections (e.g., topics inside retrieved_context) */
+    .or-xml-section .or-xml-section {
+        margin: 0.25rem 0;
+        border-radius: 0.375rem;
+    }
+    .or-xml-content > .or-xml-section:first-child {
+        margin-top: 0;
+    }
+    .or-xml-content > .or-xml-section:last-child {
+        margin-bottom: 0;
+    }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="container-fluid">
+    <div class="row mb-3">
+        <div class="col">
+            <h4><i class="bi bi-{{.Data.AgentIcon}}"></i> {{.Data.AgentName}} Agent Logs</h4>
+            <p class="text-muted">{{.Data.AgentDescription}}</p>
+        </div>
+    </div>
+
+    {{if not .Data.Logs}}
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle"></i> No logs yet. Agent logs will appear here when {{.Data.AgentName}} processes requests.
+    </div>
+    {{else}}
+
+    {{range $idx, $log := .Data.Logs}}
+    <div class="card log-entry">
+        <div class="card-header log-header d-flex justify-content-between align-items-center" onclick="toggleLog({{$idx}})">
+            <div>
+                <span class="badge {{if $log.Success}}success-badge{{else}}error-badge{{end}} me-2">
+                    {{if $log.Success}}OK{{else}}ERROR{{end}}
+                </span>
+                <span class="text-muted">{{$log.CreatedAt.Format "2006-01-02 15:04:05"}}</span>
+                {{if $log.Model}}
+                <span class="badge bg-secondary ms-2">{{$log.Model}}</span>
+                {{end}}
+            </div>
+            <div class="d-flex align-items-center">
+                {{if $log.DurationMs}}
+                <div class="metric-card me-3">
+                    <div class="metric-value">{{$log.DurationMs}}ms</div>
+                    <div class="metric-label">Duration</div>
+                </div>
+                {{end}}
+                {{if $log.PromptTokens}}
+                <div class="metric-card me-3">
+                    <div class="metric-value">{{$log.PromptTokens}}</div>
+                    <div class="metric-label">Prompt</div>
+                </div>
+                {{end}}
+                {{if $log.CompletionTokens}}
+                <div class="metric-card me-3">
+                    <div class="metric-value">{{$log.CompletionTokens}}</div>
+                    <div class="metric-label">Completion</div>
+                </div>
+                {{end}}
+                {{if $log.TotalCost}}
+                <div class="metric-card">
+                    <div class="metric-value">${{printf "%.4f" (deref $log.TotalCost)}}</div>
+                    <div class="metric-label">Cost</div>
+                </div>
+                {{end}}
+                <i class="bi bi-chevron-down ms-3"></i>
+            </div>
+        </div>
+        <div class="card-body log-content" id="log-{{$idx}}">
+            {{if not $log.Success}}
+            <div class="alert alert-danger">
+                <strong>Error:</strong> {{$log.ErrorMessage}}
+            </div>
+            {{end}}
+
+            {{if $log.InputContext}}
+            <div class="mb-3">
+                <h6>
+                    API Request
+                    <button class="btn btn-sm btn-outline-secondary ms-2" onclick="toggleRawJSON({{$idx}}); event.stopPropagation();">
+                        <i class="bi bi-code"></i> Raw JSON
+                    </button>
+                </h6>
+                <div class="openrouter-request" id="or-request-{{$idx}}"></div>
+                <div class="json-view mt-2" id="or-raw-{{$idx}}" style="display: none;">{{$log.InputContext | prettyJSON}}</div>
+            </div>
+            {{end}}
+
+            <div class="mb-3">
+                <h6>Output Response</h6>
+                <div class="response-view">{{if $log.OutputResponse}}{{$log.OutputResponse}}{{else}}<em>No response</em>{{end}}</div>
+            </div>
+
+            {{if $log.OutputParsed}}
+            <div class="mb-3">
+                <h6>Parsed Output <small class="text-muted">(JSON)</small></h6>
+                <div class="json-view">{{$log.OutputParsed | prettyJSON}}</div>
+            </div>
+            {{end}}
+
+            {{if $log.Metadata}}
+            <div class="mb-3">
+                <h6>Metadata <small class="text-muted">(JSON)</small></h6>
+                <div class="json-view">{{$log.Metadata | prettyJSON}}</div>
+            </div>
+            {{end}}
+        </div>
+    </div>
+    {{end}}
+
+    {{end}}
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+function toggleLog(idx) {
+    const content = document.getElementById('log-' + idx);
+    content.classList.toggle('show');
+}
+
+function toggleRawJSON(idx) {
+    const raw = document.getElementById('or-raw-' + idx);
+    const request = document.getElementById('or-request-' + idx);
+    if (raw.style.display === 'none') {
+        raw.style.display = 'block';
+        request.style.display = 'none';
+    } else {
+        raw.style.display = 'none';
+        request.style.display = 'block';
+    }
+}
+
+function toggleORMessage(header) {
+    const content = header.nextElementSibling;
+    const icon = header.querySelector('i.bi');
+    content.classList.toggle('collapsed');
+    if (icon) {
+        icon.classList.toggle('bi-chevron-down');
+        icon.classList.toggle('bi-chevron-up');
+    }
+}
+
+function toggleORSection(header) {
+    const content = header.nextElementSibling;
+    const icon = header.querySelector('i.bi');
+    content.classList.toggle('collapsed');
+    if (icon) {
+        icon.classList.toggle('bi-chevron-down');
+        icon.classList.toggle('bi-chevron-up');
+    }
+}
+
+class OpenRouterRequestViewer {
+    constructor(containerId, jsonString) {
+        this.container = document.getElementById(containerId);
+        this.data = null;
+
+        try {
+            this.data = JSON.parse(jsonString);
+        } catch (e) {
+            this.container.innerHTML = '<div class="or-error"><i class="bi bi-exclamation-triangle"></i> Invalid JSON: ' + this.escapeHtml(e.message) + '</div>';
+            return;
+        }
+
+        this.render();
+    }
+
+    render() {
+        const html = `
+            ${this.renderHeader()}
+            ${this.renderMessages()}
+            ${this.renderTools()}
+        `;
+        this.container.innerHTML = html;
+    }
+
+    renderHeader() {
+        const badges = [];
+
+        const modelName = this.data.model || 'unknown';
+        const modelDisplay = modelName.split('/').pop();
+
+        if (this.data.reasoning && this.data.reasoning.enabled) {
+            const effort = this.data.reasoning.effort || 'default';
+            badges.push('<span class="or-badge or-badge-reasoning"><i class="bi bi-lightbulb"></i> reasoning: ' + this.escapeHtml(effort) + '</span>');
+        }
+
+        if (this.data.response_format) {
+            const formatType = this.data.response_format.type || '';
+            if (formatType === 'json_schema') {
+                const schemaName = (this.data.response_format.json_schema && this.data.response_format.json_schema.name) || 'JSON';
+                badges.push('<span class="or-badge or-badge-format"><i class="bi bi-braces"></i> ' + this.escapeHtml(schemaName) + '</span>');
+            } else if (formatType === 'json_object') {
+                badges.push('<span class="or-badge or-badge-format"><i class="bi bi-braces"></i> JSON</span>');
+            }
+        }
+
+        if (this.data.plugins && this.data.plugins.length) {
+            this.data.plugins.forEach(p => {
+                badges.push('<span class="or-badge or-badge-plugin"><i class="bi bi-plug"></i> ' + this.escapeHtml(p.id || 'plugin') + '</span>');
+            });
+        }
+
+        if (this.data.tools && this.data.tools.length) {
+            badges.push('<span class="or-badge or-badge-tools"><i class="bi bi-tools"></i> ' + this.data.tools.length + ' tools</span>');
+        }
+
+        return '<div class="or-header"><span class="or-model-badge">' + this.escapeHtml(modelDisplay) + '</span>' + badges.join('') + '</div>';
+    }
+
+    renderMessages() {
+        if (!this.data.messages || !this.data.messages.length) {
+            return '<div class="text-muted">No messages</div>';
+        }
+
+        let html = '<div class="or-messages">';
+        for (let i = 0; i < this.data.messages.length; i++) {
+            html += this.renderMessage(this.data.messages[i], i);
+        }
+        html += '</div>';
+        return html;
+    }
+
+    renderMessage(msg, idx) {
+        const role = msg.role || 'unknown';
+
+        if (role === 'system') {
+            return this.renderSystemMessage(msg, idx);
+        }
+
+        if (role === 'tool') {
+            return this.renderToolMessage(msg);
+        }
+
+        if (role === 'user') {
+            return this.renderUserMessage(msg, idx);
+        }
+
+        const roleClass = 'or-message-' + role;
+        const contentHtml = this.renderContent(msg.content);
+        const toolCallsHtml = (msg.tool_calls && msg.tool_calls.length) ? this.renderToolCalls(msg.tool_calls) : '';
+
+        return '<div class="or-message ' + roleClass + '"><div class="or-role">' + this.escapeHtml(role) + '</div><div class="or-message-content">' + contentHtml + toolCallsHtml + '</div></div>';
+    }
+
+    renderUserMessage(msg, idx) {
+        const content = this.getTextContent(msg.content);
+        const hasXmlTags = /<\w+[^>]*>[\s\S]*?<\/\w+>/g.test(content);
+
+        // If content has XML tags (like RAG context), visualize them
+        if (hasXmlTags) {
+            const preview = content.substring(0, 120).replace(/<[^>]*>/g, '').trim() + (content.length > 120 ? '...' : '');
+            const contentHtml = this.renderMessageWithTags(content);
+
+            return '<div class="or-message or-message-user">' +
+                '<div class="or-message-header" onclick="toggleORMessage(this)">' +
+                    '<span class="or-role">User</span>' +
+                    '<span class="or-preview">' + this.escapeHtml(preview) + '</span>' +
+                    '<i class="bi bi-chevron-down"></i>' +
+                '</div>' +
+                '<div class="or-message-content collapsed">' + contentHtml + '</div>' +
+            '</div>';
+        }
+
+        // For multimodal content or simple text, render normally
+        const contentHtml = this.renderContent(msg.content);
+        return '<div class="or-message or-message-user">' +
+            '<div class="or-role">User</div>' +
+            '<div class="or-message-content">' + contentHtml + '</div>' +
+        '</div>';
+    }
+
+    renderMessageWithTags(content) {
+        // Same as renderSystemMessageWithTags but for any message
+        const tagRegex = /<(\w+)([^>]*)>([\s\S]*?)<\/\1>/g;
+
+        let html = '';
+        let lastIndex = 0;
+        let match;
+
+        while ((match = tagRegex.exec(content)) !== null) {
+            const beforeText = content.substring(lastIndex, match.index).trim();
+            if (beforeText) {
+                html += '<div class="or-xml-plain">' + this.escapeHtml(beforeText) + '</div>';
+            }
+
+            const tagName = match[1];
+            const attrString = match[2];
+            const tagContent = match[3].trim();
+
+            const colorClass = this.getTagColorClass(tagName);
+            const attrs = this.parseAttributes(attrString);
+            const isLong = tagContent.length > 200;
+
+            let attrHtml = '';
+            for (const [key, value] of Object.entries(attrs)) {
+                attrHtml += '<span class="or-xml-attr">' + this.escapeHtml(key) + ': ' + this.escapeHtml(value) + '</span>';
+            }
+
+            // For nested tags (like <topic> inside <retrieved_context>), render recursively
+            const hasNestedTags = /<\w+[^>]*>[\s\S]*?<\/\w+>/g.test(tagContent);
+            const innerHtml = hasNestedTags
+                ? this.renderMessageWithTags(tagContent)
+                : this.escapeHtml(tagContent);
+
+            html += '<div class="or-xml-section ' + colorClass + '">' +
+                '<div class="or-xml-header" onclick="toggleORSection(this)">' +
+                    '<span>' + this.escapeHtml(tagName) + '</span>' +
+                    attrHtml +
+                    (isLong || hasNestedTags ? '<i class="bi bi-chevron-down"></i>' : '') +
+                '</div>' +
+                '<div class="or-xml-content' + (isLong ? ' collapsed' : '') + '">' + innerHtml + '</div>' +
+            '</div>';
+
+            lastIndex = match.index + match[0].length;
+        }
+
+        const afterText = content.substring(lastIndex).trim();
+        if (afterText) {
+            html += '<div class="or-xml-plain">' + this.escapeHtml(afterText) + '</div>';
+        }
+
+        return html || '<pre>' + this.escapeHtml(content) + '</pre>';
+    }
+
+    renderSystemMessage(msg, idx) {
+        const content = this.getTextContent(msg.content);
+        const preview = content.substring(0, 120).replace(/<[^>]*>/g, '').trim() + (content.length > 120 ? '...' : '');
+
+        // Check if content has XML-like tags
+        const hasXmlTags = /<\w+[^>]*>[\s\S]*?<\/\w+>/g.test(content);
+
+        const contentHtml = hasXmlTags
+            ? this.renderSystemMessageWithTags(content)
+            : '<pre>' + this.escapeHtml(content) + '</pre>';
+
+        return '<div class="or-message or-message-system">' +
+            '<div class="or-message-header" onclick="toggleORMessage(this)">' +
+                '<span class="or-role">System</span>' +
+                '<span class="or-preview">' + this.escapeHtml(preview) + '</span>' +
+                '<i class="bi bi-chevron-down"></i>' +
+            '</div>' +
+            '<div class="or-message-content collapsed">' + contentHtml + '</div>' +
+        '</div>';
+    }
+
+    renderSystemMessageWithTags(content) {
+        // Reuse the shared method for XML tag rendering
+        return this.renderMessageWithTags(content);
+    }
+
+    getTagColorClass(tagName) {
+        const colors = {
+            // Identity tags (purple)
+            'role': 'or-xml-role',
+            'topic_definition': 'or-xml-role',
+            // Critical rules (red)
+            'critical_rules': 'or-xml-critical',
+            'truth_protocol': 'or-xml-critical',
+            'limit_exceeded': 'or-xml-critical',
+            // Process tags (blue)
+            'algorithm': 'or-xml-process',
+            'task': 'or-xml-process',
+            'goal': 'or-xml-process',
+            'tools_protocol': 'or-xml-process',
+            'instructions': 'or-xml-process',
+            // Data tags (amber)
+            'user_profile': 'or-xml-data',
+            'recent_topics': 'or-xml-data',
+            'topics': 'or-xml-data',
+            'context': 'or-xml-data',
+            'current_facts': 'or-xml-data',
+            'conversation': 'or-xml-data',
+            'memory_layers': 'or-xml-data',
+            'retrieved_context': 'or-xml-data',
+            'topic': 'or-xml-data',
+            // Constraints tags (gray)
+            'constraints': 'or-xml-constraints',
+            'rules': 'or-xml-constraints',
+            'summary': 'or-xml-constraints',
+            'content': 'or-xml-constraints',
+            // Output tags (green)
+            'output': 'or-xml-output',
+            'output_format': 'or-xml-output'
+        };
+        return colors[tagName.toLowerCase()] || 'or-xml-default';
+    }
+
+    parseAttributes(attrString) {
+        const attrs = {};
+        const regex = /(\w+)="([^"]*)"/g;
+        let match;
+        while ((match = regex.exec(attrString)) !== null) {
+            attrs[match[1]] = match[2];
+        }
+        return attrs;
+    }
+
+    renderToolMessage(msg) {
+        const content = this.getTextContent(msg.content);
+        const toolCallId = msg.tool_call_id || '';
+
+        let displayContent = content;
+        try {
+            const parsed = JSON.parse(content);
+            displayContent = JSON.stringify(parsed, null, 2);
+        } catch (e) {}
+
+        return '<div class="or-message or-message-tool">' +
+            '<div class="or-role">Tool Result' + (toolCallId ? ' <code class="or-tool-id">' + this.escapeHtml(toolCallId) + '</code>' : '') + '</div>' +
+            '<div class="or-message-content"><pre>' + this.escapeHtml(displayContent) + '</pre></div>' +
+        '</div>';
+    }
+
+    renderContent(content) {
+        if (typeof content === 'string') {
+            return '<div class="or-text">' + this.escapeHtml(content) + '</div>';
+        }
+
+        if (Array.isArray(content)) {
+            let html = '';
+            for (let i = 0; i < content.length; i++) {
+                html += this.renderContentPart(content[i]);
+            }
+            return html;
+        }
+
+        return '<pre>' + this.escapeHtml(JSON.stringify(content, null, 2)) + '</pre>';
+    }
+
+    renderContentPart(part) {
+        if (!part || typeof part !== 'object') {
+            return '';
+        }
+
+        const type = part.type;
+
+        if (type === 'text') {
+            return '<div class="or-text">' + this.escapeHtml(part.text || '') + '</div>';
+        }
+
+        if (type === 'image_url') {
+            const url = (part.image_url && part.image_url.url) || '';
+            if (url.startsWith('data:image')) {
+                return '<div class="or-image"><img src="' + url + '" alt="Uploaded image" /><span class="or-image-badge"><i class="bi bi-image"></i> Image</span></div>';
+            } else {
+                const truncUrl = url.length > 50 ? url.substring(0, 50) + '...' : url;
+                return '<div class="or-multimodal-badge"><i class="bi bi-image"></i> Image URL: <code>' + this.escapeHtml(truncUrl) + '</code></div>';
+            }
+        }
+
+        if (type === 'input_audio') {
+            const format = (part.input_audio && part.input_audio.format) || 'audio';
+            return '<div class="or-multimodal-badge"><i class="bi bi-mic"></i> Audio (' + this.escapeHtml(format) + ')</div>';
+        }
+
+        if (type === 'file' || type === 'document') {
+            return '<div class="or-multimodal-badge"><i class="bi bi-file-earmark"></i> Document</div>';
+        }
+
+        return '<pre>' + this.escapeHtml(JSON.stringify(part, null, 2)) + '</pre>';
+    }
+
+    renderToolCalls(toolCalls) {
+        let html = '';
+        for (let i = 0; i < toolCalls.length; i++) {
+            const tc = toolCalls[i];
+            const name = (tc.function && tc.function.name) || 'unknown';
+            let args = (tc.function && tc.function.arguments) || '{}';
+
+            try {
+                args = JSON.stringify(JSON.parse(args), null, 2);
+            } catch (e) {}
+
+            html += '<div class="or-tool-call">' +
+                '<span class="or-tool-badge"><i class="bi bi-gear"></i> Tool Call</span> ' +
+                '<code>' + this.escapeHtml(name) + '</code>' +
+                (tc.id ? '<span class="or-tool-id">' + this.escapeHtml(tc.id) + '</span>' : '') +
+                '<pre class="or-tool-args">' + this.escapeHtml(args) + '</pre>' +
+            '</div>';
+        }
+        return html;
+    }
+
+    renderTools() {
+        if (!this.data.tools || !this.data.tools.length) {
+            return '';
+        }
+
+        let toolsHtml = '';
+        for (let i = 0; i < this.data.tools.length; i++) {
+            const tool = this.data.tools[i];
+            const fn = tool.function || {};
+            const name = fn.name || 'unknown';
+            const desc = fn.description || '';
+            const params = fn.parameters ? JSON.stringify(fn.parameters, null, 2) : '{}';
+
+            toolsHtml += '<div class="or-tool">' +
+                '<code class="or-tool-name">' + this.escapeHtml(name) + '</code>' +
+                '<div class="or-tool-desc">' + this.escapeHtml(desc) + '</div>' +
+                '<details><summary style="font-size: 0.75rem; cursor: pointer; color: #6b7280; margin-top: 0.25rem;">Parameters</summary>' +
+                '<pre class="or-tool-schema">' + this.escapeHtml(params) + '</pre></details>' +
+            '</div>';
+        }
+
+        return '<div class="or-tools-section">' +
+            '<div class="or-section-header" onclick="toggleORSection(this)">' +
+                '<span><i class="bi bi-tools"></i> Available Tools (' + this.data.tools.length + ')</span>' +
+                '<i class="bi bi-chevron-down"></i>' +
+            '</div>' +
+            '<div class="or-section-content collapsed">' + toolsHtml + '</div>' +
+        '</div>';
+    }
+
+    getTextContent(content) {
+        if (typeof content === 'string') {
+            return content;
+        }
+        if (Array.isArray(content)) {
+            let text = '';
+            for (let i = 0; i < content.length; i++) {
+                if (content[i].type === 'text') {
+                    text += (content[i].text || '') + '\n';
+                }
+            }
+            return text.trim();
+        }
+        return JSON.stringify(content);
+    }
+
+    escapeHtml(text) {
+        if (text === null || text === undefined) return '';
+        const div = document.createElement('div');
+        div.textContent = String(text);
+        return div.innerHTML;
+    }
+}
+
+// Initialize viewers on page load
+document.addEventListener('DOMContentLoaded', function() {
+    {{range $idx, $log := .Data.Logs}}
+    {{if $log.InputContext}}
+    new OpenRouterRequestViewer('or-request-{{$idx}}', {{$log.InputContext | jsString}});
+    {{end}}
+    {{end}}
+});
+</script>
+{{end}}

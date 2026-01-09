@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/bot"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
@@ -176,16 +177,23 @@ func main() {
 	}
 	logger.Info("Translator initialized", "default_lang", cfg.Bot.Language)
 
+	// Create agent logger for debugging LLM calls (only logs when debug mode is enabled)
+	agentLogger := agentlog.NewLogger(store, logger, cfg.Server.DebugMode)
+
 	memoryService := memory.NewService(logger, cfg, store, store, store, openrouterClient, translator)
+	memoryService.SetAgentLogger(agentLogger)
 
-	ragService := rag.NewService(logger, cfg, store, store, store, store, store, store, store, openrouterClient, memoryService, translator)
+	ragService := rag.NewService(logger, cfg, store, store, store, store, store, openrouterClient, memoryService, translator)
+	ragService.SetAgentLogger(agentLogger)
 	memoryService.SetVectorSearcher(ragService)
+	memoryService.SetTopicRepository(store)
 
-	b, err := bot.NewBot(logger, api, cfg, store, store, store, store, store, store, openrouterClient, speechKitClient, ragService, translator)
+	b, err := bot.NewBot(logger, api, cfg, store, store, store, store, store, openrouterClient, speechKitClient, ragService, translator)
 	if err != nil {
 		logger.Error("failed to create bot", "error", err)
 		os.Exit(1)
 	}
+	b.SetAgentLogger(agentLogger)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -198,11 +206,12 @@ func main() {
 	defer b.Stop()
 
 	// Start web server for stats and webhooks
-	webServer, err := web.NewServer(ctx, logger, cfg, store, store, store, store, store, store, store, store, store, b, ragService)
+	webServer, err := web.NewServer(ctx, logger, cfg, store, store, store, store, store, store, store, b, ragService)
 	if err != nil {
 		logger.Error("failed to create web server", "error", err)
 		os.Exit(1)
 	}
+	webServer.SetAgentLogRepo(store)
 	srvDone := make(chan struct{})
 	go func() {
 		defer close(srvDone)

@@ -120,22 +120,6 @@ type Stat struct {
 	CostUSD    float64
 }
 
-type RAGLog struct {
-	ID               int64
-	UserID           int64
-	OriginalQuery    string
-	EnrichedQuery    string
-	EnrichmentPrompt string
-	ContextUsed      string // The full context sent to the generation model
-	SystemPrompt     string
-	RetrievalResults string // JSON array of retrieved messages
-	LLMResponse      string
-	EnrichmentTokens int
-	GenerationTokens int
-	TotalCostUSD     float64
-	CreatedAt        time.Time
-}
-
 type DashboardStats struct {
 	TotalTopics         int
 	AvgTopicSize        float64
@@ -150,24 +134,6 @@ type DashboardStats struct {
 	AvgRAGCost          float64
 	MessagesPerDay      map[string]int
 	FactsGrowth         map[string]int
-}
-
-// RerankerLog stores debug traces from the reranker component
-type RerankerLog struct {
-	ID                   int64
-	UserID               int64
-	OriginalQuery        string
-	EnrichedQuery        string
-	CandidatesJSON       string  // JSON array of candidates with scores
-	ToolCallsJSON        string  // JSON array of tool call iterations
-	SelectedIDsJSON      string  // JSON array of selected topic IDs
-	ReasoningJSON        string  // JSON array of reasoning entries per iteration
-	FallbackReason       *string // nil if no fallback, otherwise reason
-	DurationEnrichmentMs int
-	DurationVectorMs     int
-	DurationRerankerMs   int
-	DurationTotalMs      int
-	CreatedAt            time.Time
 }
 
 // RerankerCandidate is a single candidate for JSON serialization
@@ -193,17 +159,50 @@ type RerankerToolCallTopic struct {
 	Summary string `json:"summary"`
 }
 
+// AgentLog stores debug traces from LLM agent calls (unified logging for all agents)
+type AgentLog struct {
+	ID               int64
+	UserID           int64
+	AgentType        string // laplace, reranker, splitter, merger, enricher, archivist, deduplicator, scout
+	InputPrompt      string
+	InputContext     string // JSON - messages, facts, topics, etc.
+	OutputResponse   string
+	OutputParsed     string // JSON - structured output
+	Model            string
+	PromptTokens     int
+	CompletionTokens int
+	TotalCost        *float64
+	DurationMs       int
+	Metadata         string // JSON - agent-specific data
+	Success          bool
+	ErrorMessage     string
+	CreatedAt        time.Time
+}
+
+// AgentLogFilter for filtering agent logs
+type AgentLogFilter struct {
+	UserID    int64
+	AgentType string
+	Success   *bool
+	Search    string
+}
+
+// AgentLogResult wraps agent logs with total count for pagination
+type AgentLogResult struct {
+	Data       []AgentLog
+	TotalCount int
+}
+
 type Storage interface {
 	MessageRepository
 	UserRepository
 	StatsRepository
-	LogRepository
 	TopicRepository
 	MemoryBankRepository
 	FactRepository
 	FactHistoryRepository
 	MaintenanceRepository
-	RerankerLogRepository
+	AgentLogRepository
 }
 
 type SQLiteStore struct {
@@ -571,6 +570,34 @@ func (s *SQLiteStore) migrate() error {
 		if _, err := s.db.Exec(`ALTER TABLE reranker_logs ADD COLUMN reasoning_json TEXT`); err != nil {
 			s.logger.Warn("failed to add reasoning_json column", "error", err)
 		}
+	}
+
+	// Create agent_logs table for unified agent debugging
+	agentLogsQuery := `
+		CREATE TABLE IF NOT EXISTS agent_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			agent_type TEXT NOT NULL,
+			input_prompt TEXT,
+			input_context TEXT,
+			output_response TEXT,
+			output_parsed TEXT,
+			model TEXT,
+			prompt_tokens INTEGER,
+			completion_tokens INTEGER,
+			total_cost REAL,
+			duration_ms INTEGER,
+			metadata TEXT,
+			success BOOLEAN DEFAULT 1,
+			error_message TEXT,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE INDEX IF NOT EXISTS idx_agent_logs_user_id ON agent_logs(user_id);
+		CREATE INDEX IF NOT EXISTS idx_agent_logs_agent_type ON agent_logs(agent_type);
+		CREATE INDEX IF NOT EXISTS idx_agent_logs_created_at ON agent_logs(created_at DESC);
+	`
+	if _, err := s.db.Exec(agentLogsQuery); err != nil {
+		return fmt.Errorf("failed to create agent_logs table: %w", err)
 	}
 
 	return nil

@@ -30,9 +30,9 @@ func TestProcessChunk_HallucinatedIDs(t *testing.T) {
 	mockStore := new(MockStorage)
 	mockClient := new(MockClient)
 
-	// Create test translator
+	// Create test translator (use %s placeholders for profile/topics)
 	tmpDir := t.TempDir()
-	_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("rag.topic_extraction_prompt: 'Extract topics'"), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("rag.topic_extraction_prompt: '%s\n%s\nExtract topics'"), 0644)
 	translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
 
 	userID := int64(123)
@@ -43,6 +43,10 @@ func TestProcessChunk_HallucinatedIDs(t *testing.T) {
 
 	// Expectations
 	mockStore.On("GetUnprocessedMessages", userID).Return(messages, nil)
+	// Mock GetFacts for user profile (now called in extractTopics)
+	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil).Maybe()
+	// Mock GetTopicsExtended for recent topics (now called in extractTopics)
+	mockStore.On("GetTopicsExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(storage.TopicResult{}, nil).Maybe()
 
 	// Mock LLM response for topic extraction
 	// LLM returns a topic with ID 101 (which doesn't exist in messages)
@@ -93,11 +97,9 @@ func TestProcessChunk_HallucinatedIDs(t *testing.T) {
 	// Mock incremental loading methods (called after processChunk)
 	mockStore.On("GetTopicsAfterID", mock.Anything).Return([]storage.Topic{}, nil).Maybe()
 	mockStore.On("GetFactsAfterID", mock.Anything).Return([]storage.Fact{}, nil).Maybe()
-	// Mock AddRAGLog for topic extraction logging
-	mockStore.On("AddRAGLog", mock.Anything).Return(nil).Maybe()
 
 	// Run
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, nil, translator)
+	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, nil, translator)
 	_, err := svc.ForceProcessUser(context.Background(), userID)
 
 	// Now we expect an error because of incomplete coverage
@@ -123,9 +125,9 @@ func TestProcessChunk_ValidIDs(t *testing.T) {
 	mockStore := new(MockStorage)
 	mockClient := new(MockClient)
 
-	// Create test translator
+	// Create test translator (use %s placeholders for profile/topics)
 	tmpDir := t.TempDir()
-	_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("rag.topic_extraction_prompt: 'Extract topics'"), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte("rag.topic_extraction_prompt: '%s\n%s\nExtract topics'"), 0644)
 	translator, _ := i18n.NewTranslatorFromFS(os.DirFS(tmpDir), "en")
 
 	userID := int64(123)
@@ -136,6 +138,10 @@ func TestProcessChunk_ValidIDs(t *testing.T) {
 
 	// Expectations
 	mockStore.On("GetUnprocessedMessages", userID).Return(messages, nil)
+	// Mock GetFacts for user profile (now called in extractTopics)
+	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil).Maybe()
+	// Mock GetTopicsExtended for recent topics (now called in extractTopics)
+	mockStore.On("GetTopicsExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(storage.TopicResult{}, nil).Maybe()
 
 	// Mock LLM response for topic extraction
 	// LLM returns a topic covering 100-102
@@ -189,11 +195,9 @@ func TestProcessChunk_ValidIDs(t *testing.T) {
 	// Mock incremental loading methods (called after processChunk)
 	mockStore.On("GetTopicsAfterID", mock.Anything).Return([]storage.Topic{}, nil).Maybe()
 	mockStore.On("GetFactsAfterID", mock.Anything).Return([]storage.Fact{}, nil).Maybe()
-	// Mock AddRAGLog for topic extraction logging
-	mockStore.On("AddRAGLog", mock.Anything).Return(nil).Maybe()
 
 	// Run
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, nil, translator)
+	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, nil, translator)
 	_, err := svc.ForceProcessUser(context.Background(), userID)
 	assert.NoError(t, err)
 

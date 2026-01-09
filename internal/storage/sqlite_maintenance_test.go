@@ -111,7 +111,7 @@ func TestCleanupFactHistory(t *testing.T) {
 	assert.Equal(t, 4, count, "Should have 4 records remaining (2 per user)")
 }
 
-func TestCleanupRagLogs(t *testing.T) {
+func TestCleanupAgentLogs(t *testing.T) {
 	// Create temp directory
 	tmpDir, err := os.MkdirTemp("", "test-db-*")
 	require.NoError(t, err)
@@ -126,32 +126,32 @@ func TestCleanupRagLogs(t *testing.T) {
 	err = store.Init()
 	require.NoError(t, err)
 
-	// Insert test data: 4 records for user 1, 2 records for user 2
+	// Insert test data: 4 records for user 1 agent "laplace", 3 for user 1 agent "reranker"
 	for i := 0; i < 4; i++ {
-		err = store.AddRAGLog(RAGLog{
-			UserID:        1,
-			OriginalQuery: "test query",
+		err = store.AddAgentLog(AgentLog{
+			UserID:    1,
+			AgentType: "laplace",
 		})
 		require.NoError(t, err)
 	}
-	for i := 0; i < 2; i++ {
-		err = store.AddRAGLog(RAGLog{
-			UserID:        2,
-			OriginalQuery: "test query",
+	for i := 0; i < 3; i++ {
+		err = store.AddAgentLog(AgentLog{
+			UserID:    1,
+			AgentType: "reranker",
 		})
 		require.NoError(t, err)
 	}
 
-	// Keep 2 per user - should delete 2 for user 1, 0 for user 2 = 2 total
-	deleted, err := store.CleanupRagLogs(2)
+	// Keep 2 per user per agent - should delete 2 for laplace, 1 for reranker = 3 total
+	deleted, err := store.CleanupAgentLogs(2)
 	require.NoError(t, err)
-	assert.Equal(t, int64(2), deleted, "Should delete 2 records (2 from user 1)")
+	assert.Equal(t, int64(3), deleted, "Should delete 3 records (2 from laplace, 1 from reranker)")
 
 	// Verify remaining records
 	var count int
-	err = store.db.QueryRow("SELECT COUNT(*) FROM rag_logs").Scan(&count)
+	err = store.db.QueryRow("SELECT COUNT(*) FROM agent_logs").Scan(&count)
 	require.NoError(t, err)
-	assert.Equal(t, 4, count, "Should have 4 records remaining (2 for user 1, 2 for user 2)")
+	assert.Equal(t, 4, count, "Should have 4 records remaining (2 per agent)")
 }
 
 func TestContaminatedTopicsDetection(t *testing.T) {

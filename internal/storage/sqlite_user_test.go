@@ -79,7 +79,6 @@ func TestResetUserData(t *testing.T) {
 	_, _ = store.AddTopic(Topic{UserID: userID, Summary: "Topic"})
 	_, _ = store.AddFact(Fact{UserID: userID, Content: "Fact"})
 	_ = store.AddMessageToHistory(userID, Message{Role: "user", Content: "msg", TopicID: new(int64)}) // TopicID not null
-	_ = store.AddRAGLog(RAGLog{UserID: userID, OriginalQuery: "q"})
 	_ = store.UpdateMemoryBank(userID, "memory")
 
 	// Reset
@@ -94,10 +93,6 @@ func TestResetUserData(t *testing.T) {
 	// Facts cleared
 	facts, _ := store.GetFacts(userID)
 	assert.Empty(t, facts)
-
-	// RAG logs cleared
-	logs, _ := store.GetRAGLogs(userID, 10)
-	assert.Empty(t, logs)
 
 	// Memory bank cleared
 	mb, _ := store.GetMemoryBank(userID)

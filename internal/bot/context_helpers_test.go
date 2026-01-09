@@ -201,77 +201,6 @@ func TestDeduplicateTopics(t *testing.T) {
 	}
 }
 
-func TestFormatCoreIdentityFacts(t *testing.T) {
-	translator := createTestTranslator(t)
-	cfg := &config.Config{Bot: config.BotConfig{Language: "en"}}
-	bot := &Bot{translator: translator, cfg: cfg}
-
-	now := time.Now()
-
-	tests := []struct {
-		name     string
-		facts    []storage.Fact
-		contains []string
-		notEmpty bool
-	}{
-		{
-			name:     "empty facts",
-			facts:    []storage.Fact{},
-			notEmpty: false,
-		},
-		{
-			name: "user facts only",
-			facts: []storage.Fact{
-				{ID: 1, Entity: "User", Category: "personal", Type: "identity", Content: "Loves Go", LastUpdated: now},
-			},
-			contains: []string{"[ID:1]", "[User]", "[personal/identity]", "Loves Go"},
-			notEmpty: true,
-		},
-		{
-			name: "other entity facts only",
-			facts: []storage.Fact{
-				{ID: 2, Entity: "Alice", Category: "work", Type: "context", Content: "Is a colleague", LastUpdated: now},
-			},
-			contains: []string{"[ID:2]", "[Alice]", "[work/context]", "Is a colleague"},
-			notEmpty: true,
-		},
-		{
-			name: "mixed user and other facts",
-			facts: []storage.Fact{
-				{ID: 1, Entity: "User", Category: "personal", Type: "identity", Content: "Loves Go", LastUpdated: now},
-				{ID: 2, Entity: "user", Category: "hobby", Type: "identity", Content: "Plays chess", LastUpdated: now}, // lowercase user
-				{ID: 3, Entity: "Bob", Category: "friend", Type: "context", Content: "Lives nearby", LastUpdated: now},
-			},
-			contains: []string{"[ID:1]", "[ID:2]", "[ID:3]", "Loves Go", "Plays chess", "Lives nearby"},
-			notEmpty: true,
-		},
-		{
-			name: "case insensitive user entity",
-			facts: []storage.Fact{
-				{ID: 1, Entity: "USER", Category: "test", Type: "identity", Content: "Uppercase", LastUpdated: now},
-				{ID: 2, Entity: "uSeR", Category: "test", Type: "identity", Content: "Mixed case", LastUpdated: now},
-			},
-			contains: []string{"Uppercase", "Mixed case"},
-			notEmpty: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := bot.formatCoreIdentityFacts(tt.facts)
-
-			if tt.notEmpty {
-				assert.NotEmpty(t, result)
-				for _, substr := range tt.contains {
-					assert.Contains(t, result, substr)
-				}
-			} else {
-				assert.Empty(t, result)
-			}
-		})
-	}
-}
-
 func TestSetMessageReactionConfigParams(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -430,21 +359,20 @@ func TestFormatRAGResults(t *testing.T) {
 		name     string
 		results  []rag.TopicSearchResult
 		query    string
+		isEmpty  bool
 		contains []string
 	}{
 		{
-			name:    "empty results",
+			name:    "empty results returns empty string",
 			results: []rag.TopicSearchResult{},
 			query:   "test query",
-			contains: []string{
-				"test query",
-			},
+			isEmpty: true,
 		},
 		{
-			name: "single topic with messages",
+			name: "single topic with messages - XML format",
 			results: []rag.TopicSearchResult{
 				{
-					Topic: storage.Topic{ID: 1, Summary: "Test Topic Summary"},
+					Topic: storage.Topic{ID: 1, Summary: "Test Topic Summary", CreatedAt: now},
 					Score: 0.85,
 					Messages: []storage.Message{
 						{ID: 1, Role: "user", Content: "[User]: Hello", CreatedAt: now},
@@ -454,27 +382,28 @@ func TestFormatRAGResults(t *testing.T) {
 			},
 			query: "greeting",
 			contains: []string{
-				"greeting",
-				"Test Topic Summary",
-				"0.85",
+				"<retrieved_context query=\"greeting\">",
+				"<topic id=\"1\" summary=\"Test Topic Summary\" relevance=\"0.85\"",
 				"[User]: Hello",
 				"Hi there!",
 				"1.",
 				"2.",
+				"</topic>",
+				"</retrieved_context>",
 			},
 		},
 		{
-			name: "multiple topics",
+			name: "multiple topics - XML format",
 			results: []rag.TopicSearchResult{
 				{
-					Topic: storage.Topic{ID: 1, Summary: "First Topic"},
+					Topic: storage.Topic{ID: 1, Summary: "First Topic", CreatedAt: now},
 					Score: 0.9,
 					Messages: []storage.Message{
 						{ID: 1, Role: "user", Content: "[User]: Message 1", CreatedAt: now},
 					},
 				},
 				{
-					Topic: storage.Topic{ID: 2, Summary: "Second Topic"},
+					Topic: storage.Topic{ID: 2, Summary: "Second Topic", CreatedAt: now},
 					Score: 0.7,
 					Messages: []storage.Message{
 						{ID: 2, Role: "assistant", Content: "Response 2", CreatedAt: now},
@@ -483,17 +412,16 @@ func TestFormatRAGResults(t *testing.T) {
 			},
 			query: "multi",
 			contains: []string{
-				"First Topic",
-				"Second Topic",
-				"0.90",
-				"0.70",
+				"<retrieved_context query=\"multi\">",
+				"<topic id=\"1\" summary=\"First Topic\" relevance=\"0.90\"",
+				"<topic id=\"2\" summary=\"Second Topic\" relevance=\"0.70\"",
 			},
 		},
 		{
-			name: "with system role message",
+			name: "with system role message - XML format",
 			results: []rag.TopicSearchResult{
 				{
-					Topic: storage.Topic{ID: 1, Summary: "System Topic"},
+					Topic: storage.Topic{ID: 1, Summary: "System Topic", CreatedAt: now},
 					Score: 0.5,
 					Messages: []storage.Message{
 						{ID: 1, Role: "system", Content: "System instruction", CreatedAt: now},
@@ -502,8 +430,25 @@ func TestFormatRAGResults(t *testing.T) {
 			},
 			query: "system",
 			contains: []string{
-				"System Topic",
-				"System",
+				"summary=\"System Topic\"",
+				"[System",
+			},
+		},
+		{
+			name: "query with special XML characters",
+			results: []rag.TopicSearchResult{
+				{
+					Topic: storage.Topic{ID: 1, Summary: "Test <Topic> & Summary", CreatedAt: now},
+					Score: 0.5,
+					Messages: []storage.Message{
+						{ID: 1, Role: "user", Content: "Test", CreatedAt: now},
+					},
+				},
+			},
+			query: "query <with> \"quotes\" & ampersand",
+			contains: []string{
+				"query &lt;with&gt; &quot;quotes&quot; &amp; ampersand",
+				"summary=\"Test &lt;Topic&gt; &amp; Summary\"",
 			},
 		},
 	}
@@ -511,8 +456,12 @@ func TestFormatRAGResults(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := bot.formatRAGResults(tt.results, tt.query)
-			for _, substr := range tt.contains {
-				assert.Contains(t, result, substr)
+			if tt.isEmpty {
+				assert.Empty(t, result)
+			} else {
+				for _, substr := range tt.contains {
+					assert.Contains(t, result, substr)
+				}
 			}
 		})
 	}

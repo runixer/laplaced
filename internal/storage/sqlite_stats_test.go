@@ -60,10 +60,6 @@ func TestGetDashboardStats(t *testing.T) {
 	_ = store.AddMessageToHistory(userID, Message{Role: "user", Content: "m1", TopicID: new(int64)}) // Processed
 	_ = store.AddMessageToHistory(userID, Message{Role: "user", Content: "m2"})                      // Unprocessed
 
-	// 4. Add RAG Logs
-	_ = store.AddRAGLog(RAGLog{UserID: userID, TotalCostUSD: 0.01})
-	_ = store.AddRAGLog(RAGLog{UserID: userID, TotalCostUSD: 0.02})
-
 	// Get Stats
 	stats, err := store.GetDashboardStats(userID)
 	assert.NoError(t, err)
@@ -86,9 +82,8 @@ func TestGetDashboardStats(t *testing.T) {
 	assert.Equal(t, 2, stats.TotalMessages)
 	assert.Equal(t, 1, stats.UnprocessedMessages)
 
-	// Verify RAG
-	assert.Equal(t, 2, stats.TotalRAGQueries)
-	assert.InDelta(t, 0.015, stats.AvgRAGCost, 0.0001)
+	// Verify RAG (empty since we don't add rag_logs anymore)
+	assert.Equal(t, 0, stats.TotalRAGQueries)
 
 	// Verify Activity (Today)
 	// SQLite date() function returns UTC date by default, so we should expect UTC date here

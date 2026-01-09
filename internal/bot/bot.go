@@ -13,6 +13,7 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
+	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
@@ -39,7 +40,6 @@ type Bot struct {
 	userRepo        storage.UserRepository
 	msgRepo         storage.MessageRepository
 	statsRepo       storage.StatsRepository
-	logRepo         storage.LogRepository
 	factRepo        storage.FactRepository
 	factHistoryRepo storage.FactHistoryRepository
 	orClient        openrouter.Client
@@ -50,10 +50,11 @@ type Bot struct {
 	messageGrouper  *MessageGrouper
 	logger          *slog.Logger
 	translator      *i18n.Translator
+	agentLogger     *agentlog.Logger
 	wg              sync.WaitGroup
 }
 
-func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRepo storage.UserRepository, msgRepo storage.MessageRepository, statsRepo storage.StatsRepository, logRepo storage.LogRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, orClient openrouter.Client, speechKitClient yandex.Client, ragService *rag.Service, translator *i18n.Translator) (*Bot, error) {
+func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRepo storage.UserRepository, msgRepo storage.MessageRepository, statsRepo storage.StatsRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, orClient openrouter.Client, speechKitClient yandex.Client, ragService *rag.Service, translator *i18n.Translator) (*Bot, error) {
 	botLogger := logger.With("component", "bot")
 	downloader, err := telegram.NewHTTPFileDownloader(api, "https://api.telegram.org", cfg.Telegram.ProxyURL)
 	if err != nil {
@@ -68,7 +69,6 @@ func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRe
 		userRepo:        userRepo,
 		msgRepo:         msgRepo,
 		statsRepo:       statsRepo,
-		logRepo:         logRepo,
 		factRepo:        factRepo,
 		factHistoryRepo: factHistoryRepo,
 		orClient:        orClient,
@@ -97,6 +97,11 @@ func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRe
 	}
 
 	return b, nil
+}
+
+// SetAgentLogger sets the agent logger for debug logging
+func (b *Bot) SetAgentLogger(logger *agentlog.Logger) {
+	b.agentLogger = logger
 }
 
 func (b *Bot) setCommands() error {
@@ -324,6 +329,8 @@ func (b *Bot) getTools() []openrouter.Tool {
 }
 
 func (b *Bot) performModelTool(ctx context.Context, userID int64, modelName string, query string) (string, error) {
+	startTime := time.Now()
+
 	req := openrouter.ChatCompletionRequest{
 		Model: modelName,
 		Messages: []openrouter.Message{
@@ -338,15 +345,47 @@ func (b *Bot) performModelTool(ctx context.Context, userID int64, modelName stri
 	}
 
 	resp, err := b.orClient.CreateChatCompletion(ctx, req)
+	duration := time.Since(startTime)
+
 	if err != nil {
+		// Log error to Scout agent
+		if b.agentLogger != nil {
+			b.agentLogger.Log(ctx, agentlog.Entry{
+				UserID:       userID,
+				AgentType:    agentlog.AgentScout,
+				InputPrompt:  query,
+				Model:        modelName,
+				DurationMs:   int(duration.Milliseconds()),
+				Success:      false,
+				ErrorMessage: err.Error(),
+			})
+		}
 		return "", err
 	}
 
-	if len(resp.Choices) == 0 {
-		return "No results found.", nil
+	result := "No results found."
+	if len(resp.Choices) > 0 {
+		result = resp.Choices[0].Message.Content
 	}
 
-	return resp.Choices[0].Message.Content, nil
+	// Log success to Scout agent
+	if b.agentLogger != nil {
+		b.agentLogger.Log(ctx, agentlog.Entry{
+			UserID:           userID,
+			AgentType:        agentlog.AgentScout,
+			InputPrompt:      query,
+			InputContext:     resp.DebugRequestBody, // Full API request JSON
+			OutputResponse:   result,
+			Model:            modelName,
+			PromptTokens:     resp.Usage.PromptTokens,
+			CompletionTokens: resp.Usage.CompletionTokens,
+			TotalCost:        resp.Usage.Cost,
+			DurationMs:       int(duration.Milliseconds()),
+			Success:          true,
+		})
+	}
+
+	return result, nil
 }
 
 func (b *Bot) sendResponses(ctx context.Context, chatID int64, responses []telegram.SendMessageRequest, logger *slog.Logger) {
@@ -386,24 +425,52 @@ func (b *Bot) sendResponses(ctx context.Context, chatID int64, responses []teleg
 	}
 }
 
+// escapeXMLAttr escapes special characters for use in XML attribute values
+func escapeXMLAttr(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "\"", "&quot;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
+}
+
 func (b *Bot) formatRAGResults(results []rag.TopicSearchResult, query string) string {
+	if len(results) == 0 {
+		return ""
+	}
+
 	var ragContent strings.Builder
-	ragContent.WriteString(fmt.Sprintf("# %s\n", b.translator.Get(b.cfg.Bot.Language, "rag.context_header")))
-	ragContent.WriteString(fmt.Sprintf("# %s: %s\n", b.translator.Get(b.cfg.Bot.Language, "rag.query"), query))
-	ragContent.WriteString(fmt.Sprintf("# %s: \n", b.translator.Get(b.cfg.Bot.Language, "rag.results")))
+	ragContent.WriteString("<retrieved_context query=\"")
+	ragContent.WriteString(escapeXMLAttr(query))
+	ragContent.WriteString("\">\n")
 
 	for _, topicRes := range results {
-		ragContent.WriteString(fmt.Sprintf("\n%s: %s (%s: %.2f)\n",
-			b.translator.Get(b.cfg.Bot.Language, "rag.topic_header"),
-			topicRes.Topic.Summary,
-			b.translator.Get(b.cfg.Bot.Language, "rag.weight"),
-			topicRes.Score))
+		// Get topic date from first message or topic creation
+		topicDate := topicRes.Topic.CreatedAt.Format("2006-01-02")
+		if len(topicRes.Messages) > 0 {
+			topicDate = topicRes.Messages[0].CreatedAt.Format("2006-01-02")
+		}
+
+		// Build topic tag with summary as attribute, excerpt flag if applicable
+		excerptAttr := ""
+		if topicRes.Excerpt != nil && !b.cfg.Agents.Reranker.IgnoreExcerpts {
+			excerptAttr = " excerpt=\"true\""
+		}
+
+		ragContent.WriteString("  <topic id=\"")
+		ragContent.WriteString(fmt.Sprintf("%d", topicRes.Topic.ID))
+		ragContent.WriteString("\" summary=\"")
+		ragContent.WriteString(escapeXMLAttr(topicRes.Topic.Summary))
+		ragContent.WriteString("\" relevance=\"")
+		ragContent.WriteString(fmt.Sprintf("%.2f", topicRes.Score))
+		ragContent.WriteString("\" date=\"")
+		ragContent.WriteString(topicDate)
+		ragContent.WriteString("\"")
+		ragContent.WriteString(excerptAttr)
+		ragContent.WriteString(">\n")
 
 		// Use excerpt if available (for large topics filtered by reranker)
-		// Can be disabled with ignore_excerpts config option
 		if topicRes.Excerpt != nil && !b.cfg.Agents.Reranker.IgnoreExcerpts {
-			ragContent.WriteString(b.translator.Get(b.cfg.Bot.Language, "rag.excerpt_marker"))
-			ragContent.WriteString("\n")
 			ragContent.WriteString(*topicRes.Excerpt)
 			ragContent.WriteString("\n")
 		} else {
@@ -424,9 +491,11 @@ func (b *Bot) formatRAGResults(results []rag.TopicSearchResult, query string) st
 				ragContent.WriteString(fmt.Sprintf("%d. %s\n", i+1, textContent))
 			}
 		}
+
+		ragContent.WriteString("  </topic>\n")
 	}
 
-	ragContent.WriteString(fmt.Sprintf("# %s\n", b.translator.Get(b.cfg.Bot.Language, "rag.end_of_results")))
+	ragContent.WriteString("</retrieved_context>")
 	return ragContent.String()
 }
 
@@ -450,62 +519,6 @@ func (b *Bot) performHistorySearch(ctx context.Context, userID int64, query stri
 	}
 
 	return b.formatRAGResults(results, query), nil
-}
-
-// formatCoreIdentityFacts formats core identity facts into a string for the system prompt.
-// It separates facts about the user from facts about other entities.
-func (b *Bot) formatCoreIdentityFacts(facts []storage.Fact) string {
-	if len(facts) == 0 {
-		return ""
-	}
-
-	var userFacts, otherFacts []storage.Fact
-	for _, f := range facts {
-		if strings.EqualFold(f.Entity, "User") {
-			userFacts = append(userFacts, f)
-		} else {
-			otherFacts = append(otherFacts, f)
-		}
-	}
-
-	var result string
-	if len(userFacts) > 0 {
-		result += fmt.Sprintf("%s\n", b.translator.Get(b.cfg.Bot.Language, "memory.facts_user_header"))
-		for _, f := range userFacts {
-			result += fmt.Sprintf("- [ID:%d] [%s] [%s/%s] (Updated: %s) %s\n",
-				f.ID, f.Entity, f.Category, f.Type, f.LastUpdated.Format("2006-01-02"), f.Content)
-		}
-		result += "\n"
-	}
-
-	if len(otherFacts) > 0 {
-		result += fmt.Sprintf("%s\n", b.translator.Get(b.cfg.Bot.Language, "memory.facts_others_header"))
-		for _, f := range otherFacts {
-			result += fmt.Sprintf("- [ID:%d] [%s] [%s/%s] (Updated: %s) %s\n",
-				f.ID, f.Entity, f.Category, f.Type, f.LastUpdated.Format("2006-01-02"), f.Content)
-		}
-		result += "\n"
-	}
-
-	return strings.TrimRight(result, "\n")
-}
-
-// formatRecentTopics formats recent topics metadata for temporal context.
-func (b *Bot) formatRecentTopics(topics []storage.TopicExtended) string {
-	if len(topics) == 0 {
-		return ""
-	}
-
-	result := b.translator.Get(b.cfg.Bot.Language, "rag.recent_topics_header") + "\n"
-	for _, t := range topics {
-		result += fmt.Sprintf("- %s: %q (%d msg, ~%dk chars)\n",
-			t.CreatedAt.Format("2006-01-02"),
-			t.Summary,
-			t.MessageCount,
-			t.SizeChars/1000,
-		)
-	}
-	return strings.TrimRight(result, "\n")
 }
 
 // deduplicateTopics removes messages from retrieved topics that are already present in recent history.
@@ -551,19 +564,15 @@ func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageCont
 	allFacts, err := b.factRepo.GetFacts(userID)
 	var coreIdentityFacts []storage.Fact
 	if err == nil {
-		for _, f := range allFacts {
-			if f.Type == "identity" || f.Importance >= 90 {
-				coreIdentityFacts = append(coreIdentityFacts, f)
-			}
-		}
+		coreIdentityFacts = rag.FilterProfileFacts(allFacts)
 	} else {
 		b.logger.Error("failed to get facts", "error", err)
 	}
 
-	// Format Core Identity for System Prompt
-	memoryBankFormatted := b.formatCoreIdentityFacts(coreIdentityFacts)
+	// Format Core Identity for System Prompt (wrapped in <user_profile> tags)
+	memoryBankFormatted := rag.FormatUserProfile(coreIdentityFacts)
 
-	// Get Recent Topics for temporal context
+	// Get Recent Topics for temporal context (wrapped in <recent_topics> tags)
 	var recentTopicsFormatted string
 	if b.cfg.RAG.Enabled {
 		recentTopicsCount := b.cfg.RAG.GetRecentTopicsInContext()
@@ -572,7 +581,7 @@ func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageCont
 			if err != nil {
 				b.logger.Warn("failed to get recent topics", "error", err)
 			} else {
-				recentTopicsFormatted = b.formatRecentTopics(recentTopics)
+				recentTopicsFormatted = rag.FormatRecentTopics(recentTopics)
 			}
 		}
 	}
@@ -586,7 +595,6 @@ func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageCont
 
 	// 2. RAG Retrieval (Layer 2)
 	var retrievedResults []rag.TopicSearchResult
-	var retrievedFacts []storage.Fact
 	var debugInfo *rag.RetrievalDebugInfo
 
 	if b.cfg.RAG.Enabled {
@@ -624,17 +632,6 @@ func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageCont
 		} else {
 			retrievedResults = b.deduplicateTopics(retrievedResults, recentHistory)
 		}
-
-		// Retrieve relevant facts (Layer 2 - Context)
-		queryForFacts := currentMessageRaw
-		if debugInfo != nil && debugInfo.EnrichedQuery != "" {
-			queryForFacts = debugInfo.EnrichedQuery
-		}
-
-		retrievedFacts, err = b.ragService.RetrieveFacts(ctx, userID, queryForFacts)
-		if err != nil {
-			b.logger.Error("Fact retrieval failed", "error", err)
-		}
 	}
 
 	var orMessages []openrouter.Message
@@ -666,29 +663,12 @@ func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageCont
 		})
 	}
 
-	// RAG Result String (Topics + Facts)
+	// RAG Result String (Topics)
 	var ragContextMsg *openrouter.Message
-	if len(retrievedResults) > 0 || len(retrievedFacts) > 0 {
+	if len(retrievedResults) > 0 {
 		ragContent := b.formatRAGResults(retrievedResults, "")
 		if debugInfo != nil {
 			ragContent = b.formatRAGResults(retrievedResults, debugInfo.EnrichedQuery)
-		}
-
-		if len(retrievedFacts) > 0 {
-			ragContent += fmt.Sprintf("\n%s\n", b.translator.Get(b.cfg.Bot.Language, "rag.relevant_facts_header"))
-			for _, f := range retrievedFacts {
-				// Skip if already in Core Identity
-				isCore := false
-				for _, core := range coreIdentityFacts {
-					if core.Content == f.Content {
-						isCore = true
-						break
-					}
-				}
-				if !isCore {
-					ragContent += fmt.Sprintf("- [ID:%d] [%s] [%s/%s] (Updated: %s) %s\n", f.ID, f.Entity, f.Category, f.Type, f.LastUpdated.Format("2006-01-02"), f.Content)
-				}
-			}
 		}
 
 		ragContextMsg = &openrouter.Message{
@@ -1142,6 +1122,7 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, sa
 	totalPromptTokens := 0
 	totalCompletionTokens := 0
 	var finalResponse string
+	var lastRawRequestBody string
 	toolIterations := 0
 	const maxToolIterations = 10
 
@@ -1170,6 +1151,7 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, sa
 
 		totalPromptTokens += resp.Usage.PromptTokens
 		totalCompletionTokens += resp.Usage.CompletionTokens
+		lastRawRequestBody = resp.DebugRequestBody
 
 		choice := resp.Choices[0].Message
 
@@ -1218,7 +1200,7 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, sa
 		}
 
 		// Record metrics
-		b.recordMetrics(userID, totalPromptTokens, totalCompletionTokens, ragInfo, orMessages, finalResponse, logger)
+		b.recordMetrics(userID, totalPromptTokens, totalCompletionTokens, ragInfo, orMessages, finalResponse, lastRawRequestBody, result.TimingLLM, logger)
 	}
 
 	return result, nil

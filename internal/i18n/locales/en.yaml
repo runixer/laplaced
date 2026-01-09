@@ -51,7 +51,9 @@ bot:
     - User should not see internal data structures.
     </tools_protocol>
 
+    <output_format>
     ###SPLIT### — separator for multiple Telegram messages. Use when preparing text for forwarding or to logically split a long response.
+    </output_format>
 
 tools:
   internet_search:
@@ -65,111 +67,124 @@ tools:
     parameter_description: "JSON object with 'operations' array. Each operation contains: action ('add', 'update', 'delete'), entity (e.g., 'User'), content (the fact itself), category (bio, work, hobby, etc), type (identity, context, status), importance (0-100), fact_id (for update/delete), reason (reason for change)."
 
 rag:
-  context_header: "CONTEXT (RAG)"
-  relevant_facts_header: "=== RELEVANT FACTS ==="
-  recent_topics_header: "📅 Recent conversations:"
-  topic_header: "Topic"
-  weight: "Weight"
-  query: "QUERY"
-  results: "RESULTS"
-  end_of_results: "END OF RESULTS"
-  excerpt_marker: "[Truncated by reranker — only relevant fragments shown]"
+  # Unified Splitter prompt - used for both regular extraction and split mode
+  # Placeholders: %[1]s = profile, %[2]s = recent_topics, %[3]s = optional goal section
   topic_extraction_prompt: |
-    Analyze the chat log. Break it down into logical semantic topics.
-
-    STRICT RULES:
-    1. YOU MUST DISTRIBUTE ALL MESSAGES. Each message from the log must be assigned to one of the topics.
-    2. If a message is meaningless noise, a greeting, or a short response, include it in the context of the current topic.
-    3. If the entire dialogue or part of it consists only of noise, create a topic named "Small Talk / Noise".
-    4. Do not leave "gaps" (missing IDs) between topics.
-
-    LANGUAGE REQUIREMENTS:
-    ALL HEADERS AND DESCRIPTIONS MUST BE IN ENGLISH.
-    EXCEPTION: Keep brand names, software names, device models, and specific technical terms (e.g., GitLab, Notepad++, VPN, API) in their original (English) language. Do not translate or transliterate them.
-  topic_split_prompt: |
     <role>
     You are the Splitter, a specialist in organizing dialogue archives.
-    Your task is to split a LARGE conversation into MULTIPLE smaller logical topics.
+    Your task is to break down the chat log into logical semantic topics.
     </role>
 
-    <user_profile>
-    %s
-    </user_profile>
+    <topic_definition>
+    TOPICS ARE DEFINED BY USER'S REQUESTS:
+    - Messages [User ...] — user's requests, questions, tasks. This is the SOURCE of topics.
+    - Messages [Bot ...] — assistant's responses. They ACCOMPANY the topic but don't define it.
+    - Topic summary = what USER wanted/asked/did, not what Bot answered.
 
-    <goal>
-    Split into 3-10 topics of 10-25 messages each. Find natural boundaries:
-    - Change in discussion topic
-    - Time gaps (if visible from dates)
-    - Transition from one project/task to another
-    - Shift in conversation focus
-
-    Use the user profile to understand context: what counts as "one topic" vs "different topics" for this user.
-    </goal>
+    Summary examples:
+    ✓ "Setting up Docker for Laplaced project" (focus on User's task)
+    ✗ "Bot explained how to configure Docker" (focus on Bot's actions)
+    </topic_definition>
 
     <rules>
-    1. YOU MUST DISTRIBUTE ALL MESSAGES. Each message from the log must be assigned to one of the topics.
-    2. DO NOT CREATE ONE LARGE TOPIC. If the dialogue is long — split it forcefully.
-    3. If a topic was discussed for a long time (>30 messages), split by subtopics or time blocks.
-    4. Do not leave "gaps" (missing IDs) between topics.
-    5. NEVER split a user message from its assistant response. The [user]-[assistant] pair must stay together, even if it exceeds the message limit per topic.
-    6. ALL HEADERS AND DESCRIPTIONS MUST BE IN ENGLISH.
-    7. EXCEPTION: Keep brand names, software, technical terms in their original form.
+    1. YOU MUST DISTRIBUTE ALL MESSAGES. Each message must be assigned to one topic.
+    2. Include noise/greetings in the current topic context or create "Small Talk / Noise".
+    3. Do not leave "gaps" (missing IDs) between topics.
+    4. NEVER split a user message from its assistant response — they must stay together.
+    5. Language: English (keep brand names/software as-is).
     </rules>
-  enrichment_prompt: |
-    Role: You are the Enricher, a context analyst for vector search (Memory Retrieval).
-    Current date: %s
-    Task: Formulate a search query that will find ALL relevant discussion history related to the last message's topic.
-    Make a short prompt with keywords — personalities, technologies, brands.
+    %[3]s
+    <output>
+    JSON: {"topics": [{"summary": "topic description", "start_msg_id": N, "end_msg_id": M}]}
+    </output>
 
-    STRICT RULES:
-    1. FOCUS: Don't look for "answer". Look for "discussion history of the topic".
-    2. SCOPE: Include mentioned technologies, related bugs, architectural decisions.
-    3. TIME: Time markers ("yesterday") → specific dates.
-    4. CONTEXT: Replace pronouns ("he", "it") with specific names from dialogue.
-    5. DON'T GUESS: Keep unfamiliar words as-is! "meniscus" ≠ "MinIO", "grandma" ≠ "Grandma.js".
-    6. LANGUAGE: English (technical terms in English).
-    7. OUTPUT: Only the search query text in one line.
+    %[1]s
 
+    %[2]s
+
+  # Goal section for split mode (large topic splitting)
+  topic_extraction_goal_split: |
+
+    <goal>
+    Split into 3-10 topics of 10-25 messages. Find natural boundaries:
+    - Change in discussion topic
+    - Time gaps
+    - Transition between projects/tasks
+    DO NOT CREATE ONE LARGE TOPIC — split forcefully.
+    </goal>
+  # Enricher system prompt
+  # Placeholders: %[1]s = date, %[2]s = profile, %[3]s = recent_topics
+  enrichment_system_prompt: |
+    <role>
+    You are the Enricher, a context analyst for vector search (Memory Retrieval).
+    Current date: %[1]s
+    Task: Formulate a search query to find relevant discussion history.
+    </role>
+
+    <rules>
+    1. FOCUS: Look for "discussion history", not "answer".
+    2. SCOPE: Include technologies, bugs, architectural decisions.
+    3. TIME: "yesterday" → specific dates.
+    4. CONTEXT: "he", "it" → specific names.
+    5. DON'T GUESS: "meniscus" ≠ "MinIO", "grandma" ≠ "Grandma.js".
+    6. OUTPUT: Only the search query text in one line.
+    </rules>
+
+    <output>
+    Short search query with keywords (personalities, technologies, brands).
+    </output>
+
+    %[2]s
+
+    %[3]s
+
+  # Enricher user message template
+  # Placeholders: %[1]s = history, %[2]s = query
+  enrichment_user_prompt: |
     Dialogue History:
-    %s
-    - [user]: %s
+    %[1]s
 
-    Your search query:
+    Current query:
+    %[2]s
+
+    Formulate search query:
 
   enrichment_media_instruction: |
     The user's message contains media (image or audio). When formulating the search query, describe what you see/hear in the media — objects, people, places, text, spoken words — if it helps find relevant conversation history.
 
-  topic_consolidation_prompt: |
+  # Merger system prompt
+  # Placeholders: %[1]s = profile, %[2]s = recent_topics
+  topic_consolidation_system_prompt: |
     <role>
     You are the Merger, a specialist in combining related topics in dialogue archives.
     Your task is to determine whether two consecutive topics are part of the same conversation.
     </role>
 
-    <user_profile>
-    %s
-    </user_profile>
-
-    <topics>
-    Topic 1 (Beginning):
-    %s
-
-    Topic 2 (Continuation):
-    %s
-    </topics>
-
     <task>
     Analyze the topics' content considering the user profile.
-    If Topic 2 is a logical continuation of Topic 1 (same context, same problem, same discussion), they should be merged.
-
-    Use the profile to understand: are the topics related in the context of user's interests and activities.
+    If Topic 2 is a logical continuation of Topic 1 (same context, same problem), they should be merged.
     </task>
 
     <output>
-    Return the answer STRICTLY in JSON format:
-    {"should_merge": true, "new_summary": "New merged summary"}
-    or:
-    {"should_merge": false}
+    JSON: {"should_merge": true, "new_summary": "merged description"} or {"should_merge": false}
     </output>
+
+    %[1]s
+
+    %[2]s
+
+  # Merger user message template
+  # Placeholders: %[1]s = topic1 summary, %[2]s = topic2 summary
+  topic_consolidation_user_prompt: |
+    <topics>
+    Topic 1 (Beginning):
+    %[1]s
+
+    Topic 2 (Continuation):
+    %[2]s
+    </topics>
+
+    Should these topics be merged?
 
   reranker_system_prompt: |
     <role>
@@ -178,16 +193,16 @@ rag:
     </role>
 
     <constraints>
-    - Limit: maximum %d topics in final selection
-    - Budget: aim for ~%dK chars total output (excerpts + small topics as-is)
+    - Limit: maximum %[3]d topics in final selection
+    - Budget: aim for ~%[4]dK chars total output (excerpts + small topics as-is)
     - MUST call get_topics_content() before final response
     - Return JSON with selection reasons
     </constraints>
 
     <algorithm>
     MANDATORY WORKFLOW:
-    1. **SCAN**: Read ALL titles from start to end. DO NOT stop at first %d.
-    2. **SELECT**: Mark %d-%d potentially relevant candidates. Better to include extra than miss important.
+    1. **SCAN**: Read ALL titles from start to end. DO NOT stop at first %[5]d.
+    2. **SELECT**: Mark %[6]d-%[7]d potentially relevant candidates. Better to include extra than miss important.
     3. **LOAD**: Call get_topics_content([ids]) for ALL candidates in ONE call.
     4. **FILTER**: After reading full text — select final topics.
 
@@ -246,7 +261,7 @@ rag:
     This gives several advantages..."
     (and then the FULL message text)
 
-    🎯 BUDGET: ~%dK chars for ALL excerpts
+    🎯 BUDGET: ~%[8]dK chars for ALL excerpts
     - 5 topics selected → ~6K for each excerpt
     - Excerpt < 1K chars = ERROR, add more text!
 
@@ -316,6 +331,10 @@ rag:
     - DO NOT assume content by title — LOAD and read
     </grounding>
 
+    %[1]s
+
+    %[2]s
+
   # Simplified prompt without excerpt requirements (used when ignore_excerpts: true)
   reranker_system_prompt_simple: |
     <role>
@@ -324,15 +343,15 @@ rag:
     </role>
 
     <constraints>
-    - Limit: maximum %d topics in final selection
+    - Limit: maximum %[3]d topics in final selection
     - MUST call get_topics_content() before final response
     - Return JSON with selection reasons
     </constraints>
 
     <algorithm>
     MANDATORY WORKFLOW:
-    1. **SCAN**: Read ALL titles from start to end. DO NOT stop at first %d.
-    2. **SELECT**: Mark %d-%d potentially relevant candidates. Better to include extra than miss important.
+    1. **SCAN**: Read ALL titles from start to end. DO NOT stop at first %[4]d.
+    2. **SELECT**: Mark %[5]d-%[6]d potentially relevant candidates. Better to include extra than miss important.
     3. **LOAD**: Call get_topics_content([ids]) for ALL candidates in ONE call.
     4. **FILTER**: After reading full text — select final topics.
 
@@ -388,6 +407,10 @@ rag:
     - DO NOT assume content by title — LOAD and read
     </grounding>
 
+    %[1]s
+
+    %[2]s
+
   reranker_user_prompt: |
     Current date: %s
 
@@ -400,10 +423,6 @@ rag:
     Current messages:
     %s
 
-    <user_profile>
-    %s
-    </user_profile>
-
     Memory candidates (ID | Date | Size | Topic):
     %s
 
@@ -411,9 +430,6 @@ rag:
   reranker_tool_param_description: "Topic IDs to load"
 
 memory:
-  core_identity_header: "=== CORE IDENTITY ==="
-  facts_user_header: "=== USER FACTS ==="
-  facts_others_header: "=== ENVIRONMENT FACTS ==="
   system_prompt: |
     <role>
     You are the Archivist, a strict system keeper of facts. Task: maintain a CONCISE but ACCURATE fact log, ignoring noise and speculation.
@@ -483,13 +499,18 @@ memory:
     </conversation>
 
   consolidation_prompt: |
+    <role>
     You are a Deduplication Engine. Goal — database cleanliness.
+    </role>
 
-    NEW FACT: %s
+    <task>
+    NEW FACT: %[1]s
 
     EXISTING CANDIDATES:
-    %s
+    %[2]s
+    </task>
 
+    <rules>
     COMPARISON RULES:
     1. NAMES ARE SACRED: Roman Pomazanov and Roman Lukanov are DIFFERENT entities. When in doubt — ADD. Better a duplicate than data loss.
     2. VERSION CONFLICT: If new fact is more technically precise (v0.3.3 instead of v0.3), use REPLACE.
@@ -500,6 +521,7 @@ memory:
     - REPLACE: New fact is an update of the old one. Specify target_id.
     - MERGE: Facts complement each other. Specify target_id and new_content.
     - ADD: New or disputed information.
+    </rules>
 
     Answer in JSON.
 

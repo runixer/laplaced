@@ -245,6 +245,10 @@ type ChatCompletionResponse struct {
 		TotalTokens      int      `json:"total_tokens"`
 		Cost             *float64 `json:"cost,omitempty"` // Cost in USD from OpenRouter
 	} `json:"usage"`
+
+	// DebugRequestBody contains the raw JSON request body sent to OpenRouter.
+	// Not part of API response - populated by client for debugging purposes.
+	DebugRequestBody string `json:"-"`
 }
 
 type EmbeddingRequest struct {
@@ -483,6 +487,9 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		RecordLLMRequest(req.UserID, req.Model, time.Since(startTime).Seconds(), false, 0, 0, nil, jt)
 		return ChatCompletionResponse{}, err
 	}
+
+	// Store raw request body for debugging (available via response.DebugRequestBody)
+	chatResp.DebugRequestBody = string(body)
 
 	if len(chatResp.Choices) > 0 {
 		msg := chatResp.Choices[0].Message

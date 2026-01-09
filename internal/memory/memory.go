@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/jobtype"
@@ -25,9 +26,11 @@ type Service struct {
 	factRepo        storage.FactRepository
 	userRepo        storage.UserRepository
 	factHistoryRepo storage.FactHistoryRepository
+	topicRepo       storage.TopicRepository
 	orClient        openrouter.Client
 	translator      *i18n.Translator
 	vectorSearcher  VectorSearcher
+	agentLogger     *agentlog.Logger
 }
 
 func NewService(logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, factHistoryRepo storage.FactHistoryRepository, orClient openrouter.Client, translator *i18n.Translator) *Service {
@@ -44,6 +47,14 @@ func NewService(logger *slog.Logger, cfg *config.Config, factRepo storage.FactRe
 
 func (s *Service) SetVectorSearcher(vs VectorSearcher) {
 	s.vectorSearcher = vs
+}
+
+func (s *Service) SetTopicRepository(tr storage.TopicRepository) {
+	s.topicRepo = tr
+}
+
+func (s *Service) SetAgentLogger(logger *agentlog.Logger) {
+	s.agentLogger = logger
 }
 
 // MemoryUpdate represents the changes returned by the LLM
@@ -199,6 +210,8 @@ func (s *Service) extractMemoryUpdate(ctx context.Context, userID int64, session
 	}
 
 	// Serialize facts for prompt (simplified view)
+	// Note: user_profile and recent_topics removed from archivist prompt
+	// because <current_facts> already contains full JSON of all facts
 	type FactView struct {
 		ID         int64  `json:"id"`
 		Entity     string `json:"entity"`
@@ -292,9 +305,10 @@ func (s *Service) extractMemoryUpdate(ctx context.Context, userID int64, session
 	}
 
 	maxFacts := s.cfg.RAG.MaxProfileFacts
+	// Args: currentDate, maxFacts, len(userFacts), len(otherFacts), userFactsJSON, otherFactsJSON, conversation
 	prompt := s.translator.Get(s.cfg.Bot.Language, "memory.system_prompt", currentDate, maxFacts, len(userFacts), len(otherFacts), string(userFactsJSON), string(otherFactsJSON), sb.String())
 	if len(userFacts) > maxFacts {
-		warning := fmt.Sprintf("\n\nCRITICAL WARNING: You have %d facts about User. The limit is %d. You MUST delete or consolidate at least %d facts in this turn to reduce the count.", len(userFacts), maxFacts, len(userFacts)-maxFacts+1)
+		warning := fmt.Sprintf("\n\n<limit_exceeded>\nCRITICAL: You have %d facts about User. The limit is %d.\nYou MUST delete or consolidate at least %d facts in this response.\n</limit_exceeded>", len(userFacts), maxFacts, len(userFacts)-maxFacts+1)
 		prompt += warning
 	}
 
@@ -317,7 +331,19 @@ func (s *Service) extractMemoryUpdate(ctx context.Context, userID int64, session
 	}
 
 	resp, err := s.orClient.CreateChatCompletion(ctx, req)
+	durationMs := int(time.Since(startTime).Milliseconds())
+
+	inputContext := map[string]interface{}{
+		"user_facts":  userFacts,
+		"other_facts": otherFacts,
+		"messages":    sb.String(),
+	}
+
 	if err != nil {
+		// Log error
+		if s.agentLogger != nil {
+			s.agentLogger.LogError(ctx, userID, agentlog.AgentArchivist, prompt, inputContext, err.Error(), req.Model, durationMs, nil)
+		}
 		return nil, fullRequest, chatUsage{}, err
 	}
 
@@ -328,12 +354,30 @@ func (s *Service) extractMemoryUpdate(ctx context.Context, userID int64, session
 	}
 
 	if len(resp.Choices) == 0 {
+		if s.agentLogger != nil {
+			s.agentLogger.LogError(ctx, userID, agentlog.AgentArchivist, prompt, resp.DebugRequestBody, "empty response", req.Model, durationMs, nil)
+		}
 		return nil, fullRequest, usage, fmt.Errorf("empty response")
 	}
 
 	var update MemoryUpdate
 	if err := json.Unmarshal([]byte(resp.Choices[0].Message.Content), &update); err != nil {
+		if s.agentLogger != nil {
+			s.agentLogger.LogError(ctx, userID, agentlog.AgentArchivist, prompt, resp.DebugRequestBody, fmt.Sprintf("failed to parse response: %v", err), req.Model, durationMs, map[string]interface{}{
+				"raw_response": resp.Choices[0].Message.Content,
+			})
+		}
 		return nil, fullRequest, usage, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	// Log success
+	if s.agentLogger != nil {
+		s.agentLogger.LogSuccess(ctx, userID, agentlog.AgentArchivist, prompt, resp.DebugRequestBody,
+			resp.Choices[0].Message.Content, &update, req.Model, usage.PromptTokens, usage.CompletionTokens, usage.Cost, durationMs, map[string]interface{}{
+				"added_count":   len(update.Added),
+				"updated_count": len(update.Updated),
+				"removed_count": len(update.Removed),
+			})
 	}
 
 	return &update, fullRequest, usage, nil
@@ -679,11 +723,17 @@ func (s *Service) deduplicateAndAddFact(ctx context.Context, fact storage.Fact, 
 }
 
 func (s *Service) arbitrateFact(ctx context.Context, newFact storage.Fact, existingFacts []storage.Fact) (string, int64, string, error) {
+	startTime := time.Now()
+
+	// Note: user_profile and recent_topics removed from deduplicator prompt
+	// as the prompt focuses on comparing the new fact with existing candidates only
+
 	var existingSB strings.Builder
 	for _, f := range existingFacts {
 		existingSB.WriteString(fmt.Sprintf("- [ID:%d] %s (Date: %s)\n", f.ID, f.Content, f.CreatedAt.Format("2006-01-02")))
 	}
 
+	// Args: newFact.Content, existingFacts
 	prompt := s.translator.Get(s.cfg.Bot.Language, "memory.consolidation_prompt", newFact.Content, existingSB.String())
 
 	schema := map[string]interface{}{
@@ -721,11 +771,24 @@ func (s *Service) arbitrateFact(ctx context.Context, newFact storage.Fact, exist
 	}
 
 	resp, err := s.orClient.CreateChatCompletion(ctx, req)
+	durationMs := int(time.Since(startTime).Milliseconds())
+
+	inputContext := map[string]interface{}{
+		"new_fact":       newFact.Content,
+		"existing_facts": existingSB.String(),
+	}
+
 	if err != nil {
+		if s.agentLogger != nil {
+			s.agentLogger.LogError(ctx, newFact.UserID, agentlog.AgentDeduplicator, prompt, inputContext, err.Error(), req.Model, durationMs, nil)
+		}
 		return "", 0, "", err
 	}
 
 	if len(resp.Choices) == 0 {
+		if s.agentLogger != nil {
+			s.agentLogger.LogError(ctx, newFact.UserID, agentlog.AgentDeduplicator, prompt, resp.DebugRequestBody, "empty response", req.Model, durationMs, nil)
+		}
 		return "", 0, "", fmt.Errorf("empty response")
 	}
 
@@ -735,7 +798,23 @@ func (s *Service) arbitrateFact(ctx context.Context, newFact storage.Fact, exist
 		NewContent string `json:"new_content"`
 	}
 	if err := json.Unmarshal([]byte(resp.Choices[0].Message.Content), &result); err != nil {
+		if s.agentLogger != nil {
+			s.agentLogger.LogError(ctx, newFact.UserID, agentlog.AgentDeduplicator, prompt, resp.DebugRequestBody, fmt.Sprintf("failed to parse response: %v", err), req.Model, durationMs, map[string]interface{}{
+				"raw_response": resp.Choices[0].Message.Content,
+			})
+		}
 		return "", 0, "", err
+	}
+
+	// Log success
+	if s.agentLogger != nil {
+		s.agentLogger.LogSuccess(ctx, newFact.UserID, agentlog.AgentDeduplicator, prompt, resp.DebugRequestBody,
+			resp.Choices[0].Message.Content, &result, req.Model,
+			resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.Cost, durationMs,
+			map[string]interface{}{
+				"action":    result.Action,
+				"target_id": result.TargetID,
+			})
 	}
 
 	return result.Action, result.TargetID, result.NewContent, nil

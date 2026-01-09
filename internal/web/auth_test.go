@@ -119,7 +119,7 @@ func TestServer_Start_GeneratesPassword(t *testing.T) {
 	mockBot.On("API").Return(mockAPI)
 	mockAPI.On("GetToken").Return("test-token")
 
-	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
 	assert.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())

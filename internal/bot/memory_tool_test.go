@@ -82,7 +82,6 @@ func TestPerformManageMemory_Add(t *testing.T) {
 		userRepo:        mockStore,
 		msgRepo:         mockStore,
 		statsRepo:       mockStore,
-		logRepo:         mockStore,
 		factRepo:        mockStore,
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,

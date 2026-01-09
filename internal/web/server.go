@@ -144,12 +144,11 @@ type Server struct {
 	factRepo        storage.FactRepository
 	userRepo        storage.UserRepository
 	statsRepo       storage.StatsRepository
-	logRepo         storage.LogRepository
 	topicRepo       storage.TopicRepository
 	msgRepo         storage.MessageRepository
 	factHistoryRepo storage.FactHistoryRepository
 	maintenanceRepo storage.MaintenanceRepository
-	rerankerLogRepo storage.RerankerLogRepository
+	agentLogRepo    storage.AgentLogRepository
 	bot             BotInterface
 	rag             *rag.Service
 	logger          *slog.Logger
@@ -159,7 +158,7 @@ type Server struct {
 	wg              sync.WaitGroup
 }
 
-func NewServer(ctx context.Context, logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, statsRepo storage.StatsRepository, logRepo storage.LogRepository, topicRepo storage.TopicRepository, msgRepo storage.MessageRepository, factHistoryRepo storage.FactHistoryRepository, maintenanceRepo storage.MaintenanceRepository, rerankerLogRepo storage.RerankerLogRepository, bot BotInterface, rag *rag.Service) (*Server, error) {
+func NewServer(ctx context.Context, logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, statsRepo storage.StatsRepository, topicRepo storage.TopicRepository, msgRepo storage.MessageRepository, factHistoryRepo storage.FactHistoryRepository, maintenanceRepo storage.MaintenanceRepository, bot BotInterface, rag *rag.Service) (*Server, error) {
 	renderer, err := ui.NewRenderer()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize renderer: %w", err)
@@ -170,12 +169,10 @@ func NewServer(ctx context.Context, logger *slog.Logger, cfg *config.Config, fac
 		factRepo:        factRepo,
 		userRepo:        userRepo,
 		statsRepo:       statsRepo,
-		logRepo:         logRepo,
 		topicRepo:       topicRepo,
 		msgRepo:         msgRepo,
 		factHistoryRepo: factHistoryRepo,
 		maintenanceRepo: maintenanceRepo,
-		rerankerLogRepo: rerankerLogRepo,
 		bot:             bot,
 		rag:             rag,
 		logger:          logger.With("component", "web_server"),
@@ -183,6 +180,11 @@ func NewServer(ctx context.Context, logger *slog.Logger, cfg *config.Config, fac
 		statsCache:      newDashboardStatsCache(5 * time.Minute),
 		ctx:             ctx,
 	}, nil
+}
+
+// SetAgentLogRepo sets the agent log repository (used for debug UI)
+func (s *Server) SetAgentLogRepo(repo storage.AgentLogRepository) {
+	s.agentLogRepo = repo
 }
 
 func (s *Server) Start(ctx context.Context) error {
@@ -202,9 +204,6 @@ func (s *Server) Start(ctx context.Context) error {
 	// Register debug routes only if enabled
 	if s.cfg.Server.DebugMode {
 		mux.HandleFunc("/ui/stats", instrumentHandler("stats", s.statsHandler))
-		mux.HandleFunc("/ui/inspector", instrumentHandler("inspector", s.inspectorHandler))
-		mux.HandleFunc("/ui/debug/reranker", instrumentHandler("debug_reranker", s.debugRerankerHandler))
-		mux.HandleFunc("/ui/debug/topics", instrumentHandler("debug_topics", s.topicDebugHandler))
 		mux.HandleFunc("/ui/debug/sessions", instrumentHandler("debug_sessions", s.sessionsHandler))
 		mux.HandleFunc("/ui/debug/sessions/process", instrumentHandler("debug_sessions_process", s.sessionsProcessSSEHandler))
 		mux.HandleFunc("/ui/debug/chat", instrumentHandler("debug_chat", s.debugChatHandler))
@@ -215,9 +214,17 @@ func (s *Server) Start(ctx context.Context) error {
 		mux.HandleFunc("/ui/debug/database/repair", instrumentHandler("debug_database_repair", s.databaseRepairHandler))
 		mux.HandleFunc("/ui/debug/database/contamination", instrumentHandler("debug_database_contamination", s.databaseContaminationHandler))
 		mux.HandleFunc("/ui/debug/database/contamination/fix", instrumentHandler("debug_database_contamination_fix", s.databaseContaminationFixHandler))
-		mux.HandleFunc("/ui/topics", instrumentHandler("topics", s.topicsHandler))
-		mux.HandleFunc("/ui/facts", instrumentHandler("facts", s.factsHandler))
-		mux.HandleFunc("/ui/facts/history", instrumentHandler("facts_history", s.factsHistoryHandler))
+		mux.HandleFunc("/ui/debug/database/purge", instrumentHandler("debug_database_purge", s.databasePurgeHandler))
+
+		// Agent log pages
+		mux.HandleFunc("/ui/agents/laplace", instrumentHandler("agent_laplace", s.agentLogHandler("laplace", "Laplace", "robot", "Main chat bot - processes user messages and generates responses")))
+		mux.HandleFunc("/ui/agents/reranker", instrumentHandler("agent_reranker", s.agentLogHandler("reranker", "Reranker", "funnel", "Filters and ranks retrieved topics by relevance")))
+		mux.HandleFunc("/ui/agents/archivist", instrumentHandler("agent_archivist", s.agentLogHandler("archivist", "Archivist", "archive", "Extracts facts from conversations for long-term memory")))
+		mux.HandleFunc("/ui/agents/deduplicator", instrumentHandler("agent_deduplicator", s.agentLogHandler("deduplicator", "Deduplicator", "layers", "Resolves conflicting facts and decides what to keep")))
+		mux.HandleFunc("/ui/agents/splitter", instrumentHandler("agent_splitter", s.agentLogHandler("splitter", "Splitter", "scissors", "Splits conversations into topics")))
+		mux.HandleFunc("/ui/agents/merger", instrumentHandler("agent_merger", s.agentLogHandler("merger", "Merger", "intersect", "Verifies if topics should be merged")))
+		mux.HandleFunc("/ui/agents/enricher", instrumentHandler("agent_enricher", s.agentLogHandler("enricher", "Enricher", "magic", "Expands user queries for better retrieval")))
+		mux.HandleFunc("/ui/agents/scout", instrumentHandler("agent_scout", s.agentLogHandler("scout", "Scout", "search", "Web search tool execution logs")))
 
 		// Redirect /ui/ to /ui/stats
 		mux.HandleFunc("/ui/", func(w http.ResponseWriter, r *http.Request) {
@@ -387,31 +394,17 @@ func (s *Server) runCleanup() {
 		}
 	}
 
-	// Cleanup rag_logs: keep 20 per user
+	// Cleanup agent_logs: keep 50 per user per agent
 	start = time.Now()
-	deleted, err = s.maintenanceRepo.CleanupRagLogs(20)
+	deleted, err = s.maintenanceRepo.CleanupAgentLogs(50)
 	duration = time.Since(start).Seconds()
 	if err != nil {
-		s.logger.Error("failed to cleanup rag_logs", "error", err)
+		s.logger.Error("failed to cleanup agent_logs", "error", err)
 	} else {
-		storage.RecordCleanupDuration("rag_logs", duration)
+		storage.RecordCleanupDuration("agent_logs", duration)
 		if deleted > 0 {
-			storage.RecordCleanupDeleted("rag_logs", deleted)
-			s.logger.Info("cleaned up rag_logs", "deleted", deleted, "duration_s", duration)
-		}
-	}
-
-	// Cleanup reranker_logs: keep 20 per user
-	start = time.Now()
-	deleted, err = s.maintenanceRepo.CleanupRerankerLogs(20)
-	duration = time.Since(start).Seconds()
-	if err != nil {
-		s.logger.Error("failed to cleanup reranker_logs", "error", err)
-	} else {
-		storage.RecordCleanupDuration("reranker_logs", duration)
-		if deleted > 0 {
-			storage.RecordCleanupDeleted("reranker_logs", deleted)
-			s.logger.Info("cleaned up reranker_logs", "deleted", deleted, "duration_s", duration)
+			storage.RecordCleanupDeleted("agent_logs", deleted)
+			s.logger.Info("cleaned up agent_logs", "deleted", deleted, "duration_s", duration)
 		}
 	}
 }
@@ -533,341 +526,6 @@ func (s *Server) statsHandler(w http.ResponseWriter, r *http.Request) {
 	pageData.Data = data
 
 	if err := s.renderer.Render(w, "stats.html", pageData, ui.GetFuncMap()); err != nil {
-		s.logger.Error("failed to render template", "error", err)
-		http.Error(w, "Failed to render template", http.StatusInternalServerError)
-	}
-}
-
-func (s *Server) inspectorHandler(w http.ResponseWriter, r *http.Request) {
-	pageData, err := s.getCommonData(r)
-	if err != nil {
-		s.logger.Error("failed to get common data", "error", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	logs, err := s.logRepo.GetRAGLogs(pageData.SelectedUserID, 50) // Last 50 logs
-	if err != nil {
-		s.logger.Error("failed to get rag logs", "error", err)
-		http.Error(w, "Failed to get logs", http.StatusInternalServerError)
-		return
-	}
-
-	var viewLogs []ui.RAGLogView
-	for _, l := range logs {
-		viewLogs = append(viewLogs, ui.ParseRAGLog(l))
-	}
-
-	pageData.Data = viewLogs
-
-	if err := s.renderer.Render(w, "context_inspector.html", pageData, ui.GetFuncMap()); err != nil {
-		s.logger.Error("failed to render template", "error", err)
-		http.Error(w, "Failed to render template", http.StatusInternalServerError)
-	}
-}
-
-func (s *Server) topicsHandler(w http.ResponseWriter, r *http.Request) {
-	pageData, err := s.getCommonData(r)
-	if err != nil {
-		s.logger.Error("failed to get common data", "error", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	limit := 20
-	page := 1
-	if pStr := r.URL.Query().Get("page"); pStr != "" {
-		_, _ = fmt.Sscanf(pStr, "%d", &page)
-		if page < 1 {
-			page = 1
-		}
-	}
-	offset := (page - 1) * limit
-
-	var hasFacts *bool
-	if val := r.URL.Query().Get("has_facts"); val != "" {
-		switch val {
-		case "true":
-			b := true
-			hasFacts = &b
-		case "false":
-			b := false
-			hasFacts = &b
-		}
-	}
-
-	var isConsolidated *bool
-	if val := r.URL.Query().Get("merged"); val != "" {
-		switch val {
-		case "true":
-			b := true
-			isConsolidated = &b
-		case "false":
-			b := false
-			isConsolidated = &b
-		}
-	}
-
-	var topicID *int64
-	if val := r.URL.Query().Get("topic_id"); val != "" {
-		var id int64
-		if _, err := fmt.Sscanf(val, "%d", &id); err == nil {
-			topicID = &id
-		}
-	}
-
-	filter := storage.TopicFilter{
-		UserID:         pageData.SelectedUserID,
-		Search:         r.URL.Query().Get("q"),
-		HasFacts:       hasFacts,
-		IsConsolidated: isConsolidated,
-		TopicID:        topicID,
-	}
-
-	sortBy := r.URL.Query().Get("sort")
-	sortDir := r.URL.Query().Get("dir")
-	if sortDir == "" {
-		sortDir = "DESC"
-	}
-
-	result, err := s.topicRepo.GetTopicsExtended(filter, limit, offset, sortBy, sortDir)
-	if err != nil {
-		s.logger.Error("failed to get topics", "error", err)
-		http.Error(w, "Failed to get topics", http.StatusInternalServerError)
-		return
-	}
-
-	var viewTopics []ui.TopicView
-	for _, t := range result.Data {
-		msgs, err := s.msgRepo.GetMessagesByTopicID(context.Background(), t.ID)
-		if err != nil {
-			s.logger.Error("failed to get topic messages", "id", t.ID, "error", err)
-			// Continue without messages
-		}
-		viewTopics = append(viewTopics, ui.TopicView{
-			TopicExtended: t,
-			Messages:      msgs,
-		})
-	}
-
-	data := struct {
-		Topics  []ui.TopicView
-		Total   int
-		Page    int
-		Limit   int
-		Pages   int
-		Filter  storage.TopicFilter
-		SortBy  string
-		SortDir string
-	}{
-		Topics:  viewTopics,
-		Total:   result.TotalCount,
-		Page:    page,
-		Limit:   limit,
-		Pages:   (result.TotalCount + limit - 1) / limit,
-		Filter:  filter,
-		SortBy:  sortBy,
-		SortDir: sortDir,
-	}
-
-	pageData.Data = data
-
-	if err := s.renderer.Render(w, "topics.html", pageData, ui.GetFuncMap()); err != nil {
-		s.logger.Error("failed to render template", "error", err)
-		http.Error(w, "Failed to render template", http.StatusInternalServerError)
-	}
-}
-
-func (s *Server) debugRerankerHandler(w http.ResponseWriter, r *http.Request) {
-	pageData, err := s.getCommonData(r)
-	if err != nil {
-		s.logger.Error("failed to get common data", "error", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	limit := 20
-	logs, err := s.rerankerLogRepo.GetRerankerLogs(pageData.SelectedUserID, limit)
-	if err != nil {
-		s.logger.Error("failed to get reranker logs", "error", err)
-		http.Error(w, "Failed to get reranker logs", http.StatusInternalServerError)
-		return
-	}
-
-	// Parse JSON fields into view structs
-	viewLogs := make([]ui.RerankerLogView, 0, len(logs))
-	for _, log := range logs {
-		viewLogs = append(viewLogs, ui.ParseRerankerLog(log))
-	}
-
-	pageData.Data = viewLogs
-
-	if err := s.renderer.Render(w, "reranker_debug.html", pageData, ui.GetFuncMap()); err != nil {
-		s.logger.Error("failed to render template", "error", err)
-		http.Error(w, "Failed to render template", http.StatusInternalServerError)
-	}
-}
-
-func (s *Server) topicDebugHandler(w http.ResponseWriter, r *http.Request) {
-	pageData, err := s.getCommonData(r)
-	if err != nil {
-		s.logger.Error("failed to get common data", "error", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	limit := 20
-	page := 1
-	if pStr := r.URL.Query().Get("page"); pStr != "" {
-		_, _ = fmt.Sscanf(pStr, "%d", &page)
-		if page < 1 {
-			page = 1
-		}
-	}
-	offset := (page - 1) * limit
-
-	logs, total, err := s.logRepo.GetTopicExtractionLogs(limit, offset)
-	if err != nil {
-		s.logger.Error("failed to get topic logs", "error", err)
-		http.Error(w, "Failed to get logs", http.StatusInternalServerError)
-		return
-	}
-
-	var viewLogs []ui.TopicLogView
-	for _, l := range logs {
-		view := ui.ParseTopicLog(l)
-
-		if view.InputStartID != 0 {
-			// Fetch first message to get date
-			msgs, err := s.msgRepo.GetMessagesByIDs([]int64{view.InputStartID})
-			if err == nil && len(msgs) > 0 {
-				view.ChunkDate = msgs[0].CreatedAt
-			}
-		}
-
-		viewLogs = append(viewLogs, view)
-	}
-
-	data := struct {
-		Logs  []ui.TopicLogView
-		Total int
-		Page  int
-		Limit int
-		Pages int
-	}{
-		Logs:  viewLogs,
-		Total: total,
-		Page:  page,
-		Limit: limit,
-		Pages: (total + limit - 1) / limit,
-	}
-
-	pageData.Data = data
-
-	if err := s.renderer.Render(w, "topic_debug.html", pageData, ui.GetFuncMap()); err != nil {
-		s.logger.Error("failed to render template", "error", err)
-		http.Error(w, "Failed to render template", http.StatusInternalServerError)
-	}
-}
-
-func (s *Server) factsHandler(w http.ResponseWriter, r *http.Request) {
-	pageData, err := s.getCommonData(r)
-	if err != nil {
-		s.logger.Error("failed to get common data", "error", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	var facts []storage.Fact
-	if pageData.SelectedUserID != 0 {
-		facts, err = s.factRepo.GetFacts(pageData.SelectedUserID)
-	} else {
-		facts, err = s.factRepo.GetAllFacts()
-	}
-
-	if err != nil {
-		s.logger.Error("failed to get facts", "error", err)
-		http.Error(w, "Failed to get facts", http.StatusInternalServerError)
-		return
-	}
-
-	// Sort by Importance desc, then CreatedAt desc
-	sort.Slice(facts, func(i, j int) bool {
-		if facts[i].Importance != facts[j].Importance {
-			return facts[i].Importance > facts[j].Importance
-		}
-		return facts[i].CreatedAt.After(facts[j].CreatedAt)
-	})
-
-	pageData.Data = facts
-
-	if err := s.renderer.Render(w, "facts.html", pageData, ui.GetFuncMap()); err != nil {
-		s.logger.Error("failed to render template", "error", err)
-		http.Error(w, "Failed to render template", http.StatusInternalServerError)
-	}
-}
-
-func (s *Server) factsHistoryHandler(w http.ResponseWriter, r *http.Request) {
-	pageData, err := s.getCommonData(r)
-	if err != nil {
-		s.logger.Error("failed to get common data", "error", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	limit := 50
-	page := 1
-	if pStr := r.URL.Query().Get("page"); pStr != "" {
-		_, _ = fmt.Sscanf(pStr, "%d", &page)
-		if page < 1 {
-			page = 1
-		}
-	}
-	offset := (page - 1) * limit
-
-	filter := storage.FactHistoryFilter{
-		UserID:   pageData.SelectedUserID,
-		Action:   r.URL.Query().Get("action"),
-		Category: r.URL.Query().Get("category"),
-		Search:   r.URL.Query().Get("search"),
-	}
-
-	sortBy := r.URL.Query().Get("sort")
-	sortDir := r.URL.Query().Get("dir")
-	if sortDir == "" {
-		sortDir = "DESC"
-	}
-
-	result, err := s.factHistoryRepo.GetFactHistoryExtended(filter, limit, offset, sortBy, sortDir)
-	if err != nil {
-		s.logger.Error("failed to get fact history", "error", err)
-		http.Error(w, "Failed to get fact history", http.StatusInternalServerError)
-		return
-	}
-
-	data := struct {
-		History []storage.FactHistory
-		Total   int
-		Page    int
-		Limit   int
-		Pages   int
-		Filter  storage.FactHistoryFilter
-		SortBy  string
-		SortDir string
-	}{
-		History: result.Data,
-		Total:   result.TotalCount,
-		Page:    page,
-		Limit:   limit,
-		Pages:   (result.TotalCount + limit - 1) / limit,
-		Filter:  filter,
-		SortBy:  sortBy,
-		SortDir: sortDir,
-	}
-
-	pageData.Data = data
-
-	if err := s.renderer.Render(w, "facts_history.html", pageData, ui.GetFuncMap()); err != nil {
 		s.logger.Error("failed to render template", "error", err)
 		http.Error(w, "Failed to render template", http.StatusInternalServerError)
 	}
@@ -1394,6 +1052,78 @@ func (s *Server) databaseContaminationFixHandler(w http.ResponseWriter, r *http.
 	})
 }
 
+// databasePurgeHandler handles POST /ui/debug/database/purge - deletes all debug data.
+func (s *Server) databasePurgeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		DryRun bool `json:"dry_run"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Invalid JSON: " + err.Error()})
+		return
+	}
+
+	if s.maintenanceRepo == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Maintenance repository not available"})
+		return
+	}
+
+	stats := map[string]int64{
+		"agent_logs_deleted":   0,
+		"fact_history_deleted": 0,
+	}
+
+	if req.DryRun {
+		// For dry run, count records that would be deleted
+		agentLogsCount, err := s.maintenanceRepo.CountAgentLogs()
+		if err != nil {
+			s.logger.Error("Failed to count agent_logs", "error", err)
+		} else {
+			stats["agent_logs_deleted"] = agentLogsCount
+		}
+
+		factHistoryCount, err := s.maintenanceRepo.CountFactHistory()
+		if err != nil {
+			s.logger.Error("Failed to count fact_history", "error", err)
+		} else {
+			stats["fact_history_deleted"] = factHistoryCount
+		}
+	} else {
+		// Actually delete all debug data
+		deleted, err := s.maintenanceRepo.CleanupAgentLogs(0)
+		if err != nil {
+			s.logger.Error("Failed to purge agent_logs", "error", err)
+		} else {
+			stats["agent_logs_deleted"] = deleted
+			s.logger.Info("Purged agent_logs", "deleted", deleted)
+		}
+
+		deleted, err = s.maintenanceRepo.CleanupFactHistory(0)
+		if err != nil {
+			s.logger.Error("Failed to purge fact_history", "error", err)
+		} else {
+			stats["fact_history_deleted"] = deleted
+			s.logger.Info("Purged fact_history", "deleted", deleted)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"stats":   stats,
+		"dry_run": req.DryRun,
+	})
+}
+
 // debugChatSendHandler handles POST /ui/debug/chat/send - sends a test message and returns metrics.
 func (s *Server) debugChatSendHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -1450,4 +1180,50 @@ func (s *Server) debugChatSendHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// agentLogHandler returns a handler for displaying agent logs.
+// It's a factory function that creates handlers for different agent types.
+func (s *Server) agentLogHandler(agentType, agentName, agentIcon, agentDescription string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		pageData, err := s.getCommonData(r)
+		if err != nil {
+			s.logger.Error("failed to get common data", "error", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		if s.agentLogRepo == nil {
+			s.logger.Error("agent log repository not configured")
+			http.Error(w, "Agent log repository not configured", http.StatusInternalServerError)
+			return
+		}
+
+		limit := 50
+		logs, err := s.agentLogRepo.GetAgentLogs(agentType, pageData.SelectedUserID, limit)
+		if err != nil {
+			s.logger.Error("failed to get agent logs", "error", err, "agent_type", agentType)
+			http.Error(w, "Failed to get agent logs", http.StatusInternalServerError)
+			return
+		}
+
+		data := struct {
+			AgentName        string
+			AgentIcon        string
+			AgentDescription string
+			Logs             []storage.AgentLog
+		}{
+			AgentName:        agentName,
+			AgentIcon:        agentIcon,
+			AgentDescription: agentDescription,
+			Logs:             logs,
+		}
+
+		pageData.Data = data
+
+		if err := s.renderer.Render(w, "agent_log.html", pageData, ui.GetFuncMap()); err != nil {
+			s.logger.Error("failed to render template", "error", err)
+			http.Error(w, "Failed to render template", http.StatusInternalServerError)
+		}
+	}
 }

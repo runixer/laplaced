@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/jobtype"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
@@ -202,23 +203,57 @@ func (s *Service) findMergeCandidates(userID int64) ([]storage.MergeCandidate, e
 }
 
 func (s *Service) verifyMerge(ctx context.Context, candidate storage.MergeCandidate) (bool, string, UsageInfo, error) {
-	// Load user profile for context
-	profile := s.formatUserProfileCompact(candidate.Topic1.UserID)
+	startTime := time.Now()
+	userID := candidate.Topic1.UserID
 
-	promptTmpl := s.translator.Get(s.cfg.Bot.Language, "rag.topic_consolidation_prompt")
-	prompt := fmt.Sprintf(promptTmpl, profile, candidate.Topic1.Summary, candidate.Topic2.Summary)
+	// Load user profile for context (unified format with tags)
+	allFacts, err := s.factRepo.GetFacts(userID)
+	var profile string
+	if err == nil {
+		profile = FormatUserProfile(FilterProfileFacts(allFacts))
+	} else {
+		s.logger.Warn("failed to load facts for merger", "error", err)
+		profile = FormatUserProfile(nil)
+	}
+
+	// Load recent topics for context
+	var recentTopics string
+	recentTopicsCount := s.cfg.RAG.GetRecentTopicsInContext()
+	if recentTopicsCount > 0 {
+		topics, err := s.GetRecentTopics(userID, recentTopicsCount)
+		if err != nil {
+			s.logger.Warn("failed to get recent topics for merger", "error", err)
+		}
+		recentTopics = FormatRecentTopics(topics)
+	} else {
+		recentTopics = FormatRecentTopics(nil)
+	}
+
+	// Build system prompt with profile and recent topics
+	systemPromptTmpl := s.translator.Get(s.cfg.Bot.Language, "rag.topic_consolidation_system_prompt")
+	systemPrompt := fmt.Sprintf(systemPromptTmpl, profile, recentTopics)
+
+	// Build user message with topic summaries
+	userPromptTmpl := s.translator.Get(s.cfg.Bot.Language, "rag.topic_consolidation_user_prompt")
+	userMessage := fmt.Sprintf(userPromptTmpl, candidate.Topic1.Summary, candidate.Topic2.Summary)
 
 	model := s.cfg.Agents.Merger.GetModel(s.cfg.Agents.Default.Model)
 
 	resp, err := s.client.CreateChatCompletion(ctx, openrouter.ChatCompletionRequest{
 		Model: model,
 		Messages: []openrouter.Message{
-			{Role: "user", Content: prompt},
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userMessage},
 		},
 		ResponseFormat: map[string]interface{}{"type": "json_object"},
 		UserID:         candidate.Topic1.UserID,
 	})
+	durationMs := int(time.Since(startTime).Milliseconds())
+
 	if err != nil {
+		if s.agentLogger != nil {
+			s.agentLogger.LogError(ctx, candidate.Topic1.UserID, agentlog.AgentMerger, systemPrompt, nil, err.Error(), model, durationMs, nil)
+		}
 		return false, "", UsageInfo{}, err
 	}
 
@@ -230,6 +265,9 @@ func (s *Service) verifyMerge(ctx context.Context, candidate storage.MergeCandid
 	}
 
 	if len(resp.Choices) == 0 {
+		if s.agentLogger != nil {
+			s.agentLogger.LogError(ctx, candidate.Topic1.UserID, agentlog.AgentMerger, systemPrompt, resp.DebugRequestBody, "empty response", model, durationMs, nil)
+		}
 		return false, "", usage, fmt.Errorf("empty response")
 	}
 
@@ -238,7 +276,22 @@ func (s *Service) verifyMerge(ctx context.Context, candidate storage.MergeCandid
 		NewSummary  string `json:"new_summary"`
 	}
 	if err := json.Unmarshal([]byte(resp.Choices[0].Message.Content), &result); err != nil {
+		if s.agentLogger != nil {
+			s.agentLogger.LogError(ctx, candidate.Topic1.UserID, agentlog.AgentMerger, systemPrompt, resp.DebugRequestBody, fmt.Sprintf("failed to parse response: %v", err), model, durationMs, map[string]interface{}{
+				"raw_response": resp.Choices[0].Message.Content,
+			})
+		}
 		return false, "", usage, err
+	}
+
+	// Log success
+	if s.agentLogger != nil {
+		s.agentLogger.LogSuccess(ctx, candidate.Topic1.UserID, agentlog.AgentMerger, systemPrompt, resp.DebugRequestBody,
+			resp.Choices[0].Message.Content, &result, model,
+			usage.PromptTokens, usage.CompletionTokens, usage.Cost, durationMs,
+			map[string]interface{}{
+				"should_merge": result.ShouldMerge,
+			})
 	}
 
 	return result.ShouldMerge, result.NewSummary, usage, nil
