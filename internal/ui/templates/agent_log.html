@@ -1492,11 +1492,13 @@ class OpenRouterResponseViewer {
 // Initialize viewers on page load
 document.addEventListener('DOMContentLoaded', function() {
     {{range $idx, $log := .Data.Logs}}
+    {{if not $log.ConversationTurns}}
     {{if $log.InputContext}}
     new OpenRouterRequestViewer('or-request-{{$idx}}', {{$log.InputContext | jsString}});
     {{end}}
     {{if $log.OutputContext}}
     new OpenRouterResponseViewer('or-response-{{$idx}}', {{$log.OutputContext | jsString}});
+    {{end}}
     {{end}}
     {{end}}
 });
