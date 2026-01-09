@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
@@ -87,6 +88,12 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	}
 
 	userID := group.UserID
+
+	// Load SharedContext once for all agents in this request
+	if b.contextService != nil {
+		shared := b.contextService.Load(shutdownSafeCtx, userID)
+		shutdownSafeCtx = agent.WithContext(shutdownSafeCtx, shared)
+	}
 
 	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "user", Content: historyContent}); err != nil {
 		logger.Error("failed to add message to history", "error", err)

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
@@ -526,27 +527,36 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 			contextualizedQuery = query
 		}
 
-		// Load user profile for reranker context (unified format with tags)
-		allFacts, err := s.factRepo.GetFacts(userID)
+		// Load user profile and recent topics for reranker context
+		// Try to use SharedContext if available (loaded once in processMessageGroup)
 		var userProfile string
-		if err == nil {
-			userProfile = FormatUserProfile(FilterProfileFacts(allFacts))
-		} else {
-			s.logger.Warn("failed to load facts for reranker", "error", err)
-			userProfile = FormatUserProfile(nil)
-		}
-
-		// Load recent topics for reranker context
 		var recentTopics string
-		recentTopicsCount := s.cfg.RAG.GetRecentTopicsInContext()
-		if recentTopicsCount > 0 {
-			topics, err := s.GetRecentTopics(userID, recentTopicsCount)
-			if err != nil {
-				s.logger.Warn("failed to get recent topics for reranker", "error", err)
-			}
-			recentTopics = FormatRecentTopics(topics)
+
+		if shared := agent.FromContext(ctx); shared != nil {
+			// Use pre-loaded data from SharedContext
+			userProfile = shared.Profile
+			recentTopics = shared.RecentTopics
 		} else {
-			recentTopics = FormatRecentTopics(nil)
+			// Fallback: load directly (for tests or when contextService is not configured)
+			allFacts, err := s.factRepo.GetFacts(userID)
+			if err == nil {
+				userProfile = FormatUserProfile(FilterProfileFacts(allFacts))
+			} else {
+				s.logger.Warn("failed to load facts for reranker", "error", err)
+				userProfile = FormatUserProfile(nil)
+			}
+
+			// Load recent topics for reranker context
+			recentTopicsCount := s.cfg.RAG.GetRecentTopicsInContext()
+			if recentTopicsCount > 0 {
+				topics, err := s.GetRecentTopics(userID, recentTopicsCount)
+				if err != nil {
+					s.logger.Warn("failed to get recent topics for reranker", "error", err)
+				}
+				recentTopics = FormatRecentTopics(topics)
+			} else {
+				recentTopics = FormatRecentTopics(nil)
+			}
 		}
 
 		// Format current session messages for reranker

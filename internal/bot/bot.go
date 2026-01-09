@@ -13,6 +13,7 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
+	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
@@ -45,6 +46,7 @@ type Bot struct {
 	orClient        openrouter.Client
 	speechKitClient yandex.Client
 	ragService      *rag.Service
+	contextService  *agent.ContextService
 	downloader      telegram.FileDownloader
 	fileProcessor   *files.Processor
 	messageGrouper  *MessageGrouper
@@ -54,7 +56,7 @@ type Bot struct {
 	wg              sync.WaitGroup
 }
 
-func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRepo storage.UserRepository, msgRepo storage.MessageRepository, statsRepo storage.StatsRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, orClient openrouter.Client, speechKitClient yandex.Client, ragService *rag.Service, translator *i18n.Translator) (*Bot, error) {
+func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRepo storage.UserRepository, msgRepo storage.MessageRepository, statsRepo storage.StatsRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, orClient openrouter.Client, speechKitClient yandex.Client, ragService *rag.Service, contextService *agent.ContextService, translator *i18n.Translator) (*Bot, error) {
 	botLogger := logger.With("component", "bot")
 	downloader, err := telegram.NewHTTPFileDownloader(api, "https://api.telegram.org", cfg.Telegram.ProxyURL)
 	if err != nil {
@@ -74,6 +76,7 @@ func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRe
 		orClient:        orClient,
 		speechKitClient: speechKitClient,
 		ragService:      ragService,
+		contextService:  contextService,
 		downloader:      downloader,
 		fileProcessor:   fileProcessor,
 		logger:          botLogger,
@@ -561,28 +564,36 @@ func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageCont
 		b.logger.Error("failed to get unprocessed messages", "error", err)
 	}
 
-	// 1. Get Core Identity Facts (Layer 1)
-	allFacts, err := b.factRepo.GetFacts(userID)
-	var coreIdentityFacts []storage.Fact
-	if err == nil {
-		coreIdentityFacts = rag.FilterProfileFacts(allFacts)
-	} else {
-		b.logger.Error("failed to get facts", "error", err)
-	}
-
-	// Format Core Identity for System Prompt (wrapped in <user_profile> tags)
-	memoryBankFormatted := rag.FormatUserProfile(coreIdentityFacts)
-
-	// Get Recent Topics for temporal context (wrapped in <recent_topics> tags)
+	// 1. Get Core Identity Facts and Recent Topics
+	// Try to use SharedContext if available (loaded once in processMessageGroup)
+	var memoryBankFormatted string
 	var recentTopicsFormatted string
-	if b.cfg.RAG.Enabled {
-		recentTopicsCount := b.cfg.RAG.GetRecentTopicsInContext()
-		if recentTopicsCount > 0 {
-			recentTopics, err := b.ragService.GetRecentTopics(userID, recentTopicsCount)
-			if err != nil {
-				b.logger.Warn("failed to get recent topics", "error", err)
-			} else {
-				recentTopicsFormatted = rag.FormatRecentTopics(recentTopics)
+
+	if shared := agent.FromContext(ctx); shared != nil {
+		// Use pre-loaded data from SharedContext
+		memoryBankFormatted = shared.Profile
+		recentTopicsFormatted = shared.RecentTopics
+	} else {
+		// Fallback: load directly (for tests or when contextService is not configured)
+		allFacts, err := b.factRepo.GetFacts(userID)
+		var coreIdentityFacts []storage.Fact
+		if err == nil {
+			coreIdentityFacts = rag.FilterProfileFacts(allFacts)
+		} else {
+			b.logger.Error("failed to get facts", "error", err)
+		}
+		memoryBankFormatted = rag.FormatUserProfile(coreIdentityFacts)
+
+		// Get Recent Topics for temporal context
+		if b.cfg.RAG.Enabled {
+			recentTopicsCount := b.cfg.RAG.GetRecentTopicsInContext()
+			if recentTopicsCount > 0 {
+				recentTopics, err := b.ragService.GetRecentTopics(userID, recentTopicsCount)
+				if err != nil {
+					b.logger.Warn("failed to get recent topics", "error", err)
+				} else {
+					recentTopicsFormatted = rag.FormatRecentTopics(recentTopics)
+				}
 			}
 		}
 	}

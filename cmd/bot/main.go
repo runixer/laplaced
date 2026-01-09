@@ -181,10 +181,8 @@ func main() {
 	// Create agent logger for debugging LLM calls (only logs when debug mode is enabled)
 	agentLogger := agentlog.NewLogger(store, logger, cfg.Server.DebugMode)
 
-	// Create context service for shared user context across agents (Phase 1 - foundation)
-	// Will be integrated with bot/rag in Phase 2
+	// Create context service for shared user context across agents
 	contextService := agent.NewContextService(store, store, cfg, logger)
-	_ = contextService // TODO: wire into bot/rag in Phase 2
 
 	memoryService := memory.NewService(logger, cfg, store, store, store, openrouterClient, translator)
 	memoryService.SetAgentLogger(agentLogger)
@@ -194,7 +192,7 @@ func main() {
 	memoryService.SetVectorSearcher(ragService)
 	memoryService.SetTopicRepository(store)
 
-	b, err := bot.NewBot(logger, api, cfg, store, store, store, store, store, openrouterClient, speechKitClient, ragService, translator)
+	b, err := bot.NewBot(logger, api, cfg, store, store, store, store, store, openrouterClient, speechKitClient, ragService, contextService, translator)
 	if err != nil {
 		logger.Error("failed to create bot", "error", err)
 		os.Exit(1)
