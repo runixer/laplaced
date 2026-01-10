@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/runixer/laplaced/internal/agent/laplace"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
@@ -33,6 +34,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 	}
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	laplaceAgent := laplace.New(cfg, mockORClient, ragService, mockStore, mockStore, translator, logger)
 
 	bot := &Bot{
 		api:             mockAPI,
@@ -46,6 +48,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
+		laplaceAgent:    laplaceAgent,
 	}
 	bot.messageGrouper = NewMessageGrouper(bot, logger, 0, bot.processMessageGroup)
 

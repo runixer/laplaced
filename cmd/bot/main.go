@@ -17,6 +17,7 @@ import (
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/archivist"
 	"github.com/runixer/laplaced/internal/agent/enricher"
+	"github.com/runixer/laplaced/internal/agent/laplace"
 	"github.com/runixer/laplaced/internal/agent/merger"
 	"github.com/runixer/laplaced/internal/agent/reranker"
 	"github.com/runixer/laplaced/internal/agent/splitter"
@@ -221,12 +222,19 @@ func main() {
 	memoryService.SetVectorSearcher(ragService)
 	memoryService.SetTopicRepository(store)
 
+	// Create Laplace (main chat agent)
+	// Note: Laplace is not registered in the agent registry because it has a different
+	// interface (requires ToolHandler for tool execution callbacks)
+	laplaceAgent := laplace.New(cfg, openrouterClient, ragService, store, store, translator, logger)
+	laplaceAgent.SetAgentLogger(agentLogger)
+
 	b, err := bot.NewBot(logger, api, cfg, store, store, store, store, store, openrouterClient, speechKitClient, ragService, contextService, translator)
 	if err != nil {
 		logger.Error("failed to create bot", "error", err)
 		os.Exit(1)
 	}
 	b.SetAgentLogger(agentLogger)
+	b.SetLaplaceAgent(laplaceAgent)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agent/laplace"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
@@ -70,6 +71,7 @@ func TestProcessMessageGroup_CompletesOnContextCancel(t *testing.T) {
 	cfg.RAG.Enabled = false
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	laplaceAgent := laplace.New(cfg, mockORClient, ragService, mockStore, mockStore, translator, logger)
 
 	bot := &Bot{
 		api:             mockAPI,
@@ -83,6 +85,7 @@ func TestProcessMessageGroup_CompletesOnContextCancel(t *testing.T) {
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
+		laplaceAgent:    laplaceAgent,
 	}
 	bot.messageGrouper = NewMessageGrouper(bot, logger, 0, bot.processMessageGroup)
 
@@ -175,6 +178,7 @@ func TestProcessMessageGroup_LLMContextNotCancelled(t *testing.T) {
 	cfg.RAG.Enabled = false
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	laplaceAgent := laplace.New(cfg, mockORClient, ragService, mockStore, mockStore, translator, logger)
 
 	bot := &Bot{
 		api:             mockAPI,
@@ -188,6 +192,7 @@ func TestProcessMessageGroup_LLMContextNotCancelled(t *testing.T) {
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
+		laplaceAgent:    laplaceAgent,
 	}
 	bot.messageGrouper = NewMessageGrouper(bot, logger, 0, bot.processMessageGroup)
 
@@ -275,6 +280,7 @@ func TestProcessMessageGroup_VoiceCompletesOnContextCancel(t *testing.T) {
 	cfg.RAG.Enabled = false
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	laplaceAgent := laplace.New(cfg, mockORClient, ragService, mockStore, mockStore, translator, logger)
 
 	bot := &Bot{
 		api:             mockAPI,
@@ -290,6 +296,7 @@ func TestProcessMessageGroup_VoiceCompletesOnContextCancel(t *testing.T) {
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
+		laplaceAgent:    laplaceAgent,
 	}
 	bot.messageGrouper = NewMessageGrouper(bot, logger, 0, bot.processMessageGroup)
 
@@ -379,6 +386,7 @@ func TestProcessMessageGroup_VoiceDownloadContextNotCancelled(t *testing.T) {
 	cfg.RAG.Enabled = false
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	laplaceAgent := laplace.New(cfg, mockORClient, ragService, mockStore, mockStore, translator, logger)
 
 	bot := &Bot{
 		api:             mockAPI,
@@ -394,6 +402,7 @@ func TestProcessMessageGroup_VoiceDownloadContextNotCancelled(t *testing.T) {
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
+		laplaceAgent:    laplaceAgent,
 	}
 	bot.messageGrouper = NewMessageGrouper(bot, logger, 0, bot.processMessageGroup)
 

@@ -14,6 +14,7 @@ import (
 	"golang.org/x/text/language"
 
 	"github.com/runixer/laplaced/internal/agent"
+	"github.com/runixer/laplaced/internal/agent/laplace"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
@@ -47,6 +48,7 @@ type Bot struct {
 	speechKitClient yandex.Client
 	ragService      *rag.Service
 	contextService  *agent.ContextService
+	laplaceAgent    *laplace.Laplace
 	downloader      telegram.FileDownloader
 	fileProcessor   *files.Processor
 	messageGrouper  *MessageGrouper
@@ -105,6 +107,11 @@ func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRe
 // SetAgentLogger sets the agent logger for debug logging
 func (b *Bot) SetAgentLogger(logger *agentlog.Logger) {
 	b.agentLogger = logger
+}
+
+// SetLaplaceAgent sets the Laplace chat agent
+func (b *Bot) SetLaplaceAgent(agent *laplace.Laplace) {
+	b.laplaceAgent = agent
 }
 
 func (b *Bot) setCommands() error {
@@ -289,46 +296,6 @@ func (b *Bot) sendTypingActionLoop(ctx context.Context, chatID int64, messageThr
 
 func (b *Bot) handleGroupedMessage(msg *telegram.Message) {
 	b.messageGrouper.AddMessage(msg)
-}
-
-func (b *Bot) getTools() []openrouter.Tool {
-	var tools []openrouter.Tool
-
-	// 1. Configured Tools
-	for _, toolCfg := range b.cfg.Tools {
-		desc := toolCfg.Description
-		if desc == "" {
-			desc = b.translator.Get(b.cfg.Bot.Language, fmt.Sprintf("tools.%s.description", toolCfg.Name))
-		}
-
-		paramDesc := toolCfg.ParameterDescription
-		if paramDesc == "" {
-			paramDesc = b.translator.Get(b.cfg.Bot.Language, fmt.Sprintf("tools.%s.parameter_description", toolCfg.Name))
-		}
-		if paramDesc == "" {
-			paramDesc = "Input prompt for the tool"
-		}
-		tool := openrouter.Tool{
-			Type: "function",
-			Function: openrouter.ToolFunction{
-				Name:        toolCfg.Name,
-				Description: desc,
-				Parameters: map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"query": map[string]interface{}{
-							"type":        "string",
-							"description": paramDesc,
-						},
-					},
-					"required": []string{"query"},
-				},
-			},
-		}
-		tools = append(tools, tool)
-	}
-
-	return tools
 }
 
 func (b *Bot) performModelTool(ctx context.Context, userID int64, modelName string, query string) (string, error) {
@@ -531,197 +498,6 @@ func (b *Bot) deduplicateTopics(topics []rag.TopicSearchResult, recentHistory []
 		}
 	}
 	return filtered
-}
-
-// buildContext assembles the full context for LLM generation.
-//
-// REFACTORING NOTE: This function has high cyclomatic complexity (~34) but is intentionally
-// kept as a single function because:
-// 1. It's a linear pipeline (steps 0-6) where each step depends on previous results
-// 2. Three helpers are already extracted: formatCoreIdentityFacts, deduplicateTopics, filterShortMessages
-// 3. The remaining complexity comes from error handling (normal Go pattern)
-// 4. Splitting further would fragment understanding without improving testability
-// See CLAUDE.md "Refactoring & Cyclomatic Complexity" section for decision framework.
-func (b *Bot) buildContext(ctx context.Context, userID int64, currentMessageContent string, currentMessageRaw string, currentUserMessageParts []interface{}) ([]openrouter.Message, *rag.RetrievalDebugInfo, error) {
-	// 0. Get Session Memory (Short-Term Archive)
-	unprocessedHistory, err := b.msgRepo.GetUnprocessedMessages(userID)
-	if err != nil {
-		b.logger.Error("failed to get unprocessed messages", "error", err)
-	}
-
-	// 1. Get Core Identity Facts and Recent Topics
-	// Try to use SharedContext if available (loaded once in processMessageGroup)
-	var memoryBankFormatted string
-	var recentTopicsFormatted string
-
-	if shared := agent.FromContext(ctx); shared != nil {
-		// Use pre-loaded data from SharedContext
-		memoryBankFormatted = shared.Profile
-		recentTopicsFormatted = shared.RecentTopics
-	} else {
-		// Fallback: load directly (for tests or when contextService is not configured)
-		allFacts, err := b.factRepo.GetFacts(userID)
-		var coreIdentityFacts []storage.Fact
-		if err == nil {
-			coreIdentityFacts = rag.FilterProfileFacts(allFacts)
-		} else {
-			b.logger.Error("failed to get facts", "error", err)
-		}
-		memoryBankFormatted = rag.FormatUserProfile(coreIdentityFacts)
-
-		// Get Recent Topics for temporal context
-		if b.cfg.RAG.Enabled {
-			recentTopicsCount := b.cfg.RAG.GetRecentTopicsInContext()
-			if recentTopicsCount > 0 {
-				recentTopics, err := b.ragService.GetRecentTopics(userID, recentTopicsCount)
-				if err != nil {
-					b.logger.Warn("failed to get recent topics", "error", err)
-				} else {
-					recentTopicsFormatted = rag.FormatRecentTopics(recentTopics)
-				}
-			}
-		}
-	}
-
-	recentHistory := unprocessedHistory
-
-	// Limit recent history to avoid context overflow
-	if b.cfg.RAG.MaxContextMessages > 0 && len(recentHistory) > b.cfg.RAG.MaxContextMessages {
-		recentHistory = recentHistory[len(recentHistory)-b.cfg.RAG.MaxContextMessages:]
-	}
-
-	// 2. RAG Retrieval (Layer 2)
-	var retrievedResults []rag.TopicSearchResult
-	var debugInfo *rag.RetrievalDebugInfo
-
-	if b.cfg.RAG.Enabled {
-		// Prepare context for enrichment
-		var enrichmentContext []storage.Message
-		if len(recentHistory) > 1 {
-			availableHistory := recentHistory[:len(recentHistory)-1]
-			count := 5
-			if len(availableHistory) < count {
-				count = len(availableHistory)
-			}
-			enrichmentContext = availableHistory[len(availableHistory)-count:]
-		}
-
-		var err error
-		// Extract media parts (images, audio) for multimodal RAG
-		// ImagePart = photos/images, FilePart = voice/audio/documents
-		var mediaParts []interface{}
-		for _, part := range currentUserMessageParts {
-			switch part.(type) {
-			case openrouter.ImagePart, openrouter.FilePart:
-				mediaParts = append(mediaParts, part)
-			}
-		}
-
-		opts := &rag.RetrievalOptions{
-			History:        enrichmentContext,
-			SkipEnrichment: false,
-			Source:         "auto",
-			MediaParts:     mediaParts,
-		}
-		retrievedResults, debugInfo, err = b.ragService.Retrieve(ctx, userID, currentMessageRaw, opts)
-		if err != nil {
-			b.logger.Error("RAG retrieval failed", "error", err)
-		} else {
-			retrievedResults = b.deduplicateTopics(retrievedResults, recentHistory)
-		}
-	}
-
-	var orMessages []openrouter.Message
-
-	// System Prompt + Core Identity
-	botName := b.cfg.Agents.Chat.Name
-	if botName == "" {
-		botName = "Bot"
-	}
-	baseSystemPrompt := b.translator.Get(b.cfg.Bot.Language, "bot.system_prompt", botName)
-
-	if b.cfg.Bot.SystemPromptExtra != "" {
-		baseSystemPrompt += " " + b.cfg.Bot.SystemPromptExtra
-	}
-	fullSystemPrompt := baseSystemPrompt
-	if memoryBankFormatted != "" {
-		fullSystemPrompt += "\n\n" + memoryBankFormatted
-	}
-	if recentTopicsFormatted != "" {
-		fullSystemPrompt += "\n\n" + recentTopicsFormatted
-	}
-
-	if fullSystemPrompt != "" {
-		orMessages = append(orMessages, openrouter.Message{
-			Role: "system",
-			Content: []interface{}{
-				openrouter.TextPart{Type: "text", Text: fullSystemPrompt},
-			},
-		})
-	}
-
-	// RAG Result String (Topics)
-	var ragContextMsg *openrouter.Message
-	if len(retrievedResults) > 0 {
-		ragContent := b.formatRAGResults(retrievedResults, "")
-		if debugInfo != nil {
-			ragContent = b.formatRAGResults(retrievedResults, debugInfo.EnrichedQuery)
-		}
-
-		ragContextMsg = &openrouter.Message{
-			Role: "user",
-			Content: []interface{}{
-				openrouter.TextPart{Type: "text", Text: ragContent},
-			},
-		}
-	}
-
-	// Add RAG context before session (historical context first, then current conversation)
-	if ragContextMsg != nil {
-		orMessages = append(orMessages, *ragContextMsg)
-	}
-
-	// Add Recent History (active session)
-	var sessionChars int
-	for _, hMsg := range recentHistory {
-		var contentParts []interface{}
-
-		if hMsg.Content == currentMessageContent && currentUserMessageParts != nil && hMsg.Role == "user" {
-			contentParts = currentUserMessageParts
-		} else {
-			contentParts = []interface{}{
-				openrouter.TextPart{Type: "text", Text: hMsg.Content},
-			}
-		}
-		sessionChars += len(hMsg.Content)
-		orMessages = append(orMessages, openrouter.Message{Role: hMsg.Role, Content: contentParts})
-	}
-
-	// Record context tokens by source (approximate: 1 token ≈ 4 characters)
-	if len(baseSystemPrompt) > 0 {
-		RecordContextTokensBySource(userID, ContextSourceSystem, len(baseSystemPrompt)/4)
-	}
-	if len(memoryBankFormatted) > 0 {
-		RecordContextTokensBySource(userID, ContextSourceProfile, len(memoryBankFormatted)/4)
-	}
-	if ragContextMsg != nil {
-		ragText := ""
-		if parts, ok := ragContextMsg.Content.([]interface{}); ok {
-			for _, part := range parts {
-				if tp, ok := part.(openrouter.TextPart); ok {
-					ragText += tp.Text
-				}
-			}
-		}
-		if len(ragText) > 0 {
-			RecordContextTokensBySource(userID, ContextSourceTopics, len(ragText)/4)
-		}
-	}
-	if sessionChars > 0 {
-		RecordContextTokensBySource(userID, ContextSourceSession, sessionChars/4)
-	}
-
-	return orMessages, debugInfo, nil
 }
 
 func (b *Bot) getTieredCost(promptTokens, completionTokens int, logger *slog.Logger) float64 {
@@ -1057,6 +833,10 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, sa
 
 	result := &rag.TestMessageResult{}
 
+	if b.laplaceAgent == nil {
+		return nil, fmt.Errorf("laplace agent not configured")
+	}
+
 	// Save user message to history if requested
 	if saveToHistory {
 		if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "user", Content: text}); err != nil {
@@ -1065,36 +845,49 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, sa
 		}
 	}
 
-	// Build context with timing
-	startContext := time.Now()
+	// Load SharedContext
+	if b.contextService != nil {
+		shared := b.contextService.Load(ctx, userID)
+		ctx = agent.WithContext(ctx, shared)
+	}
+
+	// Build request
 	currentUserMessageContent := []interface{}{
 		openrouter.TextPart{Type: "text", Text: text},
 	}
-	orMessages, ragInfo, err := b.buildContext(ctx, userID, text, text, currentUserMessageContent)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build context: %w", err)
+	req := &laplace.Request{
+		UserID:              userID,
+		HistoryContent:      text,
+		RawQuery:            text,
+		CurrentMessageParts: currentUserMessageContent,
 	}
-	contextDuration := time.Since(startContext)
+
+	// Create tool handler
+	toolHandler := b.newBotToolHandler(ctx, userID, logger)
+
+	// Execute via Laplace agent
+	resp, err := b.laplaceAgent.Execute(ctx, req, toolHandler)
+	if err != nil {
+		return nil, fmt.Errorf("laplace execution failed: %w", err)
+	}
 
 	// Extract timing breakdown from RAG info
-	if ragInfo != nil {
-		result.RAGDebugInfo = ragInfo
-		result.TopicsMatched = len(ragInfo.Results)
+	if resp.RAGInfo != nil {
+		result.RAGDebugInfo = resp.RAGInfo
+		result.TopicsMatched = len(resp.RAGInfo.Results)
 
-		// Count facts from results
-		for _, topicRes := range ragInfo.Results {
+		for _, topicRes := range resp.RAGInfo.Results {
 			result.FactsInjected += len(topicRes.Messages)
 		}
 	}
 
-	// Estimate embedding and search time from context building
-	// (in reality these happen inside buildContext via ragService.Retrieve)
-	result.TimingEmbedding = contextDuration / 3 // rough estimate
-	result.TimingSearch = contextDuration / 3    // rough estimate
+	// Estimate embedding and search time (rough)
+	result.TimingEmbedding = resp.LLMDuration / 10
+	result.TimingSearch = resp.LLMDuration / 10
 
-	// Generate context preview (first 500 chars)
-	if len(orMessages) > 0 {
-		contextBytes, _ := json.Marshal(orMessages)
+	// Generate context preview
+	if len(resp.Messages) > 0 {
+		contextBytes, _ := json.Marshal(resp.Messages)
 		preview := string(contextBytes)
 		if len(preview) > 500 {
 			preview = preview[:500] + "..."
@@ -1102,184 +895,104 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, sa
 		result.ContextPreview = preview
 	}
 
-	// Call LLM with timing
-	startLLM := time.Now()
+	result.TimingLLM = resp.LLMDuration
+	result.Response = resp.Content
+	result.PromptTokens = resp.PromptTokens
+	result.CompletionTokens = resp.CompletionTokens
 
-	var plugins []openrouter.Plugin
-	if b.cfg.OpenRouter.PDFParserEngine != "" {
-		plugins = append(plugins, openrouter.Plugin{
-			ID: "file-parser",
-			PDF: openrouter.PDFConfig{
-				Engine: b.cfg.OpenRouter.PDFParserEngine,
-			},
-		})
-	}
-
-	tools := b.getTools()
-	tracker := agentlog.NewTurnTracker() // Unified turn tracking
-	var finalResponse string
-	toolIterations := 0
-	const maxToolIterations = 10
-
-	for {
-		if toolIterations >= maxToolIterations {
-			logger.Warn("max tool iterations reached", "iterations", toolIterations)
-			break
-		}
-		toolIterations++
-
-		req := openrouter.ChatCompletionRequest{
-			Model:    b.cfg.Agents.Chat.GetModel(b.cfg.Agents.Default.Model),
-			Messages: orMessages,
-			Plugins:  plugins,
-			Tools:    tools,
-		}
-
-		tracker.StartTurn()
-		resp, err := b.orClient.CreateChatCompletion(ctx, req)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get completion: %w", err)
-		}
-
-		if len(resp.Choices) == 0 {
-			return nil, fmt.Errorf("empty response from OpenRouter")
-		}
-
-		// Record turn with TurnTracker
-		tracker.EndTurn(
-			resp.DebugRequestBody,
-			resp.DebugResponseBody,
-			resp.Usage.PromptTokens,
-			resp.Usage.CompletionTokens,
-			resp.Usage.Cost,
-		)
-
-		choice := resp.Choices[0].Message
-
-		// Handle tool calls
-		if len(choice.ToolCalls) > 0 {
-			logger.Info("Model requested tool calls", "count", len(choice.ToolCalls))
-
-			var content interface{} = choice.Content
-			if choice.Content == "" {
-				content = nil
-			}
-
-			orMessages = append(orMessages, openrouter.Message{
-				Role:             "assistant",
-				Content:          content,
-				ToolCalls:        choice.ToolCalls,
-				ReasoningDetails: choice.ReasoningDetails,
-			})
-
-			// Execute tool calls (without Telegram actions)
-			toolMessages := b.executeToolCallsForTest(ctx, userID, choice.ToolCalls, logger)
-			orMessages = append(orMessages, toolMessages...)
-			continue
-		}
-
-		finalResponse = choice.Content
-		break
-	}
-
-	result.TimingLLM = time.Since(startLLM)
-
-	if strings.TrimSpace(finalResponse) == "" {
-		finalResponse = b.translator.Get(b.cfg.Bot.Language, "bot.empty_response")
-	}
-
-	promptTokens, completionTokens := tracker.TotalTokens()
-	result.Response = finalResponse
-	result.PromptTokens = promptTokens
-	result.CompletionTokens = completionTokens
-	// Use OpenRouter cost if available, otherwise fall back to our calculation
-	if totalCost := tracker.TotalCost(); totalCost != nil {
-		result.TotalCost = *totalCost
+	if resp.TotalCost != nil {
+		result.TotalCost = *resp.TotalCost
 	} else {
-		result.TotalCost = b.getTieredCost(promptTokens, completionTokens, logger)
+		result.TotalCost = b.getTieredCost(resp.PromptTokens, resp.CompletionTokens, logger)
 	}
 	result.TimingTotal = time.Since(startTotal)
 
 	// Save assistant response to history if requested
 	if saveToHistory {
-		if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "assistant", Content: finalResponse}); err != nil {
+		if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "assistant", Content: resp.Content}); err != nil {
 			logger.Error("failed to add assistant message to history", "error", err)
 		}
 
-		// Record metrics
-		b.recordMetrics(userID, promptTokens, completionTokens, tracker.TotalCost(), ragInfo, orMessages, finalResponse, tracker, result.TimingLLM, logger)
+		// Calculate cost and log
+		var cost float64
+		if resp.TotalCost != nil {
+			cost = *resp.TotalCost
+		} else {
+			cost = b.getTieredCost(resp.PromptTokens, resp.CompletionTokens, logger)
+		}
+
+		// Record stats
+		stat := storage.Stat{
+			UserID:     userID,
+			TokensUsed: resp.PromptTokens + resp.CompletionTokens,
+			CostUSD:    cost,
+		}
+		if err := b.statsRepo.AddStat(stat); err != nil {
+			logger.Error("failed to add stat", "error", err)
+		}
+
+		// Log to agent logger
+		b.laplaceAgent.LogExecution(ctx, userID, resp, cost)
 	}
 
 	return result, nil
 }
 
-// executeToolCallsForTest executes tool calls without Telegram-specific actions.
-func (b *Bot) executeToolCallsForTest(ctx context.Context, userID int64, toolCalls []openrouter.ToolCall, logger *slog.Logger) []openrouter.Message {
-	var toolMessages []openrouter.Message
+// botToolHandler implements laplace.ToolHandler for Bot.
+type botToolHandler struct {
+	bot    *Bot
+	ctx    context.Context
+	userID int64
+	logger *slog.Logger
+}
 
-	for _, toolCall := range toolCalls {
-		var matchedTool *config.ToolConfig
-		for _, t := range b.cfg.Tools {
-			if t.Name == toolCall.Function.Name {
-				matchedTool = &t
-				break
-			}
-		}
+// newBotToolHandler creates a new tool handler for the given context.
+func (b *Bot) newBotToolHandler(ctx context.Context, userID int64, logger *slog.Logger) *botToolHandler {
+	return &botToolHandler{
+		bot:    b,
+		ctx:    ctx,
+		userID: userID,
+		logger: logger,
+	}
+}
 
-		if matchedTool != nil {
-			var args map[string]interface{}
-			if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
-				logger.Error("failed to parse tool arguments", "error", err, "tool", matchedTool.Name)
-				toolMessages = append(toolMessages, openrouter.Message{
-					Role:       "tool",
-					Content:    fmt.Sprintf("Error parsing arguments: %v", err),
-					ToolCallID: toolCall.ID,
-				})
-				continue
-			}
-
-			var toolResult string
-			var err error
-
-			query, ok := args["query"].(string)
-			if !ok {
-				err = fmt.Errorf("query argument missing or not a string")
-			} else {
-				switch matchedTool.Name {
-				case "search_history":
-					logger.Info("Executing history search tool", "tool", matchedTool.Name, "query", query)
-					toolResult, err = b.performHistorySearch(ctx, userID, query)
-				case "manage_memory":
-					logger.Info("Executing Manage Memory tool", "tool", matchedTool.Name)
-					toolResult, err = b.performManageMemory(ctx, userID, args)
-				default:
-					logger.Info("Executing model tool", "tool", matchedTool.Name, "model", matchedTool.Model, "query", query)
-					toolResult, err = b.performModelTool(ctx, userID, matchedTool.Model, query)
-				}
-			}
-
-			if err != nil {
-				logger.Error("tool execution failed", "error", err, "tool", matchedTool.Name)
-				toolMessages = append(toolMessages, openrouter.Message{
-					Role:       "tool",
-					Content:    fmt.Sprintf("Tool execution failed: %v", err),
-					ToolCallID: toolCall.ID,
-				})
-			} else {
-				toolMessages = append(toolMessages, openrouter.Message{
-					Role:       "tool",
-					Content:    toolResult,
-					ToolCallID: toolCall.ID,
-				})
-			}
-		} else {
-			logger.Warn("Unknown tool called", "tool_name", toolCall.Function.Name)
-			toolMessages = append(toolMessages, openrouter.Message{
-				Role:       "tool",
-				Content:    fmt.Sprintf("Error: Unknown tool '%s'", toolCall.Function.Name),
-				ToolCallID: toolCall.ID,
-			})
+// ExecuteToolCall executes a tool call by name and returns the result.
+func (h *botToolHandler) ExecuteToolCall(toolName string, arguments string) (string, error) {
+	// Find tool config
+	var matchedTool *config.ToolConfig
+	for _, t := range h.bot.cfg.Tools {
+		if t.Name == toolName {
+			matchedTool = &t
+			break
 		}
 	}
-	return toolMessages
+
+	if matchedTool == nil {
+		return "", fmt.Errorf("unknown tool: %s", toolName)
+	}
+
+	// Parse arguments
+	var args map[string]interface{}
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return "", fmt.Errorf("failed to parse arguments: %w", err)
+	}
+
+	// Get query parameter
+	query, ok := args["query"].(string)
+	if !ok {
+		return "", fmt.Errorf("query argument missing or not a string")
+	}
+
+	// Execute based on tool name
+	switch matchedTool.Name {
+	case "search_history":
+		h.logger.Info("Executing history search tool", "tool", matchedTool.Name, "query", query)
+		return h.bot.performHistorySearch(h.ctx, h.userID, query)
+	case "manage_memory":
+		h.logger.Info("Executing Manage Memory tool", "tool", matchedTool.Name)
+		return h.bot.performManageMemory(h.ctx, h.userID, args)
+	default:
+		h.logger.Info("Executing model tool", "tool", matchedTool.Name, "model", matchedTool.Model, "query", query)
+		return h.bot.performModelTool(h.ctx, h.userID, matchedTool.Model, query)
+	}
 }

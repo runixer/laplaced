@@ -2,24 +2,20 @@ package bot
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"html"
 	"log/slog"
 	"math/rand/v2"
-	"regexp"
 	"strings"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/runixer/laplaced/internal/agent"
-	"github.com/runixer/laplaced/internal/agentlog"
-	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/agent/laplace"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/markdown"
 	"github.com/runixer/laplaced/internal/openrouter"
-	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
 )
@@ -100,37 +96,8 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		return
 	}
 
-	orMessages, ragInfo, err := b.buildContext(shutdownSafeCtx, userID, historyContent, rawQuery, currentUserMessageContent)
-	if err != nil {
-		logger.Error("failed to build context", "error", err)
-		b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.generic_error")}}, logger)
-		return
-	}
-
-	var plugins []openrouter.Plugin
-	if b.cfg.OpenRouter.PDFParserEngine != "" {
-		plugins = append(plugins, openrouter.Plugin{
-			ID: "file-parser",
-			PDF: openrouter.PDFConfig{
-				Engine: b.cfg.OpenRouter.PDFParserEngine,
-			},
-		})
-	}
-
-	// Tool Handling Loop
-	tracker := agentlog.NewTurnTracker() // Unified turn tracking
-	var finalResponse string
-	toolIterations := 0
-	const maxToolIterations = 10
-	const maxEmptyRetries = 2
-	emptyRetries := 0
-
 	// Per-message breakdown tracking
-	var totalLLMDuration time.Duration
-	var totalToolDuration time.Duration
 	var totalTelegramDuration time.Duration
-	llmCallCount := 0
-	toolCallCount := 0
 	telegramCallCount := 0
 
 	// Defer Telegram metrics recording to capture early returns
@@ -140,176 +107,105 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		}
 	}()
 
-	for {
-		if toolIterations >= maxToolIterations {
-			logger.Warn("max tool iterations reached", "iterations", toolIterations)
-			break
-		}
-		toolIterations++
+	// Execute via Laplace agent
+	if b.laplaceAgent == nil {
+		logger.Error("laplace agent not configured")
+		b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.generic_error")}}, logger)
+		return
+	}
 
-		tools := b.getTools()
+	// Create tool handler
+	toolHandler := b.newBotToolHandler(shutdownSafeCtx, userID, logger)
 
-		req := openrouter.ChatCompletionRequest{
-			Model:    b.cfg.Agents.Chat.GetModel(b.cfg.Agents.Default.Model),
-			Messages: orMessages,
-			Plugins:  plugins,
-			Tools:    tools,
-			UserID:   user.ID,
-		}
-
-		tracker.StartTurn()
-		llmStart := time.Now()
-		resp, err := b.orClient.CreateChatCompletion(shutdownSafeCtx, req)
-		llmDuration := time.Since(llmStart)
-		totalLLMDuration += llmDuration
-		llmCallCount++
-
-		if err != nil {
-			logger.Error("failed to get completion from OpenRouter", "error", err)
-			tgStart := time.Now()
-			b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
-			totalTelegramDuration += time.Since(tgStart)
-			telegramCallCount++
-			return
-		}
-
-		if len(resp.Choices) == 0 {
-			logger.Warn("empty choices from OpenRouter",
-				"model", resp.Model,
-				"prompt_tokens", resp.Usage.PromptTokens,
-				"completion_tokens", resp.Usage.CompletionTokens,
-			)
-			RecordLLMAnomaly(userID, AnomalyEmptyResponse)
-			tgStart := time.Now()
-			b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.empty_response")}}, logger)
-			totalTelegramDuration += time.Since(tgStart)
-			telegramCallCount++
-			return
-		}
-
-		// Record turn with TurnTracker
-		tracker.EndTurn(
-			resp.DebugRequestBody,
-			resp.DebugResponseBody,
-			resp.Usage.PromptTokens,
-			resp.Usage.CompletionTokens,
-			resp.Usage.Cost,
-		)
-
-		choice := resp.Choices[0]
-
-		// Check for empty response (no content and no tool calls) - retry
-		if strings.TrimSpace(choice.Message.Content) == "" && len(choice.Message.ToolCalls) == 0 {
-			logger.Warn("empty LLM response (no content, no tools)",
-				"finish_reason", choice.FinishReason,
-				"model", resp.Model,
-				"completion_tokens", resp.Usage.CompletionTokens,
-				"retry_attempt", emptyRetries+1,
-				"max_retries", maxEmptyRetries,
-			)
-			RecordLLMAnomaly(userID, AnomalyEmptyResponse)
-
-			if emptyRetries < maxEmptyRetries {
-				emptyRetries++
-				logger.Info("retrying after empty response", "attempt", emptyRetries)
-				continue
-			}
-
-			// Max retries reached
-			logger.Warn("max empty response retries reached, giving up")
-			RecordLLMAnomaly(userID, AnomalyRetryFailed)
-			tgStart := time.Now()
-			b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.empty_response")}}, logger)
-			totalTelegramDuration += time.Since(tgStart)
-			telegramCallCount++
-			return
-		}
-
-		// If we had retries and finally got content, record success
-		if emptyRetries > 0 {
-			logger.Info("retry successful after empty response", "attempts", emptyRetries)
-			RecordLLMAnomaly(userID, AnomalyRetrySuccess)
-			emptyRetries = 0 // reset for potential future retries in tool loop
-		}
-
-		// Check for tool calls
-		if len(choice.Message.ToolCalls) > 0 {
-			logger.Info("Model requested tool calls", "count", len(choice.Message.ToolCalls))
-
-			var content interface{} = choice.Message.Content
-			if choice.Message.Content == "" {
-				content = nil
-			}
-
-			// Send intermediate message to user if present
-			if choice.Message.Content != "" && strings.TrimSpace(choice.Message.Content) != "" {
-				intermediateResponses, err := b.finalizeResponse(chatID, lastMsg.MessageThreadID, userID, 0, choice.Message.Content, logger)
-				if err != nil {
-					logger.Error("failed to finalize intermediate response", "error", err)
-				} else {
-					tgStart := time.Now()
-					b.sendResponses(shutdownSafeCtx, chatID, intermediateResponses, logger)
-					totalTelegramDuration += time.Since(tgStart)
-					telegramCallCount += len(intermediateResponses)
-				}
-			}
-
-			// Add assistant message with tool calls to history
-			orMessages = append(orMessages, openrouter.Message{
-				Role:             "assistant",
-				Content:          content,
-				ToolCalls:        choice.Message.ToolCalls,
-				ReasoningDetails: choice.Message.ReasoningDetails,
-			})
-
-			toolStart := time.Now()
-			toolMessages, err := b.executeToolCalls(shutdownSafeCtx, chatID, lastMsg.MessageThreadID, userID, choice.Message.ToolCalls, logger)
-			totalToolDuration += time.Since(toolStart)
-			toolCallCount += len(choice.Message.ToolCalls)
-
+	// Build request
+	req := &laplace.Request{
+		UserID:              userID,
+		HistoryContent:      historyContent,
+		RawQuery:            rawQuery,
+		CurrentMessageParts: currentUserMessageContent,
+		ChatID:              chatID,
+		MessageThreadID:     lastMsg.MessageThreadID,
+		ReplyToMsgID:        lastMsg.MessageID,
+		OnIntermediateMessage: func(text string) {
+			responses, err := b.finalizeResponse(chatID, lastMsg.MessageThreadID, userID, 0, text, logger)
 			if err != nil {
-				// executeToolCalls logs errors but returns messages with error info if needed
-				// If it returns a critical error, we might want to stop, but currently it returns messages
-				_ = err // Error already logged in executeToolCalls
+				logger.Error("failed to finalize intermediate response", "error", err)
+				return
 			}
-			orMessages = append(orMessages, toolMessages...)
-
-			// Loop back to call model again with tool results
-			continue
-		}
-
-		// Final response
-		finalResponse = choice.Message.Content
-		break
+			tgStart := time.Now()
+			b.sendResponses(shutdownSafeCtx, chatID, responses, logger)
+			totalTelegramDuration += time.Since(tgStart)
+			telegramCallCount += len(responses)
+		},
+		OnTypingAction: func() {
+			b.sendAction(shutdownSafeCtx, chatID, lastMsg.MessageThreadID, "typing")
+		},
 	}
 
-	// Record per-message breakdown metrics
-	RecordMessageLLM(userID, totalLLMDuration.Seconds(), llmCallCount)
-	RecordMessageTools(userID, totalToolDuration.Seconds(), toolCallCount)
-
-	// Handle empty response from model
-	if strings.TrimSpace(finalResponse) == "" {
-		logger.Warn("model returned empty response")
-		finalResponse = b.translator.Get(b.cfg.Bot.Language, "bot.empty_response")
+	// Execute
+	resp, err := b.laplaceAgent.Execute(shutdownSafeCtx, req, toolHandler)
+	if err != nil {
+		logger.Error("laplace execution failed", "error", err)
+		tgStart := time.Now()
+		b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
+		totalTelegramDuration += time.Since(tgStart)
+		telegramCallCount++
+		return
 	}
 
-	responses, err := b.finalizeResponse(chatID, lastMsg.MessageThreadID, userID, lastMsg.MessageID, finalResponse, logger)
+	// Record metrics
+	RecordMessageLLM(userID, resp.LLMDuration.Seconds(), resp.TotalTurns)
+	if resp.ToolDuration > 0 {
+		RecordMessageTools(userID, resp.ToolDuration.Seconds(), resp.TotalTurns)
+	}
+
+	// Finalize response
+	responses, err := b.finalizeResponse(chatID, lastMsg.MessageThreadID, userID, lastMsg.MessageID, resp.Content, logger)
 	if err != nil {
 		logger.Error("failed to finalize response", "error", err)
 	}
 
-	promptTokens, completionTokens := tracker.TotalTokens()
-	b.recordMetrics(userID, promptTokens, completionTokens, tracker.TotalCost(), ragInfo, orMessages, finalResponse, tracker, totalLLMDuration, logger)
+	// Calculate cost
+	var cost float64
+	if resp.TotalCost != nil {
+		cost = *resp.TotalCost
+	} else {
+		cost = b.getTieredCost(resp.PromptTokens, resp.CompletionTokens, logger)
+	}
 
-	// Record context tokens for metrics (approximate based on prompt tokens)
-	RecordContextTokens(promptTokens)
+	// Record stats
+	stat := storage.Stat{
+		UserID:     userID,
+		TokensUsed: resp.PromptTokens + resp.CompletionTokens,
+		CostUSD:    cost,
+	}
+	if err := b.statsRepo.AddStat(stat); err != nil {
+		logger.Error("failed to add stat", "error", err)
+	}
 
+	// Log to agent logger
+	b.laplaceAgent.LogExecution(shutdownSafeCtx, userID, resp, cost)
+
+	// Record context tokens by source
+	RecordContextTokens(resp.PromptTokens)
+
+	logger.Info("usage stats recorded",
+		"prompt_tokens", resp.PromptTokens,
+		"completion_tokens", resp.CompletionTokens,
+		"total_tokens", stat.TokensUsed,
+		"cost_usd", stat.CostUSD,
+	)
+
+	// Save assistant response to history
+	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "assistant", Content: resp.Content}); err != nil {
+		logger.Error("failed to add assistant message to history", "error", err)
+	}
+
+	// Send response
 	tgStart := time.Now()
 	b.sendResponses(shutdownSafeCtx, chatID, responses, logger)
 	totalTelegramDuration += time.Since(tgStart)
 	telegramCallCount += len(responses)
-
-	// Telegram metrics recorded by defer
 
 	success = true
 }
@@ -419,202 +315,6 @@ func appendWithNewline(b *strings.Builder, s string) {
 	b.WriteString(s)
 }
 
-func (b *Bot) executeToolCalls(ctx context.Context, chatID int64, messageThreadID int, userID int64, toolCalls []openrouter.ToolCall, logger *slog.Logger) ([]openrouter.Message, error) {
-	var toolMessages []openrouter.Message
-
-	for _, toolCall := range toolCalls {
-		b.sendAction(ctx, chatID, messageThreadID, "typing")
-
-		// 1. Handle Configured Tools
-		var matchedTool *config.ToolConfig
-		for _, t := range b.cfg.Tools {
-			if t.Name == toolCall.Function.Name {
-				matchedTool = &t
-				break
-			}
-		}
-
-		if matchedTool != nil {
-			var args map[string]interface{}
-			if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
-				logger.Error("failed to parse tool arguments", "error", err, "tool", matchedTool.Name)
-				toolMessages = append(toolMessages, openrouter.Message{
-					Role:       "tool",
-					Content:    fmt.Sprintf("Error parsing arguments: %v", err),
-					ToolCallID: toolCall.ID,
-				})
-				continue
-			}
-
-			var toolResult string
-			var err error
-
-			// Standard tools expecting "query"
-			query, ok := args["query"].(string)
-			if !ok {
-				err = fmt.Errorf("query argument missing or not a string")
-			} else {
-				switch matchedTool.Name {
-				case "search_history":
-					logger.Info("Executing history search tool", "tool", matchedTool.Name, "query", query)
-					toolResult, err = b.performHistorySearch(ctx, userID, query)
-				case "manage_memory":
-					logger.Info("Executing Manage Memory tool", "tool", matchedTool.Name)
-					toolResult, err = b.performManageMemory(ctx, userID, args)
-				default:
-					logger.Info("Executing model tool", "tool", matchedTool.Name, "model", matchedTool.Model, "query", query)
-					toolResult, err = b.performModelTool(ctx, userID, matchedTool.Model, query)
-				}
-			}
-
-			if err != nil {
-				logger.Error("tool execution failed", "error", err, "tool", matchedTool.Name)
-				toolMessages = append(toolMessages, openrouter.Message{
-					Role:       "tool",
-					Content:    fmt.Sprintf("Tool execution failed: %v", err),
-					ToolCallID: toolCall.ID,
-				})
-			} else {
-				toolMessages = append(toolMessages, openrouter.Message{
-					Role:       "tool",
-					Content:    toolResult,
-					ToolCallID: toolCall.ID,
-				})
-			}
-		} else {
-			logger.Warn("Unknown tool called", "tool_name", toolCall.Function.Name)
-			toolMessages = append(toolMessages, openrouter.Message{
-				Role:       "tool",
-				Content:    fmt.Sprintf("Error: Unknown tool '%s'", toolCall.Function.Name),
-				ToolCallID: toolCall.ID,
-			})
-		}
-	}
-	return toolMessages, nil
-}
-
-// hallucinationTags are special tokens that LLMs sometimes hallucinate in text output.
-// These should never appear in normal response text.
-var hallucinationTags = []string{
-	"</tool_code>",
-	"</tool_call>",
-	"</s>",
-	"<|endoftext|>",
-	"<|end|>",
-	// Gemini sometimes outputs its internal tool call format as text instead of proper tool_calls.
-	// This "default_api:" prefix is from OpenAPI Generator code patterns in training data.
-	// See: https://github.com/OpenAPITools/openapi-generator
-	"default_api:",
-}
-
-// consecutiveJSONBlocksPattern matches 3+ consecutive markdown JSON code blocks.
-// This pattern detects runaway generation where model outputs endless JSON blocks.
-var consecutiveJSONBlocksPattern = regexp.MustCompile("(?s)(```json\\s*\\{[^`]*\\}\\s*```\\s*){3,}")
-
-// defaultAPIPattern matches Gemini's hallucinated tool call format.
-// Format: default_api:<tool_name>{query:<json>}
-// The JSON can contain nested braces, so we need to match balanced braces.
-var defaultAPIPattern = regexp.MustCompile(`default_api:\w+\{`)
-
-// sanitizeLLMResponse removes hallucination artifacts from LLM responses.
-// It truncates on special tags and detects runaway JSON block generation.
-// Returns sanitized text and whether any sanitization was applied.
-func sanitizeLLMResponse(text string) (string, bool) {
-	original := text
-	sanitized := false
-
-	// 1. Remove Gemini's "default_api:" hallucinated tool calls
-	// These appear when the model outputs internal tool format as text
-	if loc := defaultAPIPattern.FindStringIndex(text); loc != nil {
-		// Find matching closing brace (handle nested braces)
-		startIdx := loc[1] - 1 // Position of opening '{'
-		endIdx := findMatchingBrace(text, startIdx)
-		if endIdx != -1 {
-			// Remove the entire default_api:...{...} block
-			before := strings.TrimSpace(text[:loc[0]])
-			after := strings.TrimSpace(text[endIdx+1:])
-			if before != "" && after != "" {
-				text = before + "\n\n" + after
-			} else if after != "" {
-				text = after
-			} else {
-				text = before
-			}
-			sanitized = true
-		}
-	}
-
-	// 2. Truncate on other hallucination tags (but skip default_api: as it's handled above)
-	for _, tag := range hallucinationTags {
-		if tag == "default_api:" {
-			continue // Already handled with brace matching
-		}
-		if idx := strings.Index(text, tag); idx != -1 {
-			text = strings.TrimSpace(text[:idx])
-			sanitized = true
-		}
-	}
-
-	// 3. Truncate on 3+ consecutive JSON blocks (runaway generation)
-	if loc := consecutiveJSONBlocksPattern.FindStringIndex(text); loc != nil {
-		text = strings.TrimSpace(text[:loc[0]])
-		sanitized = true
-	}
-
-	// Don't return empty string if we sanitized everything
-	if sanitized && text == "" {
-		return original, false
-	}
-
-	return text, sanitized
-}
-
-// findMatchingBrace finds the index of the closing brace that matches the opening brace at startIdx.
-// Returns -1 if no matching brace is found.
-func findMatchingBrace(text string, startIdx int) int {
-	if startIdx >= len(text) || text[startIdx] != '{' {
-		return -1
-	}
-
-	depth := 0
-	inString := false
-	escaped := false
-
-	for i := startIdx; i < len(text); i++ {
-		c := text[i]
-
-		if escaped {
-			escaped = false
-			continue
-		}
-
-		if c == '\\' && inString {
-			escaped = true
-			continue
-		}
-
-		if c == '"' {
-			inString = !inString
-			continue
-		}
-
-		if inString {
-			continue
-		}
-
-		if c == '{' {
-			depth++
-		} else if c == '}' {
-			depth--
-			if depth == 0 {
-				return i
-			}
-		}
-	}
-
-	return -1
-}
-
 // splitByDelimiter splits text by ###SPLIT### delimiter, respecting code blocks.
 // Delimiters inside code blocks are ignored. Empty parts are filtered out.
 func splitByDelimiter(text string) []string {
@@ -663,17 +363,6 @@ func splitByDelimiter(text string) []string {
 }
 
 func (b *Bot) finalizeResponse(chatID int64, messageThreadID int, userID int64, replyToMsgID int, responseText string, logger *slog.Logger) ([]telegram.SendMessageRequest, error) {
-	// Sanitize LLM response to remove hallucination artifacts
-	originalLength := len(responseText)
-	responseText, wasSanitized := sanitizeLLMResponse(responseText)
-	if wasSanitized {
-		logger.Warn("sanitized LLM response (removed hallucination artifacts)",
-			"original_length", originalLength,
-			"sanitized_length", len(responseText),
-		)
-		RecordLLMAnomaly(userID, AnomalySanitized)
-	}
-
 	// Split by explicit ###SPLIT### delimiter first (respects code blocks)
 	delimiterParts := splitByDelimiter(responseText)
 
@@ -713,117 +402,5 @@ func (b *Bot) finalizeResponse(chatID int64, messageThreadID int, userID int64, 
 		responses = append(responses, newMsg)
 	}
 
-	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "assistant", Content: responseText}); err != nil {
-		logger.Error("failed to add assistant message to history", "error", err)
-		// We don't return error here because we still want to send the message
-	}
-
 	return responses, nil
-}
-
-func (b *Bot) recordMetrics(userID int64, promptTokens, completionTokens int, openRouterCost *float64, ragInfo *rag.RetrievalDebugInfo, orMessages []openrouter.Message, finalResponse string, tracker *agentlog.TurnTracker, totalLLMDuration time.Duration, logger *slog.Logger) {
-	// Use OpenRouter cost if available, otherwise fall back to our calculation
-	var cost float64
-	if openRouterCost != nil {
-		cost = *openRouterCost
-	} else {
-		cost = b.getTieredCost(promptTokens, completionTokens, logger)
-	}
-
-	stat := storage.Stat{
-		UserID:     userID,
-		TokensUsed: promptTokens + completionTokens,
-		CostUSD:    cost,
-	}
-	if err := b.statsRepo.AddStat(stat); err != nil {
-		logger.Error("failed to add stat", "error", err)
-	}
-
-	// Save RAG Log
-	if ragInfo != nil {
-		// Format full prompt as human-readable text
-		fullPrompt := formatMessagesForLog(orMessages)
-
-		var resultsJSON []byte
-		if len(ragInfo.Results) > 0 {
-			resultsJSON, _ = json.Marshal(ragInfo.Results)
-		}
-
-		// Log to agent_logs for debugging
-		if b.agentLogger != nil {
-			b.agentLogger.Log(context.Background(), agentlog.Entry{
-				UserID:            userID,
-				AgentType:         agentlog.AgentLaplace,
-				InputPrompt:       fullPrompt,
-				InputContext:      tracker.FirstRequest(), // First API request JSON
-				OutputResponse:    finalResponse,
-				OutputContext:     tracker.LastResponse(), // Last API response JSON
-				Model:             b.cfg.Agents.Chat.GetModel(b.cfg.Agents.Default.Model),
-				PromptTokens:      promptTokens,
-				CompletionTokens:  completionTokens,
-				TotalCost:         &cost,
-				DurationMs:        int(totalLLMDuration.Milliseconds()),
-				ConversationTurns: tracker.Build(), // All turns for multi-turn visualization
-				Metadata: map[string]interface{}{
-					"original_query":    ragInfo.OriginalQuery,
-					"enriched_query":    ragInfo.EnrichedQuery,
-					"retrieval_results": string(resultsJSON),
-				},
-				Success: true,
-			})
-		}
-	}
-
-	logger.Info("usage stats recorded",
-		"prompt_tokens", promptTokens,
-		"completion_tokens", completionTokens,
-		"total_tokens", stat.TokensUsed,
-		"cost_usd", stat.CostUSD,
-	)
-}
-
-// formatMessagesForLog formats OpenRouter messages into a human-readable string for logging.
-// Format is designed for easy visual parsing in debug UI.
-func formatMessagesForLog(messages []openrouter.Message) string {
-	var sb strings.Builder
-	for i, msg := range messages {
-		if i > 0 {
-			sb.WriteString("\n\n")
-		}
-		// Role header
-		role := strings.ToUpper(msg.Role)
-		sb.WriteString(fmt.Sprintf("=== %s ===\n", role))
-
-		// Extract text content
-		switch content := msg.Content.(type) {
-		case string:
-			sb.WriteString(content)
-		case []interface{}:
-			// Multimodal content - extract text parts
-			for _, part := range content {
-				if tp, ok := part.(openrouter.TextPart); ok {
-					sb.WriteString(tp.Text)
-				} else if m, ok := part.(map[string]interface{}); ok {
-					if t, ok := m["type"].(string); ok && t == "text" {
-						if text, ok := m["text"].(string); ok {
-							sb.WriteString(text)
-						}
-					} else if t == "image_url" {
-						sb.WriteString("[IMAGE]")
-					} else if t == "input_audio" {
-						sb.WriteString("[AUDIO]")
-					}
-				}
-			}
-		}
-
-		// Show tool calls if present
-		if len(msg.ToolCalls) > 0 {
-			sb.WriteString("\n\n[TOOL CALLS]")
-			for _, tc := range msg.ToolCalls {
-				sb.WriteString(fmt.Sprintf("\n- %s(%s)", tc.Function.Name, tc.Function.Arguments))
-			}
-		}
-	}
-	return sb.String()
 }
