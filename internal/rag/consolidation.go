@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agent"
+	"github.com/runixer/laplaced/internal/agent/merger"
 	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/jobtype"
@@ -204,6 +206,52 @@ func (s *Service) findMergeCandidates(userID int64) ([]storage.MergeCandidate, e
 }
 
 func (s *Service) verifyMerge(ctx context.Context, candidate storage.MergeCandidate) (bool, string, UsageInfo, error) {
+	// Use Merger agent if available
+	if s.mergerAgent != nil {
+		return s.verifyMergeViaAgent(ctx, candidate)
+	}
+	return s.verifyMergeLegacy(ctx, candidate)
+}
+
+// verifyMergeViaAgent delegates merge verification to the Merger agent.
+func (s *Service) verifyMergeViaAgent(ctx context.Context, candidate storage.MergeCandidate) (bool, string, UsageInfo, error) {
+	userID := candidate.Topic1.UserID
+
+	req := &agent.Request{
+		Params: map[string]any{
+			merger.ParamTopic1Summary: candidate.Topic1.Summary,
+			merger.ParamTopic2Summary: candidate.Topic2.Summary,
+			"user_id":                 userID,
+		},
+	}
+
+	// Try to get SharedContext from ctx
+	if shared := agent.FromContext(ctx); shared != nil {
+		req.Shared = shared
+	}
+
+	resp, err := s.mergerAgent.Execute(ctx, req)
+	if err != nil {
+		return false, "", UsageInfo{}, err
+	}
+
+	result, ok := resp.Structured.(*merger.Result)
+	if !ok {
+		return false, "", UsageInfo{}, fmt.Errorf("unexpected result type from merger agent")
+	}
+
+	usage := UsageInfo{
+		PromptTokens:     resp.Tokens.Prompt,
+		CompletionTokens: resp.Tokens.Completion,
+		TotalTokens:      resp.Tokens.Total,
+		Cost:             resp.Tokens.Cost,
+	}
+
+	return result.ShouldMerge, result.NewSummary, usage, nil
+}
+
+// verifyMergeLegacy is the original implementation for backwards compatibility.
+func (s *Service) verifyMergeLegacy(ctx context.Context, candidate storage.MergeCandidate) (bool, string, UsageInfo, error) {
 	startTime := time.Now()
 	userID := candidate.Topic1.UserID
 

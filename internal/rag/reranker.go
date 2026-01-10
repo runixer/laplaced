@@ -19,18 +19,10 @@ const (
 	warnToolCallChars  = 200_000 // Warn if payload exceeds ~200K chars (~50K tokens)
 )
 
-// Excerpt validation thresholds (soft limits - warning only)
-const (
-	warnExcerptMinChars = 100    // Warn if excerpt is too short
-	warnExcerptMaxRatio = 0.5    // Warn if excerpt is >50% of topic (should be extracting, not copying)
-	largeTopicThreshold = 25_000 // Only validate excerpts for topics >25K chars
-)
-
 // TopicSelection represents a selected topic with explanation
 type TopicSelection struct {
-	ID      int64   `json:"id"`
-	Reason  string  `json:"reason"`
-	Excerpt *string `json:"excerpt,omitempty"`
+	ID     int64  `json:"id"`
+	Reason string `json:"reason"`
 }
 
 // RerankerResult contains the output of the reranker
@@ -59,8 +51,7 @@ type rerankerCandidate struct {
 
 // rerankerState tracks progress during agentic reranking
 type rerankerState struct {
-	requestedIDs   []int64          // IDs requested via tool calls (for fallback)
-	loadedContents map[int64]string // Content of loaded topics (for excerpt validation)
+	requestedIDs []int64 // IDs requested via tool calls (for fallback)
 }
 
 // RerankerReasoningEntry holds reasoning text for one iteration
@@ -127,19 +118,10 @@ func (s *Service) rerankCandidates(
 		thinkingLevel = "minimal"
 	}
 
-	// Target context budget (default: 25000 chars)
-	targetContextChars := cfg.TargetContextChars
-	if targetContextChars <= 0 {
-		targetContextChars = 25000
-	}
-	budgetK := targetContextChars / 1000
-
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	state := &rerankerState{
-		loadedContents: make(map[int64]string),
-	}
+	state := &rerankerState{}
 	trace := &rerankerTrace{
 		tracker: agentlog.NewTurnTracker(),
 	}
@@ -165,29 +147,13 @@ func (s *Service) rerankCandidates(
 		selectCandidatesMax = cfg.MaxTopics * 2
 	}
 
-	// Choose prompt based on ignore_excerpts config
-	var systemPrompt string
-	if cfg.IgnoreExcerpts {
-		// Simplified prompt without excerpt requirements
-		systemPrompt, err = s.translator.GetTemplate(lang, "rag.reranker_system_prompt_simple", prompts.RerankerSimpleParams{
-			Profile:       userProfile,
-			RecentTopics:  recentTopics,
-			MaxTopics:     cfg.MaxTopics,
-			MinCandidates: cfg.MaxTopics,
-			MaxCandidates: selectCandidatesMax,
-		})
-	} else {
-		// Full prompt with excerpt policy
-		systemPrompt, err = s.translator.GetTemplate(lang, "rag.reranker_system_prompt", prompts.RerankerParams{
-			Profile:       userProfile,
-			RecentTopics:  recentTopics,
-			MaxTopics:     cfg.MaxTopics,
-			TargetCharsK:  budgetK,
-			MinCandidates: cfg.MaxTopics,
-			MaxCandidates: selectCandidatesMax,
-			LargeBudgetK:  budgetK,
-		})
-	}
+	systemPrompt, err := s.translator.GetTemplate(lang, "rag.reranker_system_prompt", prompts.RerankerParams{
+		Profile:       userProfile,
+		RecentTopics:  recentTopics,
+		MaxTopics:     cfg.MaxTopics,
+		MinCandidates: cfg.MaxTopics,
+		MaxCandidates: selectCandidatesMax,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to build reranker system prompt: %w", err)
 	}
@@ -464,11 +430,6 @@ func (s *Service) rerankCandidates(
 			return fallbackResult, nil
 		}
 
-		// Validate excerpts for large topics (warning only, skip if excerpts disabled)
-		if !cfg.IgnoreExcerpts {
-			s.validateExcerpts(userID, result, candidateMap, state.loadedContents)
-		}
-
 		// Record metrics and log success
 		s.recordRerankerMetrics(userID, startTime, toolCallCount, len(result.Topics), trace.tracker.TotalCostValue())
 		s.logger.Info("reranker completed",
@@ -714,125 +675,6 @@ func (s *Service) filterValidTopics(userID int64, result *RerankerResult, candid
 	}
 }
 
-// validateExcerpts logs warnings for invalid excerpts (soft validation - monitoring only)
-func (s *Service) validateExcerpts(userID int64, result *RerankerResult, candidateMap map[int64]rerankerCandidate, loadedContents map[int64]string) {
-	for _, topic := range result.Topics {
-		candidate, ok := candidateMap[topic.ID]
-		if !ok {
-			continue
-		}
-
-		topicSize := candidate.SizeChars
-
-		// Only validate excerpts for large topics (>25K chars)
-		if topicSize < largeTopicThreshold {
-			continue
-		}
-
-		// Large topic without excerpt — should provide one
-		if topic.Excerpt == nil || *topic.Excerpt == "" {
-			s.logger.Warn("large topic without excerpt",
-				"user_id", userID,
-				"topic_id", topic.ID,
-				"topic_size_chars", topicSize,
-				"threshold", largeTopicThreshold,
-			)
-			continue
-		}
-
-		excerptLen := len(*topic.Excerpt)
-
-		// Excerpt too short
-		if excerptLen < warnExcerptMinChars {
-			s.logger.Warn("excerpt too short",
-				"user_id", userID,
-				"topic_id", topic.ID,
-				"excerpt_chars", excerptLen,
-				"min_chars", warnExcerptMinChars,
-			)
-		}
-
-		// Excerpt too long (just copying instead of extracting)
-		ratio := float64(excerptLen) / float64(topicSize)
-		if ratio > warnExcerptMaxRatio {
-			s.logger.Warn("excerpt too long",
-				"user_id", userID,
-				"topic_id", topic.ID,
-				"excerpt_chars", excerptLen,
-				"topic_size_chars", topicSize,
-				"ratio_percent", int(ratio*100),
-				"max_ratio_percent", int(warnExcerptMaxRatio*100),
-			)
-		}
-
-		// Validate excerpt content is actually from the topic (not hallucinated)
-		if loadedContents != nil {
-			topicContent, hasContent := loadedContents[topic.ID]
-			if hasContent && !excerptFoundInContent(*topic.Excerpt, topicContent) {
-				s.logger.Warn("excerpt not found in topic content (possible hallucination)",
-					"user_id", userID,
-					"topic_id", topic.ID,
-					"excerpt_preview", truncateForLog(*topic.Excerpt, 200),
-				)
-			}
-		}
-	}
-}
-
-// excerptFoundInContent checks if excerpt text is actually present in topic content
-// Uses normalized comparison to handle minor formatting differences
-func excerptFoundInContent(excerpt, content string) bool {
-	// Normalize both strings: collapse whitespace, lowercase
-	normalizedExcerpt := normalizeForComparison(excerpt)
-	normalizedContent := normalizeForComparison(content)
-
-	// Split by various ellipsis patterns that Flash might use
-	// Replace [...] and ... with a common separator
-	normalizedExcerpt = strings.ReplaceAll(normalizedExcerpt, "[...]", "|||")
-	normalizedExcerpt = strings.ReplaceAll(normalizedExcerpt, "...", "|||")
-	parts := strings.Split(normalizedExcerpt, "|||")
-
-	// Clean up parts - remove leading/trailing ellipsis artifacts
-	var cleanParts []string
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		part = strings.Trim(part, ".")
-		part = strings.TrimSpace(part)
-		if len(part) >= 20 { // Only meaningful parts
-			cleanParts = append(cleanParts, part)
-		}
-	}
-
-	if len(cleanParts) == 0 {
-		// Very short excerpt, try direct substring match
-		// Remove all ellipsis for direct comparison
-		cleanExcerpt := strings.ReplaceAll(normalizedExcerpt, "|||", " ")
-		cleanExcerpt = strings.TrimSpace(cleanExcerpt)
-		if len(cleanExcerpt) < 10 {
-			return true // Too short to validate meaningfully
-		}
-		return strings.Contains(normalizedContent, cleanExcerpt)
-	}
-
-	// At least one meaningful part should be found in content
-	for _, part := range cleanParts {
-		if strings.Contains(normalizedContent, part) {
-			return true
-		}
-	}
-
-	return false
-}
-
-// normalizeForComparison normalizes text for fuzzy comparison
-func normalizeForComparison(s string) string {
-	// Lowercase
-	s = strings.ToLower(s)
-	// Collapse multiple whitespace to single space
-	fields := strings.Fields(s)
-	return strings.Join(fields, " ")
-}
-
 // fallbackToVectorTop returns top-N candidates by vector score
 func (s *Service) fallbackToVectorTop(candidates []rerankerCandidate, maxTopics int) *RerankerResult {
 	if maxTopics <= 0 {
@@ -921,17 +763,9 @@ func (s *Service) loadTopicsContentWithSize(
 		}
 
 		fmt.Fprintf(&sb, "=== Topic %d ===\n", id)
-		threshold := s.cfg.Agents.Reranker.LargeTopicThreshold
-		// Only show LARGE TOPIC warning when excerpts are enabled
-		if charCount > threshold && !s.cfg.Agents.Reranker.IgnoreExcerpts {
-			fmt.Fprintf(&sb, "Date: %s | %d msgs | ~%dK chars ⚠️ LARGE TOPIC - PROVIDE EXCERPT IN RESPONSE!\n", date, len(msgs), charCount/1000)
-		} else {
-			fmt.Fprintf(&sb, "Date: %s | %d msgs | ~%dK chars\n", date, len(msgs), charCount/1000)
-		}
+		fmt.Fprintf(&sb, "Date: %s | %d msgs | ~%dK chars\n", date, len(msgs), charCount/1000)
 		fmt.Fprintf(&sb, "Theme: %s\n\n", topic.Summary)
 
-		// Format messages and save raw content for excerpt validation
-		var topicContent strings.Builder
 		for _, m := range msgs {
 			timestamp := m.CreatedAt.Format("2006-01-02 15:04:05")
 			role := m.Role
@@ -940,16 +774,9 @@ func (s *Service) loadTopicsContentWithSize(
 			} else if role == "user" {
 				role = "User"
 			}
-			line := fmt.Sprintf("[%s (%s)]: %s\n", role, timestamp, m.Content)
-			sb.WriteString(line)
-			topicContent.WriteString(line)
+			fmt.Fprintf(&sb, "[%s (%s)]: %s\n", role, timestamp, m.Content)
 		}
 		sb.WriteString("\n")
-
-		// Save content for excerpt validation
-		if state != nil {
-			state.loadedContents[id] = topicContent.String()
-		}
 	}
 
 	// Warn if payload is large (soft limit for monitoring)
@@ -1018,7 +845,7 @@ func (s *Service) saveRerankerTrace(
 		toolCallsJSON = []byte("[]")
 	}
 
-	// Serialize selected topics (full TopicSelection with reason and excerpt)
+	// Serialize selected topics
 	selectedIDsJSON, err := json.Marshal(trace.selectedTopics)
 	if err != nil {
 		s.logger.Warn("failed to marshal reranker selected topics", "error", err)

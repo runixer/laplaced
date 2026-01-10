@@ -1117,7 +1117,6 @@ class OpenRouterRequestViewer {
         const relevance = parseFloat(attrs.relevance) || 0;
         const date = attrs.date || '';
         const summary = attrs.summary || ''; // Summary is an attribute, not nested tag
-        const isExcerpt = attrs.excerpt === 'true';
 
         // tagContent is the raw message content (not wrapped in <content>)
         const content = tagContent.trim();
@@ -1135,7 +1134,6 @@ class OpenRouterRequestViewer {
         html += '<div class="or-xml-header">' +
             '<span class="topic-id"><i class="bi bi-chat-square-text"></i> Topic #' + this.escapeHtml(topicId) + '</span>' +
             '<div class="topic-meta">' +
-                (isExcerpt ? '<span class="topic-relevance" style="background:#e0e7ff;color:#4338ca;"><i class="bi bi-scissors"></i> excerpt</span>' : '') +
                 '<span class="topic-relevance ' + relevanceClass + '">' + (relevance * 100).toFixed(0) + '%</span>' +
                 (date ? '<span class="topic-date"><i class="bi bi-calendar3"></i> ' + this.escapeHtml(date) + '</span>' : '') +
             '</div>' +

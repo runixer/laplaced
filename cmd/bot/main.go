@@ -18,6 +18,7 @@ import (
 	"github.com/runixer/laplaced/internal/agent/archivist"
 	"github.com/runixer/laplaced/internal/agent/enricher"
 	"github.com/runixer/laplaced/internal/agent/merger"
+	"github.com/runixer/laplaced/internal/agent/reranker"
 	"github.com/runixer/laplaced/internal/agent/splitter"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/bot"
@@ -196,6 +197,7 @@ func main() {
 	splitterAgent := splitter.New(agentExecutor, translator, cfg, store, store)
 	mergerAgent := merger.New(agentExecutor, translator, cfg, store, store)
 	archivistAgent := archivist.New(agentExecutor, translator, cfg)
+	rerankerAgent := reranker.New(openrouterClient, cfg, logger, translator, store, agentLogger)
 
 	// Register agents in registry for discovery
 	agentRegistry := agent.NewRegistry()
@@ -203,6 +205,7 @@ func main() {
 	agentRegistry.Register(splitterAgent)
 	agentRegistry.Register(mergerAgent)
 	agentRegistry.Register(archivistAgent)
+	agentRegistry.Register(rerankerAgent)
 	logger.Info("Agent registry initialized", "agents", len(agentRegistry.List()))
 
 	memoryService := memory.NewService(logger, cfg, store, store, store, openrouterClient, translator)
@@ -214,6 +217,7 @@ func main() {
 	ragService.SetEnricherAgent(enricherAgent)
 	ragService.SetSplitterAgent(splitterAgent)
 	ragService.SetMergerAgent(mergerAgent)
+	ragService.SetRerankerAgent(rerankerAgent)
 	memoryService.SetVectorSearcher(ragService)
 	memoryService.SetTopicRepository(store)
 

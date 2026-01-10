@@ -455,12 +455,6 @@ func (b *Bot) formatRAGResults(results []rag.TopicSearchResult, query string) st
 			topicDate = topicRes.Messages[0].CreatedAt.Format("2006-01-02")
 		}
 
-		// Build topic tag with summary as attribute, excerpt flag if applicable
-		excerptAttr := ""
-		if topicRes.Excerpt != nil && !b.cfg.Agents.Reranker.IgnoreExcerpts {
-			excerptAttr = " excerpt=\"true\""
-		}
-
 		ragContent.WriteString("  <topic id=\"")
 		ragContent.WriteString(fmt.Sprintf("%d", topicRes.Topic.ID))
 		ragContent.WriteString("\" summary=\"")
@@ -469,31 +463,22 @@ func (b *Bot) formatRAGResults(results []rag.TopicSearchResult, query string) st
 		ragContent.WriteString(fmt.Sprintf("%.2f", topicRes.Score))
 		ragContent.WriteString("\" date=\"")
 		ragContent.WriteString(topicDate)
-		ragContent.WriteString("\"")
-		ragContent.WriteString(excerptAttr)
-		ragContent.WriteString(">\n")
+		ragContent.WriteString("\">\n")
 
-		// Use excerpt if available (for large topics filtered by reranker)
-		if topicRes.Excerpt != nil && !b.cfg.Agents.Reranker.IgnoreExcerpts {
-			ragContent.WriteString(*topicRes.Excerpt)
-			ragContent.WriteString("\n")
-		} else {
-			// Full messages for normal topics
-			for i, msg := range topicRes.Messages {
-				var textContent string
+		for i, msg := range topicRes.Messages {
+			var textContent string
 
-				if msg.Role == "user" {
-					// Use existing content if possible (it has built-in headers like [User...])
-					textContent = msg.Content
-				} else {
-					// Assistant/System messages: we build the header
-					dateStr := msg.CreatedAt.Format("2006-01-02 15:04:05")
-					roleTitle := cases.Title(language.English).String(msg.Role)
-					textContent = fmt.Sprintf("[%s (%s)]: %s", roleTitle, dateStr, msg.Content)
-				}
-
-				ragContent.WriteString(fmt.Sprintf("%d. %s\n", i+1, textContent))
+			if msg.Role == "user" {
+				// Use existing content if possible (it has built-in headers like [User...])
+				textContent = msg.Content
+			} else {
+				// Assistant/System messages: we build the header
+				dateStr := msg.CreatedAt.Format("2006-01-02 15:04:05")
+				roleTitle := cases.Title(language.English).String(msg.Role)
+				textContent = fmt.Sprintf("[%s (%s)]: %s", roleTitle, dateStr, msg.Content)
 			}
+
+			ragContent.WriteString(fmt.Sprintf("%d. %s\n", i+1, textContent))
 		}
 
 		ragContent.WriteString("  </topic>\n")

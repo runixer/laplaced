@@ -120,6 +120,7 @@ type Service struct {
 	enricherAgent        agent.Agent                 // Query enrichment agent
 	splitterAgent        agent.Agent                 // Topic splitting agent
 	mergerAgent          agent.Agent                 // Topic merging agent
+	rerankerAgent        agent.Agent                 // Topic reranking agent
 	topicVectors         map[int64][]TopicVectorItem // UserID -> []TopicVectorItem
 	factVectors          map[int64][]FactVectorItem  // UserID -> []FactVectorItem
 	maxLoadedTopicID     int64                       // Track max loaded topic ID for incremental loading
@@ -168,6 +169,11 @@ func (s *Service) SetSplitterAgent(a agent.Agent) {
 // SetMergerAgent sets the topic merging agent.
 func (s *Service) SetMergerAgent(a agent.Agent) {
 	s.mergerAgent = a
+}
+
+// SetRerankerAgent sets the topic reranking agent.
+func (s *Service) SetRerankerAgent(a agent.Agent) {
+	s.rerankerAgent = a
 }
 
 // Start initializes and starts the RAG service background loops.

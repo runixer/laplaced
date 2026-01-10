@@ -30,18 +30,16 @@ type AgentConfig struct {
 
 // RerankerAgentConfig extends AgentConfig with reranker-specific settings.
 type RerankerAgentConfig struct {
-	AgentConfig         `yaml:",inline"`
-	Enabled             bool   `yaml:"enabled" env:"LAPLACED_RERANKER_ENABLED"`
-	Candidates          int    `yaml:"candidates" env:"LAPLACED_RERANKER_CANDIDATES"`
-	MaxTopics           int    `yaml:"max_topics" env:"LAPLACED_RERANKER_MAX_TOPICS"`
-	MaxPeople           int    `yaml:"max_people" env:"LAPLACED_RERANKER_MAX_PEOPLE"`
-	Timeout             string `yaml:"timeout" env:"LAPLACED_RERANKER_TIMEOUT"`
-	TurnTimeout         string `yaml:"turn_timeout" env:"LAPLACED_RERANKER_TURN_TIMEOUT"`
-	MaxToolCalls        int    `yaml:"max_tool_calls" env:"LAPLACED_RERANKER_MAX_TOOL_CALLS"`
-	ThinkingLevel       string `yaml:"thinking_level" env:"LAPLACED_RERANKER_THINKING_LEVEL"`
-	LargeTopicThreshold int    `yaml:"large_topic_threshold" env:"LAPLACED_RERANKER_LARGE_TOPIC_THRESHOLD"`
-	TargetContextChars  int    `yaml:"target_context_chars" env:"LAPLACED_RERANKER_TARGET_CONTEXT_CHARS"`
-	IgnoreExcerpts      bool   `yaml:"ignore_excerpts" env:"LAPLACED_RERANKER_IGNORE_EXCERPTS"`
+	AgentConfig        `yaml:",inline"`
+	Enabled            bool   `yaml:"enabled" env:"LAPLACED_RERANKER_ENABLED"`
+	Candidates         int    `yaml:"candidates" env:"LAPLACED_RERANKER_CANDIDATES"`
+	MaxTopics          int    `yaml:"max_topics" env:"LAPLACED_RERANKER_MAX_TOPICS"`
+	MaxPeople          int    `yaml:"max_people" env:"LAPLACED_RERANKER_MAX_PEOPLE"`
+	Timeout            string `yaml:"timeout" env:"LAPLACED_RERANKER_TIMEOUT"`
+	TurnTimeout        string `yaml:"turn_timeout" env:"LAPLACED_RERANKER_TURN_TIMEOUT"`
+	MaxToolCalls       int    `yaml:"max_tool_calls" env:"LAPLACED_RERANKER_MAX_TOOL_CALLS"`
+	ThinkingLevel      string `yaml:"thinking_level" env:"LAPLACED_RERANKER_THINKING_LEVEL"`
+	TargetContextChars int    `yaml:"target_context_chars" env:"LAPLACED_RERANKER_TARGET_CONTEXT_CHARS"`
 }
 
 // AgentsConfig defines all agents in the system.
@@ -349,9 +347,6 @@ func (c *Config) Validate() error {
 	}
 	if r.MaxToolCalls <= 0 {
 		errs = append(errs, fmt.Errorf("agents.reranker.max_tool_calls must be positive, got %d", r.MaxToolCalls))
-	}
-	if r.LargeTopicThreshold <= 0 {
-		r.LargeTopicThreshold = 25000
 	}
 	if r.Timeout != "" {
 		if _, err := time.ParseDuration(r.Timeout); err != nil {

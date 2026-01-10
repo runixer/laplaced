@@ -51,19 +51,7 @@ type RerankerParams struct {
 	Profile       string // Formatted <user_profile> block
 	RecentTopics  string // Formatted <recent_topics> block
 	MaxTopics     int    // Maximum topics in final selection
-	TargetCharsK  int    // Target budget in thousands (e.g., 30 for ~30K chars)
 	MinCandidates int    // Minimum candidates to consider before filtering
-	MaxCandidates int    // Maximum candidates to load
-	LargeBudgetK  int    // Budget for excerpts from large topics (K chars)
-}
-
-// RerankerSimpleParams for rag.reranker_system_prompt_simple template.
-// Used when ignore_excerpts is true - no excerpt requirements.
-type RerankerSimpleParams struct {
-	Profile       string // Formatted <user_profile> block
-	RecentTopics  string // Formatted <recent_topics> block
-	MaxTopics     int    // Maximum topics in final selection
-	MinCandidates int    // Minimum candidates to consider
 	MaxCandidates int    // Maximum candidates to load
 }
 

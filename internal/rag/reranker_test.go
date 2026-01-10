@@ -1,7 +1,6 @@
 package rag
 
 import (
-	"bytes"
 	"context"
 	"log/slog"
 	"os"
@@ -172,9 +171,6 @@ func TestParseRerankerResponse(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	s := &Service{logger: logger}
 
-	// Helper to create string pointer
-	strPtr := func(s string) *string { return &s }
-
 	tests := []struct {
 		name           string
 		content        string
@@ -224,26 +220,8 @@ func TestParseRerankerResponse(t *testing.T) {
 			content:    `{"topic_ids": [{"id": 42, "reason": "relevant discussion"}, {"id": 18, "reason": "mentions person"}]}`,
 			wantTopics: []int64{42, 18},
 			wantSelections: []TopicSelection{
-				{ID: 42, Reason: "relevant discussion", Excerpt: nil},
-				{ID: 18, Reason: "mentions person", Excerpt: nil},
-			},
-			wantErr: false,
-		},
-		{
-			name:       "new format with excerpt",
-			content:    `{"topic_ids": [{"id": 42, "reason": "big topic", "excerpt": "[User]: relevant message..."}]}`,
-			wantTopics: []int64{42},
-			wantSelections: []TopicSelection{
-				{ID: 42, Reason: "big topic", Excerpt: strPtr("[User]: relevant message...")},
-			},
-			wantErr: false,
-		},
-		{
-			name:       "new format with null excerpt",
-			content:    `{"topic_ids": [{"id": 42, "reason": "small topic", "excerpt": null}]}`,
-			wantTopics: []int64{42},
-			wantSelections: []TopicSelection{
-				{ID: 42, Reason: "small topic", Excerpt: nil},
+				{ID: 42, Reason: "relevant discussion"},
+				{ID: 18, Reason: "mentions person"},
 			},
 			wantErr: false,
 		},
@@ -253,17 +231,8 @@ func TestParseRerankerResponse(t *testing.T) {
 			content:    `[{"id": 42, "reason": "relevant"}, {"id": 18, "reason": "mentions person"}]`,
 			wantTopics: []int64{42, 18},
 			wantSelections: []TopicSelection{
-				{ID: 42, Reason: "relevant", Excerpt: nil},
-				{ID: 18, Reason: "mentions person", Excerpt: nil},
-			},
-			wantErr: false,
-		},
-		{
-			name:       "bare array with excerpt",
-			content:    `[{"id": 42, "reason": "big topic", "excerpt": "[User]: message..."}]`,
-			wantTopics: []int64{42},
-			wantSelections: []TopicSelection{
-				{ID: 42, Reason: "big topic", Excerpt: strPtr("[User]: message...")},
+				{ID: 42, Reason: "relevant"},
+				{ID: 18, Reason: "mentions person"},
 			},
 			wantErr: false,
 		},
@@ -272,7 +241,7 @@ func TestParseRerankerResponse(t *testing.T) {
 			content:    `{"topic_ids": [{"id": 42}]}`,
 			wantTopics: []int64{42},
 			wantSelections: []TopicSelection{
-				{ID: 42, Reason: "", Excerpt: nil},
+				{ID: 42, Reason: ""},
 			},
 			wantErr: false,
 		},
@@ -282,8 +251,8 @@ func TestParseRerankerResponse(t *testing.T) {
 			content:    `[{"topic_ids": [{"id": 5205, "reason": "discussion about limits"}, {"id": 4750, "reason": "cost context"}]}]`,
 			wantTopics: []int64{5205, 4750},
 			wantSelections: []TopicSelection{
-				{ID: 5205, Reason: "discussion about limits", Excerpt: nil},
-				{ID: 4750, Reason: "cost context", Excerpt: nil},
+				{ID: 5205, Reason: "discussion about limits"},
+				{ID: 4750, Reason: "cost context"},
 			},
 			wantErr: false,
 		},
@@ -596,7 +565,6 @@ func TestRerankCandidates_ProtocolViolation_NoToolCalls(t *testing.T) {
 	// Reasons are empty because it's a fallback
 	for _, topic := range result.Topics {
 		assert.Empty(t, topic.Reason)
-		assert.Nil(t, topic.Excerpt)
 	}
 	mockClient.AssertExpectations(t)
 }
@@ -767,193 +735,6 @@ func TestRerankCandidates_LLMError_FallbackToVector(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, []int64{1, 2}, result.TopicIDs()) // top-2 by vector score
 	mockClient.AssertExpectations(t)
-}
-
-func TestValidateExcerpts(t *testing.T) {
-	// Capture log output
-	var logBuf bytes.Buffer
-	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
-	s := &Service{logger: logger}
-
-	tests := []struct {
-		name         string
-		result       *RerankerResult
-		candidateMap map[int64]rerankerCandidate
-		wantWarnings []string // substrings expected in log
-		noWarnings   bool
-	}{
-		{
-			name: "no warning for small topic without excerpt",
-			result: &RerankerResult{
-				Topics: []TopicSelection{{ID: 1, Reason: "test"}},
-			},
-			candidateMap: map[int64]rerankerCandidate{
-				1: {TopicID: 1, SizeChars: 10000}, // < 25K threshold
-			},
-			noWarnings: true,
-		},
-		{
-			name: "warning for large topic without excerpt",
-			result: &RerankerResult{
-				Topics: []TopicSelection{{ID: 1, Reason: "test"}},
-			},
-			candidateMap: map[int64]rerankerCandidate{
-				1: {TopicID: 1, SizeChars: 30000}, // > 25K threshold
-			},
-			wantWarnings: []string{"large topic without excerpt"},
-		},
-		{
-			name: "warning for too short excerpt",
-			result: &RerankerResult{
-				Topics: []TopicSelection{{ID: 1, Reason: "test", Excerpt: ptr("short")}},
-			},
-			candidateMap: map[int64]rerankerCandidate{
-				1: {TopicID: 1, SizeChars: 30000},
-			},
-			wantWarnings: []string{"excerpt too short"},
-		},
-		{
-			name: "warning for too long excerpt (>50% of topic)",
-			result: &RerankerResult{
-				Topics: []TopicSelection{{ID: 1, Reason: "test", Excerpt: ptr(string(make([]byte, 20000)))}},
-			},
-			candidateMap: map[int64]rerankerCandidate{
-				1: {TopicID: 1, SizeChars: 30000}, // excerpt is 20K / 30K = 66%
-			},
-			wantWarnings: []string{"excerpt too long"},
-		},
-		{
-			name: "no warning for good excerpt",
-			result: &RerankerResult{
-				Topics: []TopicSelection{{ID: 1, Reason: "test", Excerpt: ptr(string(make([]byte, 5000)))}},
-			},
-			candidateMap: map[int64]rerankerCandidate{
-				1: {TopicID: 1, SizeChars: 30000}, // excerpt is 5K / 30K = 16%
-			},
-			noWarnings: true,
-		},
-		{
-			name: "skip unknown topic ID",
-			result: &RerankerResult{
-				Topics: []TopicSelection{{ID: 999, Reason: "test"}},
-			},
-			candidateMap: map[int64]rerankerCandidate{
-				1: {TopicID: 1, SizeChars: 30000},
-			},
-			noWarnings: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			logBuf.Reset()
-			s.validateExcerpts(123, tt.result, tt.candidateMap, nil) // nil loadedContents skips hallucination check
-			logOutput := logBuf.String()
-
-			if tt.noWarnings {
-				assert.Empty(t, logOutput, "expected no warnings")
-			} else {
-				for _, warn := range tt.wantWarnings {
-					assert.Contains(t, logOutput, warn, "expected warning: %s", warn)
-				}
-			}
-		})
-	}
-}
-
-// ptr is a helper to create string pointer
-func ptr(s string) *string {
-	return &s
-}
-
-func TestExcerptFoundInContent(t *testing.T) {
-	tests := []struct {
-		name    string
-		excerpt string
-		content string
-		want    bool
-	}{
-		{
-			name:    "content substring match",
-			excerpt: "Hello world this is a test message from user",
-			content: "[User (2026-01-01 12:00:00)]: Hello world this is a test message from user\n[Assistant]: Hi there",
-			want:    true,
-		},
-		{
-			name:    "normalized match (case insensitive)",
-			excerpt: "hello world this is a longer test message",
-			content: "[User (2026-01-01 12:00:00)]: Hello World This Is A Longer Test Message\n",
-			want:    true,
-		},
-		{
-			name:    "partial match with [...]",
-			excerpt: "[User]: First message content here\n[...]\n[User]: Last message content here",
-			content: "[User]: First message content here\n[Assistant]: Response\n[User]: Middle\n[User]: Last message content here\n",
-			want:    true,
-		},
-		{
-			name:    "hallucinated excerpt - not in content",
-			excerpt: "[User]: This text was never in the topic at all",
-			content: "[User]: Completely different content here\n[Assistant]: Something else entirely",
-			want:    false,
-		},
-		{
-			name:    "very short excerpt",
-			excerpt: "Hi",
-			content: "[User]: Hi there\n",
-			want:    true,
-		},
-		{
-			name:    "excerpt from current dialog (hallucination case)",
-			excerpt: "[User]: мы уже отказались от Яндекс-транскрибации теперь ты мультимодальный",
-			content: "[User]: Технический отчёт за январь\n[Assistant]: Обсуждаем vLLM на H100",
-			want:    false,
-		},
-		{
-			name:    "partial match with ... (no brackets)",
-			excerpt: "[User]: ...важно именно проверка на тридцать секунд голосового...",
-			content: "[User]: безусловно важно именно проверка на тридцать секунд голосового потому что это критично\n[Assistant]: Да",
-			want:    true,
-		},
-		{
-			name:    "partial match with mixed ellipsis patterns",
-			excerpt: "[User]: First part of message...\n[...]\n[User]: ...and the ending here",
-			content: "[User]: First part of message that continues longer\n[Assistant]: Response\n[User]: Some middle and the ending here with more text\n",
-			want:    true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := excerptFoundInContent(tt.excerpt, tt.content)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
-func TestValidateExcerptsHallucination(t *testing.T) {
-	var logBuf bytes.Buffer
-	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
-	s := &Service{logger: logger}
-
-	// Test that hallucinated excerpt triggers warning
-	result := &RerankerResult{
-		Topics: []TopicSelection{
-			{ID: 1, Reason: "test", Excerpt: ptr("[User]: This was never in the topic")},
-		},
-	}
-	candidateMap := map[int64]rerankerCandidate{
-		1: {TopicID: 1, SizeChars: 30000}, // Large topic
-	}
-	loadedContents := map[int64]string{
-		1: "[User]: Completely different content\n[Assistant]: Some response here",
-	}
-
-	s.validateExcerpts(123, result, candidateMap, loadedContents)
-	logOutput := logBuf.String()
-
-	assert.Contains(t, logOutput, "excerpt not found in topic content")
-	assert.Contains(t, logOutput, "possible hallucination")
 }
 
 func TestRequestedIDsDeduplication(t *testing.T) {
