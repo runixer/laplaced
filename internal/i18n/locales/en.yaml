@@ -150,7 +150,7 @@ rag:
     Formulate search query:
 
   enrichment_media_instruction: |
-    The user's message contains media (image or audio). When formulating the search query, describe what you see/hear in the media — objects, people, places, text, spoken words — if it helps find relevant conversation history.
+    IMPORTANT: The message contains media (image or audio). Formulate the search query BASED ON the media content — what is shown, what interface, what technologies, what is discussed. Text dialogue history is secondary context.
 
   # Merger system prompt
   # Template fields: Profile, RecentTopics
