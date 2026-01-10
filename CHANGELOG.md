@@ -7,7 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Next version: v0.5 (Social) — People Table, Social Graph_
+_Next version: v0.6 (Social) — People Table, Social Graph_
+
+## [0.5.0] - 2026-01-10
+
+**Architecture release: Unified agent framework and template-based prompts.**
+
+### Added
+- **Unified agent architecture** — all LLM-powered operations now use consistent `agent.Agent` interface with typed parameters
+- **SharedContext** — user profile and recent topics passed between agents, avoiding redundant DB queries
+- **Centralized test mocks** — `internal/testutil/` package with `MockStorage`, `MockAgent`, and test fixtures
+- **MockAgent** — enables testing of agent-dependent code without LLM calls
+
+### Changed
+- **Agent migration** — Laplace, Reranker, Enricher, Splitter, Merger, Archivist moved to `internal/agent/` with dedicated packages
+- **Named templates** — all i18n prompts migrated from positional `%s` to named `{{.Name}}` placeholders for type safety
+- **RAG modularization** — monolithic `rag.go` split into focused modules: retrieval, consolidation, session, processing, extraction, vector
+- **Test architecture** — centralized mocks reduce duplication, `.Maybe()` pattern handles background loop side effects
+
+### Removed
+- **Deduplicator remnants** — removed unused `DeduplicatorParams` and `memory.consolidation_prompt`
+
+### Fixed
+- **All tests passing** — previously skipped tests now work with MockAgent integration
 
 ## [0.4.8] - 2026-01-09
 
@@ -333,7 +355,8 @@ _Next version: v0.5 (Social) — People Table, Social Graph_
 - Multi-language support (en, ru)
 - Docker deployment
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.4.8...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/runixer/laplaced/compare/v0.4.8...v0.5.0
 [0.4.8]: https://github.com/runixer/laplaced/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/runixer/laplaced/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/runixer/laplaced/compare/v0.4.5...v0.4.6
