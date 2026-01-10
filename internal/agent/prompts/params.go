@@ -76,13 +76,6 @@ type ArchivistParams struct {
 	Conversation    string // Conversation to analyze
 }
 
-// DeduplicatorParams for memory.consolidation_prompt template.
-// The Deduplicator agent identifies and handles duplicate facts.
-type DeduplicatorParams struct {
-	NewFact    string // The new fact to evaluate
-	Candidates string // Existing similar facts for comparison
-}
-
 // LaplaceParams for bot.system_prompt template.
 // The main chat agent system prompt.
 type LaplaceParams struct {

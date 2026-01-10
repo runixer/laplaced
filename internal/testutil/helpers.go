@@ -72,7 +72,7 @@ bot:
   voice_recognition_prefix: "(Transcribed from audio):"
   voice_message_marker: "[Voice message]"
   voice_instruction: "The user sent a voice message (audio file below). Listen to it and respond in English. Do not describe the listening process — just respond to the content."
-  system_prompt: "System %s"
+  system_prompt: "System {{.BotName}}"
 rag:
   no_context: "No relevant context found"
   enrichment_system_prompt: "Enricher System {{.Date}} {{.Profile}} {{.RecentTopics}}"

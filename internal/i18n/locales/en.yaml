@@ -24,7 +24,7 @@ bot:
     For multiple voice messages — quote each separately.
   system_prompt: |
     <role>
-    You are %s — a friendly AI assistant.
+    You are {{.BotName}} — a friendly AI assistant.
     Platform: Telegram. Language: English. Formatting: Markdown.
     </role>
 
@@ -353,33 +353,6 @@ memory:
     <conversation>
     {{.Conversation}}
     </conversation>
-
-  consolidation_prompt: |
-    <role>
-    You are a Deduplication Engine. Goal — database cleanliness.
-    </role>
-
-    <task>
-    NEW FACT: %[1]s
-
-    EXISTING CANDIDATES:
-    %[2]s
-    </task>
-
-    <rules>
-    COMPARISON RULES:
-    1. NAMES ARE SACRED: Roman Pomazanov and Roman Lukanov are DIFFERENT entities. When in doubt — ADD. Better a duplicate than data loss.
-    2. VERSION CONFLICT: If new fact is more technically precise (v0.3.3 instead of v0.3), use REPLACE.
-    3. NOISE: If new fact is a general phrase ("likes IT") but old one is detailed ("likes Go/Linux"), use IGNORE.
-
-    Action options (action):
-    - IGNORE: New fact is useless or less precise.
-    - REPLACE: New fact is an update of the old one. Specify target_id.
-    - MERGE: Facts complement each other. Specify target_id and new_content.
-    - ADD: New or disputed information.
-    </rules>
-
-    Answer in JSON.
 
 telegram:
   forwarded_from: "[Forwarded from %s by user %s at %s]"

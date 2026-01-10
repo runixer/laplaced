@@ -9,6 +9,7 @@ import (
 	"golang.org/x/text/language"
 
 	"github.com/runixer/laplaced/internal/agent"
+	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
@@ -125,7 +126,13 @@ func (l *Laplace) LoadContextData(
 	if botName == "" {
 		botName = "Bot"
 	}
-	data.BaseSystemPrompt = l.translator.Get(l.cfg.Bot.Language, "bot.system_prompt", botName)
+	basePrompt, err := l.translator.GetTemplate(l.cfg.Bot.Language, "bot.system_prompt", prompts.LaplaceParams{
+		BotName: botName,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to build system prompt: %w", err)
+	}
+	data.BaseSystemPrompt = basePrompt
 	if l.cfg.Bot.SystemPromptExtra != "" {
 		data.BaseSystemPrompt += " " + l.cfg.Bot.SystemPromptExtra
 	}
