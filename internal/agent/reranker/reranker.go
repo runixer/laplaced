@@ -233,8 +233,14 @@ func (r *Reranker) rerank(
 	// Build user message content
 	var userMessageContent interface{}
 	if len(mediaParts) > 0 {
+		// Add media instruction
+		mediaInstruction := r.translator.Get(lang, "rag.reranker_media_instruction")
+		promptWithMedia := userPrompt
+		if mediaInstruction != "" {
+			promptWithMedia = userPrompt + "\n\n" + mediaInstruction
+		}
 		parts := []interface{}{
-			openrouter.TextPart{Type: "text", Text: userPrompt},
+			openrouter.TextPart{Type: "text", Text: promptWithMedia},
 		}
 		parts = append(parts, mediaParts...)
 		userMessageContent = parts

@@ -31,8 +31,8 @@ const (
 
 // TopicSelection represents a selected topic with explanation.
 type TopicSelection struct {
-	ID     int64  `json:"id"`
 	Reason string `json:"reason"`
+	ID     int64  `json:"id"`
 }
 
 // Result contains the output of the reranker.

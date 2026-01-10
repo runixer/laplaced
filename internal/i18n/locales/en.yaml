@@ -223,12 +223,13 @@ rag:
     </criteria>
 
     <output_format>
-    This is a SELECTION task, not explanation. After loading topics return ONLY JSON:
-    {"topic_ids": [{"id": 42, "reason": "brief reason"}, {"id": 18, "reason": "..."}]}
+    This is a SELECTION task, not explanation. After loading topics return ONLY JSON array:
+    [{"reason": "brief reason", "id": 42}, {"reason": "...", "id": 18}]
 
     RULES:
+    - Format: array of objects with "reason" and "id" fields
     - "reason" — REQUIRED, 1 sentence
-    - If nothing relevant — {"topic_ids": []}
+    - If nothing relevant — []
     - DO NOT write text before or after JSON
     </output_format>
 
@@ -237,19 +238,19 @@ rag:
     Query: "How to configure vLLM on H100?"
     Candidates: [ID:42] ML infrastructure on H100, [ID:18] Psychological profile, [ID:5] Docker basics
     Action: get_topics_content([42, 5])
-    Result: {"topic_ids": [{"id": 42, "reason": "Direct discussion of vLLM and H100"}]}
+    Result: [{"reason": "Direct discussion of vLLM and H100", "id": 42}]
 
     ### Example 2: Personal context
     Query: "Remember what Mary said about the cottage?"
     Candidates: [ID:10] Cottage with family, [ID:11] Kubernetes setup, [ID:12] Mary is sick
     Action: get_topics_content([10, 12])
-    Result: {"topic_ids": [{"id": 10, "reason": "Cottage with Mary"}, {"id": 12, "reason": "Additional context about Mary"}]}
+    Result: [{"reason": "Cottage with Mary", "id": 10}, {"reason": "Additional context about Mary", "id": 12}]
 
     ### Example 3: Nothing matches
     Query: "What's the current Bitcoin price?"
     Candidates: [ID:1] Go refactoring, [ID:2] Telegram bot development
     Action: get_topics_content([1, 2]) — check just in case
-    Result: {"topic_ids": []}
+    Result: []
     </examples>
 
     <grounding>
@@ -282,6 +283,8 @@ rag:
 
   reranker_tool_description: "Load full content of topics for detailed study. Consider size — load large topics (>10K chars) only if the topic is very relevant."
   reranker_tool_param_description: "Topic IDs to load"
+  reranker_media_instruction: |
+    IMPORTANT: The query contains media (image or audio). When selecting topics, consider the media content — what is shown, what technologies, interfaces or topics are involved.
 
 memory:
   # Archivist system prompt
