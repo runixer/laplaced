@@ -7,7 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agent"
+	"github.com/runixer/laplaced/internal/agent/enricher"
 	"github.com/runixer/laplaced/internal/agent/prompts"
+	"github.com/runixer/laplaced/internal/agent/splitter"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
@@ -20,6 +23,59 @@ type ExtractedTopic struct {
 }
 
 func (s *Service) extractTopics(ctx context.Context, userID int64, chunk []storage.Message) ([]ExtractedTopic, UsageInfo, error) {
+	// Use splitter agent if available
+	if s.splitterAgent != nil {
+		return s.extractTopicsViaAgent(ctx, userID, chunk)
+	}
+	return s.extractTopicsLegacy(ctx, userID, chunk)
+}
+
+// extractTopicsViaAgent delegates topic extraction to the Splitter agent.
+func (s *Service) extractTopicsViaAgent(ctx context.Context, userID int64, chunk []storage.Message) ([]ExtractedTopic, UsageInfo, error) {
+	req := &agent.Request{
+		Params: map[string]any{
+			splitter.ParamMessages: chunk,
+			"user_id":              userID,
+		},
+	}
+
+	// Try to get SharedContext from ctx (will be nil for background jobs)
+	if shared := agent.FromContext(ctx); shared != nil {
+		req.Shared = shared
+	}
+
+	resp, err := s.splitterAgent.Execute(ctx, req)
+	if err != nil {
+		return nil, UsageInfo{}, err
+	}
+
+	result, ok := resp.Structured.(*splitter.Result)
+	if !ok {
+		return nil, UsageInfo{}, fmt.Errorf("unexpected result type from splitter agent")
+	}
+
+	// Convert splitter.ExtractedTopic to rag.ExtractedTopic
+	topics := make([]ExtractedTopic, len(result.Topics))
+	for i, t := range result.Topics {
+		topics[i] = ExtractedTopic{
+			Summary:    t.Summary,
+			StartMsgID: t.StartMsgID,
+			EndMsgID:   t.EndMsgID,
+		}
+	}
+
+	usage := UsageInfo{
+		PromptTokens:     resp.Tokens.Prompt,
+		CompletionTokens: resp.Tokens.Completion,
+		TotalTokens:      resp.Tokens.Total,
+		Cost:             resp.Tokens.Cost,
+	}
+
+	return topics, usage, nil
+}
+
+// extractTopicsLegacy is the original implementation for backwards compatibility.
+func (s *Service) extractTopicsLegacy(ctx context.Context, userID int64, chunk []storage.Message) ([]ExtractedTopic, UsageInfo, error) {
 	startTime := time.Now()
 
 	// Load user profile for context (unified format with tags)
@@ -176,6 +232,56 @@ func (s *Service) extractTopics(ctx context.Context, userID int64, chunk []stora
 }
 
 func (s *Service) enrichQuery(ctx context.Context, userID int64, query string, history []storage.Message, mediaParts []interface{}) (string, string, int, error) {
+	// Use enricher agent if available
+	if s.enricherAgent != nil {
+		return s.enrichQueryViaAgent(ctx, userID, query, history, mediaParts)
+	}
+	return s.enrichQueryLegacy(ctx, userID, query, history, mediaParts)
+}
+
+// enrichQueryViaAgent delegates query enrichment to the Enricher agent.
+func (s *Service) enrichQueryViaAgent(ctx context.Context, userID int64, query string, history []storage.Message, mediaParts []interface{}) (string, string, int, error) {
+	model := s.cfg.Agents.Enricher.GetModel(s.cfg.Agents.Default.Model)
+	if model == "" {
+		return query, "", 0, nil
+	}
+
+	req := &agent.Request{
+		Query: query,
+		Params: map[string]any{
+			enricher.ParamHistory: history,
+		},
+	}
+
+	// Add media parts if present
+	if len(mediaParts) > 0 {
+		req.Params[enricher.ParamMediaParts] = mediaParts
+	}
+
+	// Try to get SharedContext from ctx
+	if shared := agent.FromContext(ctx); shared != nil {
+		req.Shared = shared
+	}
+
+	resp, err := s.enricherAgent.Execute(ctx, req)
+	if err != nil {
+		return "", "", 0, err
+	}
+
+	tokens := resp.Tokens.Prompt + resp.Tokens.Completion
+	enrichedQuery := strings.TrimSpace(resp.Content)
+
+	// Get system prompt from metadata for debugging
+	systemPrompt := ""
+	if sp, ok := resp.Metadata["system_prompt"].(string); ok {
+		systemPrompt = sp
+	}
+
+	return enrichedQuery, systemPrompt, tokens, nil
+}
+
+// enrichQueryLegacy is the original implementation for backwards compatibility.
+func (s *Service) enrichQueryLegacy(ctx context.Context, userID int64, query string, history []storage.Message, mediaParts []interface{}) (string, string, int, error) {
 	startTime := time.Now()
 
 	model := s.cfg.Agents.Enricher.GetModel(s.cfg.Agents.Default.Model)

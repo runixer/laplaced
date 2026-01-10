@@ -15,6 +15,10 @@ import (
 	"time"
 
 	"github.com/runixer/laplaced/internal/agent"
+	"github.com/runixer/laplaced/internal/agent/archivist"
+	"github.com/runixer/laplaced/internal/agent/enricher"
+	"github.com/runixer/laplaced/internal/agent/merger"
+	"github.com/runixer/laplaced/internal/agent/splitter"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/bot"
 	"github.com/runixer/laplaced/internal/config"
@@ -184,11 +188,32 @@ func main() {
 	// Create context service for shared user context across agents
 	contextService := agent.NewContextService(store, store, cfg, logger)
 
+	// Create agent executor for LLM calls
+	agentExecutor := agent.NewExecutor(openrouterClient, agentLogger, logger)
+
+	// Create agents
+	enricherAgent := enricher.New(agentExecutor, translator, cfg)
+	splitterAgent := splitter.New(agentExecutor, translator, cfg, store, store)
+	mergerAgent := merger.New(agentExecutor, translator, cfg, store, store)
+	archivistAgent := archivist.New(agentExecutor, translator, cfg)
+
+	// Register agents in registry for discovery
+	agentRegistry := agent.NewRegistry()
+	agentRegistry.Register(enricherAgent)
+	agentRegistry.Register(splitterAgent)
+	agentRegistry.Register(mergerAgent)
+	agentRegistry.Register(archivistAgent)
+	logger.Info("Agent registry initialized", "agents", len(agentRegistry.List()))
+
 	memoryService := memory.NewService(logger, cfg, store, store, store, openrouterClient, translator)
 	memoryService.SetAgentLogger(agentLogger)
+	memoryService.SetArchivistAgent(archivistAgent)
 
 	ragService := rag.NewService(logger, cfg, store, store, store, store, store, openrouterClient, memoryService, translator)
 	ragService.SetAgentLogger(agentLogger)
+	ragService.SetEnricherAgent(enricherAgent)
+	ragService.SetSplitterAgent(splitterAgent)
+	ragService.SetMergerAgent(mergerAgent)
 	memoryService.SetVectorSearcher(ragService)
 	memoryService.SetTopicRepository(store)
 

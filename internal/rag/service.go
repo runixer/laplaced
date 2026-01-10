@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
@@ -116,6 +117,9 @@ type Service struct {
 	memoryService        *memory.Service
 	translator           *i18n.Translator
 	agentLogger          *agentlog.Logger
+	enricherAgent        agent.Agent                 // Query enrichment agent
+	splitterAgent        agent.Agent                 // Topic splitting agent
+	mergerAgent          agent.Agent                 // Topic merging agent
 	topicVectors         map[int64][]TopicVectorItem // UserID -> []TopicVectorItem
 	factVectors          map[int64][]FactVectorItem  // UserID -> []FactVectorItem
 	maxLoadedTopicID     int64                       // Track max loaded topic ID for incremental loading
@@ -149,6 +153,21 @@ func NewService(logger *slog.Logger, cfg *config.Config, topicRepo storage.Topic
 // SetAgentLogger sets the agent logger for debugging LLM calls.
 func (s *Service) SetAgentLogger(logger *agentlog.Logger) {
 	s.agentLogger = logger
+}
+
+// SetEnricherAgent sets the query enrichment agent.
+func (s *Service) SetEnricherAgent(a agent.Agent) {
+	s.enricherAgent = a
+}
+
+// SetSplitterAgent sets the topic splitting agent.
+func (s *Service) SetSplitterAgent(a agent.Agent) {
+	s.splitterAgent = a
+}
+
+// SetMergerAgent sets the topic merging agent.
+func (s *Service) SetMergerAgent(a agent.Agent) {
+	s.mergerAgent = a
 }
 
 // Start initializes and starts the RAG service background loops.

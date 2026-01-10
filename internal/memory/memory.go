@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agent"
+	"github.com/runixer/laplaced/internal/agent/archivist"
 	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
@@ -32,6 +34,7 @@ type Service struct {
 	translator      *i18n.Translator
 	vectorSearcher  VectorSearcher
 	agentLogger     *agentlog.Logger
+	archivistAgent  agent.Agent // Fact extraction agent
 }
 
 func NewService(logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, factHistoryRepo storage.FactHistoryRepository, orClient openrouter.Client, translator *i18n.Translator) *Service {
@@ -56,6 +59,11 @@ func (s *Service) SetTopicRepository(tr storage.TopicRepository) {
 
 func (s *Service) SetAgentLogger(logger *agentlog.Logger) {
 	s.agentLogger = logger
+}
+
+// SetArchivistAgent sets the fact extraction agent.
+func (s *Service) SetArchivistAgent(a agent.Agent) {
+	s.archivistAgent = a
 }
 
 // MemoryUpdate represents the changes returned by the LLM
@@ -172,6 +180,112 @@ func (s *Service) ProcessSessionWithStats(ctx context.Context, userID int64, mes
 }
 
 func (s *Service) extractMemoryUpdate(ctx context.Context, userID int64, session []storage.Message, facts []storage.Fact, referenceDate time.Time, user *storage.User) (*MemoryUpdate, string, chatUsage, error) {
+	// Use archivist agent if available
+	if s.archivistAgent != nil {
+		return s.extractMemoryUpdateViaAgent(ctx, userID, session, facts, referenceDate, user)
+	}
+	return s.extractMemoryUpdateLegacy(ctx, userID, session, facts, referenceDate, user)
+}
+
+// extractMemoryUpdateViaAgent delegates fact extraction to the Archivist agent.
+func (s *Service) extractMemoryUpdateViaAgent(ctx context.Context, userID int64, session []storage.Message, facts []storage.Fact, referenceDate time.Time, user *storage.User) (*MemoryUpdate, string, chatUsage, error) {
+	startTime := time.Now()
+	defer func() {
+		RecordMemoryExtraction(time.Since(startTime).Seconds())
+	}()
+
+	req := &agent.Request{
+		Params: map[string]any{
+			archivist.ParamMessages:      session,
+			archivist.ParamFacts:         facts,
+			archivist.ParamReferenceDate: referenceDate,
+			archivist.ParamUser:          user,
+			"user_id":                    userID,
+		},
+	}
+
+	// Try to get SharedContext from ctx
+	if shared := agent.FromContext(ctx); shared != nil {
+		req.Shared = shared
+	}
+
+	resp, err := s.archivistAgent.Execute(ctx, req)
+	if err != nil {
+		return nil, "", chatUsage{}, err
+	}
+
+	result, ok := resp.Structured.(*archivist.Result)
+	if !ok {
+		return nil, "", chatUsage{}, fmt.Errorf("unexpected result type from archivist agent")
+	}
+
+	// Convert archivist.Result to MemoryUpdate
+	update := convertArchivistResult(result)
+
+	usage := chatUsage{
+		PromptTokens:     resp.Tokens.Prompt,
+		CompletionTokens: resp.Tokens.Completion,
+		Cost:             resp.Tokens.Cost,
+	}
+
+	return update, resp.Content, usage, nil
+}
+
+// convertArchivistResult converts archivist.Result to MemoryUpdate.
+func convertArchivistResult(result *archivist.Result) *MemoryUpdate {
+	update := &MemoryUpdate{}
+
+	for _, a := range result.Added {
+		update.Added = append(update.Added, struct {
+			Entity     string `json:"entity"`
+			Relation   string `json:"relation"`
+			Content    string `json:"content"`
+			Category   string `json:"category"`
+			Type       string `json:"type"`
+			Importance int    `json:"importance"`
+			Reason     string `json:"reason"`
+		}{
+			Entity:     a.Entity,
+			Relation:   a.Relation,
+			Content:    a.Content,
+			Category:   a.Category,
+			Type:       a.Type,
+			Importance: a.Importance,
+			Reason:     a.Reason,
+		})
+	}
+
+	for _, u := range result.Updated {
+		update.Updated = append(update.Updated, struct {
+			ID         int64  `json:"id"`
+			Content    string `json:"content"`
+			Type       string `json:"type,omitempty"`
+			Importance int    `json:"importance"`
+			Reason     string `json:"reason"`
+		}{
+			ID:         u.ID,
+			Content:    u.Content,
+			Type:       u.Type,
+			Importance: u.Importance,
+			Reason:     u.Reason,
+		})
+	}
+
+	for _, r := range result.Removed {
+		update.Removed = append(update.Removed, struct {
+			ID     int64  `json:"id"`
+			Reason string `json:"reason"`
+		}{
+			ID:     r.ID,
+			Reason: r.Reason,
+		})
+	}
+
+	return update
+}
+
+// extractMemoryUpdateLegacy is the original implementation for backwards compatibility.
+func (s *Service) extractMemoryUpdateLegacy(ctx context.Context, userID int64, session []storage.Message, facts []storage.Fact, referenceDate time.Time, user *storage.User) (*MemoryUpdate, string, chatUsage, error) {
 	startTime := time.Now()
 	defer func() {
 		RecordMemoryExtraction(time.Since(startTime).Seconds())
