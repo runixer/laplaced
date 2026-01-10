@@ -34,6 +34,14 @@ go build -o laplaced cmd/bot/main.go
 ```
 cmd/bot/main.go          # Entry point, dependency wiring
 internal/
+  agent/                 # Unified agent interface and types
+    archivist/           # Fact extraction from conversations
+    enricher/            # Query enrichment for RAG
+    laplace/             # Main chat agent with tool calls
+    merger/              # Topic merge verification
+    reranker/            # Topic relevance reranking
+    splitter/            # Topic extraction from conversations
+    prompts/             # Shared prompt parameter types
   bot/                   # Core bot logic, message handlers, Telegram updates processing
   config/                # Configuration loading (YAML + env vars)
   storage/               # SQLite repository layer (pure Go, no CGO)
@@ -46,6 +54,7 @@ internal/
   web/                   # HTTP server for dashboard and webhooks
   i18n/                  # Localization (en/ru)
   markdown/              # Markdown processing
+  agentlog/              # Agent execution logging
 ```
 
 ### Key Patterns
@@ -71,6 +80,36 @@ internal/
 - **Long-term**: Topics (conversation summaries) and structured facts stored in SQLite with vector embeddings
 - **Profile**: Up to 50 facts about the user, always included in context
 - **RAG**: Vector similarity search retrieves relevant past discussions
+
+### Agent Architecture
+
+All LLM-powered operations use agents from `internal/agent/`. Each agent implements `agent.Agent`:
+
+```go
+type Agent interface {
+    Type() AgentType
+    Execute(ctx context.Context, req *Request) (*Response, error)
+}
+```
+
+**Agent Types:**
+- **Laplace** (`agent/laplace/`): Main chat agent with tool calls (search_history, search_web, manage_memory)
+- **Reranker** (`agent/reranker/`): Selects most relevant topics from vector search candidates using tool calls
+- **Enricher** (`agent/enricher/`): Expands user queries with context for better RAG retrieval
+- **Splitter** (`agent/splitter/`): Extracts topic summaries from conversation chunks
+- **Merger** (`agent/merger/`): Verifies if two topics should be merged
+- **Archivist** (`agent/archivist/`): Extracts and manages user facts from conversations
+
+**Agent Wiring (in `cmd/bot/main.go`):**
+```go
+ragService.SetEnricherAgent(enricherAgent)
+ragService.SetSplitterAgent(splitterAgent)
+ragService.SetRerankerAgent(rerankerAgent)
+ragService.SetMergerAgent(mergerAgent)
+memoryService.SetArchivistAgent(archivistAgent)
+```
+
+**SharedContext**: Agents receive user profile and recent topics via `agent.SharedContext` to avoid redundant DB queries.
 
 ### Critical Data Invariants (MUST READ!)
 

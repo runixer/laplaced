@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/runixer/laplaced/internal/agent"
@@ -176,14 +177,14 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		RecordRerankerCandidatesInput(userID, len(matches))
 
 		// Build reranker candidates with topic metadata
-		candidates := make([]rerankerCandidate, 0, len(matches))
+		candidates := make([]reranker.Candidate, 0, len(matches))
 		for _, m := range matches {
 			if topic, ok := topicMap[m.topicID]; ok {
 				msgCount := int(topic.EndMsgID - topic.StartMsgID + 1)
 				if msgCount < 0 {
 					msgCount = 0
 				}
-				candidates = append(candidates, rerankerCandidate{
+				candidates = append(candidates, reranker.Candidate{
 					TopicID:      m.topicID,
 					Score:        m.score,
 					Topic:        topic,
@@ -235,13 +236,8 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		// Format current session messages for reranker
 		currentMessages := s.formatSessionMessages(opts.History)
 
-		// Use reranker agent if available, otherwise fall back to legacy method
-		var result *RerankerResult
-		if s.rerankerAgent != nil {
-			result, err = s.rerankViaAgent(ctx, userID, candidates, contextualizedQuery, query, currentMessages, userProfile, recentTopics, opts.MediaParts)
-		} else {
-			result, err = s.rerankCandidates(ctx, userID, candidates, contextualizedQuery, query, currentMessages, userProfile, recentTopics, opts.MediaParts)
-		}
+		// Run reranker agent
+		result, err := s.rerankViaAgent(ctx, userID, candidates, contextualizedQuery, query, currentMessages, userProfile, recentTopics, opts.MediaParts)
 		if err != nil {
 			s.logger.Warn("reranker failed, falling back to vector search", "error", err)
 			RecordRerankerFallback(userID, "error")
@@ -456,32 +452,23 @@ func cosineSimilarity(a, b []float32) float32 {
 func (s *Service) rerankViaAgent(
 	ctx context.Context,
 	userID int64,
-	candidates []rerankerCandidate,
+	candidates []reranker.Candidate,
 	contextualizedQuery string,
 	originalQuery string,
 	currentMessages string,
 	userProfile string,
 	recentTopics string,
 	mediaParts []interface{},
-) (*RerankerResult, error) {
-	startTime := time.Now()
-
-	// Convert candidates to agent format
-	agentCandidates := make([]reranker.Candidate, len(candidates))
-	for i, c := range candidates {
-		agentCandidates[i] = reranker.Candidate{
-			TopicID:      c.TopicID,
-			Score:        c.Score,
-			Topic:        c.Topic,
-			MessageCount: c.MessageCount,
-			SizeChars:    c.SizeChars,
-		}
+) (*reranker.Result, error) {
+	if s.rerankerAgent == nil {
+		return nil, fmt.Errorf("reranker agent not configured")
 	}
+	startTime := time.Now()
 
 	// Build request
 	req := &agent.Request{
 		Params: map[string]any{
-			reranker.ParamCandidates:          agentCandidates,
+			reranker.ParamCandidates:          candidates,
 			reranker.ParamContextualizedQuery: contextualizedQuery,
 			reranker.ParamOriginalQuery:       originalQuery,
 			reranker.ParamCurrentMessages:     currentMessages,
@@ -518,17 +505,37 @@ func (s *Service) rerankViaAgent(
 	RecordRerankerDuration(userID, duration)
 	RecordRerankerCandidatesOutput(userID, len(result.Topics))
 
-	// Convert result to RerankerResult
-	rrResult := &RerankerResult{
-		Topics:    make([]TopicSelection, len(result.Topics)),
-		PeopleIDs: result.PeopleIDs,
-	}
-	for i, t := range result.Topics {
-		rrResult.Topics[i] = TopicSelection{
-			ID:     t.ID,
-			Reason: t.Reason,
-		}
+	return result, nil
+}
+
+// formatSessionMessages formats the current session history for the reranker prompt.
+func (s *Service) formatSessionMessages(history []storage.Message) string {
+	if len(history) == 0 {
+		return "(no current session messages)"
 	}
 
-	return rrResult, nil
+	var sb strings.Builder
+	// Take last N messages to avoid overwhelming the reranker
+	maxMessages := 10
+	start := 0
+	if len(history) > maxMessages {
+		start = len(history) - maxMessages
+		fmt.Fprintf(&sb, "... (%d earlier messages omitted)\n\n", start)
+	}
+
+	for _, m := range history[start:] {
+		role := m.Role
+		if role == "assistant" {
+			role = "Assistant"
+		} else if role == "user" {
+			role = "User"
+		}
+		// Truncate very long messages
+		content := m.Content
+		if len(content) > 500 {
+			content = content[:500] + "..."
+		}
+		fmt.Fprintf(&sb, "[%s]: %s\n", role, content)
+	}
+	return sb.String()
 }

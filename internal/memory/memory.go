@@ -2,15 +2,12 @@ package memory
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/archivist"
-	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
@@ -180,11 +177,10 @@ func (s *Service) ProcessSessionWithStats(ctx context.Context, userID int64, mes
 }
 
 func (s *Service) extractMemoryUpdate(ctx context.Context, userID int64, session []storage.Message, facts []storage.Fact, referenceDate time.Time, user *storage.User) (*MemoryUpdate, string, chatUsage, error) {
-	// Use archivist agent if available
-	if s.archivistAgent != nil {
-		return s.extractMemoryUpdateViaAgent(ctx, userID, session, facts, referenceDate, user)
+	if s.archivistAgent == nil {
+		return nil, "", chatUsage{}, fmt.Errorf("archivist agent not configured")
 	}
-	return s.extractMemoryUpdateLegacy(ctx, userID, session, facts, referenceDate, user)
+	return s.extractMemoryUpdateViaAgent(ctx, userID, session, facts, referenceDate, user)
 }
 
 // extractMemoryUpdateViaAgent delegates fact extraction to the Archivist agent.
@@ -282,231 +278,6 @@ func convertArchivistResult(result *archivist.Result) *MemoryUpdate {
 	}
 
 	return update
-}
-
-// extractMemoryUpdateLegacy is the original implementation for backwards compatibility.
-func (s *Service) extractMemoryUpdateLegacy(ctx context.Context, userID int64, session []storage.Message, facts []storage.Fact, referenceDate time.Time, user *storage.User) (*MemoryUpdate, string, chatUsage, error) {
-	startTime := time.Now()
-	defer func() {
-		RecordMemoryExtraction(time.Since(startTime).Seconds())
-	}()
-
-	var sb strings.Builder
-	for _, msg := range session {
-		if msg.Role == "user" {
-			// Check if content is already formatted (starts with [ and contains ]:)
-			// This is a heuristic to avoid double formatting if the storage already contains formatted messages
-			if strings.HasPrefix(msg.Content, "[") && strings.Contains(msg.Content, "]:") {
-				sb.WriteString(fmt.Sprintf("%s\n", msg.Content))
-			} else {
-				// Format message
-				name := "User"
-				if user != nil {
-					name = strings.TrimSpace(user.FirstName + " " + user.LastName)
-					if user.Username != "" {
-						if name != "" {
-							name = fmt.Sprintf("%s (@%s)", name, user.Username)
-						} else {
-							name = "@" + user.Username
-						}
-					}
-					if name == "" {
-						name = fmt.Sprintf("ID:%d", user.ID)
-					}
-				}
-				dateStr := msg.CreatedAt.Format("2006-01-02 15:04:05")
-				sb.WriteString(fmt.Sprintf("[%s (%s)]: %s\n", name, dateStr, msg.Content))
-			}
-		} else {
-			// Assistant/Bot message
-			dateStr := msg.CreatedAt.Format("2006-01-02 15:04:05")
-			sb.WriteString(fmt.Sprintf("[Bot (%s)]: %s\n", dateStr, msg.Content))
-		}
-	}
-
-	// Serialize facts for prompt (simplified view)
-	// Note: user_profile and recent_topics removed from archivist prompt
-	// because <current_facts> already contains full JSON of all facts
-	type FactView struct {
-		ID         int64  `json:"id"`
-		Entity     string `json:"entity"`
-		Relation   string `json:"relation"`
-		Content    string `json:"content"`
-		Category   string `json:"category"`
-		Type       string `json:"type"`
-		Importance int    `json:"importance"`
-	}
-	var userFacts []FactView
-	var otherFacts []FactView
-
-	for _, f := range facts {
-		view := FactView{
-			ID:         f.ID,
-			Entity:     f.Entity,
-			Relation:   f.Relation,
-			Content:    f.Content,
-			Category:   f.Category,
-			Type:       f.Type,
-			Importance: f.Importance,
-		}
-		if strings.EqualFold(f.Entity, "User") {
-			userFacts = append(userFacts, view)
-		} else {
-			otherFacts = append(otherFacts, view)
-		}
-	}
-
-	userFactsJSON, _ := json.MarshalIndent(userFacts, "", "  ")
-	otherFactsJSON, _ := json.MarshalIndent(otherFacts, "", "  ")
-	currentDate := referenceDate.Format("2006-01-02")
-
-	// Schemas
-	factSchema := map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"entity":     map[string]interface{}{"type": "string"},
-			"relation":   map[string]interface{}{"type": "string"},
-			"content":    map[string]interface{}{"type": "string"},
-			"category":   map[string]interface{}{"type": "string", "enum": []string{"bio", "work", "hobby", "preference", "other"}},
-			"type":       map[string]interface{}{"type": "string", "enum": []string{"identity", "context", "status"}},
-			"importance": map[string]interface{}{"type": "integer", "description": "0-100"},
-			"reason":     map[string]interface{}{"type": "string"},
-		},
-		"required":             []string{"entity", "relation", "content", "category", "type", "importance", "reason"},
-		"additionalProperties": false,
-	}
-
-	updateSchema := map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"id":         map[string]interface{}{"type": "integer"},
-			"content":    map[string]interface{}{"type": "string"},
-			"type":       map[string]interface{}{"type": "string", "enum": []string{"identity", "context", "status"}},
-			"importance": map[string]interface{}{"type": "integer"},
-			"reason":     map[string]interface{}{"type": "string"},
-		},
-		"required":             []string{"id", "content", "importance", "reason"},
-		"additionalProperties": false,
-	}
-
-	removeSchema := map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"id":     map[string]interface{}{"type": "integer"},
-			"reason": map[string]interface{}{"type": "string"},
-		},
-		"required":             []string{"id", "reason"},
-		"additionalProperties": false,
-	}
-
-	schema := map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"added": map[string]interface{}{
-				"type":  "array",
-				"items": factSchema,
-			},
-			"updated": map[string]interface{}{
-				"type":  "array",
-				"items": updateSchema,
-			},
-			"removed": map[string]interface{}{
-				"type":  "array",
-				"items": removeSchema,
-			},
-		},
-		"required":             []string{"added", "updated", "removed"},
-		"additionalProperties": false,
-	}
-
-	maxFacts := s.cfg.RAG.MaxProfileFacts
-	// Build system prompt with typed parameters
-	prompt, err := s.translator.GetTemplate(s.cfg.Bot.Language, "memory.system_prompt", prompts.ArchivistParams{
-		Date:            currentDate,
-		UserFactsLimit:  maxFacts,
-		UserFactsCount:  len(userFacts),
-		OtherFactsCount: len(otherFacts),
-		UserFacts:       string(userFactsJSON),
-		OtherFacts:      string(otherFactsJSON),
-		Conversation:    sb.String(),
-	})
-	if err != nil {
-		return nil, "", chatUsage{}, fmt.Errorf("failed to build archivist system prompt: %w", err)
-	}
-	if len(userFacts) > maxFacts {
-		warning := fmt.Sprintf("\n\n<limit_exceeded>\nCRITICAL: You have %d facts about User. The limit is %d.\nYou MUST delete or consolidate at least %d facts in this response.\n</limit_exceeded>", len(userFacts), maxFacts, len(userFacts)-maxFacts+1)
-		prompt += warning
-	}
-
-	fullRequest := fmt.Sprintf("%s\n\n=== MESSAGES ===\n%s", prompt, sb.String())
-
-	req := openrouter.ChatCompletionRequest{
-		Model: s.cfg.Agents.Archivist.GetModel(s.cfg.Agents.Default.Model),
-		Messages: []openrouter.Message{
-			{Role: "system", Content: prompt},
-		},
-		ResponseFormat: &openrouter.ResponseFormat{
-			Type: "json_schema",
-			JSONSchema: &openrouter.JSONSchema{
-				Name:   "memory_update",
-				Strict: true,
-				Schema: schema,
-			},
-		},
-		UserID: userID,
-	}
-
-	resp, err := s.orClient.CreateChatCompletion(ctx, req)
-	durationMs := int(time.Since(startTime).Milliseconds())
-
-	inputContext := map[string]interface{}{
-		"user_facts":  userFacts,
-		"other_facts": otherFacts,
-		"messages":    sb.String(),
-	}
-
-	if err != nil {
-		// Log error
-		if s.agentLogger != nil {
-			s.agentLogger.LogError(ctx, userID, agentlog.AgentArchivist, prompt, inputContext, err.Error(), req.Model, durationMs, nil)
-		}
-		return nil, fullRequest, chatUsage{}, err
-	}
-
-	usage := chatUsage{
-		PromptTokens:     resp.Usage.PromptTokens,
-		CompletionTokens: resp.Usage.CompletionTokens,
-		Cost:             resp.Usage.Cost,
-	}
-
-	if len(resp.Choices) == 0 {
-		if s.agentLogger != nil {
-			s.agentLogger.LogError(ctx, userID, agentlog.AgentArchivist, prompt, resp.DebugRequestBody, "empty response", req.Model, durationMs, nil)
-		}
-		return nil, fullRequest, usage, fmt.Errorf("empty response")
-	}
-
-	var update MemoryUpdate
-	if err := json.Unmarshal([]byte(resp.Choices[0].Message.Content), &update); err != nil {
-		if s.agentLogger != nil {
-			s.agentLogger.LogError(ctx, userID, agentlog.AgentArchivist, prompt, resp.DebugRequestBody, fmt.Sprintf("failed to parse response: %v", err), req.Model, durationMs, map[string]interface{}{
-				"raw_response": resp.Choices[0].Message.Content,
-			})
-		}
-		return nil, fullRequest, usage, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	// Log success
-	if s.agentLogger != nil {
-		s.agentLogger.LogSuccess(ctx, userID, agentlog.AgentArchivist, prompt, resp.DebugRequestBody,
-			resp.Choices[0].Message.Content, &update, resp.DebugResponseBody, req.Model, usage.PromptTokens, usage.CompletionTokens, usage.Cost, durationMs, map[string]interface{}{
-				"added_count":   len(update.Added),
-				"updated_count": len(update.Updated),
-				"removed_count": len(update.Removed),
-			})
-	}
-
-	return &update, fullRequest, usage, nil
 }
 
 func (s *Service) applyUpdateWithStats(ctx context.Context, userID int64, update *MemoryUpdate, currentFacts []storage.Fact, referenceDate time.Time, topicID int64, requestInput string) (FactStats, error) {
