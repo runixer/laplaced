@@ -6,6 +6,8 @@ import (
 	"html"
 	"log/slog"
 	"math/rand/v2"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -362,9 +364,72 @@ func splitByDelimiter(text string) []string {
 	return parts
 }
 
+// listItemRegex matches numbered list items like "1. ", "42. " at line start.
+var listItemRegex = regexp.MustCompile(`(?m)^(\d+)\.\s`)
+
+// fixListNumbering fixes numbered list continuity across message parts.
+// When LLM splits a message mid-list, it sometimes restarts numbering from 1.
+// This function detects and fixes such cases.
+func fixListNumbering(parts []string) []string {
+	if len(parts) < 2 {
+		return parts
+	}
+
+	result := make([]string, len(parts))
+	copy(result, parts)
+
+	for i := 1; i < len(result); i++ {
+		prevPart := result[i-1]
+		currPart := result[i]
+
+		// Find last number in previous part
+		prevMatches := listItemRegex.FindAllStringSubmatch(prevPart, -1)
+		if len(prevMatches) == 0 {
+			continue
+		}
+		lastNum, _ := strconv.Atoi(prevMatches[len(prevMatches)-1][1])
+
+		// Find first numbers in current part
+		currMatches := listItemRegex.FindAllStringSubmatchIndex(currPart, 3)
+		if len(currMatches) == 0 {
+			continue
+		}
+
+		// Get first number
+		firstNumStr := currPart[currMatches[0][2]:currMatches[0][3]]
+		firstNum, _ := strconv.Atoi(firstNumStr)
+
+		// Check if numbering is broken (starts with 1 when it shouldn't)
+		expectedNum := lastNum + 1
+		if firstNum == 1 && expectedNum > 1 {
+			// Check if this looks like LLM "self-correction" bug or intentional new list
+			// Bug pattern: 1, 7, 8 (jumped from 1 to 7, skipping 2-6)
+			// Intentional: 1, 2, 3 (sequential from 1)
+			if len(currMatches) >= 2 {
+				secondNumStr := currPart[currMatches[1][2]:currMatches[1][3]]
+				secondNum, _ := strconv.Atoi(secondNumStr)
+				// If second item follows first sequentially (1->2), it's intentional new list
+				if secondNum == firstNum+1 {
+					continue
+				}
+			}
+
+			// Fix the first number
+			result[i] = currPart[:currMatches[0][2]] +
+				strconv.Itoa(expectedNum) +
+				currPart[currMatches[0][3]:]
+		}
+	}
+
+	return result
+}
+
 func (b *Bot) finalizeResponse(chatID int64, messageThreadID int, userID int64, replyToMsgID int, responseText string, logger *slog.Logger) ([]telegram.SendMessageRequest, error) {
 	// Split by explicit ###SPLIT### delimiter first (respects code blocks)
 	delimiterParts := splitByDelimiter(responseText)
+
+	// Fix numbered list continuity across split parts (LLM sometimes restarts from 1)
+	delimiterParts = fixListNumbering(delimiterParts)
 
 	// Then split each part by character limit (safety net for oversized chunks)
 	const markdownSafeLimit = 3500
