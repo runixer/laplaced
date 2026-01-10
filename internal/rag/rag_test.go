@@ -4,10 +4,13 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agent"
+	"github.com/runixer/laplaced/internal/agent/merger"
+	"github.com/runixer/laplaced/internal/agent/splitter"
+	agenttesting "github.com/runixer/laplaced/internal/agent/testing"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/memory"
 	"github.com/runixer/laplaced/internal/openrouter"
@@ -21,7 +24,6 @@ import (
 // --- Tests ---
 
 func TestRetrieve_TopicsGrouping(t *testing.T) {
-	t.Skip("TODO: Requires MockAgent setup after Phase 6 refactoring")
 	// 1. Setup
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	cfg := &config.Config{}
@@ -85,10 +87,6 @@ func TestRetrieve_TopicsGrouping(t *testing.T) {
 	mockStore.On("GetAllTopics").Return(topics, nil)
 	mockStore.On("GetAllFacts").Return([]storage.Fact{}, nil)
 
-	// EnrichQuery needs user profile facts and recent topics
-	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
-	mockStore.On("GetTopicsExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(storage.TopicResult{}, nil).Maybe()
-
 	// Background loops expectations
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil).Maybe()
 	mockStore.On("GetTopicsPendingFacts", userID).Return([]storage.Topic{}, nil).Maybe()
@@ -96,32 +94,14 @@ func TestRetrieve_TopicsGrouping(t *testing.T) {
 	mockStore.On("GetMergeCandidates", userID).Return([]storage.MergeCandidate{}, nil).Maybe()
 	mockStore.On("GetAllUsers").Return([]storage.User{}, nil).Maybe()
 
-	// Retrieve:
-	// 1. EnrichQuery (mock ChatCompletion)
-	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req openrouter.ChatCompletionRequest) bool {
-		// Assume enrichment prompt
-		return true // Simplified
-	})).Return(openrouter.ChatCompletionResponse{
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{
-			{Message: struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: "Enriched Query"}, FinishReason: "stop"},
-		},
+	// Mock enricher agent that returns "Enriched Query"
+	mockEnricher := new(agenttesting.MockAgent)
+	mockEnricher.On("Type").Return(string(agent.TypeEnricher)).Maybe()
+	mockEnricher.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
+		Content: "Enriched Query",
 	}, nil)
 
-	// 2. CreateEmbeddings for "Enriched Query" -> Returns [1, 0, 0]
+	// CreateEmbeddings for "Enriched Query" -> Returns [1, 0, 0]
 	mockClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req openrouter.EmbeddingRequest) bool {
 		return len(req.Input) > 0 && req.Input[0] == "Enriched Query"
 	})).Return(openrouter.EmbeddingResponse{
@@ -130,13 +110,13 @@ func TestRetrieve_TopicsGrouping(t *testing.T) {
 		},
 	}, nil)
 
-	// 3. GetTopicsByIDs (called inside Retrieve to fetch matched topics)
+	// GetTopicsByIDs (called inside Retrieve to fetch matched topics)
 	mockStore.On("GetTopicsByIDs", mock.MatchedBy(func(ids []int64) bool {
 		// Should request IDs of matching topics (A and C)
 		return len(ids) > 0
 	})).Return(topics, nil)
 
-	// 4. GetMessagesByTopicID for matching topics
+	// GetMessagesByTopicID for matching topics
 	// Topic A matches (similarity 1.0 > 0.5) - ID=1
 	mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return(msgsA, nil)
 	// Topic B matches (similarity 0.0 < 0.5) -> Should NOT be called
@@ -149,6 +129,8 @@ func TestRetrieve_TopicsGrouping(t *testing.T) {
 	// 4. Run Logic
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc.SetEnricherAgent(mockEnricher)
+
 	err := svc.Start(context.Background())
 	assert.NoError(t, err)
 
@@ -167,6 +149,7 @@ func TestRetrieve_TopicsGrouping(t *testing.T) {
 
 	mockStore.AssertExpectations(t)
 	mockClient.AssertExpectations(t)
+	mockEnricher.AssertExpectations(t)
 }
 
 func TestRetrieveFacts(t *testing.T) {
@@ -426,7 +409,6 @@ func TestFindMergeCandidates(t *testing.T) {
 }
 
 func TestVerifyMerge(t *testing.T) {
-	t.Skip("TODO: Requires MockAgent setup after Phase 6 refactoring")
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	cfg := &config.Config{}
 	cfg.RAG.Enabled = true
@@ -439,27 +421,14 @@ func TestVerifyMerge(t *testing.T) {
 
 		mockStore.On("GetAllTopics").Return([]storage.Topic{}, nil)
 		mockStore.On("GetAllFacts").Return([]storage.Fact{}, nil)
-		mockStore.On("GetFacts", int64(0)).Return([]storage.Fact{}, nil)
-		mockStore.On("GetTopicsExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(storage.TopicResult{}, nil)
 
-		// LLM returns should_merge: true
-		mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(openrouter.ChatCompletionResponse{
-			Choices: []struct {
-				Message struct {
-					Role             string                `json:"role"`
-					Content          string                `json:"content"`
-					ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-					ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-				} `json:"message"`
-				FinishReason string `json:"finish_reason,omitempty"`
-				Index        int    `json:"index"`
-			}{
-				{Message: struct {
-					Role             string                `json:"role"`
-					Content          string                `json:"content"`
-					ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-					ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-				}{Content: `{"should_merge": true, "new_summary": "Combined summary"}`}, FinishReason: "stop"},
+		// Mock merger agent that returns should_merge: true
+		mockMerger := new(agenttesting.MockAgent)
+		mockMerger.On("Type").Return(string(agent.TypeMerger)).Maybe()
+		mockMerger.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
+			Structured: &merger.Result{
+				ShouldMerge: true,
+				NewSummary:  "Combined summary",
 			},
 		}, nil)
 
@@ -467,6 +436,7 @@ func TestVerifyMerge(t *testing.T) {
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc.SetMergerAgent(mockMerger)
 		_ = svc.Start(context.Background())
 
 		candidate := storage.MergeCandidate{
@@ -486,26 +456,13 @@ func TestVerifyMerge(t *testing.T) {
 
 		mockStore.On("GetAllTopics").Return([]storage.Topic{}, nil)
 		mockStore.On("GetAllFacts").Return([]storage.Fact{}, nil)
-		mockStore.On("GetFacts", int64(0)).Return([]storage.Fact{}, nil)
-		mockStore.On("GetTopicsExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(storage.TopicResult{}, nil)
 
-		mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(openrouter.ChatCompletionResponse{
-			Choices: []struct {
-				Message struct {
-					Role             string                `json:"role"`
-					Content          string                `json:"content"`
-					ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-					ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-				} `json:"message"`
-				FinishReason string `json:"finish_reason,omitempty"`
-				Index        int    `json:"index"`
-			}{
-				{Message: struct {
-					Role             string                `json:"role"`
-					Content          string                `json:"content"`
-					ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-					ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-				}{Content: `{"should_merge": false}`}, FinishReason: "stop"},
+		// Mock merger agent that returns should_merge: false
+		mockMerger := new(agenttesting.MockAgent)
+		mockMerger.On("Type").Return(string(agent.TypeMerger)).Maybe()
+		mockMerger.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
+			Structured: &merger.Result{
+				ShouldMerge: false,
 			},
 		}, nil)
 
@@ -513,6 +470,7 @@ func TestVerifyMerge(t *testing.T) {
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc.SetMergerAgent(mockMerger)
 		_ = svc.Start(context.Background())
 
 		candidate := storage.MergeCandidate{
@@ -525,20 +483,23 @@ func TestVerifyMerge(t *testing.T) {
 		assert.False(t, shouldMerge)
 	})
 
-	t.Run("LLM error", func(t *testing.T) {
+	t.Run("agent error", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
 		mockStore.On("GetAllTopics").Return([]storage.Topic{}, nil)
 		mockStore.On("GetAllFacts").Return([]storage.Fact{}, nil)
-		mockStore.On("GetFacts", int64(0)).Return([]storage.Fact{}, nil)
-		mockStore.On("GetTopicsExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(storage.TopicResult{}, nil)
-		mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(openrouter.ChatCompletionResponse{}, assert.AnError)
+
+		// Mock merger agent that returns error
+		mockMerger := new(agenttesting.MockAgent)
+		mockMerger.On("Type").Return(string(agent.TypeMerger)).Maybe()
+		mockMerger.On("Execute", mock.Anything, mock.Anything).Return(nil, assert.AnError)
 
 		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc.SetMergerAgent(mockMerger)
 		_ = svc.Start(context.Background())
 
 		candidate := storage.MergeCandidate{
@@ -930,23 +891,19 @@ func TestCosineSimilarity(t *testing.T) {
 }
 
 func TestEnrichQuery(t *testing.T) {
-	t.Skip("TODO: Requires MockAgent setup after Phase 6 refactoring")
-	t.Run("returns original query when model is empty", func(t *testing.T) {
+	t.Run("returns original query when enricher not configured", func(t *testing.T) {
 		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 		cfg := &config.Config{
-			RAG: config.RAGConfig{
-				Enabled: true,
-			},
-			// empty Agents.Enricher.Model and Agents.Default.Model
+			RAG: config.RAGConfig{Enabled: true},
 		}
 
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
-
 		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		// Don't set enricher agent - should return original query
 
 		result, prompt, tokens, err := svc.enrichQuery(context.Background(), int64(123), "test query", nil, nil)
 
@@ -956,135 +913,62 @@ func TestEnrichQuery(t *testing.T) {
 		assert.Equal(t, 0, tokens)
 	})
 
-	t.Run("handles API error", func(t *testing.T) {
+	t.Run("handles agent error", func(t *testing.T) {
 		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 		cfg := &config.Config{
-			RAG: config.RAGConfig{
-				Enabled: true,
-			},
+			RAG: config.RAGConfig{Enabled: true},
 			Agents: config.AgentsConfig{
 				Enricher: config.AgentConfig{Model: "test-model"},
 				Default:  config.AgentConfig{Model: "test-model"},
 			},
-			Bot: config.BotConfig{Language: "en"},
 		}
 
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
-
-		mockStore.On("GetFacts", int64(123)).Return([]storage.Fact{}, nil)
-		mockStore.On("GetTopicsExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(storage.TopicResult{}, nil)
-		mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
-			openrouter.ChatCompletionResponse{}, assert.AnError,
-		)
-
 		translator := testutil.TestTranslator(t)
+
+		// Mock enricher agent that returns error
+		mockEnricher := new(agenttesting.MockAgent)
+		mockEnricher.On("Type").Return(string(agent.TypeEnricher)).Maybe()
+		mockEnricher.On("Execute", mock.Anything, mock.Anything).Return(nil, assert.AnError)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc.SetEnricherAgent(mockEnricher)
 
 		_, _, _, err := svc.enrichQuery(context.Background(), int64(123), "test query", nil, nil)
 
 		assert.Error(t, err)
 	})
 
-	t.Run("handles empty response", func(t *testing.T) {
+	t.Run("enriches query successfully", func(t *testing.T) {
 		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 		cfg := &config.Config{
-			RAG: config.RAGConfig{
-				Enabled: true,
-			},
+			RAG: config.RAGConfig{Enabled: true},
 			Agents: config.AgentsConfig{
 				Enricher: config.AgentConfig{Model: "test-model"},
 				Default:  config.AgentConfig{Model: "test-model"},
 			},
-			Bot: config.BotConfig{Language: "en"},
 		}
 
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
-
-		mockStore.On("GetFacts", int64(123)).Return([]storage.Fact{}, nil)
-		mockStore.On("GetTopicsExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(storage.TopicResult{}, nil)
-		mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
-			openrouter.ChatCompletionResponse{
-				Choices: []struct {
-					Message struct {
-						Role             string                `json:"role"`
-						Content          string                `json:"content"`
-						ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-						ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-					} `json:"message"`
-					FinishReason string `json:"finish_reason,omitempty"`
-					Index        int    `json:"index"`
-				}{},
-			}, nil,
-		)
-
 		translator := testutil.TestTranslator(t)
+
+		// Mock enricher agent that returns enriched query
+		mockEnricher := new(agenttesting.MockAgent)
+		mockEnricher.On("Type").Return(string(agent.TypeEnricher)).Maybe()
+		mockEnricher.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
+			Content: "enriched search terms",
+			Tokens: agent.TokenUsage{
+				Prompt:     10,
+				Completion: 5,
+			},
+		}, nil)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
-
-		_, _, _, err := svc.enrichQuery(context.Background(), int64(123), "test query", nil, nil)
-
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "empty response")
-	})
-
-	t.Run("enriches query with history", func(t *testing.T) {
-		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-		cfg := &config.Config{
-			RAG: config.RAGConfig{
-				Enabled: true,
-			},
-			Agents: config.AgentsConfig{
-				Enricher: config.AgentConfig{Model: "test-model"},
-				Default:  config.AgentConfig{Model: "test-model"},
-			},
-			Bot: config.BotConfig{Language: "en"},
-		}
-
-		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
-
-		mockStore.On("GetFacts", int64(123)).Return([]storage.Fact{}, nil)
-		mockStore.On("GetTopicsExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(storage.TopicResult{}, nil)
-		mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
-			openrouter.ChatCompletionResponse{
-				Choices: []struct {
-					Message struct {
-						Role             string                `json:"role"`
-						Content          string                `json:"content"`
-						ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-						ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-					} `json:"message"`
-					FinishReason string `json:"finish_reason,omitempty"`
-					Index        int    `json:"index"`
-				}{
-					{Message: struct {
-						Role             string                `json:"role"`
-						Content          string                `json:"content"`
-						ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-						ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-					}{
-						Role:    "assistant",
-						Content: "enriched search terms",
-					}, FinishReason: "stop"},
-				},
-				Usage: struct {
-					PromptTokens     int      `json:"prompt_tokens"`
-					CompletionTokens int      `json:"completion_tokens"`
-					TotalTokens      int      `json:"total_tokens"`
-					Cost             *float64 `json:"cost,omitempty"`
-				}{PromptTokens: 10, CompletionTokens: 5},
-			}, nil,
-		)
-
-		translator := testutil.TestTranslator(t)
-
-		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc.SetEnricherAgent(mockEnricher)
 
 		history := []storage.Message{
 			{Role: "user", Content: "Hello"},
@@ -1096,71 +980,6 @@ func TestEnrichQuery(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, "enriched search terms", result)
 		assert.Equal(t, 15, tokens)
-	})
-
-	t.Run("truncates long history messages", func(t *testing.T) {
-		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-		cfg := &config.Config{
-			RAG: config.RAGConfig{
-				Enabled: true,
-			},
-			Agents: config.AgentsConfig{
-				Enricher: config.AgentConfig{Model: "test-model"},
-				Default:  config.AgentConfig{Model: "test-model"},
-			},
-			Bot: config.BotConfig{Language: "en"},
-		}
-
-		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
-
-		mockStore.On("GetFacts", int64(123)).Return([]storage.Fact{}, nil)
-		mockStore.On("GetTopicsExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(storage.TopicResult{}, nil)
-		var capturedReq openrouter.ChatCompletionRequest
-		mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-			capturedReq = args.Get(1).(openrouter.ChatCompletionRequest)
-		}).Return(
-			openrouter.ChatCompletionResponse{
-				Choices: []struct {
-					Message struct {
-						Role             string                `json:"role"`
-						Content          string                `json:"content"`
-						ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-						ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-					} `json:"message"`
-					FinishReason string `json:"finish_reason,omitempty"`
-					Index        int    `json:"index"`
-				}{
-					{Message: struct {
-						Role             string                `json:"role"`
-						Content          string                `json:"content"`
-						ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-						ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-					}{
-						Content: "enriched",
-					}, FinishReason: "stop"},
-				},
-			}, nil,
-		)
-
-		translator := testutil.TestTranslator(t)
-
-		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
-
-		// Create a very long message (>500 chars)
-		longContent := strings.Repeat("a", 600)
-		history := []storage.Message{
-			{Role: "user", Content: longContent},
-		}
-
-		_, _, _, err := svc.enrichQuery(context.Background(), int64(123), "test query", history, nil)
-
-		assert.NoError(t, err)
-		// The user message (index 1) should contain truncated content with "..."
-		assert.Len(t, capturedReq.Messages, 2)
-		userMessage := capturedReq.Messages[1].Content.(string)
-		assert.Contains(t, userMessage, "...")
 	})
 }
 
@@ -1787,7 +1606,6 @@ func TestProcessFactExtraction(t *testing.T) {
 }
 
 func TestProcessChunkWithStats(t *testing.T) {
-	t.Skip("TODO: Requires MockAgent setup after Phase 6 refactoring")
 	t.Run("empty chunk returns nil", func(t *testing.T) {
 		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 		cfg := &config.Config{
@@ -1796,7 +1614,6 @@ func TestProcessChunkWithStats(t *testing.T) {
 
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
-
 		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
@@ -1818,19 +1635,16 @@ func TestProcessChunkWithStats(t *testing.T) {
 
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
-
-		// Mock GetFacts for user profile (now called in extractTopics)
-		mockStore.On("GetFacts", mock.Anything).Return([]storage.Fact{}, nil).Maybe()
-		// Mock GetTopicsExtended for recent topics (now called in extractTopics)
-		mockStore.On("GetTopicsExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(storage.TopicResult{}, nil).Maybe()
-
-		// Mock extractTopics to fail via CreateChatCompletion error
-		mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(openrouter.ChatCompletionResponse{}, assert.AnError)
-
 		translator := testutil.TestTranslator(t)
+
+		// Mock splitter agent that returns error
+		mockSplitter := new(agenttesting.MockAgent)
+		mockSplitter.On("Type").Return(string(agent.TypeSplitter)).Maybe()
+		mockSplitter.On("Execute", mock.Anything, mock.Anything).Return(nil, assert.AnError)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc.SetSplitterAgent(mockSplitter)
 
 		chunk := []storage.Message{
 			{ID: 1, Role: "user", Content: "Hello", CreatedAt: time.Now()},
@@ -1851,11 +1665,7 @@ func TestProcessChunkWithStats(t *testing.T) {
 
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
-
-		// Mock GetFacts for user profile (now called in extractTopics)
-		mockStore.On("GetFacts", mock.Anything).Return([]storage.Fact{}, nil).Maybe()
-		// Mock GetTopicsExtended for recent topics (now called in extractTopics)
-		mockStore.On("GetTopicsExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(storage.TopicResult{}, nil).Maybe()
+		translator := testutil.TestTranslator(t)
 
 		now := time.Now()
 		chunk := []storage.Message{
@@ -1863,35 +1673,21 @@ func TestProcessChunkWithStats(t *testing.T) {
 			{ID: 2, Role: "assistant", Content: "Hi there", CreatedAt: now},
 		}
 
-		// Mock extractTopics response
-		mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(openrouter.ChatCompletionResponse{
-			Choices: []struct {
-				Message struct {
-					Role             string                `json:"role"`
-					Content          string                `json:"content"`
-					ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-					ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-				} `json:"message"`
-				FinishReason string `json:"finish_reason,omitempty"`
-				Index        int    `json:"index"`
-			}{
-				{Message: struct {
-					Role             string                `json:"role"`
-					Content          string                `json:"content"`
-					ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-					ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-				}{
-					Role:    "assistant",
-					Content: `{"topics":[{"summary": "Test topic", "start_msg_id": 1, "end_msg_id": 2}]}`,
-				}, FinishReason: "stop"},
+		// Mock splitter agent that returns topics
+		mockSplitter := new(agenttesting.MockAgent)
+		mockSplitter.On("Type").Return(string(agent.TypeSplitter)).Maybe()
+		mockSplitter.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
+			Structured: &splitter.Result{
+				Topics: []splitter.ExtractedTopic{
+					{Summary: "Test topic", StartMsgID: 1, EndMsgID: 2},
+				},
 			},
-			Usage: struct {
-				PromptTokens     int      `json:"prompt_tokens"`
-				CompletionTokens int      `json:"completion_tokens"`
-				TotalTokens      int      `json:"total_tokens"`
-				Cost             *float64 `json:"cost,omitempty"`
-			}{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
-		}, nil).Once()
+			Tokens: agent.TokenUsage{
+				Prompt:     10,
+				Completion: 5,
+				Total:      15,
+			},
+		}, nil)
 
 		// Mock embeddings
 		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{
@@ -1912,12 +1708,9 @@ func TestProcessChunkWithStats(t *testing.T) {
 		mockStore.On("GetTopicsAfterID", mock.Anything).Return([]storage.Topic{}, nil).Maybe()
 		mockStore.On("GetFactsAfterID", mock.Anything).Return([]storage.Fact{}, nil).Maybe()
 
-		// Mock RAG logging
-
-		translator := testutil.TestTranslator(t)
-
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc.SetSplitterAgent(mockSplitter)
 
 		stats := &ProcessingStats{}
 		topicIDs, err := svc.processChunkWithStats(context.Background(), 123, chunk, stats)
@@ -1938,56 +1731,35 @@ func TestProcessChunkWithStats(t *testing.T) {
 
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
-
-		// Mock GetFacts for user profile (now called in extractTopics)
-		mockStore.On("GetFacts", mock.Anything).Return([]storage.Fact{}, nil).Maybe()
-		// Mock GetTopicsExtended for recent topics (now called in extractTopics)
-		mockStore.On("GetTopicsExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(storage.TopicResult{}, nil).Maybe()
+		translator := testutil.TestTranslator(t)
 
 		now := time.Now()
 		chunk := []storage.Message{
 			{ID: 1, Role: "user", Content: "Hello", CreatedAt: now},
 		}
 
-		// Mock extractTopics response
-		mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(openrouter.ChatCompletionResponse{
-			Choices: []struct {
-				Message struct {
-					Role             string                `json:"role"`
-					Content          string                `json:"content"`
-					ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-					ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-				} `json:"message"`
-				FinishReason string `json:"finish_reason,omitempty"`
-				Index        int    `json:"index"`
-			}{
-				{Message: struct {
-					Role             string                `json:"role"`
-					Content          string                `json:"content"`
-					ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-					ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-				}{
-					Role:    "assistant",
-					Content: `{"topics":[{"summary": "Test topic", "start_msg_id": 1, "end_msg_id": 1}]}`,
-				}, FinishReason: "stop"},
+		// Mock splitter agent that returns topics
+		mockSplitter := new(agenttesting.MockAgent)
+		mockSplitter.On("Type").Return(string(agent.TypeSplitter)).Maybe()
+		mockSplitter.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
+			Structured: &splitter.Result{
+				Topics: []splitter.ExtractedTopic{
+					{Summary: "Test topic", StartMsgID: 1, EndMsgID: 1},
+				},
 			},
-			Usage: struct {
-				PromptTokens     int      `json:"prompt_tokens"`
-				CompletionTokens int      `json:"completion_tokens"`
-				TotalTokens      int      `json:"total_tokens"`
-				Cost             *float64 `json:"cost,omitempty"`
-			}{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
-		}, nil).Once()
+			Tokens: agent.TokenUsage{
+				Prompt:     10,
+				Completion: 5,
+				Total:      15,
+			},
+		}, nil)
 
 		// Mock embeddings error
 		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{}, assert.AnError)
 
-		// Mock RAG logging
-
-		translator := testutil.TestTranslator(t)
-
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc.SetSplitterAgent(mockSplitter)
 
 		stats := &ProcessingStats{}
 		_, err := svc.processChunkWithStats(context.Background(), 123, chunk, stats)

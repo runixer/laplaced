@@ -7,6 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agent"
+	"github.com/runixer/laplaced/internal/agent/archivist"
+	"github.com/runixer/laplaced/internal/agent/splitter"
+	agenttesting "github.com/runixer/laplaced/internal/agent/testing"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/memory"
 	"github.com/runixer/laplaced/internal/openrouter"
@@ -18,7 +22,6 @@ import (
 )
 
 func TestGracefulShutdown(t *testing.T) {
-	t.Skip("TODO: Requires MockAgent setup after Phase 6 refactoring")
 	// 1. Setup
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	cfg := &config.Config{}
@@ -59,98 +62,57 @@ func TestGracefulShutdown(t *testing.T) {
 	// Mock AddRAGLog for topic extraction logging
 	mockStore.On("AddRAGLog", mock.Anything).Return(nil).Maybe()
 
-	// processChunk calls CreateTopic (for Noise) and CreateEmbeddings
-	mockStore.On("CreateTopic", mock.Anything).Return(int64(1), nil)
-	mockStore.On("UpdateMessageTopic", mock.Anything, mock.Anything).Return(nil)
+	// Embeddings for topic
 	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{
 		Data: []openrouter.EmbeddingObject{{Embedding: []float32{0.1, 0.2}}},
-	}, nil)
+	}, nil).Maybe()
 
-	// processChunk calls:
-	// 1. extractTopics (LLM)
-	// We want to simulate delay here.
-	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req openrouter.ChatCompletionRequest) bool {
-		// Check if it's topic extraction
-		// We need to check the response format map manually since it's interface{}
-		if req.ResponseFormat == nil {
-			return false
-		}
+	// AddTopic for extracted topics
+	mockStore.On("AddTopic", mock.Anything).Return(int64(1), nil).Maybe()
 
-		// Try to cast to map
-		if m, ok := req.ResponseFormat.(map[string]interface{}); ok {
-			if js, ok := m["json_schema"].(map[string]interface{}); ok {
-				if name, ok := js["name"].(string); ok {
-					return name == "topic_extraction"
-				}
-			}
-		}
-		return false
-	})).Run(func(args mock.Arguments) {
-		// Sleep to simulate long running task
-		time.Sleep(500 * time.Millisecond)
-	}).Return(openrouter.ChatCompletionResponse{
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{
-			{Message: struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: `{"topics": []}`}, FinishReason: "stop"},
-		},
-	}, nil)
+	// Mock for LoadNewVectors
+	mockStore.On("GetTopicsAfterID", mock.Anything).Return([]storage.Topic{}, nil).Maybe()
+	mockStore.On("GetFactsAfterID", mock.Anything).Return([]storage.Fact{}, nil).Maybe()
 
-	// 2. memoryService.ProcessSession (LLM)
-	mockStore.On("GetFacts", int64(123)).Return([]storage.Fact{}, nil)
-	// Mock GetTopicsExtended for recent topics (now called in extractTopics)
-	mockStore.On("GetTopicsExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(storage.TopicResult{}, nil).Maybe()
+	// Mock GetAllUsers for background loops
 	mockStore.On("GetAllUsers").Return([]storage.User{}, nil).Maybe()
 
-	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req openrouter.ChatCompletionRequest) bool {
-		// Check if it's memory update
-		if req.ResponseFormat == nil {
-			return false
-		}
+	// Mock GetFacts for memory service
+	mockStore.On("GetFacts", int64(123)).Return([]storage.Fact{}, nil).Maybe()
 
-		// Try to cast to *openrouter.ResponseFormat (used in memory.go)
-		if rf, ok := req.ResponseFormat.(*openrouter.ResponseFormat); ok {
-			return rf.JSONSchema != nil && rf.JSONSchema.Name == "memory_update"
-		}
-
-		return false
-	})).Return(openrouter.ChatCompletionResponse{
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{
-			{Message: struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: `{"added": [], "updated": [], "removed": []}`}, FinishReason: "stop"},
+	// Mock splitter agent with delay to simulate long-running task
+	mockSplitter := new(agenttesting.MockAgent)
+	mockSplitter.On("Type").Return(string(agent.TypeSplitter)).Maybe()
+	mockSplitter.On("Execute", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		// Sleep to simulate long running task
+		time.Sleep(500 * time.Millisecond)
+	}).Return(&agent.Response{
+		Structured: &splitter.Result{
+			Topics: []splitter.ExtractedTopic{
+				{Summary: "Test topic", StartMsgID: 1, EndMsgID: 2},
+			},
 		},
 	}, nil)
+
+	// Mock archivist agent for memory.ProcessSession
+	mockArchivist := new(agenttesting.MockAgent)
+	mockArchivist.On("Type").Return(string(agent.TypeArchivist)).Maybe()
+	mockArchivist.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
+		Structured: &archivist.Result{
+			Added:   []archivist.AddedFact{},
+			Updated: []archivist.UpdatedFact{},
+			Removed: []archivist.RemovedFact{},
+		},
+	}, nil).Maybe()
 
 	// Create translator with required template keys
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
+	memSvc.SetArchivistAgent(mockArchivist)
+
 	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc.SetSplitterAgent(mockSplitter)
 
 	// Start
 	ctx, cancel := context.WithCancel(context.Background())
@@ -169,7 +131,6 @@ func TestGracefulShutdown(t *testing.T) {
 	// Assert that Stop() took at least ~400ms (500ms sleep - 100ms wait)
 	assert.Greater(t, duration, 300*time.Millisecond, "Stop() should wait for pending task")
 
-	// Verify that the task actually completed (mock was called)
-	// We expect 2 calls: 1 for topic extraction (which slept), 1 for memory update
-	mockClient.AssertNumberOfCalls(t, "CreateChatCompletion", 2)
+	// Verify that the splitter agent was called
+	mockSplitter.AssertCalled(t, "Execute", mock.Anything, mock.Anything)
 }

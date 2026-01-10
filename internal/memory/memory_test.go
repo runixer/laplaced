@@ -2,13 +2,15 @@ package memory
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agent"
+	"github.com/runixer/laplaced/internal/agent/archivist"
+	agenttesting "github.com/runixer/laplaced/internal/agent/testing"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/openrouter"
@@ -92,7 +94,6 @@ func TestAddFactWithHistory(t *testing.T) {
 }
 
 func TestProcessSession_AddFact_RecordsHistory(t *testing.T) {
-	t.Skip("TODO: Requires MockAgent setup after Phase 6 refactoring")
 	// Arrange
 	mockStore := new(testutil.MockStorage)
 	mockOR := new(testutil.MockOpenRouterClient)
@@ -112,52 +113,27 @@ func TestProcessSession_AddFact_RecordsHistory(t *testing.T) {
 
 	// Mock GetFacts
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
-
-	// Mock GetAllUsers
 	mockStore.On("GetAllUsers").Return([]storage.User{}, nil)
 
-	// Mock LLM Response for extractMemoryUpdate
-	update := MemoryUpdate{
-		Added: []struct {
-			Entity     string `json:"entity"`
-			Relation   string `json:"relation"`
-			Content    string `json:"content"`
-			Category   string `json:"category"`
-			Type       string `json:"type"`
-			Importance int    `json:"importance"`
-			Reason     string `json:"reason"`
-		}{
-			{
-				Entity:     "User",
-				Relation:   "name",
-				Content:    "Name is John",
-				Category:   "bio",
-				Type:       "identity",
-				Importance: 100,
-				Reason:     "User stated name",
-			},
-		},
-	}
-	updateJSON, _ := json.Marshal(update)
-
-	// Construct complex response structure
-	resp := openrouter.ChatCompletionResponse{}
-	// We can't easily construct the anonymous struct slice literal without defining the type.
-	// But we can use JSON unmarshal to create it!
-	respJSON := map[string]interface{}{
-		"choices": []map[string]interface{}{
-			{
-				"message": map[string]interface{}{
-					"role":    "assistant",
-					"content": string(updateJSON),
+	// Mock archivist agent that returns added fact
+	mockArchivist := new(agenttesting.MockAgent)
+	mockArchivist.On("Type").Return(string(agent.TypeArchivist)).Maybe()
+	mockArchivist.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
+		Structured: &archivist.Result{
+			Added: []archivist.AddedFact{
+				{
+					Entity:     "User",
+					Relation:   "name",
+					Content:    "Name is John",
+					Category:   "bio",
+					Type:       "identity",
+					Importance: 100,
+					Reason:     "User stated name",
 				},
 			},
 		},
-	}
-	respBytes, _ := json.Marshal(respJSON)
-	_ = json.Unmarshal(respBytes, &resp)
-
-	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(&resp, nil)
+	}, nil)
+	svc.SetArchivistAgent(mockArchivist)
 
 	// Mock Embedding
 	embResp := openrouter.EmbeddingResponse{
@@ -179,10 +155,10 @@ func TestProcessSession_AddFact_RecordsHistory(t *testing.T) {
 	// Assert
 	assert.NoError(t, err)
 	mockStore.AssertExpectations(t)
+	mockArchivist.AssertExpectations(t)
 }
 
 func TestProcessSession_UpdateFact_RecordsHistory(t *testing.T) {
-	t.Skip("TODO: Requires MockAgent setup after Phase 6 refactoring")
 	// Arrange
 	mockStore := new(testutil.MockStorage)
 	mockOR := new(testutil.MockOpenRouterClient)
@@ -201,52 +177,33 @@ func TestProcessSession_UpdateFact_RecordsHistory(t *testing.T) {
 	refDate := time.Now()
 
 	existingFact := storage.Fact{
-		ID:      1,
-		UserID:  userID,
-		Content: "Name is John",
-		Type:    "identity",
+		ID:       1,
+		UserID:   userID,
+		Content:  "Name is John",
+		Type:     "identity",
+		Relation: "name",
 	}
 
 	// Mock GetFacts
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{existingFact}, nil)
-
-	// Mock GetAllUsers
 	mockStore.On("GetAllUsers").Return([]storage.User{}, nil)
 
-	// Mock LLM Response
-	update := MemoryUpdate{
-		Updated: []struct {
-			ID         int64  `json:"id"`
-			Content    string `json:"content"`
-			Type       string `json:"type,omitempty"`
-			Importance int    `json:"importance"`
-			Reason     string `json:"reason"`
-		}{
-			{
-				ID:         1,
-				Content:    "Name is Bob",
-				Importance: 100,
-				Reason:     "Correction",
-			},
-		},
-	}
-	updateJSON, _ := json.Marshal(update)
-
-	resp := openrouter.ChatCompletionResponse{}
-	respJSON := map[string]interface{}{
-		"choices": []map[string]interface{}{
-			{
-				"message": map[string]interface{}{
-					"role":    "assistant",
-					"content": string(updateJSON),
+	// Mock archivist agent that returns updated fact
+	mockArchivist := new(agenttesting.MockAgent)
+	mockArchivist.On("Type").Return(string(agent.TypeArchivist)).Maybe()
+	mockArchivist.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
+		Structured: &archivist.Result{
+			Updated: []archivist.UpdatedFact{
+				{
+					ID:         1,
+					Content:    "Name is Bob",
+					Importance: 100,
+					Reason:     "Correction",
 				},
 			},
 		},
-	}
-	respBytes, _ := json.Marshal(respJSON)
-	_ = json.Unmarshal(respBytes, &resp)
-
-	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(&resp, nil)
+	}, nil)
+	svc.SetArchivistAgent(mockArchivist)
 
 	// Mock Embedding
 	embResp := openrouter.EmbeddingResponse{
@@ -257,7 +214,7 @@ func TestProcessSession_UpdateFact_RecordsHistory(t *testing.T) {
 	// Mock UpdateFact
 	mockStore.On("UpdateFact", mock.Anything).Return(nil)
 
-	// Mock AddFactHistory
+	// Mock AddFactHistory - THIS IS WHAT WE WANT TO VERIFY
 	mockStore.On("AddFactHistory", mock.MatchedBy(func(h storage.FactHistory) bool {
 		return h.FactID == 1 && h.Action == "update" && h.OldContent == "Name is John" && h.NewContent == "Name is Bob" && h.Reason == "Correction"
 	})).Return(nil)
@@ -268,10 +225,10 @@ func TestProcessSession_UpdateFact_RecordsHistory(t *testing.T) {
 	// Assert
 	assert.NoError(t, err)
 	mockStore.AssertExpectations(t)
+	mockArchivist.AssertExpectations(t)
 }
 
 func TestProcessSession_RemoveFact_RecordsHistory(t *testing.T) {
-	t.Skip("TODO: Requires MockAgent setup after Phase 6 refactoring")
 	// Arrange
 	mockStore := new(testutil.MockStorage)
 	mockOR := new(testutil.MockOpenRouterClient)
@@ -290,51 +247,35 @@ func TestProcessSession_RemoveFact_RecordsHistory(t *testing.T) {
 	refDate := time.Now()
 
 	existingFact := storage.Fact{
-		ID:      1,
-		UserID:  userID,
-		Content: "Name is John",
+		ID:       1,
+		UserID:   userID,
+		Content:  "Name is John",
+		Relation: "name",
 	}
 
 	// Mock GetFacts
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{existingFact}, nil)
-
-	// Mock GetAllUsers
 	mockStore.On("GetAllUsers").Return([]storage.User{}, nil)
 
-	// Mock LLM Response
-	update := MemoryUpdate{
-		Removed: []struct {
-			ID     int64  `json:"id"`
-			Reason string `json:"reason"`
-		}{
-			{
-				ID:     1,
-				Reason: "User request",
-			},
-		},
-	}
-	updateJSON, _ := json.Marshal(update)
-
-	resp := openrouter.ChatCompletionResponse{}
-	respJSON := map[string]interface{}{
-		"choices": []map[string]interface{}{
-			{
-				"message": map[string]interface{}{
-					"role":    "assistant",
-					"content": string(updateJSON),
+	// Mock archivist agent that returns removed fact
+	mockArchivist := new(agenttesting.MockAgent)
+	mockArchivist.On("Type").Return(string(agent.TypeArchivist)).Maybe()
+	mockArchivist.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
+		Structured: &archivist.Result{
+			Removed: []archivist.RemovedFact{
+				{
+					ID:     1,
+					Reason: "User request",
 				},
 			},
 		},
-	}
-	respBytes, _ := json.Marshal(respJSON)
-	_ = json.Unmarshal(respBytes, &resp)
-
-	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(&resp, nil)
+	}, nil)
+	svc.SetArchivistAgent(mockArchivist)
 
 	// Mock DeleteFact
 	mockStore.On("DeleteFact", userID, int64(1)).Return(nil)
 
-	// Mock AddFactHistory
+	// Mock AddFactHistory - THIS IS WHAT WE WANT TO VERIFY
 	mockStore.On("AddFactHistory", mock.MatchedBy(func(h storage.FactHistory) bool {
 		return h.FactID == 1 && h.Action == "delete" && h.OldContent == "Name is John" && h.Reason == "User request"
 	})).Return(nil)
@@ -345,6 +286,7 @@ func TestProcessSession_RemoveFact_RecordsHistory(t *testing.T) {
 	// Assert
 	assert.NoError(t, err)
 	mockStore.AssertExpectations(t)
+	mockArchivist.AssertExpectations(t)
 }
 
 func TestSetVectorSearcher(t *testing.T) {
