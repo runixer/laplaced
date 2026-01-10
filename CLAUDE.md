@@ -137,6 +137,30 @@ UPDATE history SET topic_id = ? WHERE user_id = ? AND id >= ? AND id <= ?
 2. Does the SQL WHERE clause include `AND user_id = ?`?
 3. If operating on topics/facts, does it verify ownership?
 
+### Personal Data in Code (IMPORTANT!)
+
+**NEVER put real personal data in tracked files.**
+
+This bot processes real conversations. When analyzing logs, debugging, writing examples, or documenting bugs — always depersonalize before putting into tracked files.
+
+**Gitignored directories (real data OK here):**
+- `logs/` — runtime logs with real conversations
+- `data/` — SQLite databases with user data
+- `docs/plans/` — internal planning documents
+- `.claude/` — Claude Code working files
+
+**Tracked files (depersonalize!):**
+- `*_test.go` — use `@testuser`, `John Doe`, generic topics
+- `*.yaml` prompts — use `Mary`, `Alice`, `@johndoe` in examples
+- `*.md` documentation — describe bugs abstractly, no real excerpts
+- Any file that goes to GitHub
+
+**Depersonalization checklist:**
+1. Replace real names → `John`, `Mary`, `Alice`, `Bob`
+2. Replace real handles → `@testuser`, `@johndoe`, `@news_channel`
+3. Replace conversation excerpts → describe abstractly ("user asked about X")
+4. Replace personal details → generic equivalents ("hobby discussion", "family topic")
+
 ### Terminology (IMPORTANT!)
 
 **Session / Active Session:**
