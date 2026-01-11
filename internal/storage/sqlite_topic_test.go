@@ -47,12 +47,12 @@ func TestGetTopicsExtended(t *testing.T) {
 
 	// Add facts
 	// Topic 2: 3 facts
-	_, _ = store.AddFact(Fact{UserID: userID, TopicID: &id2, Content: "f1", Entity: "e1", Relation: "r1"})
-	_, _ = store.AddFact(Fact{UserID: userID, TopicID: &id2, Content: "f2", Entity: "e2", Relation: "r2"})
-	_, _ = store.AddFact(Fact{UserID: userID, TopicID: &id2, Content: "f3", Entity: "e3", Relation: "r3"})
+	_, _ = store.AddFact(Fact{UserID: userID, TopicID: &id2, Content: "f1", Relation: "r1"})
+	_, _ = store.AddFact(Fact{UserID: userID, TopicID: &id2, Content: "f2", Relation: "r2"})
+	_, _ = store.AddFact(Fact{UserID: userID, TopicID: &id2, Content: "f3", Relation: "r3"})
 
 	// Topic 3: 1 fact
-	_, _ = store.AddFact(Fact{UserID: userID, TopicID: &id3, Content: "f4", Entity: "e4", Relation: "r4"})
+	_, _ = store.AddFact(Fact{UserID: userID, TopicID: &id3, Content: "f4", Relation: "r4"})
 
 	// Test 1: Pagination
 	filter := TopicFilter{UserID: userID}

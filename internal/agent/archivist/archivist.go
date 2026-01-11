@@ -1,16 +1,18 @@
 // Package archivist provides the Archivist agent that extracts and manages
-// facts from conversations for long-term memory.
+// facts and people from conversations for long-term memory.
 package archivist
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/prompts"
+	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/openrouter"
@@ -23,6 +25,8 @@ const (
 	ParamMessages = "messages"
 	// ParamFacts is the key for current facts ([]storage.Fact).
 	ParamFacts = "facts"
+	// ParamPeople is the key for known people names ([]storage.Person).
+	ParamPeople = "people"
 	// ParamReferenceDate is the key for the reference date (time.Time).
 	ParamReferenceDate = "reference_date"
 	// ParamUser is the key for user info (*storage.User, optional).
@@ -31,7 +35,6 @@ const (
 
 // AddedFact represents a new fact to add.
 type AddedFact struct {
-	Entity     string `json:"entity"`
 	Relation   string `json:"relation"`
 	Content    string `json:"content"`
 	Category   string `json:"category"`
@@ -55,18 +58,78 @@ type RemovedFact struct {
 	Reason string `json:"reason"`
 }
 
-// Result contains the memory update decisions.
-type Result struct {
+// FactsResult contains fact operations.
+type FactsResult struct {
 	Added   []AddedFact   `json:"added"`
 	Updated []UpdatedFact `json:"updated"`
 	Removed []RemovedFact `json:"removed"`
 }
 
-// Archivist extracts and manages facts from conversations.
+// AddedPerson represents a new person to add.
+type AddedPerson struct {
+	DisplayName string   `json:"display_name"`
+	Aliases     []string `json:"aliases,omitempty"`
+	Circle      string   `json:"circle"`
+	Bio         string   `json:"bio"`
+	Reason      string   `json:"reason"`
+}
+
+// UpdatedPerson represents changes to an existing person.
+type UpdatedPerson struct {
+	DisplayName    string   `json:"display_name"`
+	NewDisplayName string   `json:"new_display_name,omitempty"` // Rename person, old name goes to aliases
+	Aliases        []string `json:"aliases,omitempty"`          // New aliases to add
+	Circle         string   `json:"circle,omitempty"`
+	Bio            string   `json:"bio"` // Complete rewritten bio
+	Reason         string   `json:"reason"`
+}
+
+// MergedPerson represents a merge operation for duplicate people.
+type MergedPerson struct {
+	TargetName string `json:"target_name"` // Keep this person
+	SourceName string `json:"source_name"` // Delete this person (merge into target)
+	Reason     string `json:"reason"`
+}
+
+// PeopleResult contains people operations.
+type PeopleResult struct {
+	Added   []AddedPerson   `json:"added,omitempty"`
+	Updated []UpdatedPerson `json:"updated,omitempty"`
+	Merged  []MergedPerson  `json:"merged,omitempty"`
+}
+
+// Result contains all memory update decisions.
+type Result struct {
+	Facts  FactsResult  `json:"facts"`
+	People PeopleResult `json:"people"`
+}
+
+// LegacyResult for backward compatibility with old format.
+type LegacyResult struct {
+	Added   []AddedFact   `json:"added"`
+	Updated []UpdatedFact `json:"updated"`
+	Removed []RemovedFact `json:"removed"`
+}
+
+// ResultWithArrayFields handles LLM quirk where "facts" or "people" is wrapped in array.
+type ResultWithArrayFields struct {
+	Facts  []FactsResult  `json:"facts"`
+	People []PeopleResult `json:"people"`
+}
+
+// PeopleRepository is the interface for loading people.
+type PeopleRepository interface {
+	GetPeople(userID int64) ([]storage.Person, error)
+}
+
+// Archivist extracts and manages facts and people from conversations.
 type Archivist struct {
-	executor   *agent.Executor
-	translator *i18n.Translator
-	cfg        *config.Config
+	executor    *agent.Executor
+	translator  *i18n.Translator
+	cfg         *config.Config
+	logger      *slog.Logger
+	peopleRepo  PeopleRepository
+	agentLogger *agentlog.Logger
 }
 
 // New creates a new Archivist agent.
@@ -74,17 +137,39 @@ func New(
 	executor *agent.Executor,
 	translator *i18n.Translator,
 	cfg *config.Config,
+	logger *slog.Logger,
+	agentLogger *agentlog.Logger,
 ) *Archivist {
 	return &Archivist{
-		executor:   executor,
-		translator: translator,
-		cfg:        cfg,
+		executor:    executor,
+		translator:  translator,
+		cfg:         cfg,
+		logger:      logger.With("component", "archivist"),
+		agentLogger: agentLogger,
 	}
+}
+
+// SetPeopleRepository sets the people repository for the agent.
+func (a *Archivist) SetPeopleRepository(repo PeopleRepository) {
+	a.peopleRepo = repo
 }
 
 // Type returns the agent type.
 func (a *Archivist) Type() agent.AgentType {
 	return agent.TypeArchivist
+}
+
+// Capabilities returns the agent's capabilities.
+func (a *Archivist) Capabilities() agent.Capabilities {
+	return agent.Capabilities{
+		IsAgentic:    true,
+		OutputFormat: "json",
+	}
+}
+
+// Description returns a human-readable description.
+func (a *Archivist) Description() string {
+	return "Extracts and manages facts and people from conversations"
 }
 
 // Execute runs the archivist with the given request.
@@ -98,33 +183,53 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (*agent.Res
 	}
 
 	facts := a.getFacts(req)
+	people := a.getPeople(req)
 	referenceDate := a.getReferenceDate(req)
 	user := a.getUser(req)
 	userID := a.getUserID(req)
 
-	model := a.cfg.Agents.Archivist.GetModel(a.cfg.Agents.Default.Model)
+	cfg := a.cfg.Agents.Archivist
+	model := cfg.GetModel(a.cfg.Agents.Default.Model)
 	if model == "" {
 		return nil, fmt.Errorf("no model configured for archivist")
 	}
 
+	// Parse timeout
+	timeout, err := time.ParseDuration(cfg.Timeout)
+	if err != nil || timeout <= 0 {
+		timeout = 120 * time.Second
+	}
+
+	thinkingLevel := cfg.ThinkingLevel
+	if thinkingLevel == "" {
+		thinkingLevel = "medium"
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	startTime := time.Now()
+	tracker := agentlog.NewTurnTracker()
+
 	// Build conversation text
 	conversation := a.buildConversation(messages, user)
 
-	// Prepare facts JSON
-	userFacts, otherFacts := a.prepareFacts(facts)
+	// Prepare facts JSON (only User facts)
+	userFacts := a.prepareUserFacts(facts)
 	userFactsJSON, _ := json.MarshalIndent(userFacts, "", "  ")
-	otherFactsJSON, _ := json.MarshalIndent(otherFacts, "", "  ")
+
+	// Format all people with full bio (v0.5.1 unified format)
+	knownPeople := storage.FormatPeople(people, storage.TagPeople)
 
 	// Build system prompt
 	maxFacts := a.cfg.RAG.MaxProfileFacts
 	systemPrompt, err := a.translator.GetTemplate(a.cfg.Bot.Language, "memory.system_prompt", prompts.ArchivistParams{
-		Date:            referenceDate.Format("2006-01-02"),
-		UserFactsLimit:  maxFacts,
-		UserFactsCount:  len(userFacts),
-		OtherFactsCount: len(otherFacts),
-		UserFacts:       string(userFactsJSON),
-		OtherFacts:      string(otherFactsJSON),
-		Conversation:    conversation,
+		Date:           referenceDate.Format("2006-01-02"),
+		UserFactsLimit: maxFacts,
+		UserFactsCount: len(userFacts),
+		UserFacts:      string(userFactsJSON),
+		Conversation:   conversation,
+		KnownPeople:    knownPeople,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to build system prompt: %w", err)
@@ -136,66 +241,200 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (*agent.Res
 		systemPrompt += warning
 	}
 
-	// Build JSON schema
-	schema := a.buildJSONSchema()
+	messages_llm := []openrouter.Message{
+		{Role: "system", Content: systemPrompt},
+	}
 
-	// Make LLM call
-	start := time.Now()
-	resp, err := a.executor.Client().CreateChatCompletion(ctx, openrouter.ChatCompletionRequest{
-		Model: model,
-		Messages: []openrouter.Message{
-			{Role: "system", Content: systemPrompt},
-		},
-		ResponseFormat: schema,
+	// Single LLM call (v0.5.1: no agentic loop - all people info is in prompt)
+	tracker.StartTurn()
+
+	var reasoning *openrouter.ReasoningConfig
+	if thinkingLevel != "off" && thinkingLevel != "" {
+		reasoning = &openrouter.ReasoningConfig{
+			Effort: thinkingLevel,
+		}
+	}
+
+	llmReq := openrouter.ChatCompletionRequest{
+		Model:    model,
+		Messages: messages_llm,
+		// NOTE: response-healing plugin breaks reasoning visibility when combined with json_object format.
+		// Reasoning works correctly without plugins.
+		ResponseFormat: openrouter.ResponseFormat{Type: "json_object"},
+		Reasoning:      reasoning,
 		UserID:         userID,
-	})
-	duration := time.Since(start)
+	}
+
+	resp, err := a.executor.Client().CreateChatCompletion(ctx, llmReq)
+
+	tracker.EndTurn(
+		resp.DebugRequestBody,
+		resp.DebugResponseBody,
+		resp.Usage.PromptTokens,
+		resp.Usage.CompletionTokens,
+		resp.Usage.Cost,
+	)
 
 	if err != nil {
+		a.logger.Warn("archivist LLM call failed", "error", err)
+		a.saveTrace(userID, conversation, tracker, startTime, false, "llm_error: "+err.Error())
 		return nil, fmt.Errorf("llm call failed: %w", err)
 	}
 
 	if len(resp.Choices) == 0 {
+		a.logger.Warn("archivist got empty response")
+		a.saveTrace(userID, conversation, tracker, startTime, false, "empty_response")
 		return nil, fmt.Errorf("empty response from LLM")
 	}
 
-	content := resp.Choices[0].Message.Content
-
-	// Parse JSON response
-	var result Result
-	if err := json.Unmarshal([]byte(content), &result); err != nil {
+	choice := resp.Choices[0]
+	content := choice.Message.Content
+	result, err := a.parseResponse(content)
+	if err != nil {
+		a.logger.Warn("failed to parse archivist response", "error", err, "content_preview", truncate(content, 500))
+		a.saveTrace(userID, conversation, tracker, startTime, false, "parse_error: "+err.Error())
 		return nil, fmt.Errorf("json parse error: %w, content: %s", err, content)
 	}
 
+	duration := time.Since(startTime)
+	promptTokens, completionTokens := tracker.TotalTokens()
+
+	a.logger.Info("archivist completed",
+		"user_id", userID,
+		"facts_added", len(result.Facts.Added),
+		"facts_updated", len(result.Facts.Updated),
+		"facts_removed", len(result.Facts.Removed),
+		"people_added", len(result.People.Added),
+		"people_updated", len(result.People.Updated),
+		"people_merged", len(result.People.Merged),
+		"duration_ms", duration.Milliseconds(),
+	)
+
+	a.saveTrace(userID, conversation, tracker, startTime, true, "")
+
 	return &agent.Response{
-		Content:    content,
-		Structured: &result,
+		Content:    "",
+		Structured: result,
 		Duration:   duration,
 		Tokens: agent.TokenUsage{
-			Prompt:     resp.Usage.PromptTokens,
-			Completion: resp.Usage.CompletionTokens,
-			Total:      resp.Usage.TotalTokens,
-			Cost:       resp.Usage.Cost,
+			Prompt:     promptTokens,
+			Completion: completionTokens,
+			Total:      promptTokens + completionTokens,
+			Cost:       tracker.TotalCost(),
 		},
 		Metadata: map[string]any{
-			"added_count":   len(result.Added),
-			"updated_count": len(result.Updated),
-			"removed_count": len(result.Removed),
+			"facts_added":    len(result.Facts.Added),
+			"facts_updated":  len(result.Facts.Updated),
+			"facts_removed":  len(result.Facts.Removed),
+			"people_added":   len(result.People.Added),
+			"people_updated": len(result.People.Updated),
+			"people_merged":  len(result.People.Merged),
 		},
 	}, nil
 }
 
-// Capabilities returns the agent's capabilities.
-func (a *Archivist) Capabilities() agent.Capabilities {
-	return agent.Capabilities{
-		IsAgentic:    false,
-		OutputFormat: "json",
+// parseResponse parses the JSON response, supporting both new and legacy formats.
+func (a *Archivist) parseResponse(content string) (*Result, error) {
+	content = strings.TrimSpace(content)
+
+	// Try new format first (object)
+	var result Result
+	if err := json.Unmarshal([]byte(content), &result); err == nil {
+		// Check if it's the new format (has "facts" key) or legacy format
+		if hasStructuredContent(&result) {
+			return &result, nil
+		}
 	}
+
+	// Try array format (LLM sometimes wraps response in array)
+	var arrayResult []Result
+	if err := json.Unmarshal([]byte(content), &arrayResult); err == nil && len(arrayResult) > 0 {
+		if hasStructuredContent(&arrayResult[0]) {
+			return &arrayResult[0], nil
+		}
+	}
+
+	// Try format with array fields (LLM quirk: "facts": [...] instead of "facts": {...})
+	var arrayFieldsResult ResultWithArrayFields
+	if err := json.Unmarshal([]byte(content), &arrayFieldsResult); err == nil {
+		if len(arrayFieldsResult.Facts) > 0 || len(arrayFieldsResult.People) > 0 {
+			converted := &Result{}
+			// Merge all facts arrays into one
+			for _, f := range arrayFieldsResult.Facts {
+				converted.Facts.Added = append(converted.Facts.Added, f.Added...)
+				converted.Facts.Updated = append(converted.Facts.Updated, f.Updated...)
+				converted.Facts.Removed = append(converted.Facts.Removed, f.Removed...)
+			}
+			// Merge all people arrays into one
+			for _, p := range arrayFieldsResult.People {
+				converted.People.Added = append(converted.People.Added, p.Added...)
+				converted.People.Updated = append(converted.People.Updated, p.Updated...)
+				converted.People.Merged = append(converted.People.Merged, p.Merged...)
+			}
+			if hasStructuredContent(converted) {
+				return converted, nil
+			}
+		}
+	}
+
+	// Try legacy format (backward compatibility)
+	var legacy LegacyResult
+	if err := json.Unmarshal([]byte(content), &legacy); err == nil {
+		if len(legacy.Added) > 0 || len(legacy.Updated) > 0 || len(legacy.Removed) > 0 {
+			return &Result{
+				Facts:  FactsResult(legacy),
+				People: PeopleResult{},
+			}, nil
+		}
+	}
+
+	// Default: try parsing as new format anyway
+	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
-// Description returns a human-readable description.
-func (a *Archivist) Description() string {
-	return "Extracts and manages facts from conversations"
+// hasStructuredContent checks if result has any content (new format detection).
+func hasStructuredContent(r *Result) bool {
+	return len(r.Facts.Added) > 0 || len(r.Facts.Updated) > 0 || len(r.Facts.Removed) > 0 ||
+		len(r.People.Added) > 0 || len(r.People.Updated) > 0 || len(r.People.Merged) > 0
+}
+
+// saveTrace saves the execution trace for debugging.
+func (a *Archivist) saveTrace(
+	userID int64,
+	conversation string,
+	tracker *agentlog.TurnTracker,
+	startTime time.Time,
+	success bool,
+	errorMsg string,
+) {
+	if a.agentLogger == nil {
+		return
+	}
+
+	duration := time.Since(startTime)
+	promptTokens, completionTokens := tracker.TotalTokens()
+
+	a.agentLogger.Log(context.Background(), agentlog.Entry{
+		UserID:            userID,
+		AgentType:         agentlog.AgentArchivist,
+		InputPrompt:       truncate(conversation, 2000),
+		InputContext:      tracker.FirstRequest(),
+		OutputResponse:    tracker.LastResponse(),
+		OutputParsed:      "",
+		OutputContext:     "",
+		Model:             a.cfg.Agents.Archivist.GetModel(a.cfg.Agents.Default.Model),
+		PromptTokens:      promptTokens,
+		CompletionTokens:  completionTokens,
+		TotalCost:         tracker.TotalCost(),
+		DurationMs:        int(duration.Milliseconds()),
+		ConversationTurns: tracker.Build(),
+		Metadata:          nil,
+		Success:           success,
+		ErrorMessage:      errorMsg,
+	})
 }
 
 // getMessages extracts messages from request params.
@@ -216,6 +455,17 @@ func (a *Archivist) getFacts(req *agent.Request) []storage.Fact {
 	}
 	if facts, ok := req.Params[ParamFacts].([]storage.Fact); ok {
 		return facts
+	}
+	return nil
+}
+
+// getPeople extracts people from request params.
+func (a *Archivist) getPeople(req *agent.Request) []storage.Person {
+	if req.Params == nil {
+		return nil
+	}
+	if people, ok := req.Params[ParamPeople].([]storage.Person); ok {
+		return people
 	}
 	return nil
 }
@@ -297,7 +547,6 @@ func (a *Archivist) formatUserName(user *storage.User) string {
 // FactView is a simplified view of a fact for the prompt.
 type FactView struct {
 	ID         int64  `json:"id"`
-	Entity     string `json:"entity"`
 	Relation   string `json:"relation"`
 	Content    string `json:"content"`
 	Category   string `json:"category"`
@@ -305,91 +554,27 @@ type FactView struct {
 	Importance int    `json:"importance"`
 }
 
-// prepareFacts separates facts into user and other facts.
-func (a *Archivist) prepareFacts(facts []storage.Fact) (userFacts, otherFacts []FactView) {
+// prepareUserFacts formats facts for the prompt.
+// All facts are now about User (entity field removed).
+func (a *Archivist) prepareUserFacts(facts []storage.Fact) []FactView {
+	var userFacts []FactView
 	for _, f := range facts {
-		view := FactView{
+		userFacts = append(userFacts, FactView{
 			ID:         f.ID,
-			Entity:     f.Entity,
 			Relation:   f.Relation,
 			Content:    f.Content,
 			Category:   f.Category,
 			Type:       f.Type,
 			Importance: f.Importance,
-		}
-		if strings.EqualFold(f.Entity, "User") {
-			userFacts = append(userFacts, view)
-		} else {
-			otherFacts = append(otherFacts, view)
-		}
+		})
 	}
-	return
+	return userFacts
 }
 
-// buildJSONSchema creates the JSON schema for structured output.
-func (a *Archivist) buildJSONSchema() map[string]interface{} {
-	factSchema := map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"entity":     map[string]interface{}{"type": "string"},
-			"relation":   map[string]interface{}{"type": "string"},
-			"content":    map[string]interface{}{"type": "string"},
-			"category":   map[string]interface{}{"type": "string", "enum": []string{"bio", "work", "hobby", "preference", "other"}},
-			"type":       map[string]interface{}{"type": "string", "enum": []string{"identity", "context", "status"}},
-			"importance": map[string]interface{}{"type": "integer", "description": "0-100"},
-			"reason":     map[string]interface{}{"type": "string"},
-		},
-		"required":             []string{"entity", "relation", "content", "category", "type", "importance", "reason"},
-		"additionalProperties": false,
+// truncate limits string length for logging.
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
 	}
-
-	updateSchema := map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"id":         map[string]interface{}{"type": "integer"},
-			"content":    map[string]interface{}{"type": "string"},
-			"type":       map[string]interface{}{"type": "string", "enum": []string{"identity", "context", "status"}},
-			"importance": map[string]interface{}{"type": "integer"},
-			"reason":     map[string]interface{}{"type": "string"},
-		},
-		"required":             []string{"id", "content", "importance", "reason"},
-		"additionalProperties": false,
-	}
-
-	removeSchema := map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"id":     map[string]interface{}{"type": "integer"},
-			"reason": map[string]interface{}{"type": "string"},
-		},
-		"required":             []string{"id", "reason"},
-		"additionalProperties": false,
-	}
-
-	return map[string]interface{}{
-		"type": "json_schema",
-		"json_schema": map[string]interface{}{
-			"name":   "memory_update",
-			"strict": true,
-			"schema": map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"added": map[string]interface{}{
-						"type":  "array",
-						"items": factSchema,
-					},
-					"updated": map[string]interface{}{
-						"type":  "array",
-						"items": updateSchema,
-					},
-					"removed": map[string]interface{}{
-						"type":  "array",
-						"items": removeSchema,
-					},
-				},
-				"required":             []string{"added", "updated", "removed"},
-				"additionalProperties": false,
-			},
-		},
-	}
+	return s[:maxLen] + "..."
 }

@@ -12,10 +12,10 @@ func (s *SQLiteStore) AddFactHistory(h FactHistory) error {
 		h.CreatedAt = time.Now()
 	}
 	query := `
-		INSERT INTO fact_history (fact_id, user_id, action, old_content, new_content, reason, category, entity, relation, importance, topic_id, request_input, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO fact_history (fact_id, user_id, action, old_content, new_content, reason, category, relation, importance, topic_id, request_input, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
-	_, err := s.db.Exec(query, h.FactID, h.UserID, h.Action, h.OldContent, h.NewContent, h.Reason, h.Category, h.Entity, h.Relation, h.Importance, h.TopicID, h.RequestInput, h.CreatedAt.UTC().Format("2006-01-02 15:04:05.999"))
+	_, err := s.db.Exec(query, h.FactID, h.UserID, h.Action, h.OldContent, h.NewContent, h.Reason, h.Category, h.Relation, h.Importance, h.TopicID, h.RequestInput, h.CreatedAt.UTC().Format("2006-01-02 15:04:05.999"))
 	return err
 }
 
@@ -31,7 +31,7 @@ func (s *SQLiteStore) GetFactHistory(userID int64, limit int) ([]FactHistory, er
 
 	if userID != 0 {
 		query := `
-			SELECT id, fact_id, user_id, action, old_content, new_content, reason, category, entity, relation, importance, topic_id, request_input, created_at
+			SELECT id, fact_id, user_id, action, old_content, new_content, reason, category, relation, importance, topic_id, request_input, created_at
 			FROM fact_history
 			WHERE user_id = ?
 			ORDER BY created_at DESC
@@ -40,7 +40,7 @@ func (s *SQLiteStore) GetFactHistory(userID int64, limit int) ([]FactHistory, er
 		rows, err = s.db.Query(query, userID, limit)
 	} else {
 		query := `
-			SELECT id, fact_id, user_id, action, old_content, new_content, reason, category, entity, relation, importance, topic_id, request_input, created_at
+			SELECT id, fact_id, user_id, action, old_content, new_content, reason, category, relation, importance, topic_id, request_input, created_at
 			FROM fact_history
 			ORDER BY created_at DESC
 			LIMIT ?
@@ -56,8 +56,8 @@ func (s *SQLiteStore) GetFactHistory(userID int64, limit int) ([]FactHistory, er
 	var history []FactHistory
 	for rows.Next() {
 		var h FactHistory
-		var oldContent, newContent, reason, category, entity, relation, requestInput sql.NullString
-		if err := rows.Scan(&h.ID, &h.FactID, &h.UserID, &h.Action, &oldContent, &newContent, &reason, &category, &entity, &relation, &h.Importance, &h.TopicID, &requestInput, &h.CreatedAt); err != nil {
+		var oldContent, newContent, reason, category, relation, requestInput sql.NullString
+		if err := rows.Scan(&h.ID, &h.FactID, &h.UserID, &h.Action, &oldContent, &newContent, &reason, &category, &relation, &h.Importance, &h.TopicID, &requestInput, &h.CreatedAt); err != nil {
 			return nil, err
 		}
 		if oldContent.Valid {
@@ -71,9 +71,6 @@ func (s *SQLiteStore) GetFactHistory(userID int64, limit int) ([]FactHistory, er
 		}
 		if category.Valid {
 			h.Category = category.String
-		}
-		if entity.Valid {
-			h.Entity = entity.String
 		}
 		if relation.Valid {
 			h.Relation = relation.String
@@ -103,9 +100,9 @@ func (s *SQLiteStore) GetFactHistoryExtended(filter FactHistoryFilter, limit, of
 		args = append(args, filter.Category)
 	}
 	if filter.Search != "" {
-		whereClauses = append(whereClauses, "(old_content LIKE ? OR new_content LIKE ? OR reason LIKE ? OR entity LIKE ?)")
+		whereClauses = append(whereClauses, "(old_content LIKE ? OR new_content LIKE ? OR reason LIKE ?)")
 		searchPattern := "%" + filter.Search + "%"
-		args = append(args, searchPattern, searchPattern, searchPattern, searchPattern)
+		args = append(args, searchPattern, searchPattern, searchPattern)
 	}
 
 	whereSQL := ""
@@ -127,7 +124,6 @@ func (s *SQLiteStore) GetFactHistoryExtended(filter FactHistoryFilter, limit, of
 		"action":     true,
 		"fact_id":    true,
 		"category":   true,
-		"entity":     true,
 		"importance": true,
 	}
 	if !validSortCols[sortBy] {
@@ -138,7 +134,7 @@ func (s *SQLiteStore) GetFactHistoryExtended(filter FactHistoryFilter, limit, of
 	}
 
 	query := fmt.Sprintf(`
-		SELECT id, fact_id, user_id, action, old_content, new_content, reason, category, entity, relation, importance, topic_id, request_input, created_at
+		SELECT id, fact_id, user_id, action, old_content, new_content, reason, category, relation, importance, topic_id, request_input, created_at
 		FROM fact_history
 		%s
 		ORDER BY %s %s
@@ -156,8 +152,8 @@ func (s *SQLiteStore) GetFactHistoryExtended(filter FactHistoryFilter, limit, of
 	var history []FactHistory
 	for rows.Next() {
 		var h FactHistory
-		var oldContent, newContent, reason, category, entity, relation, requestInput sql.NullString
-		if err := rows.Scan(&h.ID, &h.FactID, &h.UserID, &h.Action, &oldContent, &newContent, &reason, &category, &entity, &relation, &h.Importance, &h.TopicID, &requestInput, &h.CreatedAt); err != nil {
+		var oldContent, newContent, reason, category, relation, requestInput sql.NullString
+		if err := rows.Scan(&h.ID, &h.FactID, &h.UserID, &h.Action, &oldContent, &newContent, &reason, &category, &relation, &h.Importance, &h.TopicID, &requestInput, &h.CreatedAt); err != nil {
 			return FactHistoryResult{}, err
 		}
 		if oldContent.Valid {
@@ -171,9 +167,6 @@ func (s *SQLiteStore) GetFactHistoryExtended(filter FactHistoryFilter, limit, of
 		}
 		if category.Valid {
 			h.Category = category.String
-		}
-		if entity.Valid {
-			h.Entity = entity.String
 		}
 		if relation.Valid {
 			h.Relation = relation.String

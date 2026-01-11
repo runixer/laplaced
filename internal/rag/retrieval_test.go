@@ -129,18 +129,19 @@ func TestRetrieve_TopicsGrouping(t *testing.T) {
 	err := svc.Start(context.Background())
 	assert.NoError(t, err)
 
-	results, _, err := svc.Retrieve(context.Background(), userID, "Test Query", nil)
+	result, _, err := svc.Retrieve(context.Background(), userID, "Test Query", nil)
 	assert.NoError(t, err)
 
 	// 5. Assertions
-	assert.Len(t, results, 2, "Should return 2 topics (A and C)")
+	assert.NotNil(t, result)
+	assert.Len(t, result.Topics, 2, "Should return 2 topics (A and C)")
 
 	// Sort order is by score descending in implementation
-	assert.Equal(t, int64(1), results[0].Topic.ID) // Topic A (1.0)
-	assert.Len(t, results[0].Messages, 3)
+	assert.Equal(t, int64(1), result.Topics[0].Topic.ID) // Topic A (1.0)
+	assert.Len(t, result.Topics[0].Messages, 3)
 
-	assert.Equal(t, int64(3), results[1].Topic.ID) // Topic C (0.9)
-	assert.Len(t, results[1].Messages, 3)
+	assert.Equal(t, int64(3), result.Topics[1].Topic.ID) // Topic C (0.9)
+	assert.Len(t, result.Topics[1].Messages, 3)
 
 	mockStore.AssertExpectations(t)
 	mockClient.AssertExpectations(t)

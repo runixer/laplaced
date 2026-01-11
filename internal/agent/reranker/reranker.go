@@ -72,7 +72,7 @@ func (r *Reranker) Description() string {
 
 // Execute runs the reranker with the given request.
 // Required params: candidates, contextualized_query, original_query, current_messages
-// Optional params: media_parts
+// Optional params: media_parts, person_candidates (v0.5.1)
 // Uses SharedContext for user_profile and recent_topics if available.
 func (r *Reranker) Execute(ctx context.Context, req *agent.Request) (*agent.Response, error) {
 	// Extract parameters
@@ -80,6 +80,9 @@ func (r *Reranker) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 	if !ok {
 		return nil, fmt.Errorf("candidates parameter required")
 	}
+
+	// v0.5.1: Optional person candidates
+	personCandidates, _ := req.Params[ParamPersonCandidates].([]PersonCandidate)
 
 	contextualizedQuery, _ := req.Params[ParamContextualizedQuery].(string)
 	originalQuery, _ := req.Params[ParamOriginalQuery].(string)
@@ -106,7 +109,7 @@ func (r *Reranker) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 		}
 	}
 
-	result, err := r.rerank(ctx, userID, candidates, contextualizedQuery, originalQuery, currentMessages, userProfile, recentTopics, mediaParts)
+	result, err := r.rerank(ctx, userID, candidates, personCandidates, contextualizedQuery, originalQuery, currentMessages, userProfile, recentTopics, mediaParts)
 	if err != nil {
 		return nil, err
 	}
@@ -115,6 +118,7 @@ func (r *Reranker) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 		Structured: result,
 		Metadata: map[string]any{
 			"topics_count": len(result.Topics),
+			"people_count": len(result.People),
 		},
 	}, nil
 }
@@ -124,6 +128,7 @@ func (r *Reranker) rerank(
 	ctx context.Context,
 	userID int64,
 	candidates []Candidate,
+	personCandidates []PersonCandidate,
 	contextualizedQuery string,
 	originalQuery string,
 	currentMessages string,
@@ -133,7 +138,7 @@ func (r *Reranker) rerank(
 ) (*Result, error) {
 	cfg := r.cfg.Agents.Reranker
 	if !cfg.Enabled || len(candidates) == 0 {
-		return r.fallbackToVectorTop(candidates, cfg.MaxTopics), nil
+		return r.fallbackToVectorTop(candidates, personCandidates, cfg.MaxTopics), nil
 	}
 
 	// Parse timeouts
@@ -175,6 +180,9 @@ func (r *Reranker) rerank(
 		})
 	}
 
+	// v0.5.1: Build person candidate map
+	peopleMap := r.buildPeopleMap(personCandidates)
+
 	// Build initial prompt
 	lang := r.cfg.Bot.Language
 	selectCandidatesMax := cfg.Candidates / 2
@@ -194,12 +202,20 @@ func (r *Reranker) rerank(
 	}
 
 	candidatesList := r.formatCandidatesForReranker(candidates)
+
+	// v0.5.1: Extract Person from PersonCandidate and use unified format
+	var candidatePeople []storage.Person
+	for _, c := range personCandidates {
+		candidatePeople = append(candidatePeople, c.Person)
+	}
+	peopleCandidatesList := storage.FormatPeople(candidatePeople, "") // Plain list without XML wrapper
 	userPrompt, err := r.translator.GetTemplate(lang, "rag.reranker_user_prompt", prompts.RerankerUserParams{
-		Date:            time.Now().Format("2006-01-02"),
-		Query:           originalQuery,
-		EnrichedQuery:   contextualizedQuery,
-		CurrentMessages: currentMessages,
-		Candidates:      candidatesList,
+		Date:             time.Now().Format("2006-01-02"),
+		Query:            originalQuery,
+		EnrichedQuery:    contextualizedQuery,
+		CurrentMessages:  currentMessages,
+		Candidates:       candidatesList,
+		PeopleCandidates: peopleCandidatesList,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to build reranker user prompt: %w", err)
@@ -278,17 +294,17 @@ func (r *Reranker) rerank(
 		var reasoning *openrouter.ReasoningConfig
 		if thinkingLevel != "off" && thinkingLevel != "" {
 			reasoning = &openrouter.ReasoningConfig{
-				Enabled: true,
-				Effort:  thinkingLevel,
+				Effort: thinkingLevel,
 			}
 		}
 
 		resp, err := r.client.CreateChatCompletion(turnCtx, openrouter.ChatCompletionRequest{
-			Model:          cfg.GetModel(r.cfg.Agents.Default.Model),
-			Messages:       messages,
-			Tools:          tools,
-			ToolChoice:     toolChoice,
-			Plugins:        []openrouter.Plugin{{ID: "response-healing"}},
+			Model:      cfg.GetModel(r.cfg.Agents.Default.Model),
+			Messages:   messages,
+			Tools:      tools,
+			ToolChoice: toolChoice,
+			// NOTE: response-healing plugin breaks reasoning visibility when combined with json_object format.
+			// Reasoning works correctly without plugins.
 			ResponseFormat: responseFormat,
 			Reasoning:      reasoning,
 			UserID:         userID,
@@ -308,8 +324,9 @@ func (r *Reranker) rerank(
 				"reason", fallbackReason,
 			)
 			tr.fallbackReason = fallbackReason
-			result := r.fallbackFromState(st, candidates, cfg.MaxTopics)
+			result := r.fallbackFromState(st, candidates, personCandidates, cfg.MaxTopics)
 			tr.selectedTopics = result.Topics
+			tr.selectedPeople = result.People
 			r.saveTrace(userID, originalQuery, contextualizedQuery, tr, startTime)
 			return result, nil
 		}
@@ -325,8 +342,9 @@ func (r *Reranker) rerank(
 		if len(resp.Choices) == 0 {
 			r.logger.Warn("reranker got empty response")
 			tr.fallbackReason = "empty_response"
-			result := r.fallbackFromState(st, candidates, cfg.MaxTopics)
+			result := r.fallbackFromState(st, candidates, personCandidates, cfg.MaxTopics)
 			tr.selectedTopics = result.Topics
+			tr.selectedPeople = result.People
 			r.saveTrace(userID, originalQuery, contextualizedQuery, tr, startTime)
 			return result, nil
 		}
@@ -416,8 +434,9 @@ func (r *Reranker) rerank(
 				"content_preview", truncateForLog(choice.Message.Content, 200),
 			)
 			tr.fallbackReason = "protocol_violation"
-			fallbackResult := r.fallbackToVectorTop(candidates, cfg.MaxTopics)
+			fallbackResult := r.fallbackToVectorTop(candidates, personCandidates, cfg.MaxTopics)
 			tr.selectedTopics = fallbackResult.Topics
+			tr.selectedPeople = fallbackResult.People
 			r.saveTrace(userID, originalQuery, contextualizedQuery, tr, startTime)
 			return fallbackResult, nil
 		}
@@ -426,33 +445,39 @@ func (r *Reranker) rerank(
 		if err != nil {
 			r.logger.Warn("failed to parse reranker response", "error", err, "content", choice.Message.Content)
 			tr.fallbackReason = "parse_error"
-			fallbackResult := r.fallbackFromState(st, candidates, cfg.MaxTopics)
+			fallbackResult := r.fallbackFromState(st, candidates, personCandidates, cfg.MaxTopics)
 			tr.selectedTopics = fallbackResult.Topics
+			tr.selectedPeople = fallbackResult.People
 			r.saveTrace(userID, originalQuery, contextualizedQuery, tr, startTime)
 			return fallbackResult, nil
 		}
 
-		// Validate topics
+		// Validate topics and people
 		result = r.filterValidTopics(userID, result, candidateMap)
-		if len(result.Topics) == 0 {
-			r.logger.Warn("reranker returned no valid topics (all hallucinated)", "user_id", userID)
+		result = r.filterValidPeople(userID, result, peopleMap)
+		if len(result.Topics) == 0 && len(result.People) == 0 {
+			r.logger.Warn("reranker returned no valid results (all hallucinated)", "user_id", userID)
 			tr.fallbackReason = "all_hallucinated"
-			fallbackResult := r.fallbackFromState(st, candidates, cfg.MaxTopics)
+			fallbackResult := r.fallbackFromState(st, candidates, personCandidates, cfg.MaxTopics)
 			tr.selectedTopics = fallbackResult.Topics
+			tr.selectedPeople = fallbackResult.People
 			r.saveTrace(userID, originalQuery, contextualizedQuery, tr, startTime)
 			return fallbackResult, nil
 		}
 
 		r.logger.Info("reranker completed",
 			"user_id", userID,
-			"candidates_in", len(candidates),
-			"candidates_out", len(result.Topics),
+			"topic_candidates_in", len(candidates),
+			"topics_out", len(result.Topics),
+			"people_candidates_in", len(personCandidates),
+			"people_out", len(result.People),
 			"tool_calls", toolCallCount,
 			"duration_ms", int(time.Since(startTime).Milliseconds()),
 			"cost_usd", tr.tracker.TotalCostValue(),
 		)
 
 		tr.selectedTopics = result.Topics
+		tr.selectedPeople = result.People
 		r.saveTrace(userID, originalQuery, contextualizedQuery, tr, startTime)
 
 		return result, nil
@@ -461,8 +486,9 @@ func (r *Reranker) rerank(
 	// Max tool calls reached
 	r.logger.Warn("reranker max tool calls reached", "max", cfg.MaxToolCalls)
 	tr.fallbackReason = "max_tool_calls"
-	result := r.fallbackFromState(st, candidates, cfg.MaxTopics)
+	result := r.fallbackFromState(st, candidates, personCandidates, cfg.MaxTopics)
 	tr.selectedTopics = result.Topics
+	tr.selectedPeople = result.People
 	r.saveTrace(userID, originalQuery, contextualizedQuery, tr, startTime)
 	return result, nil
 }
@@ -472,6 +498,15 @@ func (r *Reranker) buildCandidateMap(candidates []Candidate) map[int64]Candidate
 	m := make(map[int64]Candidate, len(candidates))
 	for _, c := range candidates {
 		m[c.TopicID] = c
+	}
+	return m
+}
+
+// buildPeopleMap creates a map for quick person lookup (v0.5.1).
+func (r *Reranker) buildPeopleMap(candidates []PersonCandidate) map[int64]PersonCandidate {
+	m := make(map[int64]PersonCandidate, len(candidates))
+	for _, c := range candidates {
+		m[c.PersonID] = c
 	}
 	return m
 }
@@ -582,7 +617,7 @@ func (r *Reranker) loadTopicsContent(
 func (r *Reranker) parseResponse(content string) (*Result, error) {
 	content = extractJSONFromResponse(content)
 
-	// Try bare array format
+	// Try bare array format (only topics, no people)
 	var bareArray []TopicSelection
 	if err := json.Unmarshal([]byte(content), &bareArray); err == nil && len(bareArray) > 0 && bareArray[0].ID != 0 {
 		return &Result{Topics: bareArray}, nil
@@ -615,9 +650,20 @@ func (r *Reranker) parseResponse(content string) (*Result, error) {
 		}
 	}
 
+	// v0.5.1: Parse people
+	var people []PersonSelection
+
+	if len(resp.PeopleIDs) > 0 {
+		people = r.parsePeopleArray(resp.PeopleIDs)
+	}
+
+	if len(people) == 0 && len(resp.People) > 0 {
+		people = r.parsePeopleArray(resp.People)
+	}
+
 	return &Result{
-		Topics:    topics,
-		PeopleIDs: nil,
+		Topics: topics,
+		People: people,
 	}, nil
 }
 
@@ -634,6 +680,25 @@ func (r *Reranker) parseTopicArray(data json.RawMessage) []TopicSelection {
 			topics[i] = TopicSelection{ID: id}
 		}
 		return topics
+	}
+
+	return nil
+}
+
+// parsePeopleArray parses people from JSON (v0.5.1).
+func (r *Reranker) parsePeopleArray(data json.RawMessage) []PersonSelection {
+	var objFormat []PersonSelection
+	if err := json.Unmarshal(data, &objFormat); err == nil && len(objFormat) > 0 && objFormat[0].ID != 0 {
+		return objFormat
+	}
+
+	var intFormat []int64
+	if err := json.Unmarshal(data, &intFormat); err == nil {
+		people := make([]PersonSelection, len(intFormat))
+		for i, id := range intFormat {
+			people[i] = PersonSelection{ID: id}
+		}
+		return people
 	}
 
 	return nil
@@ -662,13 +727,45 @@ func (r *Reranker) filterValidTopics(userID int64, result *Result, candidateMap 
 	}
 
 	return &Result{
-		Topics:    validTopics,
-		PeopleIDs: result.PeopleIDs,
+		Topics: validTopics,
+		People: result.People, // Preserve people for next filter
+	}
+}
+
+// filterValidPeople removes hallucinated person IDs (v0.5.1).
+func (r *Reranker) filterValidPeople(userID int64, result *Result, peopleMap map[int64]PersonCandidate) *Result {
+	if len(result.People) == 0 {
+		return result
+	}
+
+	var validPeople []PersonSelection
+	var hallucinatedIDs []int64
+
+	for _, person := range result.People {
+		if _, ok := peopleMap[person.ID]; ok {
+			validPeople = append(validPeople, person)
+		} else {
+			hallucinatedIDs = append(hallucinatedIDs, person.ID)
+		}
+	}
+
+	if len(hallucinatedIDs) > 0 {
+		r.logger.Warn("reranker hallucinated person IDs",
+			"user_id", userID,
+			"hallucinated_ids", hallucinatedIDs,
+			"valid_count", len(validPeople),
+			"total_returned", len(result.People),
+		)
+	}
+
+	return &Result{
+		Topics: result.Topics,
+		People: validPeople,
 	}
 }
 
 // fallbackToVectorTop returns top-N candidates by vector score.
-func (r *Reranker) fallbackToVectorTop(candidates []Candidate, maxTopics int) *Result {
+func (r *Reranker) fallbackToVectorTop(candidates []Candidate, personCandidates []PersonCandidate, maxTopics int) *Result {
 	if maxTopics <= 0 {
 		maxTopics = 5
 	}
@@ -681,11 +778,21 @@ func (r *Reranker) fallbackToVectorTop(candidates []Candidate, maxTopics int) *R
 		topics[i] = TopicSelection{ID: c.TopicID}
 	}
 
-	return &Result{Topics: topics}
+	// v0.5.1: Include top-N people by vector score as well (max 3)
+	maxPeople := 3
+	if len(personCandidates) > maxPeople {
+		personCandidates = personCandidates[:maxPeople]
+	}
+	people := make([]PersonSelection, len(personCandidates))
+	for i, p := range personCandidates {
+		people[i] = PersonSelection{ID: p.PersonID}
+	}
+
+	return &Result{Topics: topics, People: people}
 }
 
 // fallbackFromState returns top-N from requestedIDs if available.
-func (r *Reranker) fallbackFromState(st *state, candidates []Candidate, maxTopics int) *Result {
+func (r *Reranker) fallbackFromState(st *state, candidates []Candidate, personCandidates []PersonCandidate, maxTopics int) *Result {
 	if maxTopics <= 0 {
 		maxTopics = 5
 	}
@@ -699,10 +806,21 @@ func (r *Reranker) fallbackFromState(st *state, candidates []Candidate, maxTopic
 		for i, id := range ids {
 			topics[i] = TopicSelection{ID: id}
 		}
-		return &Result{Topics: topics}
+
+		// v0.5.1: Include top-N people by vector score (max 3)
+		maxPeople := 3
+		if len(personCandidates) > maxPeople {
+			personCandidates = personCandidates[:maxPeople]
+		}
+		people := make([]PersonSelection, len(personCandidates))
+		for i, p := range personCandidates {
+			people[i] = PersonSelection{ID: p.PersonID}
+		}
+
+		return &Result{Topics: topics, People: people}
 	}
 
-	return r.fallbackToVectorTop(candidates, maxTopics)
+	return r.fallbackToVectorTop(candidates, personCandidates, maxTopics)
 }
 
 // saveTrace saves the trace to storage for debugging.

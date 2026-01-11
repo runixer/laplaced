@@ -44,6 +44,7 @@ type Bot struct {
 	statsRepo       storage.StatsRepository
 	factRepo        storage.FactRepository
 	factHistoryRepo storage.FactHistoryRepository
+	peopleRepo      storage.PeopleRepository // v0.5.1: People management
 	orClient        openrouter.Client
 	speechKitClient yandex.Client
 	ragService      *rag.Service
@@ -58,7 +59,7 @@ type Bot struct {
 	wg              sync.WaitGroup
 }
 
-func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRepo storage.UserRepository, msgRepo storage.MessageRepository, statsRepo storage.StatsRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, orClient openrouter.Client, speechKitClient yandex.Client, ragService *rag.Service, contextService *agent.ContextService, translator *i18n.Translator) (*Bot, error) {
+func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRepo storage.UserRepository, msgRepo storage.MessageRepository, statsRepo storage.StatsRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, peopleRepo storage.PeopleRepository, orClient openrouter.Client, speechKitClient yandex.Client, ragService *rag.Service, contextService *agent.ContextService, translator *i18n.Translator) (*Bot, error) {
 	botLogger := logger.With("component", "bot")
 	downloader, err := telegram.NewHTTPFileDownloader(api, "https://api.telegram.org", cfg.Telegram.ProxyURL)
 	if err != nil {
@@ -75,6 +76,7 @@ func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRe
 		statsRepo:       statsRepo,
 		factRepo:        factRepo,
 		factHistoryRepo: factHistoryRepo,
+		peopleRepo:      peopleRepo,
 		orClient:        orClient,
 		speechKitClient: speechKitClient,
 		ragService:      ragService,
@@ -210,7 +212,7 @@ func (b *Bot) ProcessUpdate(ctx context.Context, update *telegram.Update, source
 		"source", source,
 	}
 	ctxLogger := b.logger.With(logAttrs...)
-	ctxLogger.Info("Received message")
+	ctxLogger.Debug("Received message")
 
 	// Update user info in storage
 	if err := b.userRepo.UpsertUser(storage.User{
@@ -460,21 +462,22 @@ func (b *Bot) performHistorySearch(ctx context.Context, userID int64, query stri
 		SkipEnrichment: true,
 		Source:         "tool",
 	}
-	results, _, err := b.ragService.Retrieve(ctx, userID, query, opts)
+	result, _, err := b.ragService.Retrieve(ctx, userID, query, opts)
 	if err != nil {
 		return "", err
 	}
-	if len(results) == 0 {
+	if result == nil || len(result.Topics) == 0 {
 		return "No results found in memory.", nil
 	}
 
 	// Sort by weight ASC (lowest to highest) to match context injection behavior
 	// Retrieve returns DESC (highest to lowest)
-	for i, j := 0, len(results)-1; i < j; i, j = i+1, j-1 {
-		results[i], results[j] = results[j], results[i]
+	topics := result.Topics
+	for i, j := 0, len(topics)-1; i < j; i, j = i+1, j-1 {
+		topics[i], topics[j] = topics[j], topics[i]
 	}
 
-	return b.formatRAGResults(results, query), nil
+	return b.formatRAGResults(topics, query), nil
 }
 
 // deduplicateTopics removes messages from retrieved topics that are already present in recent history.
@@ -544,7 +547,6 @@ func (b *Bot) getTieredCost(promptTokens, completionTokens int, logger *slog.Log
 // memoryOpParams holds parsed parameters for a memory operation.
 type memoryOpParams struct {
 	Action     string
-	Entity     string
 	Content    string
 	Category   string
 	FactType   string
@@ -557,14 +559,10 @@ type memoryOpParams struct {
 func parseMemoryOpParams(params map[string]interface{}) memoryOpParams {
 	p := memoryOpParams{
 		Action:   params["action"].(string),
-		Entity:   "",
 		Content:  "",
 		Category: "",
 		FactType: "",
 		Reason:   "",
-	}
-	if v, ok := params["entity"].(string); ok {
-		p.Entity = v
 	}
 	if v, ok := params["content"].(string); ok {
 		p.Content = v
@@ -601,10 +599,6 @@ func (b *Bot) performAddFact(ctx context.Context, userID int64, p memoryOpParams
 	}
 
 	// Apply defaults
-	entity := p.Entity
-	if entity == "" {
-		entity = "User"
-	}
 	category := p.Category
 	if category == "" {
 		category = "other"
@@ -620,7 +614,6 @@ func (b *Bot) performAddFact(ctx context.Context, userID int64, p memoryOpParams
 
 	fact := storage.Fact{
 		UserID:     userID,
-		Entity:     entity,
 		Content:    p.Content,
 		Type:       factType,
 		Importance: importance,
@@ -642,7 +635,6 @@ func (b *Bot) performAddFact(ctx context.Context, userID int64, p memoryOpParams
 		NewContent: p.Content,
 		Reason:     p.Reason,
 		Category:   category,
-		Entity:     entity,
 		Relation:   "related_to",
 		Importance: importance,
 		TopicID:    nil,
@@ -663,12 +655,11 @@ func (b *Bot) performDeleteFact(ctx context.Context, userID int64, p memoryOpPar
 	if err != nil {
 		b.logger.Warn("failed to fetch old fact for history", "fact_id", p.FactID, "error", err)
 	}
-	var oldContent, category, entity, relation string
+	var oldContent, category, relation string
 	var importance int
 	if len(oldFacts) > 0 {
 		oldContent = oldFacts[0].Content
 		category = oldFacts[0].Category
-		entity = oldFacts[0].Entity
 		relation = oldFacts[0].Relation
 		importance = oldFacts[0].Importance
 	}
@@ -684,7 +675,6 @@ func (b *Bot) performDeleteFact(ctx context.Context, userID int64, p memoryOpPar
 		OldContent: oldContent,
 		Reason:     p.Reason,
 		Category:   category,
-		Entity:     entity,
 		Relation:   relation,
 		Importance: importance,
 		TopicID:    nil,
@@ -723,11 +713,10 @@ func (b *Bot) performUpdateFact(ctx context.Context, userID int64, p memoryOpPar
 	if err != nil {
 		b.logger.Warn("failed to fetch old fact for history", "fact_id", p.FactID, "error", err)
 	}
-	var oldContent, category, entity, relation string
+	var oldContent, category, relation string
 	if len(oldFacts) > 0 {
 		oldContent = oldFacts[0].Content
 		category = oldFacts[0].Category
-		entity = oldFacts[0].Entity
 		relation = oldFacts[0].Relation
 	}
 
@@ -752,7 +741,6 @@ func (b *Bot) performUpdateFact(ctx context.Context, userID int64, p memoryOpPar
 		NewContent: p.Content,
 		Reason:     p.Reason,
 		Category:   category,
-		Entity:     entity,
 		Relation:   relation,
 		Importance: importance,
 		TopicID:    nil,
@@ -823,6 +811,449 @@ func (b *Bot) performManageMemory(ctx context.Context, userID int64, args map[st
 		return fmt.Sprintf("Completed with %d errors:\n%s", errorCount, finalResult), nil
 	}
 	return fmt.Sprintf("Successfully processed %d operations:\n%s", len(operations), finalResult), nil
+}
+
+// performSearchPeople searches for people in the user's memory (v0.5.1).
+func (b *Bot) performSearchPeople(ctx context.Context, userID int64, query string) (string, error) {
+	if b.peopleRepo == nil {
+		return "People search is not available", nil
+	}
+
+	var people []storage.Person
+
+	// Try username search first
+	if strings.HasPrefix(query, "@") {
+		person, err := b.peopleRepo.FindPersonByUsername(userID, strings.TrimPrefix(query, "@"))
+		if err == nil && person != nil {
+			people = append(people, *person)
+		}
+	}
+
+	// Try exact name match
+	if len(people) == 0 {
+		person, err := b.peopleRepo.FindPersonByName(userID, query)
+		if err == nil && person != nil {
+			people = append(people, *person)
+		}
+	}
+
+	// Try alias search
+	if len(people) == 0 {
+		aliasPeople, err := b.peopleRepo.FindPersonByAlias(userID, query)
+		if err == nil {
+			people = append(people, aliasPeople...)
+		}
+	}
+
+	// If still no results, try vector search via RAG service
+	if len(people) == 0 && b.ragService != nil {
+		// Generate embedding for the query
+		resp, err := b.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
+			Model: b.cfg.Embedding.Model,
+			Input: []string{query},
+		})
+		if err == nil && len(resp.Data) > 0 {
+			results, err := b.ragService.SearchPeople(ctx, userID, resp.Data[0].Embedding, 0.3, 5, nil) // nil = no circle exclusion
+			if err == nil {
+				for _, r := range results {
+					people = append(people, r.Person)
+				}
+			}
+		}
+	}
+
+	if len(people) == 0 {
+		return fmt.Sprintf("No people found matching '%s'", query), nil
+	}
+
+	// Format results
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Found %d people:\n\n", len(people)))
+	for _, p := range people {
+		sb.WriteString(fmt.Sprintf("**%s** [%s]\n", p.DisplayName, p.Circle))
+		if p.Username != nil && *p.Username != "" {
+			sb.WriteString(fmt.Sprintf("Username: @%s\n", *p.Username))
+		}
+		if len(p.Aliases) > 0 {
+			sb.WriteString(fmt.Sprintf("Also known as: %s\n", strings.Join(p.Aliases, ", ")))
+		}
+		if p.Bio != "" {
+			sb.WriteString(fmt.Sprintf("Bio: %s\n", p.Bio))
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String(), nil
+}
+
+// performManagePeople manages people in memory (v0.5.1).
+func (b *Bot) performManagePeople(ctx context.Context, userID int64, args map[string]interface{}) (string, error) {
+	if b.peopleRepo == nil {
+		return "People management is not available", nil
+	}
+
+	query, ok := args["query"].(string)
+	if !ok {
+		return "Error: query argument is missing", nil
+	}
+
+	var params map[string]interface{}
+	if err := json.Unmarshal([]byte(query), &params); err != nil {
+		return fmt.Sprintf("Error parsing query JSON: %v", err), nil
+	}
+
+	operation, _ := params["operation"].(string)
+	name, _ := params["name"].(string)
+
+	switch operation {
+	case "create":
+		if name == "" {
+			return "Error: name is required for create operation", nil
+		}
+		return b.performCreatePerson(ctx, userID, name, params)
+	case "update":
+		if name == "" {
+			return "Error: name is required for update operation", nil
+		}
+		return b.performUpdatePerson(ctx, userID, name, params)
+	case "delete":
+		if name == "" {
+			return "Error: name is required for delete operation", nil
+		}
+		return b.performDeletePerson(ctx, userID, name, params)
+	case "merge":
+		target, _ := params["target"].(string)
+		source, _ := params["source"].(string)
+		if target == "" || source == "" {
+			return "Error: target and source are required for merge operation", nil
+		}
+		return b.performMergePeople(ctx, userID, target, source, params)
+	default:
+		return fmt.Sprintf("Error: unknown operation '%s'. Valid operations: create, update, delete, merge", operation), nil
+	}
+}
+
+// performCreatePerson creates a new person in the social graph.
+func (b *Bot) performCreatePerson(ctx context.Context, userID int64, name string, params map[string]interface{}) (string, error) {
+	// Check if person already exists
+	existing, err := b.peopleRepo.FindPersonByName(userID, name)
+	if err != nil {
+		return fmt.Sprintf("Error checking existing person: %v", err), nil
+	}
+	if existing != nil {
+		return fmt.Sprintf("Person '%s' already exists (ID: %d). Use 'update' operation to modify.", name, existing.ID), nil
+	}
+
+	// Also check aliases
+	aliasMatches, err := b.peopleRepo.FindPersonByAlias(userID, name)
+	if err != nil {
+		return fmt.Sprintf("Error checking aliases: %v", err), nil
+	}
+	if len(aliasMatches) > 0 {
+		return fmt.Sprintf("Person with alias '%s' already exists: %s (ID: %d). Use 'update' operation to modify.", name, aliasMatches[0].DisplayName, aliasMatches[0].ID), nil
+	}
+
+	// Build the person
+	person := storage.Person{
+		UserID:       userID,
+		DisplayName:  name,
+		Circle:       "Other", // default
+		MentionCount: 1,
+		FirstSeen:    time.Now(),
+		LastSeen:     time.Now(),
+	}
+
+	// Apply optional fields
+	if circle, ok := params["circle"].(string); ok && circle != "" {
+		person.Circle = circle
+	}
+	if bio, ok := params["bio"].(string); ok {
+		person.Bio = bio
+	}
+	if aliases, ok := params["aliases"].([]interface{}); ok {
+		for _, alias := range aliases {
+			if a, ok := alias.(string); ok {
+				person.Aliases = append(person.Aliases, a)
+			}
+		}
+	}
+	if username, ok := params["username"].(string); ok && username != "" {
+		// Strip @ if present
+		username = strings.TrimPrefix(username, "@")
+		person.Username = &username
+	}
+
+	// Generate embedding for searchable fields (name, aliases, bio)
+	embText := name
+	if len(person.Aliases) > 0 {
+		embText += " " + strings.Join(person.Aliases, " ")
+	}
+	if person.Bio != "" {
+		embText += " " + person.Bio
+	}
+	resp, err := b.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
+		Model: b.cfg.Embedding.Model,
+		Input: []string{embText},
+	})
+	if err != nil {
+		b.logger.Warn("failed to generate person embedding", "error", err, "person", name)
+	} else if len(resp.Data) > 0 {
+		person.Embedding = resp.Data[0].Embedding
+	}
+
+	// Create the person
+	personID, err := b.peopleRepo.AddPerson(person)
+	if err != nil {
+		return fmt.Sprintf("Error creating person: %v", err), nil
+	}
+
+	b.logger.Info("Person created via manage_people tool",
+		"user_id", userID,
+		"person_id", personID,
+		"person_name", name,
+		"circle", person.Circle,
+	)
+
+	return fmt.Sprintf("Successfully created person '%s' (ID: %d, Circle: %s)", name, personID, person.Circle), nil
+}
+
+// performUpdatePerson updates a person's information.
+// Supports both person_id (preferred) and name (fallback) for lookup.
+func (b *Bot) performUpdatePerson(ctx context.Context, userID int64, name string, params map[string]interface{}) (string, error) {
+	var person *storage.Person
+	var err error
+
+	// v0.5.1: Try person_id first (from <relevant_people> context)
+	if personID, ok := params["person_id"].(float64); ok && int64(personID) > 0 {
+		person, err = b.peopleRepo.GetPerson(userID, int64(personID))
+		if err != nil {
+			return fmt.Sprintf("Error finding person by ID %d: %v", int64(personID), err), nil
+		}
+	}
+
+	// Fallback to name search
+	if person == nil && name != "" {
+		person, err = b.peopleRepo.FindPersonByName(userID, name)
+		if err != nil {
+			return fmt.Sprintf("Error finding person: %v", err), nil
+		}
+		if person == nil {
+			// Try alias search
+			aliasPeople, err := b.peopleRepo.FindPersonByAlias(userID, name)
+			if err != nil || len(aliasPeople) == 0 {
+				return fmt.Sprintf("Person '%s' not found", name), nil
+			}
+			person = &aliasPeople[0]
+		}
+	}
+
+	if person == nil {
+		return "Person not found (no ID or name provided)", nil
+	}
+
+	updates, _ := params["updates"].(map[string]interface{})
+	if updates == nil {
+		return "Error: updates object is required", nil
+	}
+
+	// Track if embedding-relevant fields changed
+	needsReembed := false
+
+	// Apply updates
+	if circle, ok := updates["circle"].(string); ok {
+		person.Circle = circle
+	}
+	if bioAppend, ok := updates["bio_append"].(string); ok && bioAppend != "" {
+		if person.Bio != "" {
+			person.Bio = person.Bio + " " + bioAppend
+		} else {
+			person.Bio = bioAppend
+		}
+		needsReembed = true
+	}
+	if aliasesAdd, ok := updates["aliases_add"].([]interface{}); ok && len(aliasesAdd) > 0 {
+		for _, alias := range aliasesAdd {
+			if a, ok := alias.(string); ok {
+				person.Aliases = append(person.Aliases, a)
+			}
+		}
+		needsReembed = true
+	}
+
+	// Regenerate embedding if searchable fields changed
+	if needsReembed {
+		embText := person.DisplayName
+		if len(person.Aliases) > 0 {
+			embText += " " + strings.Join(person.Aliases, " ")
+		}
+		if person.Bio != "" {
+			embText += " " + person.Bio
+		}
+		resp, err := b.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
+			Model: b.cfg.Embedding.Model,
+			Input: []string{embText},
+		})
+		if err != nil {
+			b.logger.Warn("failed to regenerate person embedding", "error", err, "person", name)
+		} else if len(resp.Data) > 0 {
+			person.Embedding = resp.Data[0].Embedding
+		}
+	}
+
+	// Update the person
+	if err := b.peopleRepo.UpdatePerson(*person); err != nil {
+		return fmt.Sprintf("Error updating person: %v", err), nil
+	}
+
+	b.logger.Info("Person updated via manage_people tool",
+		"user_id", userID,
+		"person_id", person.ID,
+		"person_name", person.DisplayName,
+		"reembedded", needsReembed,
+	)
+
+	return fmt.Sprintf("Successfully updated person '%s'", name), nil
+}
+
+// performDeletePerson deletes a person from memory.
+// Supports both person_id (preferred) and name (fallback) for lookup.
+func (b *Bot) performDeletePerson(ctx context.Context, userID int64, name string, params map[string]interface{}) (string, error) {
+	var person *storage.Person
+	var err error
+
+	// v0.5.1: Try person_id first (from <relevant_people> context)
+	if personID, ok := params["person_id"].(float64); ok && int64(personID) > 0 {
+		person, err = b.peopleRepo.GetPerson(userID, int64(personID))
+		if err != nil {
+			return fmt.Sprintf("Error finding person by ID %d: %v", int64(personID), err), nil
+		}
+	}
+
+	// Fallback to name search
+	if person == nil && name != "" {
+		person, err = b.peopleRepo.FindPersonByName(userID, name)
+		if err != nil {
+			return fmt.Sprintf("Error finding person: %v", err), nil
+		}
+		if person == nil {
+			// Try alias search
+			aliasPeople, err := b.peopleRepo.FindPersonByAlias(userID, name)
+			if err != nil || len(aliasPeople) == 0 {
+				return fmt.Sprintf("Person '%s' not found", name), nil
+			}
+			person = &aliasPeople[0]
+		}
+	}
+
+	if person == nil {
+		return "Person not found (no ID or name provided)", nil
+	}
+
+	reason, _ := params["reason"].(string)
+
+	// Delete the person
+	if err := b.peopleRepo.DeletePerson(userID, person.ID); err != nil {
+		return fmt.Sprintf("Error deleting person: %v", err), nil
+	}
+
+	b.logger.Info("Person deleted via manage_people tool",
+		"user_id", userID,
+		"person_id", person.ID,
+		"person_name", person.DisplayName,
+		"reason", reason,
+	)
+
+	return fmt.Sprintf("Successfully deleted person '%s'", name), nil
+}
+
+// performMergePeople merges two people records.
+func (b *Bot) performMergePeople(ctx context.Context, userID int64, targetName, sourceName string, params map[string]interface{}) (string, error) {
+	// Find target person by name or alias
+	target, err := b.peopleRepo.FindPersonByName(userID, targetName)
+	if err != nil {
+		return fmt.Sprintf("Error finding target person: %v", err), nil
+	}
+	if target == nil {
+		// Try alias search
+		aliasPeople, err := b.peopleRepo.FindPersonByAlias(userID, targetName)
+		if err != nil {
+			return fmt.Sprintf("Error finding target person: %v", err), nil
+		}
+		if len(aliasPeople) > 0 {
+			target = &aliasPeople[0]
+		}
+	}
+	if target == nil {
+		return fmt.Sprintf("Target person '%s' not found", targetName), nil
+	}
+
+	// Find source person by name or alias
+	source, err := b.peopleRepo.FindPersonByName(userID, sourceName)
+	if err != nil {
+		return fmt.Sprintf("Error finding source person: %v", err), nil
+	}
+	if source == nil {
+		// Try alias search
+		aliasPeople, err := b.peopleRepo.FindPersonByAlias(userID, sourceName)
+		if err != nil {
+			return fmt.Sprintf("Error finding source person: %v", err), nil
+		}
+		if len(aliasPeople) > 0 {
+			source = &aliasPeople[0]
+		}
+	}
+	if source == nil {
+		return fmt.Sprintf("Source person '%s' not found", sourceName), nil
+	}
+
+	// Prevent self-merge
+	if target.ID == source.ID {
+		return fmt.Sprintf("Cannot merge '%s' with itself", targetName), nil
+	}
+
+	reason, _ := params["reason"].(string)
+
+	// Build merged bio: combine both bios
+	newBio := target.Bio
+	if source.Bio != "" {
+		if newBio != "" {
+			newBio = newBio + "\n" + source.Bio
+		} else {
+			newBio = source.Bio
+		}
+	}
+
+	// Build merged aliases: combine all unique aliases
+	aliasSet := make(map[string]struct{})
+	for _, a := range target.Aliases {
+		aliasSet[a] = struct{}{}
+	}
+	for _, a := range source.Aliases {
+		aliasSet[a] = struct{}{}
+	}
+	// Add source name as alias if different from target
+	if source.DisplayName != target.DisplayName {
+		aliasSet[source.DisplayName] = struct{}{}
+	}
+	newAliases := make([]string, 0, len(aliasSet))
+	for a := range aliasSet {
+		newAliases = append(newAliases, a)
+	}
+
+	// Merge source into target
+	if err := b.peopleRepo.MergePeople(userID, target.ID, source.ID, newBio, newAliases); err != nil {
+		return fmt.Sprintf("Error merging people: %v", err), nil
+	}
+
+	b.logger.Info("People merged via manage_people tool",
+		"user_id", userID,
+		"target_id", target.ID,
+		"target_name", target.DisplayName,
+		"source_id", source.ID,
+		"source_name", source.DisplayName,
+		"reason", reason,
+	)
+
+	return fmt.Sprintf("Successfully merged '%s' into '%s'", sourceName, targetName), nil
 }
 
 // SendTestMessage sends a test message through the bot pipeline without Telegram.
@@ -991,6 +1422,12 @@ func (h *botToolHandler) ExecuteToolCall(toolName string, arguments string) (str
 	case "manage_memory":
 		h.logger.Info("Executing Manage Memory tool", "tool", matchedTool.Name)
 		return h.bot.performManageMemory(h.ctx, h.userID, args)
+	case "search_people":
+		h.logger.Info("Executing search people tool", "tool", matchedTool.Name, "query", query)
+		return h.bot.performSearchPeople(h.ctx, h.userID, query)
+	case "manage_people":
+		h.logger.Info("Executing manage people tool", "tool", matchedTool.Name)
+		return h.bot.performManagePeople(h.ctx, h.userID, args)
 	default:
 		h.logger.Info("Executing model tool", "tool", matchedTool.Name, "model", matchedTool.Model, "query", query)
 		return h.bot.performModelTool(h.ctx, h.userID, matchedTool.Model, query)

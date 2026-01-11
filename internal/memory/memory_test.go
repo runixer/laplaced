@@ -64,7 +64,6 @@ func TestAddFactWithHistory(t *testing.T) {
 
 			fact := storage.Fact{
 				UserID:     123,
-				Entity:     "User",
 				Content:    "Test fact",
 				Category:   "test",
 				Relation:   "related_to",
@@ -120,15 +119,16 @@ func TestProcessSession_AddFact_RecordsHistory(t *testing.T) {
 	mockArchivist.On("Type").Return(string(agent.TypeArchivist)).Maybe()
 	mockArchivist.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
 		Structured: &archivist.Result{
-			Added: []archivist.AddedFact{
-				{
-					Entity:     "User",
-					Relation:   "name",
-					Content:    "Name is John",
-					Category:   "bio",
-					Type:       "identity",
-					Importance: 100,
-					Reason:     "User stated name",
+			Facts: archivist.FactsResult{
+				Added: []archivist.AddedFact{
+					{
+						Relation:   "name",
+						Content:    "Name is John",
+						Category:   "bio",
+						Type:       "identity",
+						Importance: 100,
+						Reason:     "User stated name",
+					},
 				},
 			},
 		},
@@ -193,12 +193,14 @@ func TestProcessSession_UpdateFact_RecordsHistory(t *testing.T) {
 	mockArchivist.On("Type").Return(string(agent.TypeArchivist)).Maybe()
 	mockArchivist.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
 		Structured: &archivist.Result{
-			Updated: []archivist.UpdatedFact{
-				{
-					ID:         1,
-					Content:    "Name is Bob",
-					Importance: 100,
-					Reason:     "Correction",
+			Facts: archivist.FactsResult{
+				Updated: []archivist.UpdatedFact{
+					{
+						ID:         1,
+						Content:    "Name is Bob",
+						Importance: 100,
+						Reason:     "Correction",
+					},
 				},
 			},
 		},
@@ -262,10 +264,12 @@ func TestProcessSession_RemoveFact_RecordsHistory(t *testing.T) {
 	mockArchivist.On("Type").Return(string(agent.TypeArchivist)).Maybe()
 	mockArchivist.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
 		Structured: &archivist.Result{
-			Removed: []archivist.RemovedFact{
-				{
-					ID:     1,
-					Reason: "User request",
+			Facts: archivist.FactsResult{
+				Removed: []archivist.RemovedFact{
+					{
+						ID:     1,
+						Reason: "User request",
+					},
 				},
 			},
 		},

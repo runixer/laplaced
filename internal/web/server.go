@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -149,6 +150,7 @@ type Server struct {
 	factHistoryRepo storage.FactHistoryRepository
 	maintenanceRepo storage.MaintenanceRepository
 	agentLogRepo    storage.AgentLogRepository
+	peopleRepo      storage.PeopleRepository
 	bot             BotInterface
 	rag             *rag.Service
 	logger          *slog.Logger
@@ -185,6 +187,11 @@ func NewServer(ctx context.Context, logger *slog.Logger, cfg *config.Config, fac
 // SetAgentLogRepo sets the agent log repository (used for debug UI)
 func (s *Server) SetAgentLogRepo(repo storage.AgentLogRepository) {
 	s.agentLogRepo = repo
+}
+
+// SetPeopleRepository sets the people repository (v0.5.1)
+func (s *Server) SetPeopleRepository(repo storage.PeopleRepository) {
+	s.peopleRepo = repo
 }
 
 func (s *Server) Start(ctx context.Context) error {
@@ -224,6 +231,11 @@ func (s *Server) Start(ctx context.Context) error {
 		mux.HandleFunc("/ui/agents/merger", instrumentHandler("agent_merger", s.agentLogHandler("merger", "Merger", "intersect", "Verifies if topics should be merged")))
 		mux.HandleFunc("/ui/agents/enricher", instrumentHandler("agent_enricher", s.agentLogHandler("enricher", "Enricher", "magic", "Expands user queries for better retrieval")))
 		mux.HandleFunc("/ui/agents/scout", instrumentHandler("agent_scout", s.agentLogHandler("scout", "Scout", "search", "Web search tool execution logs")))
+
+		// Memory pages
+		mux.HandleFunc("/ui/debug/people", instrumentHandler("debug_people", s.peopleHandler))
+		mux.HandleFunc("/ui/debug/facts", instrumentHandler("debug_facts", s.factsHandler))
+		mux.HandleFunc("/ui/debug/topics", instrumentHandler("debug_topics", s.topicsHandler))
 
 		// Redirect /ui/ to /ui/stats
 		mux.HandleFunc("/ui/", func(w http.ResponseWriter, r *http.Request) {
@@ -727,13 +739,11 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Log healthz and metrics at debug level, other requests at info level
-		if path == "/healthz" || path == "/metrics" {
-			s.logger.Debug("Received HTTP request",
-				"method", r.Method,
-				"path", path,
-				"client_ip", getClientIP(r),
-			)
+		// Log healthz, metrics, and static assets at debug level (or skip entirely)
+		// Other requests at info level
+		if path == "/healthz" || path == "/metrics" ||
+			strings.HasPrefix(path, "/static/") || path == "/favicon.ico" {
+			// Skip logging for static assets to reduce noise
 		} else {
 			s.logger.Info("Received HTTP request",
 				"method", r.Method,
@@ -1224,5 +1234,222 @@ func (s *Server) agentLogHandler(agentType, agentName, agentIcon, agentDescripti
 			s.logger.Error("failed to render template", "error", err)
 			http.Error(w, "Failed to render template", http.StatusInternalServerError)
 		}
+	}
+}
+
+// peopleHandler displays the people graph page (v0.5.1)
+func (s *Server) peopleHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	pageData, err := s.getCommonData(r)
+	if err != nil {
+		s.logger.Error("failed to get common page data", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	if s.peopleRepo == nil {
+		s.logger.Error("people repository not configured")
+		http.Error(w, "People repository not configured", http.StatusInternalServerError)
+		return
+	}
+
+	// Get people for selected user with pagination
+	filter := storage.PersonFilter{UserID: pageData.SelectedUserID}
+	if circleFilter := r.URL.Query().Get("circle"); circleFilter != "" {
+		filter.Circle = circleFilter
+	}
+	if search := r.URL.Query().Get("search"); search != "" {
+		filter.Search = search
+	}
+
+	result, err := s.peopleRepo.GetPeopleExtended(filter, 50, 0, "last_seen", "DESC")
+	if err != nil {
+		s.logger.Error("failed to get people", "error", err, "user_id", pageData.SelectedUserID)
+		http.Error(w, "Failed to get people", http.StatusInternalServerError)
+		return
+	}
+
+	// Count people by circle for stats
+	circleCounts := make(map[string]int)
+	for _, p := range result.Data {
+		circleCounts[p.Circle]++
+	}
+
+	data := struct {
+		People       []storage.Person
+		TotalCount   int
+		CircleCounts map[string]int
+		FilterCircle string
+		SearchQuery  string
+	}{
+		People:       result.Data,
+		TotalCount:   result.TotalCount,
+		CircleCounts: circleCounts,
+		FilterCircle: filter.Circle,
+		SearchQuery:  filter.Search,
+	}
+
+	pageData.Data = data
+
+	if err := s.renderer.Render(w, "people.html", pageData, ui.GetFuncMap()); err != nil {
+		s.logger.Error("failed to render template", "error", err)
+		http.Error(w, "Failed to render template", http.StatusInternalServerError)
+	}
+}
+
+// factsHandler handles GET /ui/debug/facts - displays all facts for a user.
+func (s *Server) factsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	pageData, err := s.getCommonData(r)
+	if err != nil {
+		s.logger.Error("failed to get common page data", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	var facts []storage.Fact
+	if pageData.SelectedUserID != 0 {
+		facts, err = s.factRepo.GetFacts(pageData.SelectedUserID)
+		if err != nil {
+			s.logger.Error("failed to get facts", "error", err, "user_id", pageData.SelectedUserID)
+			http.Error(w, "Failed to get facts", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	pageData.Data = facts
+
+	if err := s.renderer.Render(w, "facts.html", pageData, ui.GetFuncMap()); err != nil {
+		s.logger.Error("failed to render template", "error", err)
+		http.Error(w, "Failed to render template", http.StatusInternalServerError)
+	}
+}
+
+// TopicWithMessages extends TopicExtended with loaded messages for UI display.
+type TopicWithMessages struct {
+	storage.TopicExtended
+	Messages []storage.Message
+}
+
+// topicsHandler handles GET /ui/debug/topics - displays topics with filtering and pagination.
+func (s *Server) topicsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	pageData, err := s.getCommonData(r)
+	if err != nil {
+		s.logger.Error("failed to get common page data", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	// Parse query parameters
+	q := r.URL.Query()
+	filter := storage.TopicFilter{
+		UserID: pageData.SelectedUserID,
+		Search: q.Get("q"),
+	}
+
+	// Parse has_facts filter
+	if hasFacts := q.Get("has_facts"); hasFacts != "" {
+		val := hasFacts == "true"
+		filter.HasFacts = &val
+	}
+
+	// Parse merged filter
+	if merged := q.Get("merged"); merged != "" {
+		val := merged == "true"
+		filter.IsConsolidated = &val
+	}
+
+	// Parse topic_id filter (for direct links from facts page)
+	if topicIDStr := q.Get("topic_id"); topicIDStr != "" {
+		if topicID, err := strconv.ParseInt(topicIDStr, 10, 64); err == nil {
+			filter.TopicID = &topicID
+		}
+	}
+
+	// Pagination
+	page := 1
+	if p := q.Get("page"); p != "" {
+		if parsed, err := strconv.Atoi(p); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+	limit := 20
+	offset := (page - 1) * limit
+
+	// Sorting
+	sortBy := q.Get("sort")
+	if sortBy == "" {
+		sortBy = "created_at"
+	}
+	sortDir := q.Get("dir")
+	if sortDir == "" {
+		sortDir = "DESC"
+	}
+
+	// Get topics
+	result, err := s.topicRepo.GetTopicsExtended(filter, limit, offset, sortBy, sortDir)
+	if err != nil {
+		s.logger.Error("failed to get topics", "error", err, "user_id", pageData.SelectedUserID)
+		http.Error(w, "Failed to get topics", http.StatusInternalServerError)
+		return
+	}
+
+	// Load messages for each topic
+	ctx := r.Context()
+	topics := make([]TopicWithMessages, 0, len(result.Data))
+	for _, t := range result.Data {
+		msgs, err := s.msgRepo.GetMessagesByTopicID(ctx, t.ID)
+		if err != nil {
+			s.logger.Error("failed to get messages for topic", "error", err, "topic_id", t.ID)
+			msgs = nil // Continue with empty messages
+		}
+		topics = append(topics, TopicWithMessages{
+			TopicExtended: t,
+			Messages:      msgs,
+		})
+	}
+
+	// Calculate pagination
+	totalPages := (result.TotalCount + limit - 1) / limit
+	if totalPages == 0 {
+		totalPages = 1
+	}
+
+	data := struct {
+		Topics  []TopicWithMessages
+		Filter  storage.TopicFilter
+		Total   int
+		Page    int
+		Pages   int
+		SortBy  string
+		SortDir string
+	}{
+		Topics:  topics,
+		Filter:  filter,
+		Total:   result.TotalCount,
+		Page:    page,
+		Pages:   totalPages,
+		SortBy:  sortBy,
+		SortDir: sortDir,
+	}
+
+	pageData.Data = data
+
+	if err := s.renderer.Render(w, "topics.html", pageData, ui.GetFuncMap()); err != nil {
+		s.logger.Error("failed to render template", "error", err)
+		http.Error(w, "Failed to render template", http.StatusInternalServerError)
 	}
 }

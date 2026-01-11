@@ -509,6 +509,118 @@ func (m *MockStorage) GetAgentLogsExtended(filter storage.AgentLogFilter, limit,
 	return args.Get(0).(storage.AgentLogResult), args.Error(1)
 }
 
+// PeopleRepository methods
+
+func (m *MockStorage) AddPerson(person storage.Person) (int64, error) {
+	args := m.Called(person)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockStorage) UpdatePerson(person storage.Person) error {
+	args := m.Called(person)
+	return args.Error(0)
+}
+
+func (m *MockStorage) DeletePerson(userID, personID int64) error {
+	args := m.Called(userID, personID)
+	return args.Error(0)
+}
+
+func (m *MockStorage) GetPerson(userID, personID int64) (*storage.Person, error) {
+	args := m.Called(userID, personID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*storage.Person), args.Error(1)
+}
+
+func (m *MockStorage) GetPeople(userID int64) ([]storage.Person, error) {
+	args := m.Called(userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.Person), args.Error(1)
+}
+
+func (m *MockStorage) GetPeopleByIDs(ids []int64) ([]storage.Person, error) {
+	args := m.Called(ids)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.Person), args.Error(1)
+}
+
+func (m *MockStorage) GetAllPeople() ([]storage.Person, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.Person), args.Error(1)
+}
+
+func (m *MockStorage) GetPeopleAfterID(minID int64) ([]storage.Person, error) {
+	args := m.Called(minID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.Person), args.Error(1)
+}
+
+func (m *MockStorage) FindPersonByTelegramID(userID, telegramID int64) (*storage.Person, error) {
+	args := m.Called(userID, telegramID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*storage.Person), args.Error(1)
+}
+
+func (m *MockStorage) FindPersonByUsername(userID int64, username string) (*storage.Person, error) {
+	args := m.Called(userID, username)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*storage.Person), args.Error(1)
+}
+
+func (m *MockStorage) FindPersonByAlias(userID int64, alias string) ([]storage.Person, error) {
+	args := m.Called(userID, alias)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.Person), args.Error(1)
+}
+
+func (m *MockStorage) FindPersonByName(userID int64, name string) (*storage.Person, error) {
+	args := m.Called(userID, name)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*storage.Person), args.Error(1)
+}
+
+func (m *MockStorage) MergePeople(userID, targetID, sourceID int64, newBio string, newAliases []string) error {
+	args := m.Called(userID, targetID, sourceID, newBio, newAliases)
+	return args.Error(0)
+}
+
+func (m *MockStorage) GetPeopleExtended(filter storage.PersonFilter, limit, offset int, sortBy, sortDir string) (storage.PersonResult, error) {
+	args := m.Called(filter, limit, offset, sortBy, sortDir)
+	return args.Get(0).(storage.PersonResult), args.Error(1)
+}
+
+func (m *MockStorage) CountPeopleWithoutEmbedding(userID int64) (int, error) {
+	args := m.Called(userID)
+	return args.Get(0).(int), args.Error(1)
+}
+
+func (m *MockStorage) GetPeopleWithoutEmbedding(userID int64) ([]storage.Person, error) {
+	args := m.Called(userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.Person), args.Error(1)
+}
+
 // MockOpenRouterClient implements openrouter.Client for tests.
 type MockOpenRouterClient struct {
 	mock.Mock

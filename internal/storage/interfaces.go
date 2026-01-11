@@ -113,3 +113,34 @@ type AgentLogRepository interface {
 	GetAgentLogs(agentType string, userID int64, limit int) ([]AgentLog, error)
 	GetAgentLogsExtended(filter AgentLogFilter, limit, offset int) (AgentLogResult, error)
 }
+
+// PeopleRepository handles people from the user's social graph.
+type PeopleRepository interface {
+	// CRUD operations
+	AddPerson(person Person) (int64, error)
+	UpdatePerson(person Person) error
+	DeletePerson(userID, personID int64) error
+
+	// Retrieval
+	GetPerson(userID, personID int64) (*Person, error)
+	GetPeople(userID int64) ([]Person, error)
+	GetPeopleByIDs(ids []int64) ([]Person, error)
+	GetAllPeople() ([]Person, error)
+	GetPeopleAfterID(minID int64) ([]Person, error)
+
+	// Direct matching (fast path for @username and name lookup)
+	FindPersonByTelegramID(userID, telegramID int64) (*Person, error)
+	FindPersonByUsername(userID int64, username string) (*Person, error)
+	FindPersonByAlias(userID int64, alias string) ([]Person, error)
+	FindPersonByName(userID int64, name string) (*Person, error)
+
+	// Merge operations
+	MergePeople(userID, targetID, sourceID int64, newBio string, newAliases []string) error
+
+	// Extended queries with filtering and pagination
+	GetPeopleExtended(filter PersonFilter, limit, offset int, sortBy, sortDir string) (PersonResult, error)
+
+	// Maintenance
+	CountPeopleWithoutEmbedding(userID int64) (int, error)
+	GetPeopleWithoutEmbedding(userID int64) ([]Person, error)
+}

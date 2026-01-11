@@ -99,9 +99,11 @@ func TestGracefulShutdown(t *testing.T) {
 	mockArchivist.On("Type").Return(string(agent.TypeArchivist)).Maybe()
 	mockArchivist.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
 		Structured: &archivist.Result{
-			Added:   []archivist.AddedFact{},
-			Updated: []archivist.UpdatedFact{},
-			Removed: []archivist.RemovedFact{},
+			Facts: archivist.FactsResult{
+				Added:   []archivist.AddedFact{},
+				Updated: []archivist.UpdatedFact{},
+				Removed: []archivist.RemovedFact{},
+			},
 		},
 	}, nil).Maybe()
 

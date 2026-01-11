@@ -1,0 +1,265 @@
+{{define "title"}}People Graph{{end}}
+{{define "styles"}}
+<style>
+    .badge-circle-family { background-color: #d63384; color: white; }
+    .badge-circle-friends { background-color: #198754; color: white; }
+    .badge-circle-work_inner { background-color: #0d6efd; color: white; }
+    .badge-circle-work_outer { background-color: #6c757d; color: white; }
+    .badge-circle-other { background-color: #adb5bd; }
+
+    .circle-filter-btn {
+        margin-right: 0.25rem;
+        margin-bottom: 0.25rem;
+    }
+    .circle-filter-btn.active {
+        font-weight: bold;
+    }
+
+    .person-bio {
+        max-width: 300px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .person-aliases {
+        font-size: 0.85rem;
+        color: #6c757d;
+    }
+
+    /* Mobile Optimization */
+    @media (max-width: 768px) {
+        .filter-row {
+            flex-direction: column;
+        }
+        .filter-row .col-auto {
+            width: 100%;
+            margin-bottom: 0.5rem;
+        }
+
+        .table-responsive {
+            overflow-x: visible;
+        }
+        #peopleTable thead {
+            display: none;
+        }
+        #peopleTable tbody tr {
+            display: flex;
+            flex-wrap: wrap;
+            background: white;
+            margin-bottom: 1rem;
+            border: 1px solid #dee2e6;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            align-items: flex-start;
+        }
+        #peopleTable tbody tr td {
+            display: block;
+            padding: 0.25rem 0;
+            border: none;
+        }
+
+        /* Name */
+        #peopleTable tbody tr td:nth-child(1) {
+            width: 100%;
+            font-size: 1.1rem;
+            font-weight: bold;
+            order: 1;
+            margin-bottom: 0.25rem;
+        }
+
+        /* Circle */
+        #peopleTable tbody tr td:nth-child(2) {
+            width: auto;
+            order: 2;
+            margin-right: 0.5rem;
+        }
+
+        /* Username */
+        #peopleTable tbody tr td:nth-child(3) {
+            width: auto;
+            order: 3;
+        }
+
+        /* Aliases */
+        #peopleTable tbody tr td:nth-child(4) {
+            width: 100%;
+            order: 4;
+            margin-top: 0.5rem;
+        }
+
+        /* Bio */
+        #peopleTable tbody tr td:nth-child(5) {
+            width: 100%;
+            order: 5;
+            margin-top: 0.5rem;
+            white-space: normal;
+            max-width: none;
+        }
+
+        /* Mentions */
+        #peopleTable tbody tr td:nth-child(6) {
+            width: auto;
+            order: 6;
+            margin-right: 1rem;
+        }
+
+        /* Last Seen */
+        #peopleTable tbody tr td:nth-child(7) {
+            width: auto;
+            order: 7;
+            color: #6c757d;
+            font-size: 0.85rem;
+        }
+    }
+</style>
+{{end}}
+
+{{define "content"}}
+    <div class="row mb-3 filter-row align-items-center">
+        <div class="col-auto">
+            <span class="text-muted me-2">Circle:</span>
+            <a href="/ui/debug/people" class="btn btn-sm {{if eq .Data.FilterCircle ""}}btn-primary{{else}}btn-outline-primary{{end}} circle-filter-btn">All ({{.Data.TotalCount}})</a>
+            <a href="/ui/debug/people?circle=Family" class="btn btn-sm {{if eq .Data.FilterCircle "Family"}}btn-primary{{else}}btn-outline-primary{{end}} circle-filter-btn">Family {{with index .Data.CircleCounts "Family"}}({{.}}){{end}}</a>
+            <a href="/ui/debug/people?circle=Work_Inner" class="btn btn-sm {{if eq .Data.FilterCircle "Work_Inner"}}btn-primary{{else}}btn-outline-primary{{end}} circle-filter-btn">Work Inner {{with index .Data.CircleCounts "Work_Inner"}}({{.}}){{end}}</a>
+            <a href="/ui/debug/people?circle=Work_Outer" class="btn btn-sm {{if eq .Data.FilterCircle "Work_Outer"}}btn-primary{{else}}btn-outline-primary{{end}} circle-filter-btn">Work Outer {{with index .Data.CircleCounts "Work_Outer"}}({{.}}){{end}}</a>
+            <a href="/ui/debug/people?circle=Friends" class="btn btn-sm {{if eq .Data.FilterCircle "Friends"}}btn-primary{{else}}btn-outline-primary{{end}} circle-filter-btn">Friends {{with index .Data.CircleCounts "Friends"}}({{.}}){{end}}</a>
+            <a href="/ui/debug/people?circle=Other" class="btn btn-sm {{if eq .Data.FilterCircle "Other"}}btn-primary{{else}}btn-outline-primary{{end}} circle-filter-btn">Other {{with index .Data.CircleCounts "Other"}}({{.}}){{end}}</a>
+        </div>
+        <div class="col-md-4 col-auto ms-auto">
+            <input type="text" id="filterInput" class="form-control" onkeyup="filterTable('filterInput', 'peopleTable')" placeholder="Filter people...">
+        </div>
+    </div>
+
+    {{if eq (len .Data.People) 0}}
+    <div class="alert alert-info">
+        No people found{{if .Data.FilterCircle}} in the {{.Data.FilterCircle}} circle{{end}}. People are automatically extracted from forwarded messages and conversations.
+    </div>
+    {{else}}
+    <div class="table-responsive shadow-sm">
+        <table class="table table-striped table-hover mb-0" id="peopleTable">
+            <thead class="table-light">
+                <tr>
+                    <th onclick="sortTable('peopleTable', 0)" style="cursor: pointer;">Name</th>
+                    <th onclick="sortTable('peopleTable', 1)" style="cursor: pointer;">Circle</th>
+                    <th onclick="sortTable('peopleTable', 2)" style="cursor: pointer;">Username</th>
+                    <th>Aliases</th>
+                    <th>Bio</th>
+                    <th onclick="sortTable('peopleTable', 5)" style="cursor: pointer;">Mentions</th>
+                    <th onclick="sortTable('peopleTable', 6)" style="cursor: pointer;">Last Seen</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{range .Data.People}}
+                <tr>
+                    <td><strong>{{.DisplayName}}</strong></td>
+                    <td>
+                        <span class="badge badge-circle-{{.Circle | lower}}">{{.Circle}}</span>
+                    </td>
+                    <td>
+                        {{if .Username}}
+                            {{if derefString .Username}}
+                                <a href="https://t.me/{{derefString .Username}}" target="_blank">@{{derefString .Username}}</a>
+                            {{else}}
+                                <span class="text-muted">-</span>
+                            {{end}}
+                        {{else}}
+                            <span class="text-muted">-</span>
+                        {{end}}
+                    </td>
+                    <td class="person-aliases">
+                        {{if .Aliases}}
+                            {{range $i, $alias := .Aliases}}{{if $i}}, {{end}}{{$alias}}{{end}}
+                        {{else}}
+                            <span class="text-muted">-</span>
+                        {{end}}
+                    </td>
+                    <td class="person-bio" title="{{.Bio}}">
+                        {{if .Bio}}{{.Bio}}{{else}}<span class="text-muted">No bio</span>{{end}}
+                    </td>
+                    <td>{{.MentionCount}}</td>
+                    <td class="text-muted small">
+                        {{if .LastSeen.IsZero}}
+                            -
+                        {{else}}
+                            {{.LastSeen.Format "2006-01-02"}}
+                        {{end}}
+                    </td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+    </div>
+    {{end}}
+{{end}}
+
+{{define "scripts"}}
+<script>
+function filterTable(inputId, tableId) {
+    var input, filter, table, tr, td, i, txtValue;
+    input = document.getElementById(inputId);
+    filter = input.value.toUpperCase();
+    table = document.getElementById(tableId);
+    tr = table.getElementsByTagName("tr");
+    for (i = 0; i < tr.length; i++) {
+        if (tr[i].getElementsByTagName("th").length > 0) continue;
+        var found = false;
+        var tds = tr[i].getElementsByTagName("td");
+        for (var j = 0; j < tds.length; j++) {
+            if (tds[j]) {
+                txtValue = tds[j].textContent || tds[j].innerText;
+                if (txtValue.toUpperCase().indexOf(filter) > -1) {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if (found) {
+            tr[i].style.display = "";
+        } else {
+            tr[i].style.display = "none";
+        }
+    }
+}
+
+function sortTable(tableId, n) {
+    var table, rows, switching, i, x, y, shouldSwitch, dir, switchcount = 0;
+    table = document.getElementById(tableId);
+    switching = true;
+    dir = "asc";
+    while (switching) {
+        switching = false;
+        rows = table.rows;
+        for (i = 1; i < (rows.length - 1); i++) {
+            shouldSwitch = false;
+            x = rows[i].getElementsByTagName("TD")[n];
+            y = rows[i + 1].getElementsByTagName("TD")[n];
+            var xVal = x.innerHTML.toLowerCase();
+            var yVal = y.innerHTML.toLowerCase();
+            // Try to parse as number
+            if (!isNaN(parseFloat(xVal)) && isFinite(xVal)) {
+                xVal = parseFloat(xVal);
+                yVal = parseFloat(yVal);
+            }
+
+            if (dir == "asc") {
+                if (xVal > yVal) { shouldSwitch = true; break; }
+            } else if (dir == "desc") {
+                if (xVal < yVal) { shouldSwitch = true; break; }
+            }
+        }
+        if (shouldSwitch) {
+            rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
+            switching = true;
+            switchcount++;
+        } else {
+            if (switchcount == 0 && dir == "asc") {
+                dir = "desc";
+                switching = true;
+            }
+        }
+    }
+}
+</script>
+{{end}}

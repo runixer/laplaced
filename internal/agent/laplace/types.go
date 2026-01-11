@@ -64,11 +64,13 @@ type ContextData struct {
 	BaseSystemPrompt string
 	ProfileFacts     string
 	RecentTopics     string
+	InnerCircle      string // v0.5.1: People from Work_Inner + Family circles
 
 	// Session history
 	RecentHistory []storage.Message
 
 	// RAG results
-	RAGResults []rag.TopicSearchResult
-	RAGInfo    *rag.RetrievalDebugInfo
+	RAGResults     []rag.TopicSearchResult
+	RAGInfo        *rag.RetrievalDebugInfo
+	RelevantPeople []storage.Person // v0.5.1: People selected by reranker
 }

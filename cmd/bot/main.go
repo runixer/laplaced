@@ -86,10 +86,24 @@ func runHealthcheck(configPath string) int {
 	return 0
 }
 
+// logTimeFormat truncates time to milliseconds for cleaner logs.
+func logTimeFormat(groups []string, a slog.Attr) slog.Attr {
+	if a.Key == slog.TimeKey {
+		if t, ok := a.Value.Any().(time.Time); ok {
+			// Format: 2006-01-02T15:04:05.000Z07:00 (milliseconds, not nanoseconds)
+			a.Value = slog.StringValue(t.Format("2006-01-02T15:04:05.000Z07:00"))
+		}
+	}
+	return a
+}
+
 func main() {
 	// Set up JSON logging early (before config load) with default INFO level.
 	// Will be reconfigured with correct level after config is loaded.
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level:       slog.LevelInfo,
+		ReplaceAttr: logTimeFormat,
+	})))
 
 	// Load .env file if it exists
 	if err := godotenv.Load(); err != nil {
@@ -128,7 +142,10 @@ func main() {
 		logLevel = slog.LevelInfo
 	}
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level:       logLevel,
+		ReplaceAttr: logTimeFormat,
+	}))
 	slog.SetDefault(logger)
 	logger.Info("Config loaded successfully", "allowed_users", len(cfg.Bot.AllowedUserIDs))
 
@@ -189,6 +206,7 @@ func main() {
 
 	// Create context service for shared user context across agents
 	contextService := agent.NewContextService(store, store, cfg, logger)
+	contextService.SetPeopleRepository(store) // v0.5.1: Inner circle in context
 
 	// Create agent executor for LLM calls
 	agentExecutor := agent.NewExecutor(openrouterClient, agentLogger, logger)
@@ -197,7 +215,7 @@ func main() {
 	enricherAgent := enricher.New(agentExecutor, translator, cfg)
 	splitterAgent := splitter.New(agentExecutor, translator, cfg, store, store)
 	mergerAgent := merger.New(agentExecutor, translator, cfg, store, store)
-	archivistAgent := archivist.New(agentExecutor, translator, cfg)
+	archivistAgent := archivist.New(agentExecutor, translator, cfg, logger, agentLogger)
 	rerankerAgent := reranker.New(openrouterClient, cfg, logger, translator, store, agentLogger)
 
 	// Register agents in registry for discovery
@@ -212,9 +230,12 @@ func main() {
 	memoryService := memory.NewService(logger, cfg, store, store, store, openrouterClient, translator)
 	memoryService.SetAgentLogger(agentLogger)
 	memoryService.SetArchivistAgent(archivistAgent)
+	memoryService.SetPeopleRepository(store)  // v0.5.1: People extraction
+	archivistAgent.SetPeopleRepository(store) // v0.5.1: People lookup tool
 
 	ragService := rag.NewService(logger, cfg, store, store, store, store, store, openrouterClient, memoryService, translator)
 	ragService.SetAgentLogger(agentLogger)
+	ragService.SetPeopleRepository(store) // v0.5.1: People search
 	ragService.SetEnricherAgent(enricherAgent)
 	ragService.SetSplitterAgent(splitterAgent)
 	ragService.SetMergerAgent(mergerAgent)
@@ -228,7 +249,7 @@ func main() {
 	laplaceAgent := laplace.New(cfg, openrouterClient, ragService, store, store, translator, logger)
 	laplaceAgent.SetAgentLogger(agentLogger)
 
-	b, err := bot.NewBot(logger, api, cfg, store, store, store, store, store, openrouterClient, speechKitClient, ragService, contextService, translator)
+	b, err := bot.NewBot(logger, api, cfg, store, store, store, store, store, store, openrouterClient, speechKitClient, ragService, contextService, translator)
 	if err != nil {
 		logger.Error("failed to create bot", "error", err)
 		os.Exit(1)
@@ -253,6 +274,7 @@ func main() {
 		os.Exit(1)
 	}
 	webServer.SetAgentLogRepo(store)
+	webServer.SetPeopleRepository(store) // v0.5.1: People page
 	srvDone := make(chan struct{})
 	go func() {
 		defer close(srvDone)

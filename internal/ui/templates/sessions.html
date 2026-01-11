@@ -350,6 +350,14 @@ function updateProgress(event) {
                     <div class="stat-value" style="color: #dc3545;">${event.stats.facts_deleted || 0}</div>
                     <div class="stat-label">Facts -</div>
                 </div>
+                <div class="stat-item">
+                    <div class="stat-value" style="color: #198754;">${event.stats.people_added || 0}</div>
+                    <div class="stat-label">People +</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" style="color: #0d6efd;">${event.stats.people_updated || 0}</div>
+                    <div class="stat-label">People ~</div>
+                </div>
                 <div class="stat-item" style="grid-column: span 2;">
                     <div class="stat-value" style="font-size: 1rem;">${totalTokens.toLocaleString()} tokens</div>
                     <div class="stat-label">API Usage (prompt: ${(event.stats.prompt_tokens || 0).toLocaleString()}, completion: ${(event.stats.completion_tokens || 0).toLocaleString()}, embedding: ${(event.stats.embedding_tokens || 0).toLocaleString()})</div>

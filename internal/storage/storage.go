@@ -68,7 +68,6 @@ type TopicResult struct {
 type Fact struct {
 	ID          int64
 	UserID      int64
-	Entity      string
 	Relation    string
 	Content     string
 	Category    string
@@ -89,7 +88,6 @@ type FactHistory struct {
 	NewContent   string
 	Reason       string
 	Category     string
-	Entity       string
 	Relation     string
 	Importance   int
 	TopicID      *int64
@@ -195,6 +193,35 @@ type AgentLogResult struct {
 	TotalCount int
 }
 
+// Person represents a person from the user's social graph.
+type Person struct {
+	ID           int64     `json:"id"`
+	UserID       int64     `json:"user_id"`
+	DisplayName  string    `json:"display_name"`
+	Aliases      []string  `json:"aliases"`     // JSON array: ["Гелёй", "@akaGelo"]
+	TelegramID   *int64    `json:"telegram_id"` // For direct @mention match
+	Username     *string   `json:"username"`    // @username without @
+	Circle       string    `json:"circle"`      // Family, Friends, Work_Inner, Work_Outer, Other
+	Bio          string    `json:"bio"`         // Aggregated profile (2-3 sentences)
+	Embedding    []float32 `json:"embedding"`   // Bio vector (JSON float32 array)
+	FirstSeen    time.Time `json:"first_seen"`
+	LastSeen     time.Time `json:"last_seen"`
+	MentionCount int       `json:"mention_count"`
+}
+
+// PersonFilter for filtering people queries.
+type PersonFilter struct {
+	UserID int64
+	Circle string
+	Search string
+}
+
+// PersonResult wraps people with total count for pagination.
+type PersonResult struct {
+	Data       []Person
+	TotalCount int
+}
+
 type Storage interface {
 	MessageRepository
 	UserRepository
@@ -205,6 +232,7 @@ type Storage interface {
 	FactHistoryRepository
 	MaintenanceRepository
 	AgentLogRepository
+	PeopleRepository
 }
 
 type SQLiteStore struct {
@@ -326,7 +354,6 @@ func (s *SQLiteStore) Init() error {
 	CREATE TABLE IF NOT EXISTS structured_facts (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		user_id INTEGER NOT NULL,
-		entity TEXT NOT NULL,
 		relation TEXT NOT NULL,
 		category TEXT NOT NULL,
 		content TEXT NOT NULL,
@@ -336,10 +363,9 @@ func (s *SQLiteStore) Init() error {
 		topic_id INTEGER,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		UNIQUE(user_id, entity, relation, content)
+		UNIQUE(user_id, relation, content)
 	);
 
-	CREATE INDEX IF NOT EXISTS idx_structured_facts_user_entity ON structured_facts(user_id, entity);
 	CREATE INDEX IF NOT EXISTS idx_structured_facts_category ON structured_facts(user_id, category);
 	CREATE INDEX IF NOT EXISTS idx_structured_facts_type ON structured_facts(user_id, type);
 
@@ -352,7 +378,6 @@ func (s *SQLiteStore) Init() error {
 		new_content TEXT,
 		reason TEXT,
 		category TEXT,
-		entity TEXT,
 		importance INTEGER DEFAULT 0,
 		topic_id INTEGER,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -446,14 +471,11 @@ func (s *SQLiteStore) migrate() error {
 		return err
 	}
 	if count == 0 {
-		s.logger.Info("migrating fact_history table: adding topic_id, category, entity, importance")
+		s.logger.Info("migrating fact_history table: adding topic_id, category, importance")
 		if _, err := s.db.Exec("ALTER TABLE fact_history ADD COLUMN topic_id INTEGER"); err != nil {
 			return err
 		}
 		if _, err := s.db.Exec("ALTER TABLE fact_history ADD COLUMN category TEXT"); err != nil {
-			return err
-		}
-		if _, err := s.db.Exec("ALTER TABLE fact_history ADD COLUMN entity TEXT"); err != nil {
 			return err
 		}
 		if _, err := s.db.Exec("ALTER TABLE fact_history ADD COLUMN importance INTEGER DEFAULT 0"); err != nil {
@@ -617,6 +639,113 @@ func (s *SQLiteStore) migrate() error {
 		s.logger.Info("migrating agent_logs table: adding conversation_turns")
 		if _, err := s.db.Exec(`ALTER TABLE agent_logs ADD COLUMN conversation_turns TEXT`); err != nil {
 			s.logger.Warn("failed to add conversation_turns column", "error", err)
+		}
+	}
+
+	// Create people table for social graph (v0.5.1)
+	peopleTableQuery := `
+		CREATE TABLE IF NOT EXISTS people (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			display_name TEXT NOT NULL,
+			aliases TEXT DEFAULT '[]',
+			telegram_id INTEGER,
+			username TEXT,
+			circle TEXT DEFAULT 'Other',
+			bio TEXT,
+			embedding BLOB,
+			first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			mention_count INTEGER DEFAULT 1,
+			UNIQUE(user_id, display_name)
+		);
+		CREATE INDEX IF NOT EXISTS idx_people_user_id ON people(user_id);
+		CREATE INDEX IF NOT EXISTS idx_people_telegram_id ON people(user_id, telegram_id);
+		CREATE INDEX IF NOT EXISTS idx_people_username ON people(user_id, username);
+		CREATE INDEX IF NOT EXISTS idx_people_circle ON people(user_id, circle);
+	`
+	if _, err := s.db.Exec(peopleTableQuery); err != nil {
+		return fmt.Errorf("failed to create people table: %w", err)
+	}
+
+	// v0.5.1: Drop entity column from structured_facts (all facts are now about User)
+	// SQLite can't DROP COLUMN if it's in a UNIQUE constraint, so we rebuild the table
+	var entityColExists int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('structured_facts') WHERE name='entity'`).Scan(&entityColExists); err == nil && entityColExists > 0 {
+		s.logger.Info("migrating structured_facts table: removing entity column (table rebuild)")
+
+		// Step 1: Create new table without entity column
+		createNewTable := `
+			CREATE TABLE structured_facts_new (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				user_id INTEGER NOT NULL,
+				relation TEXT NOT NULL,
+				category TEXT NOT NULL,
+				content TEXT NOT NULL,
+				type TEXT NOT NULL,
+				importance INTEGER NOT NULL,
+				embedding BLOB,
+				created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+				last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+				topic_id INTEGER,
+				UNIQUE(user_id, relation, content)
+			)`
+		if _, err := s.db.Exec(createNewTable); err != nil {
+			return fmt.Errorf("failed to create structured_facts_new: %w", err)
+		}
+
+		// Step 2: Copy data (excluding entity)
+		copyData := `
+			INSERT INTO structured_facts_new
+				(id, user_id, relation, category, content, type, importance, embedding, created_at, last_updated, topic_id)
+			SELECT
+				id, user_id, relation, category, content, type, importance, embedding, created_at, last_updated, topic_id
+			FROM structured_facts`
+		if _, err := s.db.Exec(copyData); err != nil {
+			return fmt.Errorf("failed to copy data to structured_facts_new: %w", err)
+		}
+
+		// Step 3: Drop old table and indexes
+		if _, err := s.db.Exec(`DROP INDEX IF EXISTS idx_structured_facts_user_entity`); err != nil {
+			s.logger.Warn("failed to drop idx_structured_facts_user_entity", "error", err)
+		}
+		if _, err := s.db.Exec(`DROP INDEX IF EXISTS idx_structured_facts_category`); err != nil {
+			s.logger.Warn("failed to drop idx_structured_facts_category", "error", err)
+		}
+		if _, err := s.db.Exec(`DROP INDEX IF EXISTS idx_structured_facts_type`); err != nil {
+			s.logger.Warn("failed to drop idx_structured_facts_type", "error", err)
+		}
+		if _, err := s.db.Exec(`DROP INDEX IF EXISTS idx_structured_facts_topic_id`); err != nil {
+			s.logger.Warn("failed to drop idx_structured_facts_topic_id", "error", err)
+		}
+		if _, err := s.db.Exec(`DROP TABLE structured_facts`); err != nil {
+			return fmt.Errorf("failed to drop old structured_facts: %w", err)
+		}
+
+		// Step 4: Rename new table
+		if _, err := s.db.Exec(`ALTER TABLE structured_facts_new RENAME TO structured_facts`); err != nil {
+			return fmt.Errorf("failed to rename structured_facts_new: %w", err)
+		}
+
+		// Step 5: Recreate indexes
+		if _, err := s.db.Exec(`CREATE INDEX idx_structured_facts_category ON structured_facts(user_id, category)`); err != nil {
+			s.logger.Warn("failed to recreate idx_structured_facts_category", "error", err)
+		}
+		if _, err := s.db.Exec(`CREATE INDEX idx_structured_facts_type ON structured_facts(user_id, type)`); err != nil {
+			s.logger.Warn("failed to recreate idx_structured_facts_type", "error", err)
+		}
+		if _, err := s.db.Exec(`CREATE INDEX idx_structured_facts_topic_id ON structured_facts(topic_id)`); err != nil {
+			s.logger.Warn("failed to recreate idx_structured_facts_topic_id", "error", err)
+		}
+
+		s.logger.Info("structured_facts migration complete: entity column removed")
+	}
+
+	// v0.5.1: Drop entity column from fact_history (simpler, no UNIQUE constraint)
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('fact_history') WHERE name='entity'`).Scan(&entityColExists); err == nil && entityColExists > 0 {
+		s.logger.Info("migrating fact_history table: dropping entity column")
+		if _, err := s.db.Exec(`ALTER TABLE fact_history DROP COLUMN entity`); err != nil {
+			return fmt.Errorf("failed to drop entity column from fact_history: %w", err)
 		}
 	}
 

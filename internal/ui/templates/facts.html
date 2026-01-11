@@ -67,55 +67,47 @@
             order: 3;
         }
         
-        /* Entity */
-        #factsTable tbody tr td:nth-child(4) {
-            width: 100%;
-            font-size: 1.1rem;
-            margin-top: 0.5rem;
-            order: 4;
-        }
-        
         /* Relation */
-        #factsTable tbody tr td:nth-child(5) {
+        #factsTable tbody tr td:nth-child(4) {
             width: 100%;
             font-style: italic;
             color: #6c757d;
             margin-bottom: 0.5rem;
-            order: 5;
+            order: 4;
         }
-        
+
         /* Content */
-        #factsTable tbody tr td:nth-child(6) {
+        #factsTable tbody tr td:nth-child(5) {
             width: 100%;
             margin-bottom: 0.5rem;
-            order: 6;
+            order: 5;
         }
-        
+
         /* Importance */
-        #factsTable tbody tr td:nth-child(7) {
+        #factsTable tbody tr td:nth-child(6) {
             width: auto;
             margin-right: 1rem;
-            order: 7;
+            order: 6;
         }
-        
+
         /* Updated */
-        #factsTable tbody tr td:nth-child(8) {
+        #factsTable tbody tr td:nth-child(7) {
             width: auto;
             color: #6c757d;
             font-size: 0.85rem;
-            order: 8;
+            order: 7;
             flex-grow: 1;
             text-align: right;
         }
-        
+
         /* Actions */
-        #factsTable tbody tr td:nth-child(9) {
+        #factsTable tbody tr td:nth-child(8) {
             width: 100%;
             margin-top: 0.5rem;
-            order: 9;
+            order: 8;
             text-align: center;
         }
-        #factsTable tbody tr td:nth-child(9) .btn {
+        #factsTable tbody tr td:nth-child(8) .btn {
             width: 100%;
             padding: 0.5rem;
             font-size: 1rem;
@@ -138,11 +130,10 @@
 					<th onclick="sortTable('factsTable', 0)" style="cursor: pointer;">ID</th>
 					<th onclick="sortTable('factsTable', 1)" style="cursor: pointer;">Type</th>
 					<th onclick="sortTable('factsTable', 2)" style="cursor: pointer;">Category</th>
-					<th onclick="sortTable('factsTable', 3)" style="cursor: pointer;">Entity</th>
-					<th onclick="sortTable('factsTable', 4)" style="cursor: pointer;">Relation</th>
-					<th onclick="sortTable('factsTable', 5)" style="cursor: pointer;">Content</th>
-					<th onclick="sortTable('factsTable', 6)" style="cursor: pointer;">Imp.</th>
-					<th onclick="sortTable('factsTable', 7)" style="cursor: pointer;">Updated</th>
+					<th onclick="sortTable('factsTable', 3)" style="cursor: pointer;">Relation</th>
+					<th onclick="sortTable('factsTable', 4)" style="cursor: pointer;">Content</th>
+					<th onclick="sortTable('factsTable', 5)" style="cursor: pointer;">Imp.</th>
+					<th onclick="sortTable('factsTable', 6)" style="cursor: pointer;">Updated</th>
 					<th>Topic</th>
 				</tr>
 			</thead>
@@ -152,7 +143,6 @@
 					<td class="text-muted small">{{.ID}}</td>
 					<td><span class="badge badge-{{.Type}}">{{.Type}}</span></td>
 					<td><span class="badge badge-cat-{{.Category}}">{{.Category}}</span></td>
-					<td><strong>{{.Entity}}</strong></td>
 					<td class="text-muted">{{.Relation}}</td>
 					<td>{{.Content}}</td>
 					<td>

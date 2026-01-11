@@ -25,10 +25,13 @@ func (l *Laplace) BuildMessages(
 ) []openrouter.Message {
 	var orMessages []openrouter.Message
 
-	// System Prompt + Core Identity
+	// System Prompt + Core Identity + Inner Circle
 	fullSystemPrompt := contextData.BaseSystemPrompt
 	if contextData.ProfileFacts != "" {
 		fullSystemPrompt += "\n\n" + contextData.ProfileFacts
+	}
+	if contextData.InnerCircle != "" {
+		fullSystemPrompt += "\n\n" + contextData.InnerCircle
 	}
 	if contextData.RecentTopics != "" {
 		fullSystemPrompt += "\n\n" + contextData.RecentTopics
@@ -43,13 +46,19 @@ func (l *Laplace) BuildMessages(
 		})
 	}
 
-	// RAG Results (if any)
+	// RAG Results and Relevant People (if any) - combined in user prompt
+	var contextParts []string
 	if len(contextData.RAGResults) > 0 {
-		ragContent := formatRAGResults(contextData.RAGResults, enrichedQuery)
+		contextParts = append(contextParts, formatRAGResults(contextData.RAGResults, enrichedQuery))
+	}
+	if len(contextData.RelevantPeople) > 0 {
+		contextParts = append(contextParts, storage.FormatPeople(contextData.RelevantPeople, storage.TagRelevantPeople))
+	}
+	if len(contextParts) > 0 {
 		orMessages = append(orMessages, openrouter.Message{
 			Role: "user",
 			Content: []interface{}{
-				openrouter.TextPart{Type: "text", Text: ragContent},
+				openrouter.TextPart{Type: "text", Text: strings.Join(contextParts, "\n\n")},
 			},
 		})
 	}
@@ -86,10 +95,11 @@ func (l *Laplace) LoadContextData(
 		l.logger.Error("failed to get unprocessed messages", "error", err)
 	}
 
-	// Load profile and recent topics from SharedContext if available
+	// Load profile, recent topics, and inner circle from SharedContext if available
 	if shared := agent.FromContext(ctx); shared != nil {
 		data.ProfileFacts = shared.Profile
 		data.RecentTopics = shared.RecentTopics
+		data.InnerCircle = shared.InnerCircle
 	} else {
 		// Fallback: load directly
 		allFacts, err := l.factRepo.GetFacts(userID)
@@ -165,12 +175,13 @@ func (l *Laplace) LoadContextData(
 			MediaParts:     mediaParts,
 		}
 
-		results, debugInfo, err := l.ragService.Retrieve(ctx, userID, rawQuery, opts)
+		result, debugInfo, err := l.ragService.Retrieve(ctx, userID, rawQuery, opts)
 		if err != nil {
 			l.logger.Error("RAG retrieval failed", "error", err)
-		} else {
-			data.RAGResults = deduplicateTopics(results, recentHistory)
+		} else if result != nil {
+			data.RAGResults = deduplicateTopics(result.Topics, recentHistory)
 			data.RAGInfo = debugInfo
+			data.RelevantPeople = result.People // v0.5.1: selected by reranker
 		}
 	}
 

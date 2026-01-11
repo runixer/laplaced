@@ -147,14 +147,22 @@ func (s *Service) processFactExtraction(ctx context.Context) {
 			return
 		}
 
+		// Acquire user lock to prevent concurrent people merges (BUG-013)
+		if !s.tryStartProcessingUser(userID) {
+			s.logger.Debug("user already being processed for facts, skipping", "user_id", userID)
+			continue
+		}
+
 		topics, err := s.topicRepo.GetTopicsPendingFacts(userID)
 		if err != nil {
 			s.logger.Error("failed to get pending topics", "error", err)
+			s.finishProcessingUser(userID)
 			continue
 		}
 
 		for _, topic := range topics {
 			if ctx.Err() != nil {
+				s.finishProcessingUser(userID)
 				return
 			}
 
@@ -166,16 +174,24 @@ func (s *Service) processFactExtraction(ctx context.Context) {
 				break
 			}
 
+			// Try to acquire processing lock for this topic (prevents race with ForceProcess)
+			if !s.tryStartProcessingTopic(topic.ID) {
+				s.logger.Debug("topic already being processed, skipping", "topic_id", topic.ID)
+				continue
+			}
+
 			// Get messages for this topic
 			msgs, err := s.msgRepo.GetMessagesByTopicID(ctx, topic.ID)
 			if err != nil {
 				s.logger.Error("failed to get messages for topic", "topic_id", topic.ID, "error", err)
+				s.finishProcessingTopic(topic.ID)
 				continue
 			}
 
 			if len(msgs) == 0 {
 				// Empty topic? Mark processed.
 				_ = s.topicRepo.SetTopicFactsExtracted(topic.ID, true)
+				s.finishProcessingTopic(topic.ID)
 				continue
 			}
 
@@ -189,6 +205,7 @@ func (s *Service) processFactExtraction(ctx context.Context) {
 				s.logger.Error("failed to process facts for topic", "topic_id", topic.ID, "error", err)
 				// Don't mark processed so we retry? Or mark processed to avoid stuck?
 				// Let's retry later.
+				s.finishProcessingTopic(topic.ID)
 				continue
 			}
 
@@ -196,6 +213,10 @@ func (s *Service) processFactExtraction(ctx context.Context) {
 			if err := s.topicRepo.SetTopicFactsExtracted(topic.ID, true); err != nil {
 				s.logger.Error("failed to mark topic processed", "topic_id", topic.ID, "error", err)
 			}
+			s.finishProcessingTopic(topic.ID)
 		}
+
+		// Release user lock after processing all topics for this user
+		s.finishProcessingUser(userID)
 	}
 }

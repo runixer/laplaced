@@ -42,6 +42,13 @@ func GetFuncMap() template.FuncMap {
 			}
 			return *i
 		},
+		"derefString": func(s *string) string {
+			if s == nil {
+				return ""
+			}
+			return *s
+		},
+		"lower": strings.ToLower,
 		"derefBool": func(b *bool) bool {
 			if b == nil {
 				return false

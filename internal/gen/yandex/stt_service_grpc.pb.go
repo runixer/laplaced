@@ -8,6 +8,7 @@ package stt
 
 import (
 	context "context"
+
 	operation "github.com/yandex-cloud/go-genproto/yandex/cloud/operation"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"

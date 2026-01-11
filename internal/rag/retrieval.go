@@ -45,14 +45,14 @@ type RetrievalOptions struct {
 	MediaParts     []interface{} // Multimodal content (images, audio) for enricher and reranker
 }
 
-func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts *RetrievalOptions) ([]TopicSearchResult, *RetrievalDebugInfo, error) {
+func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts *RetrievalOptions) (*RetrievalResult, *RetrievalDebugInfo, error) {
 	startTime := time.Now()
 	debugInfo := &RetrievalDebugInfo{
 		OriginalQuery: query,
 	}
 
 	if !s.cfg.RAG.Enabled {
-		return nil, debugInfo, nil
+		return &RetrievalResult{}, debugInfo, nil
 	}
 
 	if opts == nil {
@@ -131,6 +131,24 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 	sort.Slice(matches, func(i, j int) bool {
 		return matches[i].score > matches[j].score
 	})
+
+	// v0.5.1: Search people vectors (excluding inner circle - they're already in system prompt)
+	var personCandidates []reranker.PersonCandidate
+	innerCircles := []string{"Work_Inner", "Family"}
+	if s.peopleRepo != nil && s.cfg.Agents.Reranker.Enabled {
+		peopleResults, err := s.SearchPeople(ctx, userID, qVec, float32(minSafetyThreshold), 20, innerCircles)
+		if err != nil {
+			s.logger.Warn("failed to search people", "error", err)
+		} else {
+			for _, pr := range peopleResults {
+				personCandidates = append(personCandidates, reranker.PersonCandidate{
+					PersonID: pr.Person.ID,
+					Score:    pr.Score,
+					Person:   pr.Person,
+				})
+			}
+		}
+	}
 
 	// Determine how many candidates to consider
 	rerankerCfg := s.cfg.Agents.Reranker
@@ -237,7 +255,7 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		currentMessages := s.formatSessionMessages(opts.History)
 
 		// Run reranker agent
-		result, err := s.rerankViaAgent(ctx, userID, candidates, contextualizedQuery, query, currentMessages, userProfile, recentTopics, opts.MediaParts)
+		result, err := s.rerankViaAgent(ctx, userID, candidates, personCandidates, contextualizedQuery, query, currentMessages, userProfile, recentTopics, opts.MediaParts)
 		if err != nil {
 			s.logger.Warn("reranker failed, falling back to vector search", "error", err)
 			RecordRerankerFallback(userID, "error")
@@ -260,6 +278,28 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 				}
 			}
 			matches = filteredMatches
+
+			// v0.5.1: Load selected people by IDs from reranker result
+			if len(result.People) > 0 && s.peopleRepo != nil {
+				peopleIDs := result.PeopleIDs()
+				selectedPeople, err := s.peopleRepo.GetPeopleByIDs(peopleIDs)
+				if err != nil {
+					s.logger.Warn("failed to load selected people", "error", err)
+				} else {
+					// Store in personCandidates for later use
+					// (personCandidates will be converted to result.People)
+					personCandidates = nil // Clear candidates, we'll rebuild
+					for _, p := range selectedPeople {
+						personCandidates = append(personCandidates, reranker.PersonCandidate{
+							PersonID: p.ID,
+							Person:   p,
+						})
+					}
+				}
+			} else {
+				// No people selected by reranker
+				personCandidates = nil
+			}
 		}
 	} else {
 		// Legacy behavior: limit by maxTopics (already applied above)
@@ -311,7 +351,16 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 	RecordRAGRetrieval(userID, len(results) > 0)
 	RecordRAGLatency(userID, opts.Source, time.Since(startTime).Seconds())
 
-	return results, debugInfo, nil
+	// v0.5.1: Build final result with selected people
+	var selectedPeople []storage.Person
+	for _, pc := range personCandidates {
+		selectedPeople = append(selectedPeople, pc.Person)
+	}
+
+	return &RetrievalResult{
+		Topics: results,
+		People: selectedPeople,
+	}, debugInfo, nil
 }
 
 func (s *Service) RetrieveFacts(ctx context.Context, userID int64, query string) ([]storage.Fact, error) {
@@ -432,6 +481,100 @@ func (s *Service) FindSimilarFacts(ctx context.Context, userID int64, embedding 
 	return s.factRepo.GetFactsByIDs(ids)
 }
 
+// PersonSearchResult represents a matched person with their score.
+type PersonSearchResult struct {
+	Person storage.Person
+	Score  float32
+}
+
+// RetrievalResult contains both topics and selected people from RAG retrieval.
+type RetrievalResult struct {
+	Topics []TopicSearchResult
+	People []storage.Person // Selected by reranker (excludes inner circle)
+}
+
+// SearchPeople searches for people by vector similarity (v0.5.1).
+// excludeCircles filters out people from specified circles (e.g., "Work_Inner", "Family").
+func (s *Service) SearchPeople(ctx context.Context, userID int64, embedding []float32, threshold float32, maxResults int, excludeCircles []string) ([]PersonSearchResult, error) {
+	if s.peopleRepo == nil {
+		return nil, nil
+	}
+
+	searchStart := time.Now()
+	s.mu.RLock()
+
+	userVectors := s.peopleVectors[userID]
+	vectorsScanned := len(userVectors)
+	type match struct {
+		personID int64
+		score    float32
+	}
+	var matches []match
+
+	for _, item := range userVectors {
+		score := cosineSimilarity(embedding, item.Embedding)
+		if score > threshold {
+			matches = append(matches, match{personID: item.PersonID, score: score})
+		}
+	}
+	s.mu.RUnlock()
+
+	s.logger.Debug("People vector search", "user_id", userID, "scanned", vectorsScanned, "matches", len(matches), "duration_ms", time.Since(searchStart).Milliseconds())
+
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].score > matches[j].score
+	})
+
+	if maxResults > 0 && len(matches) > maxResults {
+		matches = matches[:maxResults]
+	}
+
+	if len(matches) == 0 {
+		return nil, nil
+	}
+
+	var ids []int64
+	for _, m := range matches {
+		ids = append(ids, m.personID)
+	}
+
+	people, err := s.peopleRepo.GetPeopleByIDs(ids)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build exclusion set for circles
+	excludeSet := make(map[string]bool)
+	for _, c := range excludeCircles {
+		excludeSet[c] = true
+	}
+
+	// Build result with scores, filtering out excluded circles
+	scoreMap := make(map[int64]float32)
+	for _, m := range matches {
+		scoreMap[m.personID] = m.score
+	}
+
+	var results []PersonSearchResult
+	for _, p := range people {
+		// Skip people from excluded circles (they're already in system prompt)
+		if excludeSet[p.Circle] {
+			continue
+		}
+		results = append(results, PersonSearchResult{
+			Person: p,
+			Score:  scoreMap[p.ID],
+		})
+	}
+
+	// Sort by score again (GetPeopleByIDs might return in different order)
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+
+	return results, nil
+}
+
 func cosineSimilarity(a, b []float32) float32 {
 	if len(a) != len(b) {
 		return 0
@@ -453,6 +596,7 @@ func (s *Service) rerankViaAgent(
 	ctx context.Context,
 	userID int64,
 	candidates []reranker.Candidate,
+	personCandidates []reranker.PersonCandidate,
 	contextualizedQuery string,
 	originalQuery string,
 	currentMessages string,
@@ -469,6 +613,7 @@ func (s *Service) rerankViaAgent(
 	req := &agent.Request{
 		Params: map[string]any{
 			reranker.ParamCandidates:          candidates,
+			reranker.ParamPersonCandidates:    personCandidates,
 			reranker.ParamContextualizedQuery: contextualizedQuery,
 			reranker.ParamOriginalQuery:       originalQuery,
 			reranker.ParamCurrentMessages:     currentMessages,

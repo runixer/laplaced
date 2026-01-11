@@ -5,9 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.1] - 2026-01-11
 
-_Next version: v0.6 (Social) — People Table, Social Graph_
+### Added
+- **People Graph** — the bot now tracks people mentioned in conversations with bios, circles, and aliases
+- **Inner Circle in context** — system prompt includes people from Family and Work_Inner circles for better personalization
+- **search_people tool** — Laplace can search for people by name, username, or description
+- **manage_people tool** — update, delete, or merge people records through chat commands
+- **Forwarded message extraction** — people are automatically extracted from forwarded messages with their Telegram ID and username
+- **People Debug UI** — new `/ui/debug/people` page to view all people grouped by circle
+- **Reranker people support** — relevant people are now included in RAG context alongside topics
 
 ## [0.5.0] - 2026-01-10
 

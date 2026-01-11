@@ -459,7 +459,7 @@ func TestFallbackToVectorTop(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := r.fallbackToVectorTop(candidates, tt.maxTopics)
+			result := r.fallbackToVectorTop(candidates, nil, tt.maxTopics)
 			assert.Equal(t, tt.wantIDs, result.TopicIDs())
 		})
 	}
@@ -514,7 +514,7 @@ func TestFallbackFromState(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := r.fallbackFromState(tt.state, candidates, tt.maxTopics)
+			result := r.fallbackFromState(tt.state, candidates, nil, tt.maxTopics)
 			assert.Equal(t, tt.wantIDs, result.TopicIDs())
 		})
 	}

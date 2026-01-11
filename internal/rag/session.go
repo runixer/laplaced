@@ -163,6 +163,22 @@ func (s *Service) ForceProcessUserWithProgress(ctx context.Context, userID int64
 	})
 
 	// 4. Process facts for new topics
+	// Acquire user lock to prevent concurrent people merges (BUG-013)
+	if !s.tryStartProcessingUser(userID) {
+		s.logger.Debug("user already being processed for facts, waiting...", "user_id", userID)
+		// Wait and retry - another goroutine is processing this user
+		for i := 0; i < 60; i++ { // Wait up to 60 seconds
+			time.Sleep(1 * time.Second)
+			if s.tryStartProcessingUser(userID) {
+				break
+			}
+			if i == 59 {
+				return stats, fmt.Errorf("timeout waiting for user processing lock")
+			}
+		}
+	}
+	defer s.finishProcessingUser(userID)
+
 	// Re-fetch topics that weren't merged and need fact extraction
 	pendingTopics, err := s.topicRepo.GetTopicsPendingFacts(userID)
 	if err != nil {
@@ -198,26 +214,39 @@ func (s *Service) ForceProcessUserWithProgress(ctx context.Context, userID int64
 				Message: fmt.Sprintf("Processing topic %d/%d...", i+1, len(toProcess)),
 			})
 
+			// Try to acquire processing lock for this topic (prevents race with background loop)
+			if !s.tryStartProcessingTopic(topic.ID) {
+				s.logger.Debug("topic already being processed, skipping", "topic_id", topic.ID)
+				continue
+			}
+
 			msgs, err := s.msgRepo.GetMessagesByTopicID(ctx, topic.ID)
 			if err != nil {
 				s.logger.Error("failed to get messages for topic", "topic_id", topic.ID, "error", err)
+				s.finishProcessingTopic(topic.ID)
 				continue
 			}
 
 			if len(msgs) == 0 {
 				_ = s.topicRepo.SetTopicFactsExtracted(topic.ID, true)
+				s.finishProcessingTopic(topic.ID)
 				continue
 			}
 
 			factStats, err := s.memoryService.ProcessSessionWithStats(ctx, userID, msgs, topic.CreatedAt, topic.ID)
 			if err != nil {
 				s.logger.Error("failed to process facts", "topic_id", topic.ID, "error", err)
+				s.finishProcessingTopic(topic.ID)
 				continue
 			}
 
 			stats.FactsCreated += factStats.Created
 			stats.FactsUpdated += factStats.Updated
 			stats.FactsDeleted += factStats.Deleted
+			// Aggregate people stats (v0.5.1)
+			stats.PeopleAdded += factStats.PeopleAdded
+			stats.PeopleUpdated += factStats.PeopleUpdated
+			stats.PeopleMerged += factStats.PeopleMerged
 			// Aggregate usage from fact extraction (cost is aggregated, tokens counted separately)
 			stats.PromptTokens += factStats.PromptTokens
 			stats.CompletionTokens += factStats.CompletionTokens
@@ -230,14 +259,22 @@ func (s *Service) ForceProcessUserWithProgress(ctx context.Context, userID int64
 			}
 
 			_ = s.topicRepo.SetTopicFactsExtracted(topic.ID, true)
+			s.finishProcessingTopic(topic.ID)
+		}
+
+		// Build progress message
+		progressMsg := fmt.Sprintf("Processed facts: %d created, %d updated, %d deleted",
+			stats.FactsCreated, stats.FactsUpdated, stats.FactsDeleted)
+		if stats.PeopleAdded > 0 || stats.PeopleUpdated > 0 || stats.PeopleMerged > 0 {
+			progressMsg += fmt.Sprintf(" | People: %d added, %d updated, %d merged",
+				stats.PeopleAdded, stats.PeopleUpdated, stats.PeopleMerged)
 		}
 
 		onProgress(ProgressEvent{
 			Stage:   "facts",
 			Current: len(toProcess),
 			Total:   len(toProcess),
-			Message: fmt.Sprintf("Processed facts: %d created, %d updated, %d deleted",
-				stats.FactsCreated, stats.FactsUpdated, stats.FactsDeleted),
+			Message: progressMsg,
 		})
 	}
 

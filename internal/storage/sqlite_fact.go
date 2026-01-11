@@ -19,23 +19,23 @@ func (s *SQLiteStore) AddFact(fact Fact) (int64, error) {
 		fact.LastUpdated = time.Now()
 	}
 	query := `
-		INSERT INTO structured_facts (user_id, entity, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(user_id, entity, relation, content) DO UPDATE SET
+		INSERT INTO structured_facts (user_id, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(user_id, relation, content) DO UPDATE SET
 			last_updated = excluded.last_updated,
 			importance = excluded.importance,
 			type = excluded.type,
 			category = excluded.category,
 			topic_id = COALESCE(excluded.topic_id, structured_facts.topic_id)
 	`
-	_, err = s.db.Exec(query, fact.UserID, fact.Entity, fact.Relation, fact.Category, fact.Content, fact.Type, fact.Importance, embBytes, fact.TopicID, fact.CreatedAt.UTC().Format("2006-01-02 15:04:05.999"), fact.LastUpdated.UTC().Format("2006-01-02 15:04:05.999"))
+	_, err = s.db.Exec(query, fact.UserID, fact.Relation, fact.Category, fact.Content, fact.Type, fact.Importance, embBytes, fact.TopicID, fact.CreatedAt.UTC().Format("2006-01-02 15:04:05.999"), fact.LastUpdated.UTC().Format("2006-01-02 15:04:05.999"))
 	if err != nil {
 		return 0, err
 	}
 
 	// Get the ID (whether inserted or updated)
 	var id int64
-	err = s.db.QueryRow("SELECT id FROM structured_facts WHERE user_id = ? AND entity = ? AND relation = ? AND content = ?", fact.UserID, fact.Entity, fact.Relation, fact.Content).Scan(&id)
+	err = s.db.QueryRow("SELECT id FROM structured_facts WHERE user_id = ? AND relation = ? AND content = ?", fact.UserID, fact.Relation, fact.Content).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -43,7 +43,7 @@ func (s *SQLiteStore) AddFact(fact Fact) (int64, error) {
 }
 
 func (s *SQLiteStore) GetAllFacts() ([]Fact, error) {
-	query := "SELECT id, user_id, entity, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts"
+	query := "SELECT id, user_id, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts"
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -54,7 +54,7 @@ func (s *SQLiteStore) GetAllFacts() ([]Fact, error) {
 	for rows.Next() {
 		var f Fact
 		var embBytes []byte
-		if err := rows.Scan(&f.ID, &f.UserID, &f.Entity, &f.Relation, &f.Category, &f.Content, &f.Type, &f.Importance, &embBytes, &f.TopicID, &f.CreatedAt, &f.LastUpdated); err != nil {
+		if err := rows.Scan(&f.ID, &f.UserID, &f.Relation, &f.Category, &f.Content, &f.Type, &f.Importance, &embBytes, &f.TopicID, &f.CreatedAt, &f.LastUpdated); err != nil {
 			return nil, err
 		}
 		if len(embBytes) > 0 {
@@ -69,7 +69,7 @@ func (s *SQLiteStore) GetAllFacts() ([]Fact, error) {
 }
 
 func (s *SQLiteStore) GetFactsAfterID(minID int64) ([]Fact, error) {
-	query := "SELECT id, user_id, entity, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE id > ? ORDER BY id ASC"
+	query := "SELECT id, user_id, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE id > ? ORDER BY id ASC"
 	rows, err := s.db.Query(query, minID)
 	if err != nil {
 		return nil, err
@@ -80,7 +80,7 @@ func (s *SQLiteStore) GetFactsAfterID(minID int64) ([]Fact, error) {
 	for rows.Next() {
 		var f Fact
 		var embBytes []byte
-		if err := rows.Scan(&f.ID, &f.UserID, &f.Entity, &f.Relation, &f.Category, &f.Content, &f.Type, &f.Importance, &embBytes, &f.TopicID, &f.CreatedAt, &f.LastUpdated); err != nil {
+		if err := rows.Scan(&f.ID, &f.UserID, &f.Relation, &f.Category, &f.Content, &f.Type, &f.Importance, &embBytes, &f.TopicID, &f.CreatedAt, &f.LastUpdated); err != nil {
 			return nil, err
 		}
 		if len(embBytes) > 0 {
@@ -188,7 +188,7 @@ func (s *SQLiteStore) DeleteFact(userID, id int64) error {
 }
 
 func (s *SQLiteStore) GetFacts(userID int64) ([]Fact, error) {
-	query := "SELECT id, user_id, entity, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE user_id = ?"
+	query := "SELECT id, user_id, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE user_id = ?"
 	rows, err := s.db.Query(query, userID)
 	if err != nil {
 		return nil, err
@@ -199,7 +199,7 @@ func (s *SQLiteStore) GetFacts(userID int64) ([]Fact, error) {
 	for rows.Next() {
 		var f Fact
 		var embBytes []byte
-		if err := rows.Scan(&f.ID, &f.UserID, &f.Entity, &f.Relation, &f.Category, &f.Content, &f.Type, &f.Importance, &embBytes, &f.TopicID, &f.CreatedAt, &f.LastUpdated); err != nil {
+		if err := rows.Scan(&f.ID, &f.UserID, &f.Relation, &f.Category, &f.Content, &f.Type, &f.Importance, &embBytes, &f.TopicID, &f.CreatedAt, &f.LastUpdated); err != nil {
 			return nil, err
 		}
 		if len(embBytes) > 0 {
@@ -217,7 +217,7 @@ func (s *SQLiteStore) GetFactsByIDs(ids []int64) ([]Fact, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	query := "SELECT id, user_id, entity, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE id IN (?" + strings.Repeat(",?", len(ids)-1) + ")"
+	query := "SELECT id, user_id, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE id IN (?" + strings.Repeat(",?", len(ids)-1) + ")"
 	args := make([]interface{}, len(ids))
 	for i, id := range ids {
 		args[i] = id
@@ -233,7 +233,7 @@ func (s *SQLiteStore) GetFactsByIDs(ids []int64) ([]Fact, error) {
 	for rows.Next() {
 		var f Fact
 		var embBytes []byte
-		if err := rows.Scan(&f.ID, &f.UserID, &f.Entity, &f.Relation, &f.Category, &f.Content, &f.Type, &f.Importance, &embBytes, &f.TopicID, &f.CreatedAt, &f.LastUpdated); err != nil {
+		if err := rows.Scan(&f.ID, &f.UserID, &f.Relation, &f.Category, &f.Content, &f.Type, &f.Importance, &embBytes, &f.TopicID, &f.CreatedAt, &f.LastUpdated); err != nil {
 			return nil, err
 		}
 		if len(embBytes) > 0 {
@@ -248,7 +248,7 @@ func (s *SQLiteStore) GetFactsByIDs(ids []int64) ([]Fact, error) {
 }
 
 func (s *SQLiteStore) GetFactsByTopicID(topicID int64) ([]Fact, error) {
-	query := "SELECT id, user_id, entity, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE topic_id = ?"
+	query := "SELECT id, user_id, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE topic_id = ?"
 	rows, err := s.db.Query(query, topicID)
 	if err != nil {
 		return nil, err
@@ -259,7 +259,7 @@ func (s *SQLiteStore) GetFactsByTopicID(topicID int64) ([]Fact, error) {
 	for rows.Next() {
 		var f Fact
 		var embBytes []byte
-		if err := rows.Scan(&f.ID, &f.UserID, &f.Entity, &f.Relation, &f.Category, &f.Content, &f.Type, &f.Importance, &embBytes, &f.TopicID, &f.CreatedAt, &f.LastUpdated); err != nil {
+		if err := rows.Scan(&f.ID, &f.UserID, &f.Relation, &f.Category, &f.Content, &f.Type, &f.Importance, &embBytes, &f.TopicID, &f.CreatedAt, &f.LastUpdated); err != nil {
 			return nil, err
 		}
 		if len(embBytes) > 0 {

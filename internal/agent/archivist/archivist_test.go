@@ -45,18 +45,25 @@ func mockChatResponse(content string) openrouter.ChatCompletionResponse {
 }
 
 func TestArchivist_Execute_AddFacts(t *testing.T) {
+	// Response uses new format with facts section
 	llmResponse := `{
-		"added": [{
-			"entity": "User",
-			"relation": "works_as",
-			"content": "Software Engineer",
-			"category": "work",
-			"type": "identity",
-			"importance": 90,
-			"reason": "User mentioned their profession"
-		}],
-		"updated": [],
-		"removed": []
+		"facts": {
+			"added": [{
+				"relation": "works_as",
+				"content": "Software Engineer",
+				"category": "work",
+				"type": "identity",
+				"importance": 90,
+				"reason": "User mentioned their profession"
+			}],
+			"updated": [],
+			"removed": []
+		},
+		"people": {
+			"added": [],
+			"updated": [],
+			"merged": []
+		}
 	}`
 
 	mockClient := &testutil.MockOpenRouterClient{}
@@ -68,7 +75,7 @@ func TestArchivist_Execute_AddFacts(t *testing.T) {
 	cfg.Agents.Archivist.Model = "test-model"
 	translator := testutil.TestTranslator(t)
 
-	archivist := New(executor, translator, cfg)
+	archivist := New(executor, translator, cfg, testutil.TestLogger(), nil)
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
@@ -89,28 +96,34 @@ func TestArchivist_Execute_AddFacts(t *testing.T) {
 
 	result, ok := resp.Structured.(*Result)
 	require.True(t, ok)
-	require.Len(t, result.Added, 1)
-	assert.Equal(t, "User", result.Added[0].Entity)
-	assert.Equal(t, "works_as", result.Added[0].Relation)
-	assert.Equal(t, "Software Engineer", result.Added[0].Content)
-	assert.Equal(t, 1, resp.Metadata["added_count"])
-	assert.Equal(t, 0, resp.Metadata["updated_count"])
-	assert.Equal(t, 0, resp.Metadata["removed_count"])
+	require.Len(t, result.Facts.Added, 1)
+	assert.Equal(t, "works_as", result.Facts.Added[0].Relation)
+	assert.Equal(t, "Software Engineer", result.Facts.Added[0].Content)
+	assert.Equal(t, 1, resp.Metadata["facts_added"])
+	assert.Equal(t, 0, resp.Metadata["facts_updated"])
+	assert.Equal(t, 0, resp.Metadata["facts_removed"])
 
 	mockClient.AssertExpectations(t)
 }
 
 func TestArchivist_Execute_UpdateFacts(t *testing.T) {
 	llmResponse := `{
-		"added": [],
-		"updated": [{
-			"id": 42,
-			"content": "Senior Software Engineer",
-			"type": "identity",
-			"importance": 95,
-			"reason": "User got promoted"
-		}],
-		"removed": []
+		"facts": {
+			"added": [],
+			"updated": [{
+				"id": 42,
+				"content": "Senior Software Engineer",
+				"type": "identity",
+				"importance": 95,
+				"reason": "User got promoted"
+			}],
+			"removed": []
+		},
+		"people": {
+			"added": [],
+			"updated": [],
+			"merged": []
+		}
 	}`
 
 	mockClient := &testutil.MockOpenRouterClient{}
@@ -122,7 +135,7 @@ func TestArchivist_Execute_UpdateFacts(t *testing.T) {
 	cfg.Agents.Archivist.Model = "test-model"
 	translator := testutil.TestTranslator(t)
 
-	archivist := New(executor, translator, cfg)
+	archivist := New(executor, translator, cfg, testutil.TestLogger(), nil)
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
@@ -133,7 +146,7 @@ func TestArchivist_Execute_UpdateFacts(t *testing.T) {
 				{ID: 1, Role: "user", Content: "I just got promoted!", CreatedAt: time.Now()},
 			},
 			ParamFacts: []storage.Fact{
-				{ID: 42, UserID: 123, Entity: "User", Relation: "works_as", Content: "Software Engineer", Category: "work", Type: "identity", Importance: 90},
+				{ID: 42, UserID: 123, Relation: "works_as", Content: "Software Engineer", Category: "work", Type: "identity", Importance: 90},
 			},
 			ParamReferenceDate: time.Now(),
 		},
@@ -144,21 +157,28 @@ func TestArchivist_Execute_UpdateFacts(t *testing.T) {
 
 	result, ok := resp.Structured.(*Result)
 	require.True(t, ok)
-	require.Len(t, result.Updated, 1)
-	assert.Equal(t, int64(42), result.Updated[0].ID)
-	assert.Equal(t, "Senior Software Engineer", result.Updated[0].Content)
+	require.Len(t, result.Facts.Updated, 1)
+	assert.Equal(t, int64(42), result.Facts.Updated[0].ID)
+	assert.Equal(t, "Senior Software Engineer", result.Facts.Updated[0].Content)
 
 	mockClient.AssertExpectations(t)
 }
 
 func TestArchivist_Execute_RemoveFacts(t *testing.T) {
 	llmResponse := `{
-		"added": [],
-		"updated": [],
-		"removed": [{
-			"id": 99,
-			"reason": "User said this is no longer true"
-		}]
+		"facts": {
+			"added": [],
+			"updated": [],
+			"removed": [{
+				"id": 99,
+				"reason": "User said this is no longer true"
+			}]
+		},
+		"people": {
+			"added": [],
+			"updated": [],
+			"merged": []
+		}
 	}`
 
 	mockClient := &testutil.MockOpenRouterClient{}
@@ -170,7 +190,7 @@ func TestArchivist_Execute_RemoveFacts(t *testing.T) {
 	cfg.Agents.Archivist.Model = "test-model"
 	translator := testutil.TestTranslator(t)
 
-	archivist := New(executor, translator, cfg)
+	archivist := New(executor, translator, cfg, testutil.TestLogger(), nil)
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
@@ -181,7 +201,7 @@ func TestArchivist_Execute_RemoveFacts(t *testing.T) {
 				{ID: 1, Role: "user", Content: "I no longer work there", CreatedAt: time.Now()},
 			},
 			ParamFacts: []storage.Fact{
-				{ID: 99, UserID: 123, Entity: "User", Content: "Works at Company X"},
+				{ID: 99, UserID: 123, Content: "Works at Company X"},
 			},
 			ParamReferenceDate: time.Now(),
 		},
@@ -192,9 +212,9 @@ func TestArchivist_Execute_RemoveFacts(t *testing.T) {
 
 	result, ok := resp.Structured.(*Result)
 	require.True(t, ok)
-	require.Len(t, result.Removed, 1)
-	assert.Equal(t, int64(99), result.Removed[0].ID)
-	assert.Equal(t, 1, resp.Metadata["removed_count"])
+	require.Len(t, result.Facts.Removed, 1)
+	assert.Equal(t, int64(99), result.Facts.Removed[0].ID)
+	assert.Equal(t, 1, resp.Metadata["facts_removed"])
 
 	mockClient.AssertExpectations(t)
 }
@@ -204,7 +224,7 @@ func TestArchivist_Execute_EmptyMessages(t *testing.T) {
 	cfg := testutil.TestConfig()
 	translator := testutil.TestTranslator(t)
 
-	archivist := New(executor, translator, cfg)
+	archivist := New(executor, translator, cfg, testutil.TestLogger(), nil)
 
 	req := &agent.Request{
 		Params: map[string]any{
@@ -217,9 +237,124 @@ func TestArchivist_Execute_EmptyMessages(t *testing.T) {
 
 	result, ok := resp.Structured.(*Result)
 	require.True(t, ok)
-	assert.Empty(t, result.Added)
-	assert.Empty(t, result.Updated)
-	assert.Empty(t, result.Removed)
+	assert.Empty(t, result.Facts.Added)
+	assert.Empty(t, result.Facts.Updated)
+	assert.Empty(t, result.Facts.Removed)
+}
+
+func TestArchivist_Execute_LegacyFormat(t *testing.T) {
+	// Test backward compatibility with legacy format (no facts wrapper)
+	llmResponse := `{
+		"added": [{
+			"relation": "likes",
+			"content": "Coffee",
+			"category": "preferences",
+			"type": "identity",
+			"importance": 70,
+			"reason": "User mentioned preference"
+		}],
+		"updated": [],
+		"removed": []
+	}`
+
+	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(mockChatResponse(llmResponse), nil)
+
+	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
+	cfg := testutil.TestConfig()
+	cfg.Agents.Archivist.Model = "test-model"
+	translator := testutil.TestTranslator(t)
+
+	archivist := New(executor, translator, cfg, testutil.TestLogger(), nil)
+
+	req := &agent.Request{
+		Shared: &agent.SharedContext{
+			UserID: 123,
+		},
+		Params: map[string]any{
+			ParamMessages: []storage.Message{
+				{ID: 1, Role: "user", Content: "I love coffee", CreatedAt: time.Now()},
+			},
+			ParamFacts:         []storage.Fact{},
+			ParamReferenceDate: time.Now(),
+		},
+	}
+
+	resp, err := archivist.Execute(context.Background(), req)
+	require.NoError(t, err)
+
+	result, ok := resp.Structured.(*Result)
+	require.True(t, ok)
+	require.Len(t, result.Facts.Added, 1)
+	assert.Equal(t, "Coffee", result.Facts.Added[0].Content)
+
+	mockClient.AssertExpectations(t)
+}
+
+func TestArchivist_Execute_ArrayFieldsFormat(t *testing.T) {
+	// Test LLM quirk: "facts": [...] instead of "facts": {...}
+	llmResponse := `{
+		"facts": [{
+			"added": [{
+				"relation": "has_pet",
+				"content": "Cat named Whiskers",
+				"category": "bio",
+				"type": "context",
+				"importance": 60,
+				"reason": "User mentioned their pet"
+			}],
+			"updated": [],
+			"removed": []
+		}],
+		"people": [{
+			"added": [{
+				"display_name": "John Doe",
+				"circle": "Friends",
+				"bio": "College friend",
+				"reason": "Mentioned in conversation"
+			}],
+			"updated": [],
+			"merged": []
+		}]
+	}`
+
+	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(mockChatResponse(llmResponse), nil)
+
+	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
+	cfg := testutil.TestConfig()
+	cfg.Agents.Archivist.Model = "test-model"
+	translator := testutil.TestTranslator(t)
+
+	archivist := New(executor, translator, cfg, testutil.TestLogger(), nil)
+
+	req := &agent.Request{
+		Shared: &agent.SharedContext{
+			UserID: 123,
+		},
+		Params: map[string]any{
+			ParamMessages: []storage.Message{
+				{ID: 1, Role: "user", Content: "My cat Whiskers is sleeping", CreatedAt: time.Now()},
+			},
+			ParamFacts:         []storage.Fact{},
+			ParamReferenceDate: time.Now(),
+		},
+	}
+
+	resp, err := archivist.Execute(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	result, ok := resp.Structured.(*Result)
+	require.True(t, ok)
+	require.Len(t, result.Facts.Added, 1)
+	assert.Equal(t, "Cat named Whiskers", result.Facts.Added[0].Content)
+	require.Len(t, result.People.Added, 1)
+	assert.Equal(t, "John Doe", result.People.Added[0].DisplayName)
+
+	mockClient.AssertExpectations(t)
 }
 
 func TestArchivist_Type(t *testing.T) {
@@ -231,7 +366,7 @@ func TestArchivist_Capabilities(t *testing.T) {
 	archivist := &Archivist{}
 	caps := archivist.Capabilities()
 
-	assert.False(t, caps.IsAgentic)
+	assert.True(t, caps.IsAgentic)
 	assert.Equal(t, "json", caps.OutputFormat)
 }
 
@@ -291,21 +426,20 @@ func TestArchivist_FormatUserName(t *testing.T) {
 	}
 }
 
-func TestArchivist_PrepareFacts(t *testing.T) {
+func TestArchivist_PrepareUserFacts(t *testing.T) {
 	a := &Archivist{}
 
 	facts := []storage.Fact{
-		{ID: 1, Entity: "User", Relation: "works_as", Content: "Engineer", Category: "work", Type: "identity", Importance: 90},
-		{ID: 2, Entity: "user", Relation: "lives_in", Content: "Moscow", Category: "bio", Type: "context", Importance: 80},
-		{ID: 3, Entity: "Bot", Relation: "created_by", Content: "Developer", Category: "other", Type: "identity", Importance: 50},
+		{ID: 1, Relation: "works_as", Content: "Engineer", Category: "work", Type: "identity", Importance: 90},
+		{ID: 2, Relation: "lives_in", Content: "Moscow", Category: "bio", Type: "context", Importance: 80},
+		{ID: 3, Relation: "created_by", Content: "Developer", Category: "other", Type: "identity", Importance: 50},
 	}
 
-	userFacts, otherFacts := a.prepareFacts(facts)
+	// prepareUserFacts converts all facts to FactView (entity field was removed, all facts are about User)
+	userFacts := a.prepareUserFacts(facts)
 
-	assert.Len(t, userFacts, 2)
-	assert.Len(t, otherFacts, 1)
-
+	assert.Len(t, userFacts, 3) // All facts are included
 	assert.Equal(t, int64(1), userFacts[0].ID)
 	assert.Equal(t, int64(2), userFacts[1].ID)
-	assert.Equal(t, int64(3), otherFacts[0].ID)
+	assert.Equal(t, int64(3), userFacts[2].ID)
 }

@@ -13,6 +13,8 @@ import (
 const (
 	// ParamCandidates is the key for reranker candidates ([]Candidate).
 	ParamCandidates = "candidates"
+	// ParamPersonCandidates is the key for person candidates ([]PersonCandidate) (v0.5.1).
+	ParamPersonCandidates = "person_candidates"
 	// ParamContextualizedQuery is the key for enriched query (string).
 	ParamContextualizedQuery = "contextualized_query"
 	// ParamOriginalQuery is the key for original user query (string).
@@ -35,10 +37,16 @@ type TopicSelection struct {
 	ID     int64  `json:"id"`
 }
 
+// PersonSelection represents a selected person with explanation (v0.5.1).
+type PersonSelection struct {
+	Reason string `json:"reason"`
+	ID     int64  `json:"id"`
+}
+
 // Result contains the output of the reranker.
 type Result struct {
-	Topics    []TopicSelection // Final selected topics with reasons
-	PeopleIDs []int64          // For future Social Graph (v0.5)
+	Topics []TopicSelection  // Final selected topics with reasons
+	People []PersonSelection // Final selected people with reasons (v0.5.1)
 }
 
 // TopicIDs returns just the topic IDs (for backward compatibility).
@@ -50,6 +58,15 @@ func (r *Result) TopicIDs() []int64 {
 	return ids
 }
 
+// PeopleIDs returns just the person IDs (v0.5.1).
+func (r *Result) PeopleIDs() []int64 {
+	ids := make([]int64, len(r.People))
+	for i, p := range r.People {
+		ids[i] = p.ID
+	}
+	return ids
+}
+
 // Candidate is a topic candidate for reranking.
 type Candidate struct {
 	TopicID      int64
@@ -57,6 +74,13 @@ type Candidate struct {
 	Topic        storage.Topic
 	MessageCount int
 	SizeChars    int // Estimated: MessageCount * avgCharsPerMessage
+}
+
+// PersonCandidate is a person candidate for reranking (v0.5.1).
+type PersonCandidate struct {
+	PersonID int64
+	Score    float32
+	Person   storage.Person
 }
 
 // ReasoningEntry holds reasoning text for one iteration.
@@ -75,6 +99,7 @@ type trace struct {
 	candidates     []storage.RerankerCandidate
 	toolCalls      []storage.RerankerToolCall
 	selectedTopics []TopicSelection
+	selectedPeople []PersonSelection // v0.5.1
 	fallbackReason string
 	reasoning      []ReasoningEntry
 	systemPrompt   string                // Full system prompt for debug UI
@@ -85,7 +110,9 @@ type trace struct {
 // response is the expected JSON response from Flash.
 // Supports both old format {"topics": [42, 18]} and new format {"topics": [{"id": 42, "reason": "..."}]}.
 type response struct {
-	TopicIDs json.RawMessage `json:"topic_ids"`
-	Topics   json.RawMessage `json:"topics"` // Fallback: old format
-	IDs      []int64         `json:"ids"`    // Fallback: LLM sometimes uses bare "ids"
+	TopicIDs  json.RawMessage `json:"topic_ids"`
+	Topics    json.RawMessage `json:"topics"`     // Fallback: old format
+	IDs       []int64         `json:"ids"`        // Fallback: LLM sometimes uses bare "ids"
+	PeopleIDs json.RawMessage `json:"people_ids"` // v0.5.1: person IDs
+	People    json.RawMessage `json:"people"`     // v0.5.1: with reasons
 }

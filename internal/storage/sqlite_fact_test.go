@@ -14,9 +14,9 @@ func TestGetFactStats(t *testing.T) {
 
 	now := time.Now().UTC()
 	facts := []Fact{
-		{UserID: 1, Entity: "E1", Relation: "R1", Content: "Fact 1", Type: "identity", Importance: 100, CreatedAt: now.Add(-24 * time.Hour), LastUpdated: now.Add(-24 * time.Hour)},
-		{UserID: 1, Entity: "E2", Relation: "R2", Content: "Fact 2", Type: "identity", Importance: 100, CreatedAt: now.Add(-48 * time.Hour), LastUpdated: now.Add(-48 * time.Hour)},
-		{UserID: 1, Entity: "E3", Relation: "R3", Content: "Fact 3", Type: "context", Importance: 50, CreatedAt: now, LastUpdated: now},
+		{UserID: 1, Relation: "R1", Content: "Fact 1", Type: "identity", Importance: 100, CreatedAt: now.Add(-24 * time.Hour), LastUpdated: now.Add(-24 * time.Hour)},
+		{UserID: 1, Relation: "R2", Content: "Fact 2", Type: "identity", Importance: 100, CreatedAt: now.Add(-48 * time.Hour), LastUpdated: now.Add(-48 * time.Hour)},
+		{UserID: 1, Relation: "R3", Content: "Fact 3", Type: "context", Importance: 50, CreatedAt: now, LastUpdated: now},
 	}
 
 	for _, f := range facts {
@@ -46,7 +46,6 @@ func TestFactCRUD(t *testing.T) {
 	userID := int64(123)
 	fact := Fact{
 		UserID:     userID,
-		Entity:     "Go",
 		Relation:   "is",
 		Content:    "A programming language",
 		Category:   "tech",

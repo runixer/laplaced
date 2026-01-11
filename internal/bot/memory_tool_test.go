@@ -22,7 +22,6 @@ func TestParseMemoryOpParams(t *testing.T) {
 			name: "all fields present",
 			params: map[string]interface{}{
 				"action":     "add",
-				"entity":     "User",
 				"content":    "Likes Go",
 				"category":   "tech",
 				"type":       "preference",
@@ -32,7 +31,6 @@ func TestParseMemoryOpParams(t *testing.T) {
 			},
 			want: memoryOpParams{
 				Action:     "add",
-				Entity:     "User",
 				Content:    "Likes Go",
 				Category:   "tech",
 				FactType:   "preference",
@@ -90,7 +88,7 @@ func TestPerformManageMemory_Add(t *testing.T) {
 	}
 
 	userID := int64(123)
-	queryJSON := `{"action": "add", "entity": "User", "content": "Likes pizza", "category": "food", "type": "preference", "importance": 80}`
+	queryJSON := `{"action": "add", "content": "Likes pizza", "category": "food", "type": "preference", "importance": 80}`
 	args := map[string]interface{}{
 		"query": queryJSON,
 	}
@@ -105,7 +103,7 @@ func TestPerformManageMemory_Add(t *testing.T) {
 	}, nil)
 
 	mockStore.On("AddFact", mock.MatchedBy(func(f storage.Fact) bool {
-		return f.UserID == userID && f.Content == "Likes pizza" && f.Entity == "User" && f.Category == "food" && f.Type == "preference" && f.Importance == 80
+		return f.UserID == userID && f.Content == "Likes pizza" && f.Category == "food" && f.Type == "preference" && f.Importance == 80
 	})).Return(int64(1), nil)
 
 	mockStore.On("AddFactHistory", mock.Anything).Return(nil)

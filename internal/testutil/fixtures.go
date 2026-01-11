@@ -39,7 +39,6 @@ func TestFacts() []storage.Fact {
 			ID:        1,
 			UserID:    TestUserID,
 			Type:      "identity",
-			Entity:    "User",
 			Content:   "Software engineer",
 			TopicID:   nil,
 			CreatedAt: time.Now().Add(-24 * time.Hour),
@@ -48,7 +47,6 @@ func TestFacts() []storage.Fact {
 			ID:        2,
 			UserID:    TestUserID,
 			Type:      "preference",
-			Entity:    "User",
 			Content:   "Prefers Go programming language",
 			TopicID:   nil,
 			CreatedAt: time.Now().Add(-12 * time.Hour),
@@ -57,7 +55,6 @@ func TestFacts() []storage.Fact {
 			ID:        3,
 			UserID:    TestUserID,
 			Type:      "interest",
-			Entity:    "User",
 			Content:   "Interested in AI and machine learning",
 			TopicID:   nil,
 			CreatedAt: time.Now().Add(-6 * time.Hour),
@@ -68,7 +65,7 @@ func TestFacts() []storage.Fact {
 // TestProfileFacts returns facts that would be included in a user profile.
 func TestProfileFacts() []storage.Fact {
 	facts := TestFacts()
-	// Mark first two as profile facts (entity = "User")
+	// Return first two as profile facts
 	return facts[:2]
 }
 

@@ -42,15 +42,31 @@ type RerankerAgentConfig struct {
 	TargetContextChars int    `yaml:"target_context_chars" env:"LAPLACED_RERANKER_TARGET_CONTEXT_CHARS"`
 }
 
+// ArchivistAgentConfig extends AgentConfig with archivist-specific settings.
+type ArchivistAgentConfig struct {
+	AgentConfig   `yaml:",inline"`
+	ThinkingLevel string `yaml:"thinking_level" env:"LAPLACED_ARCHIVIST_THINKING_LEVEL"`
+	Timeout       string `yaml:"timeout" env:"LAPLACED_ARCHIVIST_TIMEOUT"`
+	MaxToolCalls  int    `yaml:"max_tool_calls" env:"LAPLACED_ARCHIVIST_MAX_TOOL_CALLS"`
+}
+
+// GetModel returns the archivist's model, falling back to default if not set.
+func (a *ArchivistAgentConfig) GetModel(defaultModel string) string {
+	if a.Model != "" {
+		return a.Model
+	}
+	return defaultModel
+}
+
 // AgentsConfig defines all agents in the system.
 type AgentsConfig struct {
-	Default   AgentConfig         `yaml:"default"`   // Default model for all agents
-	Chat      AgentConfig         `yaml:"chat"`      // Main bot - talks to users
-	Archivist AgentConfig         `yaml:"archivist"` // Extracts facts from conversations
-	Enricher  AgentConfig         `yaml:"enricher"`  // Expands search queries
-	Reranker  RerankerAgentConfig `yaml:"reranker"`  // Filters and ranks RAG candidates
-	Splitter  AgentConfig         `yaml:"splitter"`  // Splits large topics
-	Merger    AgentConfig         `yaml:"merger"`    // Merges similar topics
+	Default   AgentConfig          `yaml:"default"`   // Default model for all agents
+	Chat      AgentConfig          `yaml:"chat"`      // Main bot - talks to users
+	Archivist ArchivistAgentConfig `yaml:"archivist"` // Extracts facts and people from conversations
+	Enricher  AgentConfig          `yaml:"enricher"`  // Expands search queries
+	Reranker  RerankerAgentConfig  `yaml:"reranker"`  // Filters and ranks RAG candidates
+	Splitter  AgentConfig          `yaml:"splitter"`  // Splits large topics
+	Merger    AgentConfig          `yaml:"merger"`    // Merges similar topics
 }
 
 // GetModel returns the agent's model, falling back to default if not set.

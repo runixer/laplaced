@@ -190,11 +190,14 @@ type Plugin struct {
 }
 
 // ReasoningConfig controls the model's internal reasoning behavior.
-// Supported effort levels: "minimal", "low", "medium", "high".
+// For Gemini 3: effort levels "minimal", "low", "medium", "high".
+// For other models: max_tokens (1024-128000) controls reasoning depth.
+//
+// NOTE: response-healing plugin breaks reasoning visibility when combined with json_object format.
 type ReasoningConfig struct {
-	Enabled   bool   `json:"enabled,omitempty"`
-	Effort    string `json:"effort,omitempty"`
-	MaxTokens int    `json:"max_tokens,omitempty"`
+	Effort    string `json:"effort,omitempty"`     // Gemini 3: "minimal", "low", "medium", "high"
+	MaxTokens int    `json:"max_tokens,omitempty"` // Other models: token budget for reasoning
+	Exclude   bool   `json:"exclude,omitempty"`    // Suppress reasoning from response
 }
 
 type ChatCompletionRequest struct {
@@ -329,87 +332,15 @@ func NewClientWithBaseURL(logger *slog.Logger, apiKey, proxyURL, baseURL string)
 	}, nil
 }
 
-// loggableMessage is a version of the Message struct for logging, omitting large data fields.
-type loggableMessage struct {
-	Role       string         `json:"role"`
-	Content    []loggablePart `json:"content"`
-	ToolCalls  []ToolCall     `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-}
-
-// loggablePart represents a part of a message for logging purposes.
-type loggablePart struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
-	FileName string `json:"filename,omitempty"`
-}
-
 func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletionRequest) (ChatCompletionResponse, error) {
 	startTime := time.Now()
 	jt := jobtype.FromContext(ctx).String()
 
-	// Create a loggable version of the request
-	loggableMessages := make([]loggableMessage, 0, len(req.Messages))
-	for _, msg := range req.Messages {
-		logMsg := loggableMessage{
-			Role:       msg.Role,
-			ToolCalls:  msg.ToolCalls,
-			ToolCallID: msg.ToolCallID,
-		}
-		if msg.Content != nil {
-			if contentParts, ok := msg.Content.([]interface{}); ok {
-				for _, part := range contentParts {
-					switch p := part.(type) {
-					case TextPart:
-						const maxLoggableTextLength = 256
-						logText := p.Text
-						if len(logText) > maxLoggableTextLength {
-							logText = logText[:maxLoggableTextLength] + "... (truncated)"
-						}
-						logMsg.Content = append(logMsg.Content, loggablePart{Type: p.Type, Text: logText})
-					case ImagePart:
-						logMsg.Content = append(logMsg.Content, loggablePart{Type: p.Type, FileName: "image.jpg"}) // Placeholder
-					case FilePart:
-						logMsg.Content = append(logMsg.Content, loggablePart{Type: p.Type, FileName: p.File.FileName})
-					}
-				}
-			} else if contentStr, ok := msg.Content.(string); ok {
-				// Handle string content (which might happen if we reuse response messages)
-				const maxLoggableTextLength = 256
-				logText := contentStr
-				if len(logText) > maxLoggableTextLength {
-					logText = logText[:maxLoggableTextLength] + "... (truncated)"
-				}
-				logMsg.Content = append(logMsg.Content, loggablePart{Type: "text", Text: logText})
-			}
-		}
-		loggableMessages = append(loggableMessages, logMsg)
-	}
-
-	loggableReq := struct {
-		Model          string            `json:"model"`
-		Messages       []loggableMessage `json:"messages"`
-		Plugins        []Plugin          `json:"plugins,omitempty"`
-		Tools          []Tool            `json:"tools,omitempty"`
-		ToolChoice     any               `json:"tool_choice,omitempty"`
-		ResponseFormat interface{}       `json:"response_format,omitempty"`
-		Reasoning      *ReasoningConfig  `json:"reasoning,omitempty"`
-	}{
-		Model:          req.Model,
-		Messages:       loggableMessages,
-		Plugins:        req.Plugins,
-		Tools:          req.Tools,
-		ToolChoice:     req.ToolChoice,
-		ResponseFormat: req.ResponseFormat,
-		Reasoning:      req.Reasoning,
-	}
-
+	// Log request summary (full details available in Agent Debug UI)
 	c.logger.Debug("Sending request to OpenRouter",
 		"model", req.Model,
 		"message_count", len(req.Messages),
-		"plugins", req.Plugins,
 		"tools_count", len(req.Tools),
-		"request_structure", loggableReq,
 	)
 
 	body, err := json.Marshal(req)

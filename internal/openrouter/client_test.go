@@ -145,14 +145,11 @@ func TestCreateChatCompletionLogging(t *testing.T) {
 
 		if msg, ok := logEntry["msg"].(string); ok && msg == "Sending request to OpenRouter" {
 			foundRequestLog = true
-			requestStructure, ok := logEntry["request_structure"]
-			assert.True(t, ok, "Log entry should have request_structure field")
-			assert.IsType(t, map[string]interface{}{}, requestStructure, "request_structure should be a JSON object, not a string")
-
-			// Also check other fields
+			// Check basic fields (full request details are in Agent Debug UI, not logs)
 			assert.Equal(t, "test_model", logEntry["model"])
-			// We now log string content (truncated if necessary), so this should be present.
-			assert.Contains(t, string(line), "This is a secret message that should not be logged.")
+			assert.NotNil(t, logEntry["message_count"])
+			// Verify we don't log sensitive content anymore
+			assert.NotContains(t, string(line), "This is a secret message that should not be logged.")
 		}
 	}
 	assert.True(t, foundRequestLog, "Did not find the 'Sending request to OpenRouter' log entry")
@@ -320,6 +317,38 @@ func TestFilterReasoningForLog(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestChatCompletionRequestSerializesReasoning(t *testing.T) {
+	req := ChatCompletionRequest{
+		Model: "google/gemini-3-flash-preview",
+		Messages: []Message{
+			{Role: "user", Content: "test"},
+		},
+		Reasoning: &ReasoningConfig{
+			Effort: "high",
+		},
+		ResponseFormat: ResponseFormat{Type: "json_object"},
+		Plugins:        []Plugin{{ID: "response-healing"}},
+	}
+
+	body, err := json.Marshal(req)
+	assert.NoError(t, err)
+
+	// Check that reasoning is in the serialized JSON
+	var parsed map[string]interface{}
+	err = json.Unmarshal(body, &parsed)
+	assert.NoError(t, err)
+
+	reasoning, ok := parsed["reasoning"].(map[string]interface{})
+	assert.True(t, ok, "reasoning should be present in JSON")
+	assert.Equal(t, "high", reasoning["effort"])
+
+	// Also check plugins and response_format
+	_, ok = parsed["plugins"]
+	assert.True(t, ok, "plugins should be present")
+	_, ok = parsed["response_format"]
+	assert.True(t, ok, "response_format should be present")
 }
 
 // timeoutError implements net.Error for testing

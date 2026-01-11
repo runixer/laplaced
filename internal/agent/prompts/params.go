@@ -57,23 +57,24 @@ type RerankerParams struct {
 
 // RerankerUserParams for rag.reranker_user_prompt template.
 type RerankerUserParams struct {
-	Date            string // Current date
-	Query           string // Original user query
-	EnrichedQuery   string // Extended search context from Enricher
-	CurrentMessages string // Recent conversation messages
-	Candidates      string // Formatted candidate list (ID | Date | Size | Topic)
+	Date             string // Current date
+	Query            string // Original user query
+	EnrichedQuery    string // Extended search context from Enricher
+	CurrentMessages  string // Recent conversation messages
+	Candidates       string // Formatted candidate list (ID | Date | Size | Topic)
+	PeopleCandidates string // Formatted people candidate list (v0.5.1)
 }
 
 // ArchivistParams for memory.system_prompt template.
-// The Archivist agent extracts and manages facts from conversations.
+// The Archivist agent extracts and manages facts and people from conversations.
+// Note: Facts are now ONLY about User. Info about other people goes to the `people` table.
 type ArchivistParams struct {
-	Date            string // Current date
-	UserFactsLimit  int    // Maximum facts allowed for user
-	UserFactsCount  int    // Current count of user facts
-	OtherFactsCount int    // Current count of facts about others
-	UserFacts       string // Formatted existing facts about user
-	OtherFacts      string // Formatted existing facts about others
-	Conversation    string // Conversation to analyze
+	Date           string // Current date
+	UserFactsLimit int    // Maximum facts allowed for user
+	UserFactsCount int    // Current count of user facts
+	UserFacts      string // Formatted existing facts about user
+	Conversation   string // Conversation to analyze
+	KnownPeople    string // Formatted known people names for dedup (v0.5.1)
 }
 
 // LaplaceParams for bot.system_prompt template.

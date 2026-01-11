@@ -43,10 +43,13 @@ agents:
     name: "Laplaced"
     model: "google/gemini-3-pro-preview"
 
-  # Archivist - extracts facts from conversations
+  # Archivist - extracts facts and people from conversations
   archivist:
     name: "Archivist"
     # model: uses default
+    thinking_level: "high"  # High reasoning for better fact/people extraction quality
+    timeout: "120s"           # Longer timeout for multi-turn
+    max_tool_calls: 2         # Usually 0-1, max 2 for complex sessions
 
   # Enricher - expands search queries for RAG
   enricher:
@@ -104,6 +107,10 @@ tools:
   - name: "search_history"
     model: "memory"
   - name: "manage_memory"
+    model: "memory"
+  - name: "search_people"
+    model: "memory"
+  - name: "manage_people"
     model: "memory"
 
 # Bot Configuration

@@ -28,6 +28,12 @@ type FactVectorItem struct {
 	Embedding []float32
 }
 
+// PersonVectorItem stores a person's embedding for vector search.
+type PersonVectorItem struct {
+	PersonID  int64
+	Embedding []float32
+}
+
 // ProcessingStats contains detailed statistics about session processing.
 type ProcessingStats struct {
 	MessagesProcessed int `json:"messages_processed"`
@@ -36,6 +42,10 @@ type ProcessingStats struct {
 	FactsCreated      int `json:"facts_created"`
 	FactsUpdated      int `json:"facts_updated"`
 	FactsDeleted      int `json:"facts_deleted"`
+	// People stats (v0.5.1)
+	PeopleAdded   int `json:"people_added"`
+	PeopleUpdated int `json:"people_updated"`
+	PeopleMerged  int `json:"people_merged"`
 	// Usage stats from API calls
 	PromptTokens     int      `json:"prompt_tokens"`
 	CompletionTokens int      `json:"completion_tokens"`
@@ -113,22 +123,27 @@ type Service struct {
 	factHistoryRepo      storage.FactHistoryRepository
 	msgRepo              storage.MessageRepository
 	maintenanceRepo      storage.MaintenanceRepository
+	peopleRepo           storage.PeopleRepository // v0.5.1: People repository
 	client               openrouter.Client
 	memoryService        *memory.Service
 	translator           *i18n.Translator
 	agentLogger          *agentlog.Logger
-	enricherAgent        agent.Agent                 // Query enrichment agent
-	splitterAgent        agent.Agent                 // Topic splitting agent
-	mergerAgent          agent.Agent                 // Topic merging agent
-	rerankerAgent        agent.Agent                 // Topic reranking agent
-	topicVectors         map[int64][]TopicVectorItem // UserID -> []TopicVectorItem
-	factVectors          map[int64][]FactVectorItem  // UserID -> []FactVectorItem
-	maxLoadedTopicID     int64                       // Track max loaded topic ID for incremental loading
-	maxLoadedFactID      int64                       // Track max loaded fact ID for incremental loading
+	enricherAgent        agent.Agent                  // Query enrichment agent
+	splitterAgent        agent.Agent                  // Topic splitting agent
+	mergerAgent          agent.Agent                  // Topic merging agent
+	rerankerAgent        agent.Agent                  // Topic reranking agent
+	topicVectors         map[int64][]TopicVectorItem  // UserID -> []TopicVectorItem
+	factVectors          map[int64][]FactVectorItem   // UserID -> []FactVectorItem
+	peopleVectors        map[int64][]PersonVectorItem // UserID -> []PersonVectorItem (v0.5.1)
+	maxLoadedTopicID     int64                        // Track max loaded topic ID for incremental loading
+	maxLoadedFactID      int64                        // Track max loaded fact ID for incremental loading
+	maxLoadedPersonID    int64                        // Track max loaded person ID for incremental loading (v0.5.1)
 	mu                   sync.RWMutex
 	stopChan             chan struct{}
 	consolidationTrigger chan struct{}
 	wg                   sync.WaitGroup
+	processingTopics     sync.Map // Track topics currently being processed for facts (prevents race condition)
+	processingUsers      sync.Map // Track users currently being processed (prevents concurrent people merges)
 }
 
 // NewService creates a new RAG service.
@@ -146,6 +161,7 @@ func NewService(logger *slog.Logger, cfg *config.Config, topicRepo storage.Topic
 		translator:           translator,
 		topicVectors:         make(map[int64][]TopicVectorItem),
 		factVectors:          make(map[int64][]FactVectorItem),
+		peopleVectors:        make(map[int64][]PersonVectorItem),
 		stopChan:             make(chan struct{}),
 		consolidationTrigger: make(chan struct{}, 1),
 	}
@@ -174,6 +190,36 @@ func (s *Service) SetMergerAgent(a agent.Agent) {
 // SetRerankerAgent sets the topic reranking agent.
 func (s *Service) SetRerankerAgent(a agent.Agent) {
 	s.rerankerAgent = a
+}
+
+// tryStartProcessingTopic attempts to mark a topic as being processed.
+// Returns true if this goroutine should process it, false if another is already processing.
+func (s *Service) tryStartProcessingTopic(topicID int64) bool {
+	_, alreadyProcessing := s.processingTopics.LoadOrStore(topicID, true)
+	return !alreadyProcessing
+}
+
+// finishProcessingTopic marks a topic as no longer being processed.
+func (s *Service) finishProcessingTopic(topicID int64) {
+	s.processingTopics.Delete(topicID)
+}
+
+// tryStartProcessingUser attempts to mark a user as being processed for fact extraction.
+// Returns true if this goroutine should process, false if another is already processing.
+// This prevents concurrent people merges for the same user (BUG-013).
+func (s *Service) tryStartProcessingUser(userID int64) bool {
+	_, alreadyProcessing := s.processingUsers.LoadOrStore(userID, true)
+	return !alreadyProcessing
+}
+
+// finishProcessingUser marks a user as no longer being processed for fact extraction.
+func (s *Service) finishProcessingUser(userID int64) {
+	s.processingUsers.Delete(userID)
+}
+
+// SetPeopleRepository sets the people repository for person search (v0.5.1).
+func (s *Service) SetPeopleRepository(pr storage.PeopleRepository) {
+	s.peopleRepo = pr
 }
 
 // Start initializes and starts the RAG service background loops.
@@ -233,9 +279,9 @@ func (s *Service) GetRecentTopics(userID int64, limit int) ([]storage.TopicExten
 	return result.Data, nil
 }
 
-// ReloadVectors fully reloads all topic and fact vectors from the database.
+// ReloadVectors fully reloads all topic, fact, and people vectors from the database.
 func (s *Service) ReloadVectors() error {
-	// Full reload on startup - load all topics and facts
+	// Full reload on startup - load all topics, facts, and people
 	topics, err := s.topicRepo.GetAllTopics()
 	if err != nil {
 		return fmt.Errorf("load topics: %w", err)
@@ -246,14 +292,26 @@ func (s *Service) ReloadVectors() error {
 		return fmt.Errorf("load facts: %w", err)
 	}
 
+	// v0.5.1: Load people vectors
+	var people []storage.Person
+	if s.peopleRepo != nil {
+		people, err = s.peopleRepo.GetAllPeople()
+		if err != nil {
+			s.logger.Warn("failed to load people for vector index", "error", err)
+			people = nil // Continue without people
+		}
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	// Reset maps for full reload
 	s.topicVectors = make(map[int64][]TopicVectorItem)
 	s.factVectors = make(map[int64][]FactVectorItem)
+	s.peopleVectors = make(map[int64][]PersonVectorItem)
 	s.maxLoadedTopicID = 0
 	s.maxLoadedFactID = 0
+	s.maxLoadedPersonID = 0
 
 	tCount := 0
 	for _, t := range topics {
@@ -283,16 +341,32 @@ func (s *Service) ReloadVectors() error {
 		}
 	}
 
-	s.logger.Info("Loaded vectors (full)", "topics", tCount, "facts", fCount)
+	// v0.5.1: Load people vectors
+	pCount := 0
+	for _, p := range people {
+		if len(p.Embedding) > 0 {
+			s.peopleVectors[p.UserID] = append(s.peopleVectors[p.UserID], PersonVectorItem{
+				PersonID:  p.ID,
+				Embedding: p.Embedding,
+			})
+			pCount++
+			if p.ID > s.maxLoadedPersonID {
+				s.maxLoadedPersonID = p.ID
+			}
+		}
+	}
+
+	s.logger.Info("Loaded vectors (full)", "topics", tCount, "facts", fCount, "people", pCount)
 	UpdateVectorIndexMetrics(tCount, fCount)
 	return nil
 }
 
-// LoadNewVectors incrementally loads only new topics and facts since last load.
+// LoadNewVectors incrementally loads only new topics, facts, and people since last load.
 func (s *Service) LoadNewVectors() error {
 	s.mu.RLock()
 	minTopicID := s.maxLoadedTopicID
 	minFactID := s.maxLoadedFactID
+	minPersonID := s.maxLoadedPersonID
 	s.mu.RUnlock()
 
 	// Load only new topics
@@ -307,8 +381,18 @@ func (s *Service) LoadNewVectors() error {
 		return fmt.Errorf("load new facts: %w", err)
 	}
 
+	// v0.5.1: Load only new people
+	var people []storage.Person
+	if s.peopleRepo != nil {
+		people, err = s.peopleRepo.GetPeopleAfterID(minPersonID)
+		if err != nil {
+			s.logger.Warn("failed to load new people", "error", err)
+			people = nil
+		}
+	}
+
 	// Early return if nothing new
-	if len(topics) == 0 && len(facts) == 0 {
+	if len(topics) == 0 && len(facts) == 0 && len(people) == 0 {
 		return nil
 	}
 
@@ -316,7 +400,7 @@ func (s *Service) LoadNewVectors() error {
 	defer s.mu.Unlock()
 
 	// Check if another goroutine already loaded these vectors while we were fetching
-	if minTopicID < s.maxLoadedTopicID || minFactID < s.maxLoadedFactID {
+	if minTopicID < s.maxLoadedTopicID || minFactID < s.maxLoadedFactID || minPersonID < s.maxLoadedPersonID {
 		s.logger.Debug("Skipping incremental load - already loaded by another goroutine")
 		return nil
 	}
@@ -349,8 +433,23 @@ func (s *Service) LoadNewVectors() error {
 		}
 	}
 
-	if tCount > 0 || fCount > 0 {
-		s.logger.Info("Loaded vectors (incremental)", "new_topics", tCount, "new_facts", fCount)
+	// v0.5.1: Load people vectors
+	pCount := 0
+	for _, p := range people {
+		if len(p.Embedding) > 0 {
+			s.peopleVectors[p.UserID] = append(s.peopleVectors[p.UserID], PersonVectorItem{
+				PersonID:  p.ID,
+				Embedding: p.Embedding,
+			})
+			pCount++
+			if p.ID > s.maxLoadedPersonID {
+				s.maxLoadedPersonID = p.ID
+			}
+		}
+	}
+
+	if tCount > 0 || fCount > 0 || pCount > 0 {
+		s.logger.Info("Loaded vectors (incremental)", "new_topics", tCount, "new_facts", fCount, "new_people", pCount)
 		// Calculate total counts for metrics
 		totalTopics := 0
 		for _, vectors := range s.topicVectors {

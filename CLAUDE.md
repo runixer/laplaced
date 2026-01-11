@@ -63,6 +63,7 @@ internal/
 - **Structured logging**: Use `*slog.Logger` passed via DI. Always use structured fields: `logger.Info("msg", "key", value)`.
 - **Context propagation**: Pass `context.Context` to all I/O, DB, and LLM operations.
 - **Error wrapping**: Always wrap errors with context: `fmt.Errorf("failed to X: %w", err)`.
+- **Centralized formatting**: When multiple agents need similar data formatting (people, facts, topics), use a single function in `internal/storage/format.go` with tag/mode parameter, not N separate functions. Example: `FormatPeople(people []Person, tag string)` with constants `TagInnerCircle`, `TagRelevantPeople`, `TagPeople`. This avoids format drift where different agents format the same data differently.
 
 ### Data Flow
 

@@ -24,9 +24,8 @@ type SharedContext struct {
 	// Topics
 	RecentTopics string // Formatted <recent_topics>
 
-	// Social Graph (v0.5 - nil until implemented)
-	// People      []storage.Person
-	// PeopleGraph string // Formatted for prompts
+	// Social Graph (v0.5.1)
+	InnerCircle string // Formatted <inner_circle> (Work_Inner + Family)
 
 	// Session Context (v0.5 - nil until implemented)
 	// LastSummary *storage.SessionSummary
@@ -38,10 +37,11 @@ type SharedContext struct {
 
 // ContextService loads and manages SharedContext.
 type ContextService struct {
-	factRepo  storage.FactRepository
-	topicRepo storage.TopicRepository
-	cfg       *config.Config
-	logger    *slog.Logger
+	factRepo   storage.FactRepository
+	topicRepo  storage.TopicRepository
+	peopleRepo storage.PeopleRepository
+	cfg        *config.Config
+	logger     *slog.Logger
 }
 
 // NewContextService creates a new ContextService.
@@ -57,6 +57,11 @@ func NewContextService(
 		cfg:       cfg,
 		logger:    logger.With("component", "context_service"),
 	}
+}
+
+// SetPeopleRepository sets the people repository for loading inner circle.
+func (c *ContextService) SetPeopleRepository(repo storage.PeopleRepository) {
+	c.peopleRepo = repo
 }
 
 // Load creates SharedContext for a user.
@@ -94,7 +99,39 @@ func (c *ContextService) Load(ctx context.Context, userID int64) *SharedContext 
 		shared.RecentTopics = "<recent_topics>\n</recent_topics>"
 	}
 
+	// Load inner circle people (v0.5.1)
+	if c.peopleRepo != nil {
+		people, err := c.getInnerCirclePeople(userID)
+		if err != nil {
+			c.logger.Warn("failed to load inner circle people", "user_id", userID, "error", err)
+		} else if len(people) > 0 {
+			shared.InnerCircle = storage.FormatPeople(people, storage.TagInnerCircle)
+		}
+	}
+
+	if shared.InnerCircle == "" {
+		shared.InnerCircle = "<inner_circle>\n</inner_circle>"
+	}
+
 	return shared
+}
+
+// getInnerCirclePeople returns people from Work_Inner and Family circles.
+func (c *ContextService) getInnerCirclePeople(userID int64) ([]storage.Person, error) {
+	people, err := c.peopleRepo.GetPeople(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter to inner circles only
+	var innerCircle []storage.Person
+	for _, p := range people {
+		if p.Circle == "Work_Inner" || p.Circle == "Family" {
+			innerCircle = append(innerCircle, p)
+		}
+	}
+
+	return innerCircle, nil
 }
 
 // getRecentTopics returns the N most recent topics for a user with message counts.

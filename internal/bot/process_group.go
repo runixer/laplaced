@@ -46,6 +46,9 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 
 	logger.Info("processing message group", "message_count", len(group.Messages))
 
+	// v0.5.1: Extract people from forwarded messages
+	b.extractForwardedPeople(ctx, group.UserID, group.Messages, logger)
+
 	chatID := lastMsg.Chat.ID
 
 	// Use non-cancellable context for all operations that should complete during shutdown.
@@ -468,4 +471,147 @@ func (b *Bot) finalizeResponse(chatID int64, messageThreadID int, userID int64, 
 	}
 
 	return responses, nil
+}
+
+// extractForwardedPeople extracts people information from forwarded messages.
+// When a message is forwarded from a user, we can capture their telegram_id and username
+// for the People graph (v0.5.1).
+func (b *Bot) extractForwardedPeople(ctx context.Context, userID int64, messages []*telegram.Message, logger *slog.Logger) {
+	if b.peopleRepo == nil {
+		return
+	}
+
+	// Track stats for aggregated logging
+	var created, updated, errors int
+	var createdNames, updatedNames []string
+
+	for _, msg := range messages {
+		if msg.ForwardOrigin == nil {
+			continue
+		}
+
+		// Only process messages forwarded from users (not channels/hidden)
+		if msg.ForwardOrigin.SenderUser == nil {
+			continue
+		}
+
+		sender := msg.ForwardOrigin.SenderUser
+		if sender.IsBot {
+			continue // Skip bots
+		}
+		if sender.ID == userID {
+			continue // Skip self (user forwarding their own messages)
+		}
+
+		// Build display name from first/last name
+		displayName := sender.FirstName
+		if sender.LastName != "" {
+			displayName = displayName + " " + sender.LastName
+		}
+		if displayName == "" {
+			if sender.Username != "" {
+				displayName = sender.Username
+			} else {
+				continue // No name to use
+			}
+		}
+
+		// Check if we already have this person by telegram_id
+		existingPerson, err := b.peopleRepo.FindPersonByTelegramID(userID, sender.ID)
+		if err != nil {
+			errors++
+			continue
+		}
+
+		if existingPerson != nil {
+			// Update last_seen and mention_count
+			existingPerson.LastSeen = time.Now()
+			existingPerson.MentionCount++
+			if sender.Username != "" && (existingPerson.Username == nil || *existingPerson.Username != sender.Username) {
+				existingPerson.Username = &sender.Username
+			}
+			if err := b.peopleRepo.UpdatePerson(*existingPerson); err != nil {
+				errors++
+			} else {
+				updated++
+				// Track unique names
+				found := false
+				for _, n := range updatedNames {
+					if n == existingPerson.DisplayName {
+						found = true
+						break
+					}
+				}
+				if !found {
+					updatedNames = append(updatedNames, existingPerson.DisplayName)
+				}
+			}
+		} else {
+			// Check if person exists by username or name
+			var foundPerson *storage.Person
+			if sender.Username != "" {
+				foundPerson, _ = b.peopleRepo.FindPersonByUsername(userID, sender.Username)
+			}
+			if foundPerson == nil {
+				foundPerson, _ = b.peopleRepo.FindPersonByName(userID, displayName)
+			}
+
+			if foundPerson != nil {
+				// Update existing person with telegram_id
+				foundPerson.TelegramID = &sender.ID
+				foundPerson.LastSeen = time.Now()
+				foundPerson.MentionCount++
+				if sender.Username != "" && (foundPerson.Username == nil || *foundPerson.Username != sender.Username) {
+					foundPerson.Username = &sender.Username
+				}
+				if err := b.peopleRepo.UpdatePerson(*foundPerson); err != nil {
+					errors++
+				} else {
+					updated++
+					found := false
+					for _, n := range updatedNames {
+						if n == foundPerson.DisplayName {
+							found = true
+							break
+						}
+					}
+					if !found {
+						updatedNames = append(updatedNames, foundPerson.DisplayName)
+					}
+				}
+			} else {
+				// Create new person from forwarded message
+				now := time.Now()
+				newPerson := storage.Person{
+					UserID:       userID,
+					DisplayName:  displayName,
+					TelegramID:   &sender.ID,
+					Circle:       "Other",
+					FirstSeen:    now,
+					LastSeen:     now,
+					MentionCount: 1,
+				}
+				if sender.Username != "" {
+					newPerson.Username = &sender.Username
+				}
+
+				if _, err := b.peopleRepo.AddPerson(newPerson); err != nil {
+					errors++
+				} else {
+					created++
+					createdNames = append(createdNames, displayName)
+				}
+			}
+		}
+	}
+
+	// Log aggregated summary
+	if created > 0 || updated > 0 {
+		logger.Info("extracted people from forwarded messages",
+			"created", created,
+			"updated", updated,
+			"created_names", createdNames,
+			"updated_names", updatedNames,
+			"errors", errors)
+	}
 }

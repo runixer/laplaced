@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/runixer/laplaced/internal/agent"
@@ -27,6 +28,7 @@ type Service struct {
 	userRepo        storage.UserRepository
 	factHistoryRepo storage.FactHistoryRepository
 	topicRepo       storage.TopicRepository
+	peopleRepo      storage.PeopleRepository
 	orClient        openrouter.Client
 	translator      *i18n.Translator
 	vectorSearcher  VectorSearcher
@@ -63,10 +65,14 @@ func (s *Service) SetArchivistAgent(a agent.Agent) {
 	s.archivistAgent = a
 }
 
+// SetPeopleRepository sets the people repository for person extraction.
+func (s *Service) SetPeopleRepository(pr storage.PeopleRepository) {
+	s.peopleRepo = pr
+}
+
 // MemoryUpdate represents the changes returned by the LLM
 type MemoryUpdate struct {
 	Added []struct {
-		Entity     string `json:"entity"`
 		Relation   string `json:"relation"`
 		Content    string `json:"content"`
 		Category   string `json:"category"`
@@ -92,6 +98,10 @@ type FactStats struct {
 	Created int
 	Updated int
 	Deleted int
+	// People stats (v0.5.1)
+	PeopleAdded   int
+	PeopleUpdated int
+	PeopleMerged  int
 	// Usage tracking from API calls
 	PromptTokens     int
 	CompletionTokens int
@@ -144,6 +154,16 @@ func (s *Service) ProcessSessionWithStats(ctx context.Context, userID int64, mes
 		return FactStats{}, fmt.Errorf("failed to get facts: %w", err)
 	}
 
+	// 1b. Load current people (v0.5.1)
+	var people []storage.Person
+	if s.peopleRepo != nil {
+		people, err = s.peopleRepo.GetPeople(userID)
+		if err != nil {
+			s.logger.Warn("failed to load people for archivist", "error", err)
+			people = nil // Continue without people context
+		}
+	}
+
 	// Fetch user info for formatting
 	var user *storage.User
 	users, err := s.userRepo.GetAllUsers()
@@ -158,16 +178,30 @@ func (s *Service) ProcessSessionWithStats(ctx context.Context, userID int64, mes
 		s.logger.Warn("failed to fetch users for formatting", "error", err)
 	}
 
-	// 2. Prepare prompt
-	update, requestInput, extractUsage, err := s.extractMemoryUpdate(ctx, userID, messages, facts, referenceDate, user)
+	// 2. Prepare prompt and extract memory update
+	archivistResult, requestInput, extractUsage, err := s.extractMemoryUpdate(ctx, userID, messages, facts, people, referenceDate, user)
 	if err != nil {
 		return FactStats{}, fmt.Errorf("failed to extract memory update: %w", err)
 	}
 
-	// 3. Apply updates and collect stats
+	// 3. Apply fact updates and collect stats
+	update := convertArchivistResult(archivistResult)
 	stats, err := s.applyUpdateWithStats(ctx, userID, update, facts, referenceDate, topicID, requestInput)
 	if err != nil {
 		return FactStats{}, fmt.Errorf("failed to apply memory update: %w", err)
+	}
+
+	// 4. Apply people updates (v0.5.1)
+	if s.peopleRepo != nil && archivistResult != nil {
+		peopleStats, err := s.applyPeopleUpdates(ctx, userID, archivistResult.People, people, referenceDate)
+		if err != nil {
+			s.logger.Error("failed to apply people updates", "error", err)
+		} else {
+			stats.PeopleAdded = peopleStats.Added
+			stats.PeopleUpdated = peopleStats.Updated
+			stats.PeopleMerged = peopleStats.Merged
+			stats.AddEmbeddingUsage(peopleStats.EmbeddingTokens, peopleStats.EmbeddingCost)
+		}
 	}
 
 	// Add LLM usage from extraction call
@@ -176,15 +210,15 @@ func (s *Service) ProcessSessionWithStats(ctx context.Context, userID int64, mes
 	return stats, nil
 }
 
-func (s *Service) extractMemoryUpdate(ctx context.Context, userID int64, session []storage.Message, facts []storage.Fact, referenceDate time.Time, user *storage.User) (*MemoryUpdate, string, chatUsage, error) {
+func (s *Service) extractMemoryUpdate(ctx context.Context, userID int64, session []storage.Message, facts []storage.Fact, people []storage.Person, referenceDate time.Time, user *storage.User) (*archivist.Result, string, chatUsage, error) {
 	if s.archivistAgent == nil {
 		return nil, "", chatUsage{}, fmt.Errorf("archivist agent not configured")
 	}
-	return s.extractMemoryUpdateViaAgent(ctx, userID, session, facts, referenceDate, user)
+	return s.extractMemoryUpdateViaAgent(ctx, userID, session, facts, people, referenceDate, user)
 }
 
-// extractMemoryUpdateViaAgent delegates fact extraction to the Archivist agent.
-func (s *Service) extractMemoryUpdateViaAgent(ctx context.Context, userID int64, session []storage.Message, facts []storage.Fact, referenceDate time.Time, user *storage.User) (*MemoryUpdate, string, chatUsage, error) {
+// extractMemoryUpdateViaAgent delegates fact and people extraction to the Archivist agent.
+func (s *Service) extractMemoryUpdateViaAgent(ctx context.Context, userID int64, session []storage.Message, facts []storage.Fact, people []storage.Person, referenceDate time.Time, user *storage.User) (*archivist.Result, string, chatUsage, error) {
 	startTime := time.Now()
 	defer func() {
 		RecordMemoryExtraction(time.Since(startTime).Seconds())
@@ -194,6 +228,7 @@ func (s *Service) extractMemoryUpdateViaAgent(ctx context.Context, userID int64,
 		Params: map[string]any{
 			archivist.ParamMessages:      session,
 			archivist.ParamFacts:         facts,
+			archivist.ParamPeople:        people,
 			archivist.ParamReferenceDate: referenceDate,
 			archivist.ParamUser:          user,
 			"user_id":                    userID,
@@ -215,25 +250,21 @@ func (s *Service) extractMemoryUpdateViaAgent(ctx context.Context, userID int64,
 		return nil, "", chatUsage{}, fmt.Errorf("unexpected result type from archivist agent")
 	}
 
-	// Convert archivist.Result to MemoryUpdate
-	update := convertArchivistResult(result)
-
 	usage := chatUsage{
 		PromptTokens:     resp.Tokens.Prompt,
 		CompletionTokens: resp.Tokens.Completion,
 		Cost:             resp.Tokens.Cost,
 	}
 
-	return update, resp.Content, usage, nil
+	return result, resp.Content, usage, nil
 }
 
 // convertArchivistResult converts archivist.Result to MemoryUpdate.
 func convertArchivistResult(result *archivist.Result) *MemoryUpdate {
 	update := &MemoryUpdate{}
 
-	for _, a := range result.Added {
+	for _, a := range result.Facts.Added {
 		update.Added = append(update.Added, struct {
-			Entity     string `json:"entity"`
 			Relation   string `json:"relation"`
 			Content    string `json:"content"`
 			Category   string `json:"category"`
@@ -241,7 +272,6 @@ func convertArchivistResult(result *archivist.Result) *MemoryUpdate {
 			Importance int    `json:"importance"`
 			Reason     string `json:"reason"`
 		}{
-			Entity:     a.Entity,
 			Relation:   a.Relation,
 			Content:    a.Content,
 			Category:   a.Category,
@@ -251,7 +281,7 @@ func convertArchivistResult(result *archivist.Result) *MemoryUpdate {
 		})
 	}
 
-	for _, u := range result.Updated {
+	for _, u := range result.Facts.Updated {
 		update.Updated = append(update.Updated, struct {
 			ID         int64  `json:"id"`
 			Content    string `json:"content"`
@@ -267,7 +297,7 @@ func convertArchivistResult(result *archivist.Result) *MemoryUpdate {
 		})
 	}
 
-	for _, r := range result.Removed {
+	for _, r := range result.Facts.Removed {
 		update.Removed = append(update.Removed, struct {
 			ID     int64  `json:"id"`
 			Reason string `json:"reason"`
@@ -299,7 +329,6 @@ func (s *Service) applyUpdateWithStats(ctx context.Context, userID int64, update
 
 		fact := storage.Fact{
 			UserID:      userID,
-			Entity:      added.Entity,
 			Relation:    added.Relation,
 			Content:     added.Content,
 			Category:    added.Category,
@@ -383,8 +412,7 @@ func (s *Service) applyUpdateWithStats(ctx context.Context, userID int64, update
 					OldContent:   existingFact.Content,
 					NewContent:   updated.Content,
 					Reason:       updated.Reason,
-					Category:     existingFact.Category, // Keep existing category or should we allow update? Schema doesn't support category update in MemoryUpdate struct yet.
-					Entity:       existingFact.Entity,
+					Category:     existingFact.Category,
 					Relation:     existingFact.Relation,
 					Importance:   updated.Importance,
 					TopicID:      tID,
@@ -400,13 +428,12 @@ func (s *Service) applyUpdateWithStats(ctx context.Context, userID int64, update
 	for _, removed := range update.Removed {
 		// Find existing fact for history
 		var oldContent string
-		var category, entity, relation string
+		var category, relation string
 		var importance int
 		for _, f := range currentFacts {
 			if f.ID == removed.ID {
 				oldContent = f.Content
 				category = f.Category
-				entity = f.Entity
 				relation = f.Relation
 				importance = f.Importance
 				break
@@ -431,7 +458,6 @@ func (s *Service) applyUpdateWithStats(ctx context.Context, userID int64, update
 					OldContent:   oldContent,
 					Reason:       removed.Reason,
 					Category:     category,
-					Entity:       entity,
 					Relation:     relation,
 					Importance:   importance,
 					TopicID:      tID,
@@ -492,7 +518,6 @@ func (s *Service) addFactWithHistory(fact storage.Fact, reason string, topicID *
 			NewContent:   fact.Content,
 			Reason:       reason,
 			Category:     fact.Category,
-			Entity:       fact.Entity,
 			Relation:     fact.Relation,
 			Importance:   fact.Importance,
 			TopicID:      topicID,
@@ -503,4 +528,466 @@ func (s *Service) addFactWithHistory(fact storage.Fact, reason string, topicID *
 	}
 
 	return id, nil
+}
+
+// PeopleStats contains statistics about people processing.
+type PeopleStats struct {
+	Added           int
+	Updated         int
+	Merged          int
+	EmbeddingTokens int
+	EmbeddingCost   *float64
+}
+
+// buildPersonEmbeddingText constructs text for person embedding from all searchable fields.
+// Includes display_name, username, aliases, and bio for comprehensive vector search.
+func buildPersonEmbeddingText(displayName string, username *string, aliases []string, bio string) string {
+	text := displayName
+	if username != nil && *username != "" {
+		text += " " + *username
+	}
+	for _, alias := range aliases {
+		text += " " + alias
+	}
+	if bio != "" {
+		text += " " + bio
+	}
+	return text
+}
+
+// applyPeopleUpdates applies people changes from the archivist result.
+func (s *Service) applyPeopleUpdates(ctx context.Context, userID int64, peopleResult archivist.PeopleResult, currentPeople []storage.Person, referenceDate time.Time) (PeopleStats, error) {
+	var stats PeopleStats
+
+	// Handle Added people
+	for _, added := range peopleResult.Added {
+		// Check if person already exists by name or alias
+		var existingPerson *storage.Person
+		var matchType string
+		for _, p := range currentPeople {
+			if p.DisplayName == added.DisplayName {
+				existingPerson = &p
+				matchType = "exact"
+				break
+			}
+			// Check aliases
+			for _, alias := range p.Aliases {
+				if alias == added.DisplayName {
+					existingPerson = &p
+					matchType = "alias"
+					break
+				}
+			}
+			if existingPerson != nil {
+				break
+			}
+		}
+
+		// Check for name prefix pattern (e.g., "Мария" vs "Мария Ивановна Петрова")
+		// This catches Russian naming patterns: first name → +patronymic → +surname
+		if existingPerson == nil {
+			for i := range currentPeople {
+				p := &currentPeople[i]
+				// New name starts with existing name (e.g., "Мария Ивановна" starts with "Мария")
+				if strings.HasPrefix(added.DisplayName, p.DisplayName+" ") && p.Circle == added.Circle {
+					existingPerson = p
+					matchType = "prefix"
+					break
+				}
+				// Existing name starts with new name (e.g., existing "Мария Ивановна", adding "Мария")
+				if strings.HasPrefix(p.DisplayName, added.DisplayName+" ") && p.Circle == added.Circle {
+					existingPerson = p
+					matchType = "prefix_reverse"
+					break
+				}
+			}
+		}
+
+		if existingPerson != nil {
+			if matchType == "prefix" || matchType == "prefix_reverse" {
+				// Convert add to update: rename existing person to fuller name and update bio
+				s.logger.Info("Detected name variation, converting add to update",
+					"new_name", added.DisplayName,
+					"existing_name", existingPerson.DisplayName,
+					"existing_id", existingPerson.ID,
+					"match_type", matchType)
+
+				// Use the fuller name as display_name
+				newDisplayName := added.DisplayName
+				if matchType == "prefix_reverse" {
+					newDisplayName = existingPerson.DisplayName // Keep existing fuller name
+				}
+
+				// Add old name to aliases if not already there
+				oldName := existingPerson.DisplayName
+				if matchType == "prefix_reverse" {
+					oldName = added.DisplayName
+				}
+				aliasExists := false
+				for _, a := range existingPerson.Aliases {
+					if a == oldName {
+						aliasExists = true
+						break
+					}
+				}
+				newAliases := existingPerson.Aliases
+				if !aliasExists && oldName != newDisplayName {
+					newAliases = append(newAliases, oldName)
+				}
+				// Also add any new aliases from added
+				for _, a := range added.Aliases {
+					found := false
+					for _, ea := range newAliases {
+						if ea == a {
+							found = true
+							break
+						}
+					}
+					if !found && a != newDisplayName {
+						newAliases = append(newAliases, a)
+					}
+				}
+
+				// Update the person with fuller name and merged bio
+				existingPerson.DisplayName = newDisplayName
+				existingPerson.Aliases = newAliases
+				if added.Bio != "" {
+					existingPerson.Bio = added.Bio // Use new bio (it's likely more complete)
+				}
+				existingPerson.LastSeen = referenceDate
+				existingPerson.MentionCount++
+
+				// Regenerate embedding with new data
+				embText := buildPersonEmbeddingText(existingPerson.DisplayName, existingPerson.Username, existingPerson.Aliases, existingPerson.Bio)
+				emb, embUsage, err := s.getEmbedding(ctx, embText)
+				stats.EmbeddingTokens += embUsage.Tokens
+				if embUsage.Cost != nil {
+					if stats.EmbeddingCost == nil {
+						stats.EmbeddingCost = new(float64)
+					}
+					*stats.EmbeddingCost += *embUsage.Cost
+				}
+				if err != nil {
+					s.logger.Error("failed to get embedding for person update", "name", existingPerson.DisplayName, "error", err)
+				} else {
+					existingPerson.Embedding = emb
+				}
+
+				if err := s.peopleRepo.UpdatePerson(*existingPerson); err != nil {
+					s.logger.Error("failed to update person (name variation)", "id", existingPerson.ID, "error", err)
+				} else {
+					s.logger.Info("Person updated (name variation)", "id", existingPerson.ID, "name", existingPerson.DisplayName)
+					stats.Updated++
+				}
+				continue
+			}
+
+			s.logger.Info("Person already exists, skipping add", "name", added.DisplayName, "existing_id", existingPerson.ID, "match_type", matchType)
+			continue
+		}
+
+		// Get embedding for person (includes display_name, username, aliases, bio)
+		embText := buildPersonEmbeddingText(added.DisplayName, nil, added.Aliases, added.Bio)
+		var emb []float32
+		var embUsage embeddingUsage
+		var err error
+		emb, embUsage, err = s.getEmbedding(ctx, embText)
+		stats.EmbeddingTokens += embUsage.Tokens
+		if embUsage.Cost != nil {
+			if stats.EmbeddingCost == nil {
+				stats.EmbeddingCost = new(float64)
+			}
+			*stats.EmbeddingCost += *embUsage.Cost
+		}
+		if err != nil {
+			s.logger.Error("failed to get embedding for person", "name", added.DisplayName, "error", err)
+			// Continue without embedding
+		}
+
+		person := storage.Person{
+			UserID:       userID,
+			DisplayName:  added.DisplayName,
+			Aliases:      added.Aliases,
+			Circle:       added.Circle,
+			Bio:          added.Bio,
+			Embedding:    emb,
+			FirstSeen:    referenceDate,
+			LastSeen:     referenceDate,
+			MentionCount: 1,
+		}
+
+		if person.Circle == "" {
+			person.Circle = "Other"
+		}
+		if person.Aliases == nil {
+			person.Aliases = []string{}
+		}
+
+		personID, err := s.peopleRepo.AddPerson(person)
+		if err != nil {
+			// Check if this is a UNIQUE constraint error (person was added by concurrent process)
+			if strings.Contains(err.Error(), "UNIQUE constraint") {
+				// Find the existing person and update them instead
+				existing, findErr := s.peopleRepo.FindPersonByName(userID, added.DisplayName)
+				if findErr != nil || existing == nil {
+					s.logger.Error("failed to find existing person after UNIQUE error", "name", added.DisplayName, "error", findErr)
+					continue
+				}
+
+				// Merge bio if needed
+				mergedBio := existing.Bio
+				if added.Bio != "" && added.Bio != existing.Bio {
+					if existing.Bio != "" {
+						mergedBio = existing.Bio + " " + added.Bio
+					} else {
+						mergedBio = added.Bio
+					}
+				}
+
+				// Update the existing person
+				existing.Bio = mergedBio
+				if added.Circle != "" && added.Circle != "Other" {
+					existing.Circle = added.Circle
+				}
+				existing.LastSeen = referenceDate
+				existing.MentionCount++
+				existing.Embedding = emb // Use the new embedding
+
+				if updateErr := s.peopleRepo.UpdatePerson(*existing); updateErr != nil {
+					s.logger.Error("failed to update existing person", "name", added.DisplayName, "error", updateErr)
+					continue
+				}
+
+				stats.Updated++
+				s.logger.Info("Person updated (was UNIQUE conflict)", "id", existing.ID, "name", added.DisplayName, "reason", added.Reason)
+				continue
+			}
+
+			s.logger.Error("failed to add person", "name", added.DisplayName, "error", err)
+			continue
+		}
+
+		stats.Added++
+		s.logger.Info("Person added", "id", personID, "name", added.DisplayName, "circle", added.Circle, "reason", added.Reason)
+	}
+
+	// Handle Updated people
+	for _, updated := range peopleResult.Updated {
+		// Find existing person by name
+		var existingPerson *storage.Person
+
+		// First, try exact match on DisplayName
+		for i := range currentPeople {
+			if currentPeople[i].DisplayName == updated.DisplayName {
+				existingPerson = &currentPeople[i]
+				break
+			}
+		}
+
+		// Fallback: strip aliases in parentheses (e.g., "John Smith (@john, Johnny)" -> "John Smith")
+		if existingPerson == nil {
+			cleanName := updated.DisplayName
+			if idx := strings.Index(cleanName, " ("); idx > 0 {
+				cleanName = strings.TrimSpace(cleanName[:idx])
+			}
+			if cleanName != updated.DisplayName {
+				for i := range currentPeople {
+					if currentPeople[i].DisplayName == cleanName {
+						existingPerson = &currentPeople[i]
+						s.logger.Debug("Found person by stripped name", "original", updated.DisplayName, "clean", cleanName)
+						break
+					}
+				}
+			}
+		}
+
+		// Fallback: try matching by alias
+		if existingPerson == nil {
+			for i := range currentPeople {
+				for _, alias := range currentPeople[i].Aliases {
+					if strings.EqualFold(alias, updated.DisplayName) || strings.Contains(updated.DisplayName, alias) {
+						existingPerson = &currentPeople[i]
+						s.logger.Debug("Found person by alias", "requested", updated.DisplayName, "found", currentPeople[i].DisplayName)
+						break
+					}
+				}
+				if existingPerson != nil {
+					break
+				}
+			}
+		}
+
+		if existingPerson == nil {
+			s.logger.Warn("Person to update not found", "name", updated.DisplayName)
+			continue
+		}
+
+		// Start with existing values
+		person := storage.Person{
+			ID:           existingPerson.ID,
+			UserID:       userID,
+			DisplayName:  existingPerson.DisplayName,
+			Aliases:      existingPerson.Aliases,
+			TelegramID:   existingPerson.TelegramID,
+			Username:     existingPerson.Username,
+			Circle:       existingPerson.Circle,
+			Bio:          existingPerson.Bio,
+			FirstSeen:    existingPerson.FirstSeen,
+			LastSeen:     referenceDate,
+			MentionCount: existingPerson.MentionCount + 1,
+		}
+
+		// Track if embedding-relevant fields changed
+		needsReembed := false
+
+		// Apply updates
+		if updated.Bio != "" && updated.Bio != existingPerson.Bio {
+			person.Bio = updated.Bio
+			needsReembed = true
+		}
+		if updated.Circle != "" {
+			person.Circle = updated.Circle
+		}
+		// Add new aliases from Archivist
+		if len(updated.Aliases) > 0 {
+			existingAliasSet := make(map[string]bool)
+			for _, a := range person.Aliases {
+				existingAliasSet[a] = true
+			}
+			for _, newAlias := range updated.Aliases {
+				if !existingAliasSet[newAlias] && newAlias != person.DisplayName {
+					person.Aliases = append(person.Aliases, newAlias)
+					needsReembed = true
+				}
+			}
+		}
+		// Handle rename: new_display_name moves old name to aliases
+		if updated.NewDisplayName != "" && updated.NewDisplayName != person.DisplayName {
+			oldName := person.DisplayName
+			person.DisplayName = updated.NewDisplayName
+			// Add old name to aliases if not already there
+			hasOldName := false
+			for _, alias := range person.Aliases {
+				if alias == oldName {
+					hasOldName = true
+					break
+				}
+			}
+			if !hasOldName {
+				person.Aliases = append(person.Aliases, oldName)
+			}
+			s.logger.Info("Person renamed", "id", person.ID, "old_name", oldName, "new_name", updated.NewDisplayName)
+			needsReembed = true
+		}
+
+		// Regenerate embedding if any searchable field changed, or if person had no embedding
+		if needsReembed || len(existingPerson.Embedding) == 0 {
+			embText := buildPersonEmbeddingText(person.DisplayName, person.Username, person.Aliases, person.Bio)
+			emb, embUsage, err := s.getEmbedding(ctx, embText)
+			stats.EmbeddingTokens += embUsage.Tokens
+			if embUsage.Cost != nil {
+				if stats.EmbeddingCost == nil {
+					stats.EmbeddingCost = new(float64)
+				}
+				*stats.EmbeddingCost += *embUsage.Cost
+			}
+			if err != nil {
+				s.logger.Error("failed to get embedding for person update", "name", updated.DisplayName, "error", err)
+				person.Embedding = existingPerson.Embedding // Keep old embedding on error
+			} else {
+				person.Embedding = emb
+			}
+		} else {
+			person.Embedding = existingPerson.Embedding
+		}
+
+		if err := s.peopleRepo.UpdatePerson(person); err != nil {
+			s.logger.Error("failed to update person", "name", updated.DisplayName, "error", err)
+			continue
+		}
+
+		stats.Updated++
+		s.logger.Info("Person updated", "id", person.ID, "name", person.DisplayName, "reason", updated.Reason)
+	}
+
+	// Handle Merged people
+	for _, merged := range peopleResult.Merged {
+		// Find target and source persons
+		var targetPerson, sourcePerson *storage.Person
+		for _, p := range currentPeople {
+			if p.DisplayName == merged.TargetName {
+				targetPerson = &p
+			}
+			if p.DisplayName == merged.SourceName {
+				sourcePerson = &p
+			}
+		}
+
+		if targetPerson == nil {
+			s.logger.Warn("Target person for merge not found", "target", merged.TargetName)
+			continue
+		}
+		if sourcePerson == nil {
+			s.logger.Warn("Source person for merge not found", "source", merged.SourceName)
+			continue
+		}
+
+		// Combine bios
+		newBio := targetPerson.Bio
+		if sourcePerson.Bio != "" {
+			if newBio != "" {
+				newBio += " " + sourcePerson.Bio
+			} else {
+				newBio = sourcePerson.Bio
+			}
+		}
+
+		// Combine aliases (include source name as alias)
+		newAliases := append([]string{}, targetPerson.Aliases...)
+		newAliases = append(newAliases, sourcePerson.DisplayName)
+		newAliases = append(newAliases, sourcePerson.Aliases...)
+
+		// Deduplicate aliases
+		seen := make(map[string]bool)
+		uniqueAliases := []string{}
+		for _, alias := range newAliases {
+			if !seen[alias] && alias != targetPerson.DisplayName {
+				seen[alias] = true
+				uniqueAliases = append(uniqueAliases, alias)
+			}
+		}
+
+		if err := s.peopleRepo.MergePeople(userID, targetPerson.ID, sourcePerson.ID, newBio, uniqueAliases); err != nil {
+			s.logger.Error("failed to merge people", "target", merged.TargetName, "source", merged.SourceName, "error", err)
+			continue
+		}
+
+		// Regenerate embedding for merged person (bio and aliases changed)
+		embText := buildPersonEmbeddingText(targetPerson.DisplayName, targetPerson.Username, uniqueAliases, newBio)
+		emb, embUsage, err := s.getEmbedding(ctx, embText)
+		stats.EmbeddingTokens += embUsage.Tokens
+		if embUsage.Cost != nil {
+			if stats.EmbeddingCost == nil {
+				stats.EmbeddingCost = new(float64)
+			}
+			*stats.EmbeddingCost += *embUsage.Cost
+		}
+		if err != nil {
+			s.logger.Error("failed to get embedding for merged person", "name", merged.TargetName, "error", err)
+		} else {
+			// Update just the embedding
+			mergedPerson := *targetPerson
+			mergedPerson.Bio = newBio
+			mergedPerson.Aliases = uniqueAliases
+			mergedPerson.Embedding = emb
+			if err := s.peopleRepo.UpdatePerson(mergedPerson); err != nil {
+				s.logger.Error("failed to update merged person embedding", "name", merged.TargetName, "error", err)
+			}
+		}
+
+		stats.Merged++
+		s.logger.Info("People merged", "target", merged.TargetName, "source", merged.SourceName, "reason", merged.Reason)
+	}
+
+	return stats, nil
 }

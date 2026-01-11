@@ -27,7 +27,6 @@ func TestFormatUserProfile(t *testing.T) {
 			facts: []storage.Fact{
 				{
 					ID:          1,
-					Entity:      "User",
 					Category:    "identity",
 					Type:        "name",
 					Content:     "Меня зовут Алексей",
@@ -37,7 +36,6 @@ func TestFormatUserProfile(t *testing.T) {
 			contains: []string{
 				"<user_profile>",
 				"[ID:1]",
-				"[User]",
 				"[identity/name]",
 				"(Updated: 2025-01-09)",
 				"Меня зовут Алексей",
@@ -46,11 +44,10 @@ func TestFormatUserProfile(t *testing.T) {
 			notEmpty: true,
 		},
 		{
-			name: "multiple facts with different entities",
+			name: "multiple facts",
 			facts: []storage.Fact{
 				{
 					ID:          1,
-					Entity:      "User",
 					Category:    "identity",
 					Type:        "core",
 					Content:     "Работаю программистом",
@@ -58,7 +55,6 @@ func TestFormatUserProfile(t *testing.T) {
 				},
 				{
 					ID:          2,
-					Entity:      "Wife",
 					Category:    "identity",
 					Type:        "relationship",
 					Content:     "Жену зовут Мария",
@@ -68,9 +64,7 @@ func TestFormatUserProfile(t *testing.T) {
 			contains: []string{
 				"<user_profile>",
 				"[ID:1]",
-				"[User]",
 				"[ID:2]",
-				"[Wife]",
 				"</user_profile>",
 			},
 			notEmpty: true,

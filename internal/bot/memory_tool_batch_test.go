@@ -33,7 +33,6 @@ func TestPerformManageMemory_BatchOperations(t *testing.T) {
 		"operations": [
 			{
 				"action": "add",
-				"entity": "User",
 				"content": "Likes pizza",
 				"category": "food",
 				"type": "preference",
@@ -125,7 +124,6 @@ func TestPerformManageMemory_BatchOperations_PartialFailure(t *testing.T) {
 		"operations": [
 			{
 				"action": "add",
-				"entity": "User",
 				"content": "Likes pizza"
 			},
 			{

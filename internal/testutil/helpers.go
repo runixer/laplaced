@@ -32,7 +32,7 @@ func TestConfig() *config.Config {
 				Name:  "TestBot",
 				Model: "test-model",
 			},
-			Archivist: config.AgentConfig{Name: "Archivist"},
+			Archivist: config.ArchivistAgentConfig{AgentConfig: config.AgentConfig{Name: "Archivist"}},
 			Enricher:  config.AgentConfig{Name: "Enricher"},
 			Reranker: config.RerankerAgentConfig{
 				AgentConfig: config.AgentConfig{Name: "Reranker"},
@@ -86,7 +86,7 @@ rag:
   reranker_tool_description: "Load topic content"
   reranker_tool_param_description: "Topic IDs"
 memory:
-  system_prompt: "Archivist {{.Date}} limit={{.UserFactsLimit}} user={{.UserFactsCount}} other={{.OtherFactsCount}}\nUser: {{.UserFacts}}\nOther: {{.OtherFacts}}\nConversation: {{.Conversation}}"
+  system_prompt: "Archivist {{.Date}} limit={{.UserFactsLimit}} user={{.UserFactsCount}}\nUser: {{.UserFacts}}\nConversation: {{.Conversation}}"
 `
 	err := os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte(content), 0600)
 	if err != nil {
