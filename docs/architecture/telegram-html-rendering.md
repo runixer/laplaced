@@ -26,7 +26,7 @@ flowchart TB
     subgraph goldmark["Goldmark Parser"]
         B[Lexer → AST]
         C[GFM Extension - strikethrough, tables]
-        D[Spoiler Extension - custom ||spoiler||]
+        D[Spoiler Extension - custom spoiler syntax]
     end
 
     subgraph renderer["TelegramHTMLRenderer"]
@@ -154,7 +154,7 @@ func (r *TelegramHTMLRenderer) renderTable(w util.BufWriter, source []byte, n as
 
 ### 4. Кастомное расширение для спойлеров
 
-**Проблема:** Синтаксис `||spoiler||` — нестандартный Markdown (Discord/Telegram).
+**Проблема:** Синтаксис двойных вертикальных черт для спойлеров — нестандартный Markdown (Discord/Telegram).
 
 **Решение:** Кастомное Goldmark расширение:
 
@@ -242,7 +242,7 @@ func (r *TelegramHTMLRenderer) renderHTMLBlock(...) {
 | `**bold**` | Emphasis(2) | `<b>bold</b>` |
 | `*italic*` | Emphasis(1) | `<i>italic</i>` |
 | `~~strike~~` | Strikethrough | `<s>strike</s>` |
-| `||spoiler||` | SpoilerNode | `<tg-spoiler>spoiler</tg-spoiler>` |
+| двойные `||` | SpoilerNode | `<tg-spoiler>spoiler</tg-spoiler>` |
 | `` `code` `` | CodeSpan | `<code>code</code>` |
 | ` ```lang ` | FencedCodeBlock | `<pre><code class="language-lang">` |
 | `[text](url)` | Link | `<a href="url">text</a>` |

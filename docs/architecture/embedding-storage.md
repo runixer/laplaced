@@ -6,7 +6,8 @@
 
 Laplaced использует embeddings для семантического поиска по долгосрочной памяти:
 - **Topics** — сжатые саммари прошлых разговоров
-- **Facts** — структурированные факты о пользователе
+- **Facts** — структурированные факты о пользователе  
+- **People** — извлечённые из разговоров люди (v0.5.1)
 
 При каждом запросе:
 1. Генерируется embedding запроса через OpenRouter API
@@ -36,6 +37,11 @@ CREATE TABLE topics (
 CREATE TABLE facts (
     ...
     embedding BLOB  -- JSON: "[-0.015, 0.008, ...]"
+);
+
+CREATE TABLE people (
+    ...
+    embedding BLOB  -- JSON: "[-0.008, 0.012, ...]"  -- v0.5.1
 );
 ```
 
@@ -70,6 +76,7 @@ func cosineSimilarity(a, b []float32) float32 {
 Анализ production базы (user 201810803):
 - Период: 165 дней (5.5 месяцев)
 - Активность: 89.7 сообщений/день (очень активный пользователь)
+- People добавлены в v0.5.1 (анализ на более поздних данных)
 
 ### Измерения
 
@@ -77,6 +84,8 @@ func cosineSimilarity(a, b []float32) float32 {
 |---------|----------|
 | Topics | 1,031 |
 | Topics/day | 6.2 |
+| Facts | ~500 (оценка) |
+| People | ~150 (оценка, v0.5.1) |
 | History messages | 14,801 |
 | Messages/day | 89.7 |
 
@@ -87,6 +96,11 @@ func cosineSimilarity(a, b []float32) float32 {
 | В памяти (`[]float32`) | 12.3 KB | **12.4 MB** |
 | В БД (JSON text) | 38.3 KB | 38.5 MB |
 | Оптимально (binary) | 12.0 KB | 12.1 MB |
+
+**С People (v0.5.1):**
+- People: ~150 × 12.3 KB = **1.8 MB** в памяти
+- Facts: ~500 × 12.3 KB = **6.1 MB** в памяти
+- Всего с People+Facts: **20.3 MB** в памяти
 
 ## Экстраполяция: семейный сценарий
 
@@ -101,9 +115,11 @@ func cosineSimilarity(a, b []float32) float32 {
 | Метрика | Сейчас (1 user, 5.5 мес) | Прогноз (5 users, 5 лет) |
 |---------|--------------------------|--------------------------|
 | Topics | 1,031 | ~56,000 |
-| RAM для embeddings | 12.4 MB | **~675 MB** |
-| DB size (JSON) | 38.5 MB | ~2.1 GB |
-| DB size (binary) | 12.1 MB | ~660 MB |
+| Facts | ~500 | ~27,000 |
+| People | ~150 | ~8,000 |
+| RAM для embeddings | 20.3 MB | **~1.1 GB** |
+| DB size (JSON) | ~50 MB | ~2.7 GB |
+| DB size (binary) | ~20 MB | ~1.1 GB |
 
 ### Latency прогноз
 
@@ -115,6 +131,10 @@ Brute-force search O(n × 3072):
 | 10,000 | 30M multiplications | ~5 ms |
 | 56,000 | 172M multiplications | ~30 ms |
 
+**С People и Facts (v0.5.1):**
+- Всего векторов: 56,000 (topics) + 27,000 (facts) + 8,000 (people) = **91,000**
+- Latency: ~50 ms (всё ещё приемлемо)
+
 ## Принятое решение
 
 ### Решение: Observability-first подход
@@ -123,9 +143,9 @@ Brute-force search O(n × 3072):
 
 **Обоснование:**
 
-1. **RAM ~675 MB** — приемлемо для домашнего сервера
-2. **Latency ~30 ms** — незаметно для пользователя (LLM занимает 2-5 секунд)
-3. **DB size ~2 GB** — не критично для SQLite
+1. **RAM ~1.1 GB** — приемлемо для домашнего сервера
+2. **Latency ~50 ms** — незаметно для пользователя (LLM занимает 2-5 секунд)
+3. **DB size ~2.7 GB** — не критично для SQLite
 4. **Сложность sqlite-vec** — modernc.org/sqlite не поддерживает loadable extensions, требуется реализация vtab module с нуля
 
 ### Когда пересмотреть решение
@@ -168,7 +188,7 @@ laplaced_embedding_cost_usd_total{model}
 
 ```go
 // Время поиска
-laplaced_vector_search_duration_seconds{type}  // type=topics|facts
+laplaced_vector_search_duration_seconds{type}  // type=topics|facts|people
 
 // Количество просканированных векторов
 laplaced_vector_search_vectors_scanned{type}
@@ -178,7 +198,7 @@ laplaced_vector_search_vectors_scanned{type}
 
 ```go
 // Размер индекса (обновляется при Load/Reload)
-laplaced_vector_index_size{type}  // type=topics|facts
+laplaced_vector_index_size{type}  // type=topics|facts|people
 
 // Память (приблизительно: size × 3072 × 4 bytes)
 laplaced_vector_index_memory_bytes{type}
@@ -202,8 +222,16 @@ histogram_quantile(0.95, rate(laplaced_embedding_request_duration_seconds_bucket
 
 ### Growth Projection
 ```promql
+# Topics growth
 laplaced_vector_index_size{type="topics"}
 predict_linear(laplaced_vector_index_size{type="topics"}[30d], 365*24*3600)  # 1 year projection
+
+# People growth (v0.5.1)
+laplaced_vector_index_size{type="people"}
+predict_linear(laplaced_vector_index_size{type="people"}[30d], 365*24*3600)
+
+# Total vectors (all types)
+sum(laplaced_vector_index_size)
 ```
 
 ### Efficiency
@@ -232,6 +260,12 @@ modernc.org/sqlite (pure Go) не поддерживает loadable extensions. 
 
 **Статус:** Рассмотреть при DB size > 5 GB.
 
+## История изменений
+
+- **v0.5.1** — добавлены People embeddings для поиска людей в разговорах
+- **v0.4.x** — начальная версия с Topics и Facts
+
 ## Связанные документы
 
 - [ROADMAP.md](../plans/ROADMAP.md) — план развития, пункт "Embedding Observability"
+- [People Feature](../features/people.md) — описание функционала людей (v0.5.1)
