@@ -357,7 +357,7 @@ func (s *Service) ReloadVectors() error {
 	}
 
 	s.logger.Info("Loaded vectors (full)", "topics", tCount, "facts", fCount, "people", pCount)
-	UpdateVectorIndexMetrics(tCount, fCount)
+	UpdateVectorIndexMetrics(tCount, fCount, pCount)
 	return nil
 }
 
@@ -459,7 +459,11 @@ func (s *Service) LoadNewVectors() error {
 		for _, vectors := range s.factVectors {
 			totalFacts += len(vectors)
 		}
-		UpdateVectorIndexMetrics(totalTopics, totalFacts)
+		totalPeople := 0
+		for _, vectors := range s.peopleVectors {
+			totalPeople += len(vectors)
+		}
+		UpdateVectorIndexMetrics(totalTopics, totalFacts, totalPeople)
 	}
 	return nil
 }

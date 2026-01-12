@@ -519,7 +519,11 @@ func (s *Service) SearchPeople(ctx context.Context, userID int64, embedding []fl
 	}
 	s.mu.RUnlock()
 
+	duration := time.Since(searchStart).Seconds()
 	s.logger.Debug("People vector search", "user_id", userID, "scanned", vectorsScanned, "matches", len(matches), "duration_ms", time.Since(searchStart).Milliseconds())
+
+	// Record metrics for people search (v0.5.1)
+	RecordVectorSearch(userID, searchTypePeople, duration, vectorsScanned)
 
 	sort.Slice(matches, func(i, j int) bool {
 		return matches[i].score > matches[j].score

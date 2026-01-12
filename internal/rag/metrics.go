@@ -220,6 +220,7 @@ const (
 const (
 	searchTypeTopics = "topics"
 	searchTypeFacts  = "facts"
+	searchTypePeople = "people" // v0.5.1
 )
 
 // Константы для RAG результатов
@@ -265,13 +266,15 @@ func RecordVectorSearch(userID int64, searchType string, durationSeconds float64
 }
 
 // UpdateVectorIndexMetrics обновляет метрики размера индекса.
-func UpdateVectorIndexMetrics(topicsCount, factsCount int) {
+func UpdateVectorIndexMetrics(topicsCount, factsCount, peopleCount int) {
 	vectorIndexSize.WithLabelValues(searchTypeTopics).Set(float64(topicsCount))
 	vectorIndexSize.WithLabelValues(searchTypeFacts).Set(float64(factsCount))
+	vectorIndexSize.WithLabelValues(searchTypePeople).Set(float64(peopleCount))
 
 	// Приблизительный размер в памяти
 	vectorIndexMemoryBytes.WithLabelValues(searchTypeTopics).Set(float64(topicsCount * embeddingMemoryBytes))
 	vectorIndexMemoryBytes.WithLabelValues(searchTypeFacts).Set(float64(factsCount * embeddingMemoryBytes))
+	vectorIndexMemoryBytes.WithLabelValues(searchTypePeople).Set(float64(peopleCount * embeddingMemoryBytes))
 }
 
 // RecordRAGRetrieval записывает результат RAG retrieval.

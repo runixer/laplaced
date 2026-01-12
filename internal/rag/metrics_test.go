@@ -85,7 +85,8 @@ func TestRecordVectorSearch(t *testing.T) {
 	}{
 		{"topics search", 123, searchTypeTopics, 0.01, 100},
 		{"facts search", 456, searchTypeFacts, 0.005, 50},
-		{"empty search", 789, searchTypeTopics, 0.001, 0},
+		{"people search", 789, searchTypePeople, 0.008, 25}, // v0.5.1
+		{"empty search", 101112, searchTypeTopics, 0.001, 0},
 	}
 
 	for _, tt := range tests {
@@ -161,7 +162,7 @@ func TestRecordRAGLatency(t *testing.T) {
 }
 
 func TestUpdateVectorIndexMetrics(t *testing.T) {
-	UpdateVectorIndexMetrics(1000, 500)
+	UpdateVectorIndexMetrics(1000, 500, 0)
 
 	// Verify topics gauge
 	topicsSize := testutil.ToFloat64(vectorIndexSize.WithLabelValues(searchTypeTopics))
@@ -179,8 +180,28 @@ func TestUpdateVectorIndexMetrics(t *testing.T) {
 	assert.Equal(t, float64(500*embeddingMemoryBytes), factsMemory)
 }
 
+func TestUpdateVectorIndexMetricsWithPeople(t *testing.T) {
+	UpdateVectorIndexMetrics(1000, 500, 150)
+
+	// Verify topics gauge
+	topicsSize := testutil.ToFloat64(vectorIndexSize.WithLabelValues(searchTypeTopics))
+	assert.Equal(t, float64(1000), topicsSize)
+
+	// Verify facts gauge
+	factsSize := testutil.ToFloat64(vectorIndexSize.WithLabelValues(searchTypeFacts))
+	assert.Equal(t, float64(500), factsSize)
+
+	// Verify people gauge (v0.5.1)
+	peopleSize := testutil.ToFloat64(vectorIndexSize.WithLabelValues(searchTypePeople))
+	assert.Equal(t, float64(150), peopleSize)
+
+	// Verify memory calculation for people
+	peopleMemory := testutil.ToFloat64(vectorIndexMemoryBytes.WithLabelValues(searchTypePeople))
+	assert.Equal(t, float64(150*embeddingMemoryBytes), peopleMemory)
+}
+
 func TestUpdateVectorIndexMetrics_Zero(t *testing.T) {
-	UpdateVectorIndexMetrics(0, 0)
+	UpdateVectorIndexMetrics(0, 0, 0)
 
 	topicsSize := testutil.ToFloat64(vectorIndexSize.WithLabelValues(searchTypeTopics))
 	assert.Equal(t, float64(0), topicsSize)
