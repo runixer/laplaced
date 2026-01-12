@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-01-13
+
+**LaTeX rendering for Telegram: formulas now readable as Unicode text.**
+
 ### Added
+- **LaTeX to Unicode converter** — LaTeX formulas like `$500 \text{ г} \times 4 \text{ недели} = 2.0 \text{ кг}$` now render as readable text (`500 г × 4 недели = 2.0 кг`) instead of raw LaTeX code
+- **Math symbol support** — Greek letters (α, β, π, Σ), operators (×, ÷, ±, ≤, ≥), arrows (→, ⟹), and trigonometric functions (sin, cos, tg)
+- **Typographic conversion** — inch/foot marks like `1"` and `6'` automatically convert to `1″` and `6′` in formulas
 - **People v0.5.1 test coverage** — 35 tests for People Graph functionality (extractForwardedPeople, performSearchPeople, performUpdatePerson, performMergePeople, performCreatePerson, performDeletePerson, applyPeopleUpdates)
 - **MockEmbeddingResponse helper** — centralized mock for OpenRouter embedding responses
 

@@ -387,6 +387,192 @@ func (e *UnderlineExtension) Extend(m goldmark.Markdown) {
 - `markdown_to_html_errors_total` — ошибки парсинга
 - `telegram_message_length_utf16` — распределение длины сообщений
 
+## LaTeX → Unicode Конвертация
+
+### Обзор
+
+Telegram не поддерживает LaTeX рендеринг. Решение: пре-конвертация LaTeX в Unicode перед Markdown парсингом.
+
+**Пайплайн:**
+```go
+Markdown с LaTeX
+    → convertLatexToUnicode()  [LaTeX → Unicode]
+    → convertTypographicQuotes() [дюймы/минуты]
+    → hideCodeBlocks()          [Hide & Seek]
+    → processInlineMath()        [$...$ обработка]
+    → restoreCodeBlocks()        [Restore]
+    → Goldmark Markdown → HTML
+```
+
+### Архитектура LaTeX конвертера
+
+```
+internal/markdown/latex.go (936 строк)
+├── latexSymbols              # map[string]string → Unicode
+├── convertLatexToUnicode()   # Главный оркестратор
+├── hideCodeBlocks()          # Паттерн "Hide & Seek"
+├── convertDisplayMath()       # $$...$$ обработка
+├── convertInlineMath()        # $...$ обработка
+├── processLatexContent()      # Обработка внутри формул
+│   ├── removeSpacingCommands()
+│   ├── flattenBraces()         # \underbrace → упрощение
+│   ├── removeTextWrappers()    # \text{...} → ...
+│   ├── convertFractions()      # \frac{a}{b} → a/b
+│   ├── convertSquareRoots()   # \sqrt{x} → √x
+│   ├── replaceLatexSymbols()   # Греческие, операторы
+│   ├── convertSuperscripts()   # x^2 → x²
+│   └── convertSubscripts()     # H_2 → H₂
+├── findMatchingBrace()         # Подсчёт глубины скобок
+├── looksLikeFormulaContent()   # Currency detection
+└── convertTypographicQuotes() # 1" → 1″
+```
+
+### Порядок обработки (критичен!)
+
+1. **Hide & Seek** (защита кодовых блоков)
+   - Находим ```...``` и `...`
+   - Заменяем на `__CODE_BLOCK_N__`
+   - Сохраняем в map для восстановления
+
+2. **Типографика** (дюймы/минуты)
+   - `1"` → `1″` (после цифр)
+   - `6'` → `6′` (после цифр)
+
+3. **Display Math** (многострочные формулы)
+   - `$$...$$`
+   - `\[...\]`
+   - `$` на отдельных строках
+
+4. **Inline Math** (в строке)
+   - Currency detection: `$3.50` → пропускаем
+   - Variable detection: `$P$` → `P`
+   - Math content: `$x^2$` → `x²`
+
+5. **Restore Code Blocks**
+   - Восстанавливаем из плейсхолдеров
+
+### Flatten Braces (2D → 1D)
+
+Некоторые LaTeX конструкции невозможно отобразить в 1D тексте. Решение: "сплющивание".
+
+```go
+// \underbrace{FORMULA}_{TEXT} → FORMULA (TEXT)
+// \overbrace{FORMULA}^{TEXT} → FORMULA (TEXT)
+
+flattenBraces(content string) string {
+    re1 := regexp.MustCompile(`\\underbrace\{(.+?)\}_\{(.+?)\}`)
+    content = re1.ReplaceAllStringFunc(content, func(match string) string {
+        submatches := re1.FindStringSubmatch(match)
+        return submatches[1] + " (" + submatches[2] + ")"
+    })
+    // Аналогично для \overbrace
+}
+```
+
+**Пример:**
+- `\underbrace{2 \times 25}_{зазоры}` → `2 × 25 (зазоры)`
+- Используется в формулах: `L = 1200 + \underbrace{2 \times 25}_{зазоры} = 1250`
+
+### Currency Detection
+
+**Проблема:** `$3.50` похоже на формулу, но это валюта.
+
+**Решение:** Проверяем содержимое между `$...$`:
+```go
+hasLaTeX := strings.Contains(content, `\`)           // Есть backslash?
+hasOperator := strings.ContainsAny(content, `=+-*/<>^_`)  // Есть оператор?
+isJustLetters := isAlphaOnly(content)                  // Только буквы?
+looksLikeMath := looksLikeFormulaContent(content)       // Цифры, °, ′, ″, Greek?
+
+if !hasLaTeX && !hasOperator && !isJustLetters && !looksLikeMath {
+    return match // Валюта, не трогаем
+}
+```
+
+**Примеры:**
+- `$3.50` → `$3.50` (валюта) ✅
+- `$P$` → `P` (переменная) ✅
+- `$1″$` → `1″` (математика с primes) ✅
+- `$x^2$` → `x²` (формула) ✅
+
+### Brace Matching (для вложенности)
+
+**Проблема:** `.+?` не матчит вложенные `{...}`.
+
+**Решение:** Подсчёт глубины скобок:
+```go
+func findMatchingBrace(s string, startPos int) int {
+    runes := []rune(s)  // UTF-8 safe!
+    depth := 0
+    for i := startPos; i < len(runes); i++ {
+        if runes[i] == '{' { depth++ }
+        if runes[i] == '}' {
+            depth--
+            if depth == 0 { return i } // Нашли парную
+        }
+    }
+}
+```
+
+**Используется для:**
+- `\frac{\frac{a}{b}}{c}` → `a/b/c`
+- `\sqrt{\frac{a}{b}}` → `√(a/b)`
+- Вложенных дробей
+
+### Поддерживаемые команды
+
+#### ✅ Green Zone (1:1 замена)
+- **Греческие**: `\alpha` → α, `\beta` → β, `\Gamma` → Γ...
+- **Операторы**: `\times` → ×, `\cdot` → ·, `\pm` → ±
+- **Стрелки**: `\to` → →, `\implies` → ⟹
+- **Логика**: `\in` → ∈, `\forall` → ∀
+- **Тригонометрия**: `\sin` → sin, `\cos` → cos, `\tan` → tg
+- **Логарифмы**: `\log`, `\ln`, `\lg`
+- **Спецсимволы**: `\infty` → ∞, `\varnothing` → ∅, `^\circ` → °
+
+#### ⚠️ Yellow Zone (упрощение)
+- **Дроби**: `\frac{a}{b}` → `a/b`
+- **Корни**: `\sqrt{x}` → `√x`, `\sqrt{a + b}` → `√(a + b)`
+- **Индексы**: `x^2` → `x²`, `H_2` → `H₂`, `T_{sleep}` → `T_sleep`
+- **Скобки**: `\underbrace{a}_{b}` → `a (b)`
+
+#### ❌ Red Zone (не поддерживается)
+- **Матрицы**: `\begin{matrix} ... \end{matrix}`
+- **Системы**: `\begin{cases} ... \end{cases}`
+- **Пределы**: `\lim_{x \to 0}`
+- **Интегралы с пределами**: `\int_{a}^{b}`
+
+### Полная спецификация
+
+См. `docs/LATEX_RENDERING.md` для полного списка поддерживаемых команд с примерами.
+
+### Примеры конвертации
+
+```latex
+# Простые формулы
+$\alpha + \beta = \gamma$        → α + β = γ
+$\sqrt{a^2 + b^2}$              → √(a² + b²)
+$\frac{1}{2} + \frac{1}{3} = \frac{5}{6}$ → 1/2 + 1/3 = 5/6
+
+# Физика
+$F = m \times a$                  → F = m × a
+$E = mc^2$                        → E = mc²
+$\rho = 1000 kg/m^3$             → ρ = 1000 kg/m³
+
+# Инженерия
+$\sqrt{\frac{4 \times Q_{peak}}{\pi \times v_{max}}}$ → √(4 × Q_{peak}/π × v_{max})
+
+# Со underbrace
+$L = 1200 + \underbrace{2 \times 25}_{зазоры} = 1250$ → L = 1200 + 2 × 25 (зазоры) = 1250
+
+# Температура
+$25^\circ C$                      → 25° C
+
+# Типографика
+$1" \to 1"$                        → 1″ → 1″
+$6' 4"$                            → 6′ 4″
+```
+
 ## Связанные файлы
 
 - `internal/markdown/html.go` — основной конвертер

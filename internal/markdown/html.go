@@ -516,6 +516,9 @@ func (r *TelegramHTMLRenderer) formatTableAsMonospace() string {
 
 // ToHTML converts Markdown to Telegram-compatible HTML
 func ToHTML(markdown string) (string, error) {
+	// Convert LaTeX to Unicode BEFORE markdown parsing
+	markdown = convertLatexToUnicode(markdown)
+
 	// Create Goldmark with GFM and custom renderer
 	md := goldmark.New(
 		goldmark.WithExtensions(
