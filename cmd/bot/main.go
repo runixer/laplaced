@@ -267,6 +267,22 @@ func main() {
 	defer ragService.Stop()
 	defer b.Stop()
 
+	// Derive webhook path and secret from bot token using SHA-256 BEFORE starting web server
+	// to avoid data race (web server reads cfg while main goroutine modifies it).
+	//
+	// Security notes:
+	// - We split the hash: first half for secret header, second half for URL path
+	// - Salt is intentionally NOT used: the bot token (~46 chars) is already
+	//   a high-entropy cryptographic secret, not a weak password
+	// - Brute-forcing SHA-256 of a 46+ char random token is computationally infeasible
+	// - Deterministic derivation ensures stable values across restarts
+	// - Path hash in logs is acceptable: without the secret header, requests get 403
+	if cfg.Telegram.WebhookURL != "" {
+		hash := sha256.Sum256([]byte(cfg.Telegram.Token))
+		cfg.Telegram.WebhookPath = hex.EncodeToString(hash[16:])   // second half for URL path
+		cfg.Telegram.WebhookSecret = hex.EncodeToString(hash[:16]) // first half for secret header
+	}
+
 	// Start web server for stats and webhooks
 	webServer, err := web.NewServer(ctx, logger, cfg, store, store, store, store, store, store, store, b, ragService)
 	if err != nil {
@@ -290,19 +306,8 @@ func main() {
 	pollingDone := make(chan struct{})
 
 	if cfg.Telegram.WebhookURL != "" {
-		// Derive webhook path and secret from bot token using SHA-256.
-		//
-		// Security notes:
-		// - We split the hash: first half for secret header, second half for URL path
-		// - Salt is intentionally NOT used: the bot token (~46 chars) is already
-		//   a high-entropy cryptographic secret, not a weak password
-		// - Brute-forcing SHA-256 of a 46+ char random token is computationally infeasible
-		// - Deterministic derivation ensures stable values across restarts
-		// - Path hash in logs is acceptable: without the secret header, requests get 403
-		hash := sha256.Sum256([]byte(cfg.Telegram.Token))
-		cfg.Telegram.WebhookPath = hex.EncodeToString(hash[16:])   // second half for URL path
-		cfg.Telegram.WebhookSecret = hex.EncodeToString(hash[:16]) // first half for secret header
-
+		// WebhookPath and WebhookSecret were already computed above (before web server start)
+		// to avoid data race.
 		webhookURL := cfg.Telegram.WebhookURL + "/telegram/" + cfg.Telegram.WebhookPath
 		if err := b.SetWebhook(webhookURL, cfg.Telegram.WebhookSecret); err != nil {
 			logger.Error("failed to set webhook", "error", err)
