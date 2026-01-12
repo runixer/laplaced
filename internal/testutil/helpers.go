@@ -10,6 +10,7 @@ import (
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/openrouter"
 )
 
 // TestLogger returns a discarding logger for tests.
@@ -110,4 +111,25 @@ func TestFileProcessor(t *testing.T, downloader *MockFileDownloader, translator 
 // Ptr returns a pointer to the given value. Useful for optional fields.
 func Ptr[T any](v T) *T {
 	return &v
+}
+
+// MockEmbeddingResponse returns a mock embedding response for tests.
+func MockEmbeddingResponse() *openrouter.EmbeddingResponse {
+	embedding := TestEmbedding()
+	return &openrouter.EmbeddingResponse{
+		Data: []openrouter.EmbeddingObject{
+			{
+				Embedding: embedding,
+				Index:     0,
+			},
+		},
+		Usage: struct {
+			PromptTokens int      `json:"prompt_tokens"`
+			TotalTokens  int      `json:"total_tokens"`
+			Cost         *float64 `json:"cost,omitempty"`
+		}{
+			PromptTokens: 10,
+			TotalTokens:  10,
+		},
+	}
 }

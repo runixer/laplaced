@@ -443,3 +443,286 @@ func TestArchivist_PrepareUserFacts(t *testing.T) {
 	assert.Equal(t, int64(2), userFacts[1].ID)
 	assert.Equal(t, int64(3), userFacts[2].ID)
 }
+
+func TestArchivist_Execute_PeopleResult(t *testing.T) {
+	// Test archivist with people extraction (v0.5.1 feature)
+	llmResponse := `{
+		"facts": {
+			"added": [{
+				"relation": "works_as",
+				"content": "Software Engineer",
+				"category": "work",
+				"type": "identity",
+				"importance": 90,
+				"reason": "User mentioned their profession"
+			}],
+			"updated": [],
+			"removed": []
+		},
+		"people": {
+			"added": [{
+				"display_name": "Alice Smith",
+				"circle": "Friends",
+				"bio": "College friend, works at Google",
+				"aliases": ["Ally"],
+				"reason": "Mentioned in conversation"
+			}],
+			"updated": [{
+				"display_name": "Bob Jones",
+				"circle": "Work_Inner",
+				"bio": "Promoted to senior engineer",
+				"new_display_name": "Robert Jones",
+				"aliases": ["Rob"],
+				"reason": "Name change and promotion"
+			}],
+			"merged": [{
+				"target_name": "Charlie Brown",
+				"source_name": "Chuck",
+				"reason": "Same person, nickname vs full name"
+			}]
+		}
+	}`
+
+	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(mockChatResponse(llmResponse), nil)
+
+	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
+	cfg := testutil.TestConfig()
+	cfg.Agents.Archivist.Model = "test-model"
+	translator := testutil.TestTranslator(t)
+
+	archivist := New(executor, translator, cfg, testutil.TestLogger(), nil)
+
+	req := &agent.Request{
+		Shared: &agent.SharedContext{
+			UserID: 123,
+		},
+		Params: map[string]any{
+			ParamMessages: []storage.Message{
+				{ID: 1, Role: "user", Content: "Alice and Bob got promoted", CreatedAt: time.Now()},
+			},
+			ParamFacts:         []storage.Fact{},
+			ParamReferenceDate: time.Now(),
+		},
+	}
+
+	resp, err := archivist.Execute(context.Background(), req)
+	require.NoError(t, err)
+
+	result, ok := resp.Structured.(*Result)
+	require.True(t, ok)
+
+	// Verify facts
+	assert.Len(t, result.Facts.Added, 1)
+	assert.Equal(t, "Software Engineer", result.Facts.Added[0].Content)
+
+	// Verify people - Added
+	assert.Len(t, result.People.Added, 1)
+	assert.Equal(t, "Alice Smith", result.People.Added[0].DisplayName)
+	assert.Equal(t, "Friends", result.People.Added[0].Circle)
+	assert.Equal(t, "College friend, works at Google", result.People.Added[0].Bio)
+	assert.Equal(t, []string{"Ally"}, result.People.Added[0].Aliases)
+
+	// Verify people - Updated
+	assert.Len(t, result.People.Updated, 1)
+	assert.Equal(t, "Bob Jones", result.People.Updated[0].DisplayName)
+	assert.Equal(t, "Robert Jones", result.People.Updated[0].NewDisplayName)
+	assert.Equal(t, "Work_Inner", result.People.Updated[0].Circle)
+
+	// Verify people - Merged
+	assert.Len(t, result.People.Merged, 1)
+	assert.Equal(t, "Charlie Brown", result.People.Merged[0].TargetName)
+	assert.Equal(t, "Chuck", result.People.Merged[0].SourceName)
+
+	mockClient.AssertExpectations(t)
+}
+
+func TestArchivist_Execute_OnlyPeople(t *testing.T) {
+	// Test archivist with only people operations, no facts
+	llmResponse := `{
+		"facts": {
+			"added": [],
+			"updated": [],
+			"removed": []
+		},
+		"people": {
+			"added": [{
+				"display_name": "John Doe",
+				"circle": "Family",
+				"bio": "Cousin from New York",
+				"reason": "New family member"
+			}],
+			"updated": [],
+			"merged": []
+		}
+	}`
+
+	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(mockChatResponse(llmResponse), nil)
+
+	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
+	cfg := testutil.TestConfig()
+	cfg.Agents.Archivist.Model = "test-model"
+	translator := testutil.TestTranslator(t)
+
+	archivist := New(executor, translator, cfg, testutil.TestLogger(), nil)
+
+	req := &agent.Request{
+		Shared: &agent.SharedContext{
+			UserID: 123,
+		},
+		Params: map[string]any{
+			ParamMessages: []storage.Message{
+				{ID: 1, Role: "user", Content: "My cousin John visited", CreatedAt: time.Now()},
+			},
+			ParamFacts:         []storage.Fact{},
+			ParamReferenceDate: time.Now(),
+		},
+	}
+
+	resp, err := archivist.Execute(context.Background(), req)
+	require.NoError(t, err)
+
+	result, ok := resp.Structured.(*Result)
+	require.True(t, ok)
+
+	// Verify no facts
+	assert.Empty(t, result.Facts.Added)
+
+	// Verify person added
+	assert.Len(t, result.People.Added, 1)
+	assert.Equal(t, "John Doe", result.People.Added[0].DisplayName)
+	assert.Equal(t, "Family", result.People.Added[0].Circle)
+	assert.Equal(t, "Cousin from New York", result.People.Added[0].Bio)
+
+	mockClient.AssertExpectations(t)
+}
+
+func TestArchivist_Execute_PeopleEmptyFields(t *testing.T) {
+	// Test people with minimal fields (no bio, no aliases, default circle)
+	llmResponse := `{
+		"facts": {
+			"added": [],
+			"updated": [],
+			"removed": []
+		},
+		"people": {
+			"added": [{
+				"display_name": "Jane",
+				"reason": "Brief mention"
+			}],
+			"updated": [],
+			"merged": []
+		}
+	}`
+
+	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(mockChatResponse(llmResponse), nil)
+
+	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
+	cfg := testutil.TestConfig()
+	cfg.Agents.Archivist.Model = "test-model"
+	translator := testutil.TestTranslator(t)
+
+	archivist := New(executor, translator, cfg, testutil.TestLogger(), nil)
+
+	req := &agent.Request{
+		Shared: &agent.SharedContext{
+			UserID: 123,
+		},
+		Params: map[string]any{
+			ParamMessages: []storage.Message{
+				{ID: 1, Role: "user", Content: "Jane is here", CreatedAt: time.Now()},
+			},
+			ParamFacts:         []storage.Fact{},
+			ParamReferenceDate: time.Now(),
+		},
+	}
+
+	resp, err := archivist.Execute(context.Background(), req)
+	require.NoError(t, err)
+
+	result, ok := resp.Structured.(*Result)
+	require.True(t, ok)
+
+	assert.Len(t, result.People.Added, 1)
+	assert.Equal(t, "Jane", result.People.Added[0].DisplayName)
+	assert.Equal(t, "", result.People.Added[0].Circle) // Empty circle (will be defaulted to "Other" in storage)
+	assert.Equal(t, "", result.People.Added[0].Bio)
+	assert.Nil(t, result.People.Added[0].Aliases) // No aliases
+
+	mockClient.AssertExpectations(t)
+}
+
+func TestArchivist_Execute_PeopleAndFacts(t *testing.T) {
+	// Test archivist extracting both facts and people in same call
+	llmResponse := `{
+		"facts": {
+			"added": [{
+				"relation": "friend_of",
+				"content": "Alice Smith",
+				"category": "social",
+				"type": "identity",
+				"importance": 85,
+				"reason": "Long-time friend"
+			}],
+			"updated": [],
+			"removed": []
+		},
+		"people": {
+			"added": [{
+				"display_name": "Alice Smith",
+				"circle": "Inner",
+				"bio": "Best friend since childhood",
+				"reason": "Key person in user's life"
+			}],
+			"updated": [],
+			"merged": []
+		}
+	}`
+
+	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(mockChatResponse(llmResponse), nil)
+
+	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
+	cfg := testutil.TestConfig()
+	cfg.Agents.Archivist.Model = "test-model"
+	translator := testutil.TestTranslator(t)
+
+	archivist := New(executor, translator, cfg, testutil.TestLogger(), nil)
+
+	req := &agent.Request{
+		Shared: &agent.SharedContext{
+			UserID: 123,
+		},
+		Params: map[string]any{
+			ParamMessages: []storage.Message{
+				{ID: 1, Role: "user", Content: "Alice is my best friend", CreatedAt: time.Now()},
+			},
+			ParamFacts:         []storage.Fact{},
+			ParamReferenceDate: time.Now(),
+		},
+	}
+
+	resp, err := archivist.Execute(context.Background(), req)
+	require.NoError(t, err)
+
+	result, ok := resp.Structured.(*Result)
+	require.True(t, ok)
+
+	// Verify both fact and person were extracted for Alice
+	assert.Len(t, result.Facts.Added, 1)
+	assert.Equal(t, "Alice Smith", result.Facts.Added[0].Content)
+	assert.Equal(t, "friend_of", result.Facts.Added[0].Relation)
+
+	assert.Len(t, result.People.Added, 1)
+	assert.Equal(t, "Alice Smith", result.People.Added[0].DisplayName)
+	assert.Equal(t, "Inner", result.People.Added[0].Circle)
+	assert.Equal(t, "Best friend since childhood", result.People.Added[0].Bio)
+
+	mockClient.AssertExpectations(t)
+}
