@@ -407,49 +407,78 @@ Markdown с LaTeX
 ### Архитектура LaTeX конвертера
 
 ```
-internal/markdown/latex.go (936 строк)
-├── latexSymbols              # map[string]string → Unicode
+internal/markdown/latex.go (696 строк)
+├── Тип tokenType: tokenText, tokenCodeBlock, tokenCodeInline, tokenMathDisplay, tokenMathInline
+├── Структура token: {typ, content, raw}
+│
 ├── convertLatexToUnicode()   # Главный оркестратор
-├── hideCodeBlocks()          # Паттерн "Hide & Seek"
-├── convertDisplayMath()       # $$...$$ обработка
-├── convertInlineMath()        # $...$ обработка
+│   └── tokenize()             # State machine парсер
+│       ├── matchCodeBlock()       # ```...```
+│       ├── matchInlineCode()      # `...`
+│       ├── matchDisplayMath()     # $$...$$, \[...\], $\n...\n$
+│       ├── matchInlineMath()      # $...$ с currency detection
+│       └── mergeTextTokens()      # Склеивает смежные text токены
+│
+├── tokenType обработка:
+│   ├── tokenCodeBlock, tokenCodeInline → выводим raw (не трогаем)
+│   ├── tokenMathDisplay → processLatexContent() + trimSpace
+│   ├── tokenMathInline → processLatexContent()
+│   └── tokenText → convertTypographicQuotes()
+│
 ├── processLatexContent()      # Обработка внутри формул
-│   ├── removeSpacingCommands()
+│   ├── removeSpacingCommands() # \, \! \: \; \quad \qquad \ \
 │   ├── flattenBraces()         # \underbrace → упрощение
 │   ├── removeTextWrappers()    # \text{...} → ...
 │   ├── convertFractions()      # \frac{a}{b} → a/b
 │   ├── convertSquareRoots()   # \sqrt{x} → √x
-│   ├── replaceLatexSymbols()   # Греческие, операторы
-│   ├── convertSuperscripts()   # x^2 → x²
-│   └── convertSubscripts()     # H_2 → H₂
-├── findMatchingBrace()         # Подсчёт глубины скобок
-├── looksLikeFormulaContent()   # Currency detection
-└── convertTypographicQuotes() # 1" → 1″
+│   ├── convertVectors()        # \vec{v} → v⃗
+│   ├── replaceLatexSymbols()   # Греческие (все 24!), операторы, геометрия
+│   ├── convertSuperscripts()   # x^2 → x², поддержка Unicode букв
+│   └── convertSubscripts()     # H_2 → H₂, поддержка кириллицы и Unicode
+│
+├── State machine (matchInlineMath):
+│   ├── Состояния: поиск $, проверка currency, парсинг content
+│   ├── Обрабатывает: \$, $3.50, $100 и, двойные переводы строки
+│   └── isFormulaTerminator(), isMathContinuation() helpers
+│
+└── Утилиты:
+    ├── findMatchingBrace()         # Подсчёт глубины скобок
+    ├── looksLikeCurrency()         # Currency detection (цифры + .,)
+    ├── isFormulaTerminator()       # . , ! ? : ; ) ] \n
+    ├── isMathContinuation()        # \ + - * / = < > ≈ ≤ × · digits
+    └── convertTypographicQuotes() # 1" → 1″
 ```
 
-### Порядок обработки (критичен!)
+### Порядок обработки (Single Pass Tokenization)
 
-1. **Hide & Seek** (защита кодовых блоков)
-   - Находим ```...``` и `...`
-   - Заменяем на `__CODE_BLOCK_N__`
-   - Сохраняем в map для восстановления
+**Критическое отличие:** вместо "Hide & Seek" с плейсхолдерами используется **однопроходная токенизация**.
 
-2. **Типографика** (дюймы/минуты)
-   - `1"` → `1″` (после цифр)
-   - `6'` → `6′` (после цифр)
+```
+Входной текст
+    ↓
+tokenize() - State Machine Parser
+    ↓
+[]token {
+    {tokenCodeBlock, "```go\nfmt.Print()```", "```go\nfmt.Print()```"},
+    {tokenText, "Hello ", "Hello "},
+    {tokenMathInline, "x^2", "$x^2$"},
+    {tokenMathDisplay, "\n\\frac{a}{b}\n", "$$\n\\frac{a}{b}\n$$"},
+    ...
+}
+    ↓
+Switch по token.type:
+    ├── Code → выводим raw (защищён от обработки)
+    ├── Math → processLatexContent()
+    └── Text → convertTypographicQuotes()
+    ↓
+Выходной текст
+```
 
-3. **Display Math** (многострочные формулы)
-   - `$$...$$`
-   - `\[...\]`
-   - `$` на отдельных строках
-
-4. **Inline Math** (в строке)
-   - Currency detection: `$3.50` → пропускаем
-   - Variable detection: `$P$` → `P`
-   - Math content: `$x^2$` → `x²`
-
-5. **Restore Code Blocks**
-   - Восстанавливаем из плейсхолдеров
+**Преимущества токенизации:**
+- ✅ Один проход по тексту (O(n))
+- ✅ Нет временных строк и плейсхолдеров
+- ✅ Кодовые блоки защищены от обработки по определению
+- ✅ Чёткое разделение: парсинг vs обработка
 
 ### Flatten Braces (2D → 1D)
 
@@ -473,27 +502,43 @@ flattenBraces(content string) string {
 - `\underbrace{2 \times 25}_{зазоры}` → `2 × 25 (зазоры)`
 - Используется в формулах: `L = 1200 + \underbrace{2 \times 25}_{зазоры} = 1250`
 
-### Currency Detection
+### Currency Detection (State Machine)
 
 **Проблема:** `$3.50` похоже на формулу, но это валюта.
 
-**Решение:** Проверяем содержимое между `$...$`:
-```go
-hasLaTeX := strings.Contains(content, `\`)           // Есть backslash?
-hasOperator := strings.ContainsAny(content, `=+-*/<>^_`)  // Есть оператор?
-isJustLetters := isAlphaOnly(content)                  // Только буквы?
-looksLikeMath := looksLikeFormulaContent(content)       // Цифры, °, ′, ″, Greek?
+**Старое решение (НЕ используется):** Проверка содержимого после парсинга — много string операций.
 
-if !hasLaTeX && !hasOperator && !isJustLetters && !looksLikeMath {
-    return match // Валюта, не трогаем
+**Новое решение (State Machine в `matchInlineMath()`):** Проверка **во время** парсинга.
+
+```go
+// matchInlineMath() - state machine
+if i < len(runes) && unicode.IsDigit(runes[i]) {
+    j := i
+    // Собираем цифры, . и ,
+    for j < len(runes) && (unicode.IsDigit(runes[j]) || runes[j] == '.' || runes[j] == ',') {
+        j++
+    }
+
+    if j < len(runes) {
+        nextChar := runes[j]
+        // Валюта, если после числа идёт пунктуация:
+        if nextChar == '?' || nextChar == '!' || nextChar == '.' || nextChar == ',' {
+            return "", "", start // Не парсим как математику
+        }
+        // Валюта, если после числа идёт пробел + союз:
+        if nextChar == ' ' && hasConjunctionAfter(runes[j:]) {
+            return "", "", start
+        }
+    }
 }
 ```
 
 **Примеры:**
-- `$3.50` → `$3.50` (валюта) ✅
-- `$P$` → `P` (переменная) ✅
-- `$1″$` → `1″` (математика с primes) ✅
-- `$x^2$` → `x²` (формула) ✅
+- `$3.50` → `$3.50` (валюта, детект на этапе парсинга) ✅
+- `$100?` → `$100?` (валюта с ?) ✅
+- `$100 или` → `$100 или` (валюта с союзом) ✅
+- `$P$` → `P` (переменная, нет цифр) ✅
+- `$x^2$` → `x²` (формула, есть оператор ^) ✅
 
 ### Brace Matching (для вложенности)
 
@@ -571,6 +616,19 @@ $25^\circ C$                      → 25° C
 # Типографика
 $1" \to 1"$                        → 1″ → 1″
 $6' 4"$                            → 6′ 4″
+
+# Кириллица в индексах (новое!)
+$\frac{\text{Вес}_{груза}}{1000}$ → Вес_груза/1000
+$I_{\Delta}$                       → I_Δ
+$T_{груз}$                         → T_груз
+
+# Вектора (новое!)
+$\vec{F} = m \times \vec{a}$      → F⃗ = m × a⃗
+$\vec{v}_1 + \vec{v}_2$            → v⃗₁ + v⃗₂
+
+# Геометрия (новое!)
+$AB \parallel CD$                 → AB ∥ CD
+$\angle ABC = 90^\circ$           → ∠ ABC = 90°
 ```
 
 ## Связанные файлы

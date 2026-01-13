@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **LaTeX rendering improvements** — expanded symbol coverage and fixed subscript/superscript handling: added 10 missing Greek letters (η, ζ, ι, κ, ν, ξ, τ, υ, χ, ψ), geometry symbols (△, ∠, ∥, ⊥), vector notation (`\vec{v}` → v⃗), and proper brace removal for Cyrillic/Unicode letters in subscripts (`_{груза}` → `_груза`, `_{\Delta}` → `_Δ`). Fixed backslash-space rendering (`\ ` → space) and escaped dollar handling in formulas.
+
 ## [0.5.2] - 2026-01-13
 
 **LaTeX rendering for Telegram: formulas now readable as Unicode text.**

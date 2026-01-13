@@ -7,7 +7,7 @@ Telegram markdown doesn't support LaTeX rendering. This converter transforms com
 LaTeX commands that map 1:1 to Unicode symbols. Always safe to use.
 
 ### Greek Letters
-- **Lowercase**: `\alpha` → α, `\beta` → β, `\gamma` → γ, `\delta` → δ, `\epsilon` → ε, `\theta` → θ, `\lambda` → λ, `\mu` → μ, `\rho` → ρ, `\pi` → π, `\sigma` → σ, `\phi` → φ, `\omega` → ω
+- **Lowercase**: `\alpha` → α, `\beta` → β, `\gamma` → γ, `\delta` → δ, `\epsilon` → ε, `\zeta` → ζ, `\eta` → η, `\theta` → θ, `\iota` → ι, `\kappa` → κ, `\lambda` → λ, `\mu` → μ, `\nu` → ν, `\xi` → ξ, `\pi` → π, `\rho` → ρ, `\sigma` → σ, `\tau` → τ, `\upsilon` → υ, `\phi` → φ, `\chi` → χ, `\psi` → ψ, `\omega` → ω
 - **Uppercase**: `\Gamma` → Γ, `\Delta` → Δ, `\Theta` → Θ, `\Lambda` → Λ, `\Xi` → Ξ, `\Pi` → Π, `\Sigma` → Σ, `\Phi` → Φ, `\Psi` → Ψ, `\Omega` → Ω
 
 ### Operators
@@ -33,6 +33,13 @@ LaTeX commands that map 1:1 to Unicode symbols. Always safe to use.
 ### Logarithms
 - `\log` → log, `\ln` → ln, `\lg` → lg
 
+### Geometry
+- `\triangle` → △, `\angle` → ∠, `\parallel` → ∥, `\perp` → ⊥
+
+### Vectors
+- `\vec{v}` → `v⃗` (using combining character U+20D7)
+- `\vec{AB}` → `AB⃗`
+
 ### Other
 - `\%` → %, `\partial` → ∂, `\nabla` → ∇
 - `^\circ` → ° (degrees: `25^\circ C` → `25° C`)
@@ -51,9 +58,12 @@ LaTeX 2D constructions simplified to readable 1D text.
 
 ### Subscripts & Superscripts
 - `x^2` → `x²`, `x^{-1}` → `x⁻¹`, `H_2` → `H₂`
-- `x^{text}` → `x^text` (removes braces)
-- `T_{sleep}` → `T_sleep` (text subscripts without braces)
+- `x^{text}` → `x^text` (removes braces for letters)
+- `T_{sleep}` → `T_sleep` (Latin/Cyrillic subscripts without braces)
+- `I_{\Delta}` → `I_Δ` (Unicode Greek subscripts)
 - `_{10}` → `₁₀` (multi-digit subscripts)
+- `_{груза}` → `_груза` (Cyrillic subscripts supported)
+- Complex expressions preserve braces: `T_{i=1}` → `T_{i=1}` (has operators)
 
 ### Braces (Flattened)
 - `\underbrace{FORMULA}_{TEXT}` → `FORMULA (TEXT)`
@@ -61,6 +71,7 @@ LaTeX 2D constructions simplified to readable 1D text.
 - Example: `\underbrace{2 \times 25}_{зазоры}` → `2 × 25 (зазоры)`
 
 ### Spacing
+- `\ ` (backslash-space) → ` ` (space)
 - `\,` (thin space) → ` ` (space, for thousands separators: `2\,000` → `2 000`)
 - `\quad` → ` `, `\qquad` → ` `
 - Removed: `\!`, `\:`, `\;`
@@ -122,6 +133,20 @@ Content inside markdown code blocks is NOT processed:
 ### Engineering
 - `$\sqrt{\frac{4 \times Q_{peak}}{\pi \times v_{max}}}$` → `√(4 × Q_{peak}/π × v_{max})`
 - `$L = 1200 + \underbrace{2 \times 25}_{зазоры} = 1250$` → `L = 1200 + 2 × 25 (зазоры) = 1250`
+
+### Geometry
+- `$AB \parallel CD$` → `AB ∥ CD`
+- `$AB \perp CD$` → `AB ⊥ CD`
+- `$\triangle ABC \cong \triangle DEF$` → `△ ABC ≅ △ DEF`
+- `$\angle ABC = 90^\circ$` → `∠ ABC = 90°`
+
+### Vectors
+- `$\vec{F} = m \times \vec{a}$` → `F⃗ = m × a⃗`
+- `$\vec{v}_1 + \vec{v}_2$` → `v⃗₁ + v⃗₂`
+
+### Cyrillic Subscripts
+- `$\frac{\text{Вес}_{груза}}{1000}$` → `Вес_груза/1000`
+- `$T_{груз}$` → `T_груз`
 
 ### Temperature
 - `$25^\circ C$` → `25° C`

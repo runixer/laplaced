@@ -170,7 +170,7 @@ func TestConvertLatexToUnicode(t *testing.T) {
 		{
 			name:     "nabla operator",
 			input:    "$\\nabla \\cdot \\vec{F}$",
-			expected: "∇ · \\vec{F}",
+			expected: "∇ · F⃗",
 		},
 		{
 			name:     "empty text wrapper",
@@ -196,6 +196,86 @@ func TestConvertLatexToUnicode(t *testing.T) {
 			name:     "mixed super and subscript",
 			input:    "$x_0^2 + x_1^2$",
 			expected: "x₀² + x₁²",
+		},
+		{
+			name:     "triangle symbol",
+			input:    "$\\triangle ABC$",
+			expected: "△ ABC",
+		},
+		{
+			name:     "angle symbol",
+			input:    "$\\angle ABC = 90^\\circ$",
+			expected: "∠ ABC = 90°",
+		},
+		{
+			name:     "parallel lines",
+			input:    "$AB \\parallel CD$",
+			expected: "AB ∥ CD",
+		},
+		{
+			name:     "perpendicular lines",
+			input:    "$AB \\perp CD$",
+			expected: "AB ⊥ CD",
+		},
+		{
+			name:     "vector notation",
+			input:    "$\\vec{v} + \\vec{w}$",
+			expected: "v⃗ + w⃗",
+		},
+		{
+			name:     "vector with subscript",
+			input:    "$\\vec{v}_1$",
+			expected: "v⃗₁",
+		},
+		{
+			name:     "eta efficiency",
+			input:    "$\\eta = 0.9$",
+			expected: "η = 0.9",
+		},
+		{
+			name:     "omega resistance",
+			input:    "$R = 0.3 \\ \\Omega$",
+			expected: "R = 0.3  Ω",
+		},
+		{
+			name:     "mu microfarad",
+			input:    "$C = 60 \\mu\\text{F}$",
+			expected: "C = 60 μF",
+		},
+		{
+			name:     "all greek letters",
+			input:    "$\\alpha \\beta \\gamma \\delta \\epsilon \\zeta \\eta \\theta \\iota \\kappa \\lambda \\mu \\nu \\xi \\pi \\rho \\sigma \\tau \\upsilon \\phi \\chi \\psi \\omega$",
+			expected: "α β γ δ ε ζ η θ ι κ λ μ ν ξ π ρ σ τ υ φ χ ψ ω",
+		},
+		{
+			name:     "subscript with cyrillic",
+			input:    "$\\frac{\\text{Вес}_{груза}}{1000}$",
+			expected: "Вес_груза/1000",
+		},
+		{
+			name:     "subscript with greek unicode",
+			input:    "$I_{\\Delta}$",
+			expected: "I_Δ",
+		},
+		{
+			name:     "mixed subscripts",
+			input:    "$T_{i=1} + T_{груз} + M_{Δ}$",
+			expected: "T_{i=1} + T_груз + M_Δ",
+		},
+		{
+			name:     "superscript with cyrillic",
+			input:    "$x^{показатель}$",
+			expected: "x^показатель",
+		},
+		{
+			name:     "complex subscript with unicode and space",
+			input:    "$\\text{Масса}_{\\Delta m}$",
+			expected: "Масса_{Δ m}",
+		},
+		{
+			name:     "subscript with single unicode letter",
+			input:    "$F_{\\mu}$",
+			expected: "F_μ",
 		},
 	}
 
@@ -458,6 +538,46 @@ func TestToHTMLWithLatex(t *testing.T) {
 			name:     "mixed formatting",
 			input:    "Calculate $\\frac{1}{2}$ * $\\pi$",
 			expected: "Calculate 1/2 * π",
+		},
+		{
+			name:     "bug-05 block 1 - code with bitwise shifts",
+			input:    "```cpp\nint seed_0 = 0xA5;\nint key = (seed_0 << 2) | (seed_0 >> 1);\n```",
+			expected: "<pre><code class=\"language-cpp\">int seed_0 = 0xA5;\nint key = (seed_0 &lt;&lt; 2) | (seed_0 &gt;&gt; 1);\n</code></pre>",
+		},
+		{
+			name:     "bug-05 block 2 - financial with escaped dollar",
+			input:    "$C_{init} = 10\\,000\\$",
+			expected: "C_init = 10 000$",
+		},
+		{
+			name:     "bug-06 block 1 - Rate with escaped dollar",
+			input:    "$Rate_{min} = 50\\$",
+			expected: "Rate_min = 50$",
+		},
+		{
+			name:     "bug-06 block 1 - Limit with ge and escaped dollar",
+			input:    "$Limit_{max} \\ge 1000\\$",
+			expected: "Limit_max ≥ 1000$",
+		},
+		{
+			name:     "bug-06 block 4 - approx with escaped dollar",
+			input:    "$\\approx 600\\$",
+			expected: "≈ 600$",
+		},
+		{
+			name:     "bug-06 block 2 - display math with escaped dollar",
+			input:    "$$P_{init} = 500\\,000\\$$",
+			expected: "P_init = 500 000$",
+		},
+		{
+			name:     "bug-06 full - text with display and inline math",
+			input:    "Где $P_{init} = 500\\,000\\$.",
+			expected: "Где P_init = 500 000$.",
+		},
+		{
+			name:     "bug-05 block 3 - mixed inline math (separate formulas)",
+			input:    "Variable $x_0$ in formula, but `var_0` in code",
+			expected: "Variable x₀ in formula, but <code>var_0</code> in code",
 		},
 	}
 
@@ -926,6 +1046,111 @@ func TestFlattenBraces(t *testing.T) {
 		},
 	}
 
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := convertLatexToUnicode(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestEscapedDollarInFormula(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "escaped dollar in formula",
+			input:    "$Balance \\ge 1000\\$ \\rightarrow \\text{Buy Nvidia}$",
+			expected: "Balance ≥ 1000$ → Buy Nvidia",
+		},
+		{
+			name:     "multiple escaped dollars",
+			input:    "$Price_1 = \\$100, Price_2 = \\$200$",
+			expected: "Price₁ = $100, Price₂ = $200",
+		},
+		{
+			name:     "currency comparison",
+			input:    "$If: cost \\le \\$50 \\rightarrow buy$",
+			expected: "If: cost ≤ $50 → buy",
+		},
+		{
+			name:     "finops alert with implies - CRITICAL from bug-02.json",
+			input:    "$If \\Delta Balance < 100\\$ \\implies \\text{Critical Alert!}$",
+			expected: "If Δ Balance < 100$ ⟹ Critical Alert!",
+		},
+		{
+			name:     "block 1 from bug-02.json - GPU cost limit",
+			input:    "$$Cost_{gpu} \\le 1200\\$ \\text{ (RTX 5090)}$$",
+			expected: "Cost_gpu ≤ 1200$ (RTX 5090)",
+		},
+		{
+			name:     "block 3 from bug-02.json - SaaS subscription with multiple dollars",
+			input:    "$$P_{total} = 5 \\text{ users} \\times 20\\$ = 100\\$ \\text{ / month}$$",
+			expected: "P_total = 5 users × 20$ = 100$ / month",
+		},
+		{
+			name:     "bug-03 block 1 - base salary with thin space",
+			input:    "$$Base = 5\\,200\\$ \\text{ (Gross)}$$",
+			expected: "Base = 5 200$ (Gross)",
+		},
+		{
+			name:     "bug-03 block 2 - Delta with escaped dollar (CRITICAL)",
+			input:    "$\\Delta Tax > 50\\$ \\implies \\text{Пересчет!}$",
+			expected: "Δ Tax > 50$ ⟹ Пересчет!",
+		},
+		{
+			name:     "bug-03 block 3 - multiple dollars with percent",
+			input:    "$$Net = 100\\$ - 13\\% \\approx 87\\$$",
+			expected: "Net = 100$ - 13% ≈ 87$",
+		},
+		{
+			name:     "bug-04 block 1 - NAV with escaped dollars and thin spaces",
+			input:    "$$NAV = 10\\,000\\$ - 15\\% \\text{ fees} \\approx 8\\,500\\$$",
+			expected: "NAV = 10 000$ - 15% fees ≈ 8 500$",
+		},
+		{
+			name:     "bug-04 block 1 - inline NAV comparison",
+			input:    "$NAV < 9\\,000\\$$",
+			expected: "NAV < 9 000$",
+		},
+		{
+			name:     "bug-04 block 2 - Call option with escaped dollar",
+			input:    "$C = \\$5.50$",
+			expected: "C = $5.50",
+		},
+		{
+			name:     "bug-04 block 2 - Put option with escaped dollar",
+			input:    "$P = \\$4.20$",
+			expected: "P = $4.20",
+		},
+		{
+			name:     "bug-04 block 2 - Spread with Delta and escaped dollar",
+			input:    "$\\Delta = \\$1.30$",
+			expected: "Δ = $1.30",
+		},
+		{
+			name:     "bug-04 block 4 - Sum with multiple escaped dollars",
+			input:    "$$Total = \\sum_{i=1}^3 P_i = \\$100 + \\$200 + \\$300 = \\$600$$",
+			expected: "Total = Σ_{i=1}³ P_i = $100 + $200 + $300 = $600",
+		},
+		{
+			name:     "bug-05 block 1 - code with bitwise shifts protected",
+			input:    "int seed_0 = 0xA5; int key = (seed_0 << 2);",
+			expected: "int seed_0 = 0xA5; int key = (seed_0 << 2);",
+		},
+		{
+			name:     "bug-05 block 2 - financial with subscripts",
+			input:    "$C_{init} = 10\\,000\\$",
+			expected: "C_init = 10 000$",
+		},
+		{
+			name:     "bug-05 block 3 - variable with subscript",
+			input:    "$x_0$ in formula",
+			expected: "x₀ in formula",
+		},
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := convertLatexToUnicode(tt.input)
