@@ -1150,6 +1150,89 @@ func TestEscapedDollarInFormula(t *testing.T) {
 			input:    "$x_0$ in formula",
 			expected: "x₀ in formula",
 		},
+		// Bug-06 tests
+		{
+			name:     "bug-06 Rate with escaped dollar",
+			input:    "$Rate_{min} = 50\\$",
+			expected: "Rate_min = 50$",
+		},
+		{
+			name:     "bug-06 Limit with ge and escaped dollar",
+			input:    "$Limit_{max} \\ge 1000\\$",
+			expected: "Limit_max ≥ 1000$",
+		},
+		{
+			name:     "bug-06 approx with escaped dollar",
+			input:    "$\\approx 600\\$",
+			expected: "≈ 600$",
+		},
+		{
+			name:     "bug-06 display math with escaped dollar",
+			input:    "$$P_{init} = 500\\,000\\$$",
+			expected: "P_init = 500 000$",
+		},
+		// Bug-07 tests
+		{
+			name:     "bug-07 collision le with left",
+			input:    "$\\text{Divergence} = \\left( d \\le 0.5 \\text{ mm} \\right)$",
+			expected: "Divergence = ( d ≤ 0.5 mm )",
+		},
+		{
+			name:     "bug-07 arrows xrightarrow",
+			input:    "$\\text{Склад} \\xrightarrow{} \\text{Цех} \\rightarrow \\text{Монтаж}$",
+			expected: "Склад →{} Цех → Монтаж",
+		},
+		{
+			name:     "bug-07 table geometry left right pm",
+			input:    "$L = \\left( 10 \\pm 0.1 \\right) \\text{ m}$",
+			expected: "L = ( 10 ± 0.1 ) m",
+		},
+		{
+			name:     "bug-07 table budget to and escaped dollar",
+			input:    "$Cost \\to 500\\$$",
+			expected: "Cost → 500$",
+		},
+		{
+			name:     "bug-07 left with le no collision",
+			input:    "$$\\left( x \\le 5 \\right)$$",
+			expected: "( x ≤ 5 )",
+		},
+		{
+			name:     "bug-07 left with ge no collision",
+			input:    "$$\\left( y \\ge 10 \\right)$$",
+			expected: "( y ≥ 10 )",
+		},
+		{
+			name:     "bug-07 nested left right with le",
+			input:    "$$\\left[ d \\le 0.5 \\text{ mm} \\right]$$",
+			expected: "[ d ≤ 0.5 mm ]",
+		},
+		// Bug-08 tests
+		{
+			name:     "bug-08 formula ending with escaped dollar",
+			input:    "$Max \\le 100\\$",
+			expected: "Max ≤ 100$",
+		},
+		{
+			name:     "bug-08 formula with escaped dollar followed by period",
+			input:    "Cost is $Price = \\$100$.",
+			expected: "Cost is Price = $100.",
+		},
+		{
+			name:     "bug-08 formula ending with escaped dollar and punctuation",
+			input:    "Limit: $Max \\le 100\\$.",
+			expected: "Limit: Max ≤ 100$.",
+		},
+		{
+			name:     "bug-08 multiple escaped dollars in formula",
+			input:    "$A = \\$1$ and $B = \\$2$",
+			expected: "A = $1 and B = $2",
+		},
+		{
+			name:     "bug-08 mixed escaped and non-escaped dollars",
+			input:    "$Total = \\$50 + \\$30 = \\$80$$",
+			expected: "Total = $50 + $30 = $80$",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
