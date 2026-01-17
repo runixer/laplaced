@@ -371,6 +371,7 @@ func processLatexContent(content string) string {
 	content = removeSpacingCommands(content)
 	content = flattenBraces(content)
 	content = removeTextWrappers(content)
+	content = removeFontWrappers(content)
 	content = convertFractions(content)
 	content = convertSquareRoots(content)
 	content = convertVectors(content)
@@ -464,6 +465,24 @@ func removeTextWrappers(content string) string {
 		}
 		return match
 	})
+}
+
+func removeFontWrappers(content string) string {
+	// Font modifiers: \mathbf{}, \mathit{}, \mathrm{}, \mathsf{}, \mathtt{}, \mathcal{}
+	// These are LaTeX font style commands that we want to strip, keeping only the content
+	fontCmds := []string{`mathbf`, `mathit`, `mathrm`, `mathsf`, `mathtt`, `mathcal`}
+
+	for _, cmd := range fontCmds {
+		pattern := regexp.MustCompile(`\\` + cmd + `\{([^}]*)\}`)
+		content = pattern.ReplaceAllStringFunc(content, func(match string) string {
+			inner := pattern.FindStringSubmatch(match)
+			if len(inner) >= 2 {
+				return strings.TrimSpace(inner[1])
+			}
+			return match
+		})
+	}
+	return content
 }
 
 func convertFractions(content string) string {

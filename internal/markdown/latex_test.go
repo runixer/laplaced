@@ -287,6 +287,67 @@ func TestConvertLatexToUnicode(t *testing.T) {
 	}
 }
 
+func TestRemoveFontWrappers(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "simple mathbf",
+			input:    `\mathbf{168}`,
+			expected: "168",
+		},
+		{
+			name:     "mathbf with spaces",
+			input:    `\mathbf{168 рядов}`,
+			expected: "168 рядов",
+		},
+		{
+			name:     "multiple font modifiers",
+			input:    `\mathbf{A} + \mathrm{B}`,
+			expected: "A + B",
+		},
+		{
+			name:     "mathit italic",
+			input:    `\mathit{variable}`,
+			expected: "variable",
+		},
+		{
+			name:     "mathsf sans serif",
+			input:    `\mathsf{X}`,
+			expected: "X",
+		},
+		{
+			name:     "mathtt typewriter",
+			input:    `\mathtt{code}`,
+			expected: "code",
+		},
+		{
+			name:     "mathcal calligraphic",
+			input:    `\mathcal{L}`,
+			expected: "L",
+		},
+		{
+			name:     "empty font wrapper",
+			input:    `\mathbf{}`,
+			expected: "",
+		},
+		{
+			name:     "no font wrapper",
+			input:    `just text`,
+			expected: "just text",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := removeFontWrappers(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 func TestRemoveTextWrappers(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1018,6 +1079,77 @@ func TestCodeBlocksProtected(t *testing.T) {
 	}
 }
 
+func TestMathbf(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "mathbf simple",
+			input:    `$\mathbf{168}$`,
+			expected: "168",
+		},
+		{
+			name:     "mathbf with text",
+			input:    `$\mathbf{рядов}$`,
+			expected: "рядов",
+		},
+		{
+			name:     "user formula - potential",
+			input:    `$28 \times 6 \approx \mathbf{168}$`,
+			expected: "28 × 6 ≈ 168",
+		},
+		{
+			name:     "mathbf in complex formula",
+			input:    `$\mathbf{A} = \mathbf{B} + \mathbf{C}$`,
+			expected: "A = B + C",
+		},
+		{
+			name:     "mathrm - roman font",
+			input:    `$\mathrm{sin}(x)$`,
+			expected: "sin(x)",
+		},
+		{
+			name:     "mathit - italic font",
+			input:    `$\mathit{variable}$`,
+			expected: "variable",
+		},
+		{
+			name:     "mixed font modifiers",
+			input:    `$\mathbf{x} + \mathrm{y} + \mathit{z}$`,
+			expected: "x + y + z",
+		},
+		{
+			name:     "mathsf - sans serif",
+			input:    `$\mathsf{X}$`,
+			expected: "X",
+		},
+		{
+			name:     "mathtt - typewriter",
+			input:    `$\mathtt{code}$`,
+			expected: "code",
+		},
+		{
+			name:     "mathcal - calligraphic",
+			input:    `$\mathcal{L}$`,
+			expected: "L",
+		},
+		{
+			name:     "empty mathbf",
+			input:    `$\mathbf{}$`,
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := convertLatexToUnicode(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 func TestFlattenBraces(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1049,6 +1181,53 @@ func TestFlattenBraces(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := convertLatexToUnicode(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestToHTMLWithMathbf(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "user formula from request - bullet point",
+			input:    "3. Потенциал: 28 рядов × 6 мотков ≈ $\\mathbf{168 рядов}$",
+			expected: "1. Потенциал: 28 рядов × 6 мотков ≈ 168 рядов",
+		},
+		{
+			name:     "bold in markdown with formula",
+			input:    "**Потенциал:** $\\mathbf{168}$",
+			expected: "<b>Потенциал:</b> 168",
+		},
+		{
+			name:     "multiple mathbf in one line",
+			input:    "$\\mathbf{A} + \\mathbf{B} = \\mathbf{C}$",
+			expected: "A + B = C",
+		},
+		{
+			name:     "mathbf with subscript",
+			input:    "$\\mathbf{F}_{net}$",
+			expected: "F_net",
+		},
+		{
+			name:     "mathbf with russian text",
+			input:    "$\\mathbf{всего}$ единиц",
+			expected: "всего единиц",
+		},
+		{
+			name:     "cmath with mathbf",
+			input:    "$$\\sum_{i=1}^{\\mathbf{n}} \\mathbf{x}_i = \\mathbf{S}$$",
+			expected: "Σ_{i=1}ⁿ x_i = S",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ToHTML(tt.input)
+			assert.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
