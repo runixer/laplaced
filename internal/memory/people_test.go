@@ -382,6 +382,7 @@ func TestApplyPeopleUpdates_MergePeople(t *testing.T) {
 	}
 
 	// Mock: MergePeople call
+	// Note: both people have nil username/telegram_id in this test, so newUsername and newTelegramID are nil
 	mockStore.On("MergePeople", userID, int64(1), int64(2),
 		mock.MatchedBy(func(bio string) bool {
 			return bio == "Engineer Manager" // Bios combined
@@ -389,7 +390,10 @@ func TestApplyPeopleUpdates_MergePeople(t *testing.T) {
 		mock.MatchedBy(func(aliases []string) bool {
 			// Should contain Johnny, JD, and "J. Doe" (source display name)
 			return len(aliases) >= 2
-		})).Return(nil).Once()
+		}),
+		(*string)(nil), // newUsername (both are nil)
+		(*int64)(nil),  // newTelegramID (both are nil)
+	).Return(nil).Once()
 
 	// Mock: embedding generation for merged person
 	mockOR.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req interface{}) bool {
@@ -453,7 +457,7 @@ func TestApplyPeopleUpdates_MergePersonNotFound(t *testing.T) {
 	// Verify
 	assert.NoError(t, err)
 	assert.Equal(t, 0, stats.Merged)
-	mockStore.AssertNotCalled(t, "MergePeople", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	mockStore.AssertNotCalled(t, "MergePeople", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 	mockOR.AssertNotCalled(t, "CreateEmbeddings", mock.Anything, mock.Anything)
 }
 
@@ -565,7 +569,8 @@ func TestApplyPeopleUpdates_Complex(t *testing.T) {
 	})).Return(nil).Once()
 
 	// Mock: merge Bob into Alice
-	mockStore.On("MergePeople", userID, int64(1), int64(2), mock.Anything, mock.Anything).Return(nil).Once()
+	// Both have nil username/telegram_id in this test, so those are nil
+	mockStore.On("MergePeople", userID, int64(1), int64(2), mock.Anything, mock.Anything, (*string)(nil), (*int64)(nil)).Return(nil).Once()
 
 	// Mock: update embedding after merge
 	mockStore.On("UpdatePerson", mock.MatchedBy(func(p storage.Person) bool {
@@ -580,6 +585,96 @@ func TestApplyPeopleUpdates_Complex(t *testing.T) {
 	assert.Equal(t, 1, stats.Added)   // Charlie
 	assert.Equal(t, 1, stats.Updated) // Alice circle change
 	assert.Equal(t, 1, stats.Merged)  // Bob merged into Alice
+	mockStore.AssertExpectations(t)
+	mockOR.AssertExpectations(t)
+}
+
+func TestApplyPeopleUpdates_MergeWithUsernameAndTelegramID(t *testing.T) {
+	// Test that username and telegram_id are correctly preserved during merge
+	// This reproduces the bug where target person lost username from source
+	mockStore := new(testutil.MockStorage)
+	mockOR := new(testutil.MockOpenRouterClient)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	cfg := &config.Config{}
+	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+
+	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
+	svc.SetPeopleRepository(mockStore)
+
+	userID := int64(123)
+	referenceDate := time.Now()
+
+	username := "alice_smith"
+	telegramID := int64(123456789)
+
+	existingPeople := []storage.Person{
+		{
+			ID:          1,
+			UserID:      userID,
+			DisplayName: "Alice Smith",
+			// No username or telegram_id - this is the bug scenario
+			Bio:     "Target person without contact info",
+			Aliases: []string{"Alice"},
+		},
+		{
+			ID:          2,
+			UserID:      userID,
+			DisplayName: "Alice",
+			// Has username and telegram_id - should be preserved
+			Username:   &username,
+			TelegramID: &telegramID,
+			Bio:        "Same person with contact info",
+			Aliases:    []string{"Ali"},
+		},
+	}
+
+	peopleResult := archivist.PeopleResult{
+		Merged: []archivist.MergedPerson{
+			{
+				TargetName: "Alice Smith",
+				SourceName: "Alice",
+				Reason:     "Same person, duplicate entries",
+			},
+		},
+	}
+
+	// Mock: embedding generation for merged person
+	mockOR.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req interface{}) bool {
+		return true
+	})).Return(testutil.MockEmbeddingResponse(), nil).Once()
+
+	// Mock: MergePeople should be called with source's username/telegram_id
+	// Target (1) has no username, so source's (2) username should be used
+	mockStore.On("MergePeople", userID, int64(1), int64(2),
+		mock.MatchedBy(func(bio string) bool {
+			return bio != "" // Bios combined
+		}),
+		mock.MatchedBy(func(aliases []string) bool {
+			return len(aliases) >= 1 // Aliases combined
+		}),
+		mock.MatchedBy(func(newUsername *string) bool {
+			// Should be source's username since target has none
+			return newUsername != nil && *newUsername == username
+		}),
+		mock.MatchedBy(func(newTelegramID *int64) bool {
+			// Should be source's telegram_id since target has none
+			return newTelegramID != nil && *newTelegramID == telegramID
+		}),
+	).Return(nil).Once()
+
+	// Mock: UpdatePerson call to update embedding after merge
+	mockStore.On("UpdatePerson", mock.MatchedBy(func(p storage.Person) bool {
+		// Verify the merged person now has username/telegram_id
+		return p.ID == 1 && p.Username != nil && *p.Username == username &&
+			p.TelegramID != nil && *p.TelegramID == telegramID
+	})).Return(nil).Once()
+
+	// Execute
+	stats, err := svc.applyPeopleUpdates(context.Background(), userID, peopleResult, existingPeople, referenceDate)
+
+	// Verify
+	assert.NoError(t, err)
+	assert.Equal(t, 1, stats.Merged)
 	mockStore.AssertExpectations(t)
 	mockOR.AssertExpectations(t)
 }

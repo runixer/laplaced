@@ -957,13 +957,34 @@ func (s *Service) applyPeopleUpdates(ctx context.Context, userID int64, peopleRe
 			}
 		}
 
-		if err := s.peopleRepo.MergePeople(userID, targetPerson.ID, sourcePerson.ID, newBio, uniqueAliases); err != nil {
+		// Merge username and telegram_id: prefer target's values if they exist, otherwise use source's
+		var newUsername *string
+		if targetPerson.Username != nil && *targetPerson.Username != "" {
+			newUsername = targetPerson.Username // Keep target's username
+		} else if sourcePerson.Username != nil && *sourcePerson.Username != "" {
+			newUsername = sourcePerson.Username // Inherit from source
+		}
+		// If both are nil/empty, newUsername remains nil (no change)
+
+		var newTelegramID *int64
+		if targetPerson.TelegramID != nil && *targetPerson.TelegramID != 0 {
+			newTelegramID = targetPerson.TelegramID // Keep target's telegram_id
+		} else if sourcePerson.TelegramID != nil && *sourcePerson.TelegramID != 0 {
+			newTelegramID = sourcePerson.TelegramID // Inherit from source
+		}
+
+		if err := s.peopleRepo.MergePeople(userID, targetPerson.ID, sourcePerson.ID, newBio, uniqueAliases, newUsername, newTelegramID); err != nil {
 			s.logger.Error("failed to merge people", "target", merged.TargetName, "source", merged.SourceName, "error", err)
 			continue
 		}
 
-		// Regenerate embedding for merged person (bio and aliases changed)
-		embText := buildPersonEmbeddingText(targetPerson.DisplayName, targetPerson.Username, uniqueAliases, newBio)
+		// Regenerate embedding for merged person (bio, aliases, and possibly username changed)
+		// Use newUsername which may be from source if target didn't have one
+		embUsername := newUsername
+		if embUsername == nil {
+			embUsername = targetPerson.Username // Fallback (will be nil if both are nil)
+		}
+		embText := buildPersonEmbeddingText(targetPerson.DisplayName, embUsername, uniqueAliases, newBio)
 		emb, embUsage, err := s.getEmbedding(ctx, embText)
 		stats.EmbeddingTokens += embUsage.Tokens
 		if embUsage.Cost != nil {
@@ -975,10 +996,12 @@ func (s *Service) applyPeopleUpdates(ctx context.Context, userID int64, peopleRe
 		if err != nil {
 			s.logger.Error("failed to get embedding for merged person", "name", merged.TargetName, "error", err)
 		} else {
-			// Update just the embedding
+			// Update just the embedding (and username/telegram_id for consistency)
 			mergedPerson := *targetPerson
 			mergedPerson.Bio = newBio
 			mergedPerson.Aliases = uniqueAliases
+			mergedPerson.Username = newUsername
+			mergedPerson.TelegramID = newTelegramID
 			mergedPerson.Embedding = emb
 			if err := s.peopleRepo.UpdatePerson(mergedPerson); err != nil {
 				s.logger.Error("failed to update merged person embedding", "name", merged.TargetName, "error", err)

@@ -598,8 +598,8 @@ func (m *MockStorage) FindPersonByName(userID int64, name string) (*storage.Pers
 	return args.Get(0).(*storage.Person), args.Error(1)
 }
 
-func (m *MockStorage) MergePeople(userID, targetID, sourceID int64, newBio string, newAliases []string) error {
-	args := m.Called(userID, targetID, sourceID, newBio, newAliases)
+func (m *MockStorage) MergePeople(userID, targetID, sourceID int64, newBio string, newAliases []string, newUsername *string, newTelegramID *int64) error {
+	args := m.Called(userID, targetID, sourceID, newBio, newAliases, newUsername, newTelegramID)
 	return args.Error(0)
 }
 

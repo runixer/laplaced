@@ -1239,8 +1239,23 @@ func (b *Bot) performMergePeople(ctx context.Context, userID int64, targetName, 
 		newAliases = append(newAliases, a)
 	}
 
+	// Determine username and telegram_id to use (prefer target's if they exist)
+	var newUsername *string
+	if target.Username != nil && *target.Username != "" {
+		newUsername = target.Username // Keep target's username
+	} else if source.Username != nil && *source.Username != "" {
+		newUsername = source.Username // Inherit from source
+	}
+
+	var newTelegramID *int64
+	if target.TelegramID != nil && *target.TelegramID != 0 {
+		newTelegramID = target.TelegramID // Keep target's telegram_id
+	} else if source.TelegramID != nil && *source.TelegramID != 0 {
+		newTelegramID = source.TelegramID // Inherit from source
+	}
+
 	// Merge source into target
-	if err := b.peopleRepo.MergePeople(userID, target.ID, source.ID, newBio, newAliases); err != nil {
+	if err := b.peopleRepo.MergePeople(userID, target.ID, source.ID, newBio, newAliases, newUsername, newTelegramID); err != nil {
 		return fmt.Sprintf("Error merging people: %v", err), nil
 	}
 

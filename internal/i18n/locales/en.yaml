@@ -364,19 +364,20 @@ memory:
     - Example: "User's colleague at X-team. Backend developer. Enjoys board games."
 
     DEDUPLICATION (CRITICAL!):
-    - Before adding, ALWAYS check <people> section for matching FIRST NAME
-    - If person exists with different alias, use "merged" to combine
+    - ALWAYS check <people> section for duplicates, even if not adding new people
+    - Duplicates: identical first names, overlapping aliases, identical @username
+    - If you find duplicates — you MUST use "merged" to combine them
     - Aliases: nicknames, @usernames, diminutives (e.g., "Oleg" and "Gelo" for same person)
 
     NAME PATTERNS (SAME person!):
     - "Mary" = "Mary Jane" = "Mary Jane Smith" (first name → +middle → +last)
     - "John" = "John Smith" = "John William Smith"
-    - If <people> has "[Person:X] Mary [Family]" and you want to add "Mary Smith" — it's the SAME person!
-    - Use "updated" with person_id or display_name, NOT "added"
+    - If <people> has "[Person:67] Mary [Family]" and "[Person:80] Mary Smith [Family]" — it's the SAME person!
+    - Propose merged, target is the more complete name (e.g., "Mary Smith")
 
     ADDING RULE:
     - Use "added" ONLY if first name is COMPLETELY DIFFERENT from all in <people>
-    - If first name matches + same circle → this is an update to existing person
+    - If first name matches + same circle — use "updated" for existing person
 
     PREFER FULL NAMES:
     - If you learn a full name (First Last) for a person with nickname/short name — update display_name
@@ -412,10 +413,11 @@ memory:
     <instructions>
     1. Read the conversation below.
     2. Find EXPLICIT User statements (not Bot's).
-    3. Compare with existing facts and <people> section.
-    4. For facts: add new to "added", update changed to "updated", delete irrelevant to "removed".
-    5. For people: add new people, update existing bios (use [Person:ID] for reliable matching), merge duplicates.
-    6. If no changes — return empty arrays for both sections.
+    3. CHECK <people> SECTION FOR DUPLICATES — even if not adding new people, find and merge duplicates (identical names, shared aliases, @username).
+    4. Compare with existing facts.
+    5. For facts: add new to "added", update changed to "updated", delete irrelevant to "removed".
+    6. For people: add new people, update existing bios (use [Person:ID] for reliable matching).
+    7. If no changes — return empty arrays for both sections.
     </instructions>
 
     <current_facts entity="User">

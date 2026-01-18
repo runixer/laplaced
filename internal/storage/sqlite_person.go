@@ -286,7 +286,9 @@ func (s *SQLiteStore) FindPersonByAlias(userID int64, alias string) ([]Person, e
 }
 
 // MergePeople merges source person into target person, then deletes source.
-func (s *SQLiteStore) MergePeople(userID, targetID, sourceID int64, newBio string, newAliases []string) error {
+// newUsername and newTelegramID are the values to set (only if non-nil/non-zero).
+// If target already has username/telegram_id, those are preserved (callers should decide which to keep).
+func (s *SQLiteStore) MergePeople(userID, targetID, sourceID int64, newBio string, newAliases []string, newUsername *string, newTelegramID *int64) error {
 	// Start transaction
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -296,7 +298,7 @@ func (s *SQLiteStore) MergePeople(userID, targetID, sourceID int64, newBio strin
 		_ = tx.Rollback()
 	}()
 
-	// Update target with new bio and aliases
+	// Update target with new bio, aliases, username, and telegram_id
 	aliasesJSON, err := json.Marshal(newAliases)
 	if err != nil {
 		return fmt.Errorf("failed to marshal aliases: %w", err)
@@ -304,10 +306,24 @@ func (s *SQLiteStore) MergePeople(userID, targetID, sourceID int64, newBio strin
 
 	updateQuery := `
 		UPDATE people
-		SET bio = ?, aliases = ?, last_seen = ?, mention_count = mention_count + (SELECT COALESCE(mention_count, 0) FROM people WHERE id = ?)
+		SET bio = ?, aliases = ?, username = ?, telegram_id = ?, last_seen = ?, mention_count = mention_count + (SELECT COALESCE(mention_count, 0) FROM people WHERE id = ?)
 		WHERE id = ? AND user_id = ?
 	`
-	_, err = tx.Exec(updateQuery, newBio, string(aliasesJSON), time.Now().UTC().Format("2006-01-02 15:04:05.999"), sourceID, targetID, userID)
+
+	// Convert newUsername and newTelegramID to nullable types for SQL
+	var usernameStr sql.NullString
+	if newUsername != nil && *newUsername != "" {
+		usernameStr.String = *newUsername
+		usernameStr.Valid = true
+	}
+
+	var telegramID sql.NullInt64
+	if newTelegramID != nil && *newTelegramID != 0 {
+		telegramID.Int64 = *newTelegramID
+		telegramID.Valid = true
+	}
+
+	_, err = tx.Exec(updateQuery, newBio, string(aliasesJSON), usernameStr, telegramID, time.Now().UTC().Format("2006-01-02 15:04:05.999"), sourceID, targetID, userID)
 	if err != nil {
 		return fmt.Errorf("failed to update target person: %w", err)
 	}

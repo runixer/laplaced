@@ -135,7 +135,7 @@ type PeopleRepository interface {
 	FindPersonByName(userID int64, name string) (*Person, error)
 
 	// Merge operations
-	MergePeople(userID, targetID, sourceID int64, newBio string, newAliases []string) error
+	MergePeople(userID, targetID, sourceID int64, newBio string, newAliases []string, newUsername *string, newTelegramID *int64) error
 
 	// Extended queries with filtering and pagination
 	GetPeopleExtended(filter PersonFilter, limit, offset int, sortBy, sortDir string) (PersonResult, error)

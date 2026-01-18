@@ -319,7 +319,8 @@ func TestMergePeople(t *testing.T) {
 	// Merge source into target
 	newBio := "Colleague from X-team, backend developer."
 	newAliases := []string{"@akaGelo", "Гелёй", "Gelo"}
-	err = store.MergePeople(userID, targetID, sourceID, newBio, newAliases)
+	// No username/telegram_id in this test (both nil)
+	err = store.MergePeople(userID, targetID, sourceID, newBio, newAliases, nil, nil)
 	require.NoError(t, err)
 
 	// Verify target was updated
@@ -328,6 +329,58 @@ func TestMergePeople(t *testing.T) {
 	assert.Equal(t, newBio, target.Bio)
 	assert.Equal(t, newAliases, target.Aliases)
 	assert.Equal(t, 8, target.MentionCount) // 5 + 3
+
+	// Verify source was deleted
+	source, err := store.GetPerson(userID, sourceID)
+	require.Error(t, err)
+	assert.Nil(t, source)
+}
+
+func TestMergePeople_UsernameAndTelegramID(t *testing.T) {
+	store, cleanup := setupTestDB(t)
+	defer cleanup()
+	require.NoError(t, store.Init())
+
+	userID := int64(123)
+
+	username := "testuser"
+	telegramID := int64(123456789)
+
+	// Create target person WITHOUT username/telegram_id
+	targetID, err := store.AddPerson(Person{
+		UserID:       userID,
+		DisplayName:  "Alice",
+		Circle:       "Friends",
+		Bio:          "Target person",
+		MentionCount: 2,
+	})
+	require.NoError(t, err)
+
+	// Create source person WITH username/telegram_id (the data we want to preserve)
+	sourceID, err := store.AddPerson(Person{
+		UserID:       userID,
+		DisplayName:  "Alice Smith",
+		Username:     &username,
+		TelegramID:   &telegramID,
+		Circle:       "Friends",
+		Bio:          "Source person with contact info",
+		MentionCount: 1,
+	})
+	require.NoError(t, err)
+
+	// Merge source into target, passing source's username/telegram_id
+	newBio := "Target person. Source person with contact info"
+	newAliases := []string{"Alice Smith"}
+	err = store.MergePeople(userID, targetID, sourceID, newBio, newAliases, &username, &telegramID)
+	require.NoError(t, err)
+
+	// Verify target now has username and telegram_id from source
+	target, err := store.GetPerson(userID, targetID)
+	require.NoError(t, err)
+	assert.NotNil(t, target.Username)
+	assert.Equal(t, username, *target.Username)
+	assert.NotNil(t, target.TelegramID)
+	assert.Equal(t, telegramID, *target.TelegramID)
 
 	// Verify source was deleted
 	source, err := store.GetPerson(userID, sourceID)

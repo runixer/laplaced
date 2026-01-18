@@ -767,6 +767,7 @@ func TestPerformMergePeople_Success(t *testing.T) {
 	mockStore.On("FindPersonByName", userID, "J. Doe").Return(sourcePerson, nil).Once()
 
 	// Mock: merge
+	// Both people have nil username/telegram_id in this test, so those are nil
 	mockStore.On("MergePeople", userID, targetPerson.ID, sourcePerson.ID,
 		mock.MatchedBy(func(bio string) bool {
 			return bio == "Engineer\nManager"
@@ -774,7 +775,10 @@ func TestPerformMergePeople_Success(t *testing.T) {
 		mock.MatchedBy(func(aliases []string) bool {
 			// Should contain Johnny, JD, and "J. Doe" (source display name)
 			return len(aliases) >= 2
-		})).Return(nil).Once()
+		}),
+		(*string)(nil), // newUsername (both are nil)
+		(*int64)(nil),  // newTelegramID (both are nil)
+	).Return(nil).Once()
 
 	params := map[string]interface{}{
 		"reason": "Same person",
