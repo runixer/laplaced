@@ -147,7 +147,7 @@ and include contacts, family, friends, etc.`,
 			if len(person.Aliases) > 0 {
 				aliases = fmt.Sprintf(" (aliases: %s)", strings.Join(person.Aliases, ", "))
 			}
-			fmt.Printf("%2d. %s (@%s)%s\n", i+1, person.DisplayName, username, aliases)
+			fmt.Printf("%2d. [%d] %s (@%s)%s\n", i+1, person.ID, person.DisplayName, username, aliases)
 		}
 		return nil
 	},
