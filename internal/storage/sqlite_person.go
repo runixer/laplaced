@@ -126,6 +126,16 @@ func (s *SQLiteStore) DeletePerson(userID, personID int64) error {
 	return nil
 }
 
+// DeleteAllPeople removes all people for a user in a single query.
+func (s *SQLiteStore) DeleteAllPeople(userID int64) error {
+	query := "DELETE FROM people WHERE user_id = ?"
+	_, err := s.db.Exec(query, userID)
+	if err != nil {
+		return fmt.Errorf("failed to delete all people: %w", err)
+	}
+	return nil
+}
+
 // GetPerson retrieves a single person by ID.
 func (s *SQLiteStore) GetPerson(userID, personID int64) (*Person, error) {
 	query := `

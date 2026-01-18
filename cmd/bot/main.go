@@ -14,28 +14,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/runixer/laplaced/internal/agent"
-	"github.com/runixer/laplaced/internal/agent/archivist"
-	"github.com/runixer/laplaced/internal/agent/enricher"
-	"github.com/runixer/laplaced/internal/agent/laplace"
-	"github.com/runixer/laplaced/internal/agent/merger"
-	"github.com/runixer/laplaced/internal/agent/reranker"
-	"github.com/runixer/laplaced/internal/agent/splitter"
-	"github.com/runixer/laplaced/internal/agentlog"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/runixer/laplaced/internal/app"
 	"github.com/runixer/laplaced/internal/bot"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
-	"github.com/runixer/laplaced/internal/memory"
 	"github.com/runixer/laplaced/internal/openrouter"
-	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
 	"github.com/runixer/laplaced/internal/web"
 	"github.com/runixer/laplaced/internal/yandex"
-
-	"github.com/joho/godotenv"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 var Version = "dev"
@@ -106,8 +95,8 @@ func main() {
 	})))
 
 	// Load .env file if it exists
-	if err := godotenv.Load(); err != nil {
-		slog.Debug("No .env file found or failed to load, relying on environment variables")
+	if err := app.LoadEnv(); err != nil {
+		slog.Warn("failed to load .env", "error", err)
 	}
 
 	configPath := flag.String("config", "configs/config.yaml", "path to config file")
@@ -201,70 +190,29 @@ func main() {
 	}
 	logger.Info("Translator initialized", "default_lang", cfg.Bot.Language)
 
-	// Create agent logger for debugging LLM calls (only logs when debug mode is enabled)
-	agentLogger := agentlog.NewLogger(store, logger, cfg.Server.DebugMode)
+	// Initialize all services and agents using shared builder
+	services, err := app.SetupServices(context.Background(), logger, cfg, store, openrouterClient, translator)
+	if err != nil {
+		logger.Error("failed to setup services", "error", err)
+		os.Exit(1)
+	}
 
-	// Create context service for shared user context across agents
-	contextService := agent.NewContextService(store, store, cfg, logger)
-	contextService.SetPeopleRepository(store) // v0.5.1: Inner circle in context
-
-	// Create agent executor for LLM calls
-	agentExecutor := agent.NewExecutor(openrouterClient, agentLogger, logger)
-
-	// Create agents
-	enricherAgent := enricher.New(agentExecutor, translator, cfg)
-	splitterAgent := splitter.New(agentExecutor, translator, cfg, store, store)
-	mergerAgent := merger.New(agentExecutor, translator, cfg, store, store)
-	archivistAgent := archivist.New(agentExecutor, translator, cfg, logger, agentLogger)
-	rerankerAgent := reranker.New(openrouterClient, cfg, logger, translator, store, agentLogger)
-
-	// Register agents in registry for discovery
-	agentRegistry := agent.NewRegistry()
-	agentRegistry.Register(enricherAgent)
-	agentRegistry.Register(splitterAgent)
-	agentRegistry.Register(mergerAgent)
-	agentRegistry.Register(archivistAgent)
-	agentRegistry.Register(rerankerAgent)
-	logger.Info("Agent registry initialized", "agents", len(agentRegistry.List()))
-
-	memoryService := memory.NewService(logger, cfg, store, store, store, openrouterClient, translator)
-	memoryService.SetAgentLogger(agentLogger)
-	memoryService.SetArchivistAgent(archivistAgent)
-	memoryService.SetPeopleRepository(store)  // v0.5.1: People extraction
-	archivistAgent.SetPeopleRepository(store) // v0.5.1: People lookup tool
-
-	ragService := rag.NewService(logger, cfg, store, store, store, store, store, openrouterClient, memoryService, translator)
-	ragService.SetAgentLogger(agentLogger)
-	ragService.SetPeopleRepository(store) // v0.5.1: People search
-	ragService.SetEnricherAgent(enricherAgent)
-	ragService.SetSplitterAgent(splitterAgent)
-	ragService.SetMergerAgent(mergerAgent)
-	ragService.SetRerankerAgent(rerankerAgent)
-	memoryService.SetVectorSearcher(ragService)
-	memoryService.SetTopicRepository(store)
-
-	// Create Laplace (main chat agent)
-	// Note: Laplace is not registered in the agent registry because it has a different
-	// interface (requires ToolHandler for tool execution callbacks)
-	laplaceAgent := laplace.New(cfg, openrouterClient, ragService, store, store, translator, logger)
-	laplaceAgent.SetAgentLogger(agentLogger)
-
-	b, err := bot.NewBot(logger, api, cfg, store, store, store, store, store, store, openrouterClient, speechKitClient, ragService, contextService, translator)
+	b, err := bot.NewBot(logger, api, cfg, store, store, store, store, store, store, openrouterClient, speechKitClient, services.RAGService, services.ContextService, translator)
 	if err != nil {
 		logger.Error("failed to create bot", "error", err)
 		os.Exit(1)
 	}
-	b.SetAgentLogger(agentLogger)
-	b.SetLaplaceAgent(laplaceAgent)
+	b.SetAgentLogger(services.AgentLogger)
+	b.SetLaplaceAgent(services.LaplaceAgent)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	if err := ragService.Start(ctx); err != nil {
+	if err := services.RAGService.Start(ctx); err != nil {
 		logger.Error("failed to start RAG service", "error", err)
 		// Don't fail entire bot if RAG fails
 	}
-	defer ragService.Stop()
+	defer services.RAGService.Stop()
 	defer b.Stop()
 
 	// Derive webhook path and secret from bot token using SHA-256 BEFORE starting web server
@@ -284,7 +232,7 @@ func main() {
 	}
 
 	// Start web server for stats and webhooks
-	webServer, err := web.NewServer(ctx, logger, cfg, store, store, store, store, store, store, store, b, ragService)
+	webServer, err := web.NewServer(ctx, logger, cfg, store, store, store, store, store, store, store, b, services.RAGService)
 	if err != nil {
 		logger.Error("failed to create web server", "error", err)
 		os.Exit(1)

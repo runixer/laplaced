@@ -785,7 +785,7 @@ func (s *SQLiteStore) Checkpoint() error {
 }
 
 func (s *SQLiteStore) Close() error {
-	// Checkpoint WAL before closing to ensure all writes are flushed
+	// Checkpoint WAL to ensure all writes are flushed to main database
 	if err := s.Checkpoint(); err != nil {
 		s.logger.Warn("failed to checkpoint WAL before close", "error", err)
 	}

@@ -187,6 +187,13 @@ func (s *SQLiteStore) DeleteFact(userID, id int64) error {
 	return err
 }
 
+// DeleteAllFacts removes all facts for a user in a single query.
+func (s *SQLiteStore) DeleteAllFacts(userID int64) error {
+	query := "DELETE FROM structured_facts WHERE user_id = ?"
+	_, err := s.db.Exec(query, userID)
+	return err
+}
+
 func (s *SQLiteStore) GetFacts(userID int64) ([]Fact, error) {
 	query := "SELECT id, user_id, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE user_id = ?"
 	rows, err := s.db.Query(query, userID)

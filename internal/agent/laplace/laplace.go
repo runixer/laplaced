@@ -116,7 +116,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 		toolIterations++
 
 		orReq := openrouter.ChatCompletionRequest{
-			Model:    l.cfg.Agents.Chat.GetModel(l.cfg.Agents.Default.Model),
+			Model:    l.cfg.Agents.GetChatModel(),
 			Messages: orMessages,
 			Plugins:  plugins,
 			Tools:    l.tools,

@@ -203,3 +203,47 @@ func TestEmbedding() []float32 {
 	}
 	return embedding
 }
+
+// TestPeople returns sample people for testing.
+func TestPeople() []storage.Person {
+	now := time.Now()
+	telegramID := int64(987654321)
+	return []storage.Person{
+		{
+			ID:          1,
+			UserID:      TestUserID,
+			DisplayName: "Alice Smith",
+			Username:    Ptr("alice"),
+			Aliases:     []string{"ally", "als"},
+			Circle:      "Friends",
+			Bio:         "Software engineer at TechCorp, loves hiking",
+			TelegramID:  &telegramID,
+			FirstSeen:   now.Add(-72 * time.Hour),
+			LastSeen:    now.Add(-1 * time.Hour),
+		},
+		{
+			ID:          2,
+			UserID:      TestUserID,
+			DisplayName: "Bob Johnson",
+			Username:    nil, // no username
+			Aliases:     []string{"bobby"},
+			Circle:      "Family",
+			Bio:         "College friend, studying computer science",
+			TelegramID:  nil,
+			FirstSeen:   now.Add(-48 * time.Hour),
+			LastSeen:    now.Add(-2 * time.Hour),
+		},
+		{
+			ID:          3,
+			UserID:      TestUserID,
+			DisplayName: "Carol Williams",
+			Username:    Ptr("carol"),
+			Aliases:     []string{}, // no aliases
+			Circle:      "Work_Inner",
+			Bio:         "Colleague from previous job, now at startup",
+			TelegramID:  nil,
+			FirstSeen:   now.Add(-24 * time.Hour),
+			LastSeen:    now,
+		},
+	}
+}

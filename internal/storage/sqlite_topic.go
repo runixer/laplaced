@@ -51,6 +51,13 @@ func (s *SQLiteStore) DeleteTopic(id int64) error {
 	return err
 }
 
+// DeleteAllTopics removes all topics for a user in a single query.
+func (s *SQLiteStore) DeleteAllTopics(userID int64) error {
+	query := "DELETE FROM topics WHERE user_id = ?"
+	_, err := s.db.Exec(query, userID)
+	return err
+}
+
 func (s *SQLiteStore) DeleteTopicCascade(id int64) error {
 	tx, err := s.db.Begin()
 	if err != nil {

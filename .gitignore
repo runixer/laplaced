@@ -43,6 +43,7 @@ laplaced.db
 # Binaries from LLM
 /laplaced
 /bot
+/testbot
 
 # docs
 /docs/plans/

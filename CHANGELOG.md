@@ -5,10 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-01-18
+
 ## [Unreleased]
 
+### Added
+- **Testbot CLI tool** — interactive testing without Telegram: `go run ./cmd/testbot send "message"`, `check-facts`, `check-topics`, `process-session`, `clear-*` commands. Supports `--db` flag to test on production data copy safely.
+
 ### Fixed
-- **LaTeX rendering improvements** — expanded symbol coverage and fixed subscript/superscript handling: added 10 missing Greek letters (η, ζ, ι, κ, ν, ξ, τ, υ, χ, ψ), geometry symbols (△, ∠, ∥, ⊥), vector notation (`\vec{v}` → v⃗), and proper brace removal for Cyrillic/Unicode letters in subscripts (`_{груза}` → `_груза`, `_{\Delta}` → `_Δ`). Fixed backslash-space rendering (`\ ` → space) and escaped dollar handling in formulas.
+- **LaTeX rendering improvements** — expanded symbol coverage and fixed subscript/superscript handling: added 10 missing Greek letters (η, ζ, ι, κ, ν, ξ, τ, υ, χ, ψ), geometry symbols (△, ∠, ∥, ⊥), vector notation (`\vec{v}` → v⃗), and proper brace removal for Cyrillic/Unicode letters in subscripts (`_{груза}` → `_груза`, `_{\Delta}` → `_Δ`). Fixed backslash-space rendering (`\ ` → space) and escaped dollar handling in formulas. Added font modifier support (mathbf, mathit, mathrm, mathsf, mathtt, mathcal) — formulas like `$\mathbf{168 рядов}$` now render as "168 рядов" instead of keeping LaTeX commands.
+- **LaTeX parser refactored to state machine** — replaced regex-based parsing with manual tokenizer for more reliable formula detection. Fixed numerous edge cases with escaped dollars (`\$`), nested delimiters, and terminator detection (`. , ! ? : ; ) ]`).
 
 ## [0.5.2] - 2026-01-13
 

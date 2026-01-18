@@ -60,13 +60,14 @@ func (a *ArchivistAgentConfig) GetModel(defaultModel string) string {
 
 // AgentsConfig defines all agents in the system.
 type AgentsConfig struct {
-	Default   AgentConfig          `yaml:"default"`   // Default model for all agents
-	Chat      AgentConfig          `yaml:"chat"`      // Main bot - talks to users
-	Archivist ArchivistAgentConfig `yaml:"archivist"` // Extracts facts and people from conversations
-	Enricher  AgentConfig          `yaml:"enricher"`  // Expands search queries
-	Reranker  RerankerAgentConfig  `yaml:"reranker"`  // Filters and ranks RAG candidates
-	Splitter  AgentConfig          `yaml:"splitter"`  // Splits large topics
-	Merger    AgentConfig          `yaml:"merger"`    // Merges similar topics
+	Default   AgentConfig          `yaml:"default"`                            // Default model for all agents
+	Chat      AgentConfig          `yaml:"chat"`                               // Main bot - talks to users
+	ChatModel string               `yaml:"-" env:"LAPLACED_AGENTS_CHAT_MODEL"` // Override for chat agent model
+	Archivist ArchivistAgentConfig `yaml:"archivist"`                          // Extracts facts and people from conversations
+	Enricher  AgentConfig          `yaml:"enricher"`                           // Expands search queries
+	Reranker  RerankerAgentConfig  `yaml:"reranker"`                           // Filters and ranks RAG candidates
+	Splitter  AgentConfig          `yaml:"splitter"`                           // Splits large topics
+	Merger    AgentConfig          `yaml:"merger"`                             // Merges similar topics
 }
 
 // GetModel returns the agent's model, falling back to default if not set.
@@ -83,6 +84,14 @@ func (r *RerankerAgentConfig) GetModel(defaultModel string) string {
 		return r.Model
 	}
 	return defaultModel
+}
+
+// GetChatModel returns the chat agent's model, applying env override if set.
+func (a *AgentsConfig) GetChatModel() string {
+	if a.ChatModel != "" {
+		return a.ChatModel
+	}
+	return a.Chat.GetModel(a.Default.Model)
 }
 
 type YandexConfig struct {

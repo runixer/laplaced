@@ -262,6 +262,125 @@ func TestMyFunction(t *testing.T) {
 }
 ```
 
+### Manual Testing with Testbot
+
+For interactive testing and debugging without running the full Telegram bot, use the testbot CLI tool:
+
+```bash
+go run ./cmd/testbot [command] [args]
+```
+
+**IMPORTANT: Always use `go run`, not compiled binaries**
+
+When testing changes to the bot code, always use `go run ./cmd/testbot` instead of compiling with `go build`. This ensures you're testing the **actual current code**, not a stale binary. During development, you'll frequently modify files in `internal/`, and a compiled binary won't reflect those changes.
+
+```bash
+# GOOD - tests current code
+go run ./cmd/testbot send "test"
+
+# BAD - tests old compiled code
+go build -o testbot ./cmd/testbot && ./testbot send "test"
+```
+
+**Features:**
+- Full LLM integration (OpenRouter/Gemini)
+- Direct database access
+- No Telegram required
+- JSON output for automated checks
+- Quiet by default (use `--verbose` for full debug logs)
+
+**Configuration:**
+- Optional: `--config path/to/config.yaml`
+- Defaults: Uses embedded `configs/default.yaml`
+- Environment: Reads `LAPLACED_*` env vars (API keys, user IDs)
+- User ID: Auto-detected from `LAPLACED_ALLOWED_USER_IDS` (first ID)
+
+**Testing with Production Database Copy:**
+
+The `data/prod/laplaced.db` is a copy of the production database. To test on it:
+
+```bash
+# Run testbot on production database copy
+go run ./cmd/testbot --db data/prod/laplaced.db send "test message"
+
+# Check the results
+go run ./cmd/testbot --db data/prod/laplaced.db check-facts
+```
+
+**Note:** `data/prod/laplaced.db` is already a copy and safe to use for testing. Changes here don't affect the production database.
+
+**Database Locations:**
+
+- **`data/laplaced.db`** (default) - Test database for quick testing with RAG/facts
+- **`data/prod/laplaced.db`** - Copy of production database for testing on real data
+- **`--db ""`** (empty) - Temporary database in `/tmp` for clean testing without data
+
+**Common Commands:**
+
+```bash
+# Send a message to the bot
+go run ./cmd/testbot send "What is 2+2?"
+
+# Check facts (text or JSON)
+go run ./cmd/testbot check-facts
+go run ./cmd/testbot check-facts --format json
+
+# Check topics, people, messages
+go run ./cmd/testbot check-topics
+go run ./cmd/testbot check-people --format json
+go run ./cmd/testbot check-messages
+
+# Process active session into topic (facts extracted automatically)
+# Note: This can take 10-30 seconds - calls LLM to create topic and extract facts
+go run ./cmd/testbot process-session
+
+# Clear data
+go run ./cmd/testbot clear-facts
+go run ./cmd/testbot clear-topics
+go run ./cmd/testbot clear-people
+```
+
+**Workflow Example:**
+
+```bash
+# 1. Send a message
+go run ./cmd/testbot send "My name is Alice and I love photography"
+
+# 2. Check that facts don't exist yet
+go run ./cmd/testbot check-facts
+# → Facts for user 123: 0
+
+# 3. Process session (creates topic and extracts facts automatically)
+# Note: Can take 10-30 seconds - calls LLM for topic creation and fact extraction
+go run ./cmd/testbot process-session
+# → Processed session: topic 1 created from messages 1-1
+# → Extracted facts: 1 added, 0 updated, 0 removed
+
+# 4. Check extracted facts
+go run ./cmd/testbot check-facts
+# → Facts for user 123: 1
+#   1. [identity] My name is Alice and I love photography
+```
+
+**Global Flags:**
+- `--config path` - Config file path (default: auto-detect or use embedded)
+- `--user ID` - User ID for operations (default: first from `LAPLACED_ALLOWED_USER_IDS`)
+- `--db path` - Database path (default: `data/laplaced.db`, use `data/prod/laplaced.db` for production copy, use `--db ""` for temp DB)
+- `--verbose` - Verbose debug output (shows all logs)
+
+**Send Command Flags:**
+- `--max-wait duration` - Maximum wait time for LLM response (default: 2m)
+- `--output format` - Output format: text, json (default: text)
+- `--check-response substring` - Verify response contains substring
+
+**Use Cases:**
+1. **Debug prompt changes**: Send messages directly to LLM without Telegram
+2. **Test fact extraction**: Chat, then `process-session`, then `check-facts`
+3. **Verify RAG retrieval**: Check topics/facts before and after queries
+4. **Profile performance**: Test LLM latency, token usage
+5. **Database inspection**: Quick checks without SQL queries
+6. **Test on production data copy**: Use `--db data/prod/laplaced.db` to test with real data safely
+
 ## Refactoring & Cyclomatic Complexity
 
 ### Checking Complexity
