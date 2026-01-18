@@ -369,6 +369,15 @@ memory:
     - Structure: start with relationship + core identity, then add chronological/contextual details
     - Example: "User's colleague at TechCorp (8 years). DevOps engineer specializing in Kubernetes, Docker, CI/CD. Moved from New York to Austin, founded local meetup. Close friends (met for dinner 2025-12-02). Early adopter of infrastructure monitoring tools (Prometheus, Grafana). Maintains home lab for testing new technologies."
 
+    WHEN UPDATING AN EXISTING PROFILE:
+    - You see the old bio in <people> section — DO NOT repeat its content!
+    - Add ONLY new information that is not already in the old bio
+    - If new information replaces old info — update the bio, removing outdated details
+    - Check: is the same information already in the old bio that you want to add?
+    - Example problem: old bio "DevOps engineer at TechCorp", new info "DevOps at TechCorp specializing in Kubernetes"
+      → Correct: "DevOps engineer at TechCorp, specializing in Kubernetes"
+      → Incorrect: "DevOps engineer at TechCorp. DevOps at TechCorp specializing in Kubernetes"
+
     DEDUPLICATION (CRITICAL!):
     - ALWAYS check <people> section for duplicates, even if not adding new people
     - Duplicates: identical first names, overlapping aliases, identical @username
