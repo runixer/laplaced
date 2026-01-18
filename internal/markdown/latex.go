@@ -30,6 +30,8 @@ var latexSymbols = map[string]string{
 	`\arccos`: `arccos`, `\arctan`: `arctg`,
 	`\log`: `log`, `\ln`: `ln`, `\lg`: `lg`,
 	`\sum`: `Σ`, `\prod`: `Π`, `\int`: `∫`,
+	`\lim`: `lim`, `\limsup`: `lim sup`, `\liminf`: `lim inf`,
+	`\iint`: `∬`, `\iiint`: `∭`, `\oint`: `∮`,
 	`\cup`: `∪`, `\cap`: `∩`,
 	`\to`: `→`, `\rightarrow`: `→`, `\xrightarrow`: `→`,
 	`\leftarrow`: `←`, `\Rightarrow`: `⇒`, `\Leftarrow`: `⇐`,

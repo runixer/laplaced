@@ -964,6 +964,62 @@ func TestTrigonometricFunctions(t *testing.T) {
 	}
 }
 
+func TestLimitAndMultipleIntegrals(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "simple limit",
+			input:    `$\lim_{x \to 0} f(x)$`,
+			expected: "lim_{x → 0} f(x)",
+		},
+		{
+			name:     "limit with infinity",
+			input:    `$\lim_{n \to \infty} a_n$`,
+			expected: "lim_{n → ∞} a_n",
+		},
+		{
+			name:     "double integral",
+			input:    `$\iint_D f(x,y) dx dy$`,
+			expected: "∬_D f(x,y) dx dy",
+		},
+		{
+			name:     "triple integral",
+			input:    `$\iiint_V f(x,y,z) dx dy dz$`,
+			expected: "∭_V f(x,y,z) dx dy dz",
+		},
+		{
+			name:     "contour integral",
+			input:    `$\oint_C F \cdot dr$`,
+			expected: "∮_C F · dr",
+		},
+		{
+			name:     "limsup",
+			input:    `$\limsup_{n \to \infty} a_n$`,
+			expected: "lim sup_{n → ∞} a_n",
+		},
+		{
+			name:     "liminf",
+			input:    `$\liminf_{n \to \infty} a_n$`,
+			expected: "lim inf_{n → ∞} a_n",
+		},
+		{
+			name:     "double integral with limits",
+			input:    `$$\iint_S (x^2 + y^2) dA$$`,
+			expected: "∬_S (x² + y²) dA",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, _ := ToHTML(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 func TestSingleVariableInMath(t *testing.T) {
 	tests := []struct {
 		name     string
