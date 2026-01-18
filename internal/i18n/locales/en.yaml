@@ -359,9 +359,15 @@ memory:
     - Other: acquaintances, neighbors, service providers
 
     PERSON BIO:
-    - Write 2-3 sentences summarizing what we know
-    - Include: relationship to user, occupation, key characteristics
-    - Example: "User's colleague at X-team. Backend developer. Enjoys board games."
+    - Write a DETAILED biography (4-8 sentences is appropriate for complex profiles)
+    - IMPORTANT: Don't aggressively compress! Preserve significant details:
+      * Work history and technical expertise (specific technologies, years of experience)
+      * Major life events (relocation, family meetings, personal milestones)
+      * Notable projects or achievements
+      * Personality traits and patterns of behavior
+    - NO DUPLICATION: Each piece of information should appear ONLY ONCE in bio
+    - Structure: start with relationship + core identity, then add chronological/contextual details
+    - Example: "User's colleague at TechCorp (8 years). DevOps engineer specializing in Kubernetes, Docker, CI/CD. Moved from New York to Austin, founded local meetup. Close friends (met for dinner 2025-12-02). Early adopter of infrastructure monitoring tools (Prometheus, Grafana). Maintains home lab for testing new technologies."
 
     DEDUPLICATION (CRITICAL!):
     - ALWAYS check <people> section for duplicates, even if not adding new people

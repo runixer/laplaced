@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Archivist aggressive profile compression** — people bios now preserve significant details (work history, technical expertise, major life events) instead of aggressively compressing to 2-3 sentences. The prompt was changed from "Write 2-3 sentences" to "Write 4-8 sentences for complex profiles" with explicit instructions to preserve specific technologies, years of experience, relocations, and notable achievements. This fixes profiles losing critical context like "12 years at company", "moved to city", or specific project details.
 - **Person merge username/telegram_id loss** — when merging people records, the target now correctly inherits username and telegram_id from source if target doesn't have them. Previously these fields were lost during merge operations.
 - **Archivist automatic deduplication** — the archivist agent now ALWAYS checks for duplicate people records and suggests merges, even when no new people are added. Previously it only checked duplicates when adding new people, leaving existing duplicates unmerged.
 - **Testbot check-people shows actual database IDs** — the `check-people` command now displays actual database IDs in brackets (e.g., `[67] John Doe`), matching the format of `check-topics` and `check-messages`. Previously it showed sequential numbers, causing confusion during debugging.
