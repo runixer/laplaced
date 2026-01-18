@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **LaTeX arrow symbols** — `\uparrow` (↑) and `\downarrow` (↓) for notation like `Invest ↑, Debt ↓`
 
+### Removed
+- **Legacy database code** — dropped old `facts` table (replaced by `structured_facts`), removed entity column migration logic, deleted migration scripts (`migrations/001_cleanup_other_facts.sql`, `migrations/002_drop_entity_column.sql`). All installations already on fresh schema.
+
 ## [0.5.3] - 2026-01-18
 
 ### Added

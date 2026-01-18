@@ -341,16 +341,6 @@ func (s *SQLiteStore) Init() error {
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
 
-	CREATE TABLE IF NOT EXISTS facts (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		user_id INTEGER NOT NULL,
-		content TEXT NOT NULL,
-		embedding BLOB,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_facts_user_id ON facts(user_id);
-
 	CREATE TABLE IF NOT EXISTS structured_facts (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		user_id INTEGER NOT NULL,
@@ -668,85 +658,9 @@ func (s *SQLiteStore) migrate() error {
 		return fmt.Errorf("failed to create people table: %w", err)
 	}
 
-	// v0.5.1: Drop entity column from structured_facts (all facts are now about User)
-	// SQLite can't DROP COLUMN if it's in a UNIQUE constraint, so we rebuild the table
-	var entityColExists int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('structured_facts') WHERE name='entity'`).Scan(&entityColExists); err == nil && entityColExists > 0 {
-		s.logger.Info("migrating structured_facts table: removing entity column (table rebuild)")
-
-		// Step 1: Create new table without entity column
-		createNewTable := `
-			CREATE TABLE structured_facts_new (
-				id INTEGER PRIMARY KEY AUTOINCREMENT,
-				user_id INTEGER NOT NULL,
-				relation TEXT NOT NULL,
-				category TEXT NOT NULL,
-				content TEXT NOT NULL,
-				type TEXT NOT NULL,
-				importance INTEGER NOT NULL,
-				embedding BLOB,
-				created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-				last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-				topic_id INTEGER,
-				UNIQUE(user_id, relation, content)
-			)`
-		if _, err := s.db.Exec(createNewTable); err != nil {
-			return fmt.Errorf("failed to create structured_facts_new: %w", err)
-		}
-
-		// Step 2: Copy data (excluding entity)
-		copyData := `
-			INSERT INTO structured_facts_new
-				(id, user_id, relation, category, content, type, importance, embedding, created_at, last_updated, topic_id)
-			SELECT
-				id, user_id, relation, category, content, type, importance, embedding, created_at, last_updated, topic_id
-			FROM structured_facts`
-		if _, err := s.db.Exec(copyData); err != nil {
-			return fmt.Errorf("failed to copy data to structured_facts_new: %w", err)
-		}
-
-		// Step 3: Drop old table and indexes
-		if _, err := s.db.Exec(`DROP INDEX IF EXISTS idx_structured_facts_user_entity`); err != nil {
-			s.logger.Warn("failed to drop idx_structured_facts_user_entity", "error", err)
-		}
-		if _, err := s.db.Exec(`DROP INDEX IF EXISTS idx_structured_facts_category`); err != nil {
-			s.logger.Warn("failed to drop idx_structured_facts_category", "error", err)
-		}
-		if _, err := s.db.Exec(`DROP INDEX IF EXISTS idx_structured_facts_type`); err != nil {
-			s.logger.Warn("failed to drop idx_structured_facts_type", "error", err)
-		}
-		if _, err := s.db.Exec(`DROP INDEX IF EXISTS idx_structured_facts_topic_id`); err != nil {
-			s.logger.Warn("failed to drop idx_structured_facts_topic_id", "error", err)
-		}
-		if _, err := s.db.Exec(`DROP TABLE structured_facts`); err != nil {
-			return fmt.Errorf("failed to drop old structured_facts: %w", err)
-		}
-
-		// Step 4: Rename new table
-		if _, err := s.db.Exec(`ALTER TABLE structured_facts_new RENAME TO structured_facts`); err != nil {
-			return fmt.Errorf("failed to rename structured_facts_new: %w", err)
-		}
-
-		// Step 5: Recreate indexes
-		if _, err := s.db.Exec(`CREATE INDEX idx_structured_facts_category ON structured_facts(user_id, category)`); err != nil {
-			s.logger.Warn("failed to recreate idx_structured_facts_category", "error", err)
-		}
-		if _, err := s.db.Exec(`CREATE INDEX idx_structured_facts_type ON structured_facts(user_id, type)`); err != nil {
-			s.logger.Warn("failed to recreate idx_structured_facts_type", "error", err)
-		}
-		if _, err := s.db.Exec(`CREATE INDEX idx_structured_facts_topic_id ON structured_facts(topic_id)`); err != nil {
-			s.logger.Warn("failed to recreate idx_structured_facts_topic_id", "error", err)
-		}
-
-		s.logger.Info("structured_facts migration complete: entity column removed")
-	}
-
-	// v0.5.1: Drop entity column from fact_history (simpler, no UNIQUE constraint)
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('fact_history') WHERE name='entity'`).Scan(&entityColExists); err == nil && entityColExists > 0 {
-		s.logger.Info("migrating fact_history table: dropping entity column")
-		if _, err := s.db.Exec(`ALTER TABLE fact_history DROP COLUMN entity`); err != nil {
-			return fmt.Errorf("failed to drop entity column from fact_history: %w", err)
-		}
+	// Drop legacy facts table (replaced by structured_facts)
+	if _, err := s.db.Exec(`DROP TABLE IF EXISTS facts`); err != nil {
+		s.logger.Warn("failed to drop legacy facts table", "error", err)
 	}
 
 	return nil

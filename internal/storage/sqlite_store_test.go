@@ -40,7 +40,7 @@ func TestInit(t *testing.T) {
 
 	// Check if tables were created
 	// We check a few key tables to ensure migration ran
-	tables := []string{"history", "stats", "topics", "users", "facts", "structured_facts", "fact_history", "rag_logs", "memory_bank", "people"}
+	tables := []string{"history", "stats", "topics", "users", "structured_facts", "fact_history", "rag_logs", "memory_bank", "people"}
 
 	for _, table := range tables {
 		var name string

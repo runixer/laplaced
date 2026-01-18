@@ -129,9 +129,6 @@ func (s *SQLiteStore) ResetUserData(userID int64) error {
 	if _, err := tx.Exec("DELETE FROM structured_facts WHERE user_id = ?", userID); err != nil {
 		return fmt.Errorf("delete structured_facts: %w", err)
 	}
-	if _, err := tx.Exec("DELETE FROM facts WHERE user_id = ?", userID); err != nil {
-		return fmt.Errorf("delete facts: %w", err)
-	}
 
 	// 3. Clear Fact History
 	if _, err := tx.Exec("DELETE FROM fact_history WHERE user_id = ?", userID); err != nil {
