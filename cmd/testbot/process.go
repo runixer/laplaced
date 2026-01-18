@@ -53,12 +53,15 @@ Example:
 		if stats.TopicsExtracted > 0 {
 			fmt.Printf("Topics extracted: %d\n", stats.TopicsExtracted)
 		}
-
-		// Show fact extraction statistics
-		if stats.FactsCreated > 0 || stats.FactsUpdated > 0 || stats.FactsDeleted > 0 {
-			fmt.Printf("Extracted facts: %d added, %d updated, %d removed\n",
-				stats.FactsCreated, stats.FactsUpdated, stats.FactsDeleted)
+		if stats.TopicsMerged > 0 {
+			fmt.Printf("Topics merged: %d (consolidation completed)\n", stats.TopicsMerged)
+		} else {
+			fmt.Println("Consolidation checked: no similar topics to merge")
 		}
+
+		// Show fact extraction statistics (always show to confirm extraction ran)
+		fmt.Printf("Facts: %d added, %d updated, %d removed\n",
+			stats.FactsCreated, stats.FactsUpdated, stats.FactsDeleted)
 
 		// Show people extraction statistics
 		if stats.PeopleAdded > 0 || stats.PeopleUpdated > 0 || stats.PeopleMerged > 0 {
