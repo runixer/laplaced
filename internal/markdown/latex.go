@@ -36,6 +36,7 @@ var latexSymbols = map[string]string{
 	`\to`: `→`, `\rightarrow`: `→`, `\xrightarrow`: `→`,
 	`\leftarrow`: `←`, `\Rightarrow`: `⇒`, `\Leftarrow`: `⇐`,
 	`\Leftrightarrow`: `⇔`, `\iff`: `⇔`, `\implies`: `⟹`,
+	`\uparrow`: `↑`, `\downarrow`: `↓`,
 	`\therefore`: `∴`, `\because`: `∵`,
 	`\triangle`: `△`, `\angle`: `∠`,
 	`\parallel`: `∥`, `\perp`: `⊥`,

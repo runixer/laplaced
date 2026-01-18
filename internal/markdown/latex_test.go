@@ -88,6 +88,21 @@ func TestConvertLatexToUnicode(t *testing.T) {
 			expected: "a ⇔ b",
 		},
 		{
+			name:     "up arrow",
+			input:    "$Invest \\uparrow$",
+			expected: "Invest ↑",
+		},
+		{
+			name:     "down arrow",
+			input:    "$Debt \\downarrow$",
+			expected: "Debt ↓",
+		},
+		{
+			name:     "up and down arrows together",
+			input:    "$Revenue \\uparrow, Costs \\downarrow$",
+			expected: "Revenue ↑, Costs ↓",
+		},
+		{
 			name:     "integral",
 			input:    "$\\int f(x) dx$",
 			expected: "∫ f(x) dx",
@@ -1467,6 +1482,78 @@ func TestEscapedDollarInFormula(t *testing.T) {
 			name:     "bug-08 mixed escaped and non-escaped dollars",
 			input:    "$Total = \\$50 + \\$30 = \\$80$$",
 			expected: "Total = $50 + $30 = $80$",
+		},
+		// Real-world formula tests from OpenRouter responses
+		{
+			name:     "kitchen formula",
+			input:    "$2 \\text{ eggs} \\times 3 \\text{ people} = 6 \\text{ eggs}$",
+			expected: "2 eggs × 3 people = 6 eggs",
+		},
+		{
+			name:     "fraction with text units",
+			input:    "$Formula: \\frac{150 \\text{ г}}{300 \\text{ мл}} \\times 100\\% = 50\\% \\text{ концентрации}$",
+			expected: "Formula: 150 г/300 мл × 100% = 50% концентрации",
+		},
+		{
+			name:     "TV screen with inches (typographic quote)",
+			input:    "$Screen = 65\" \\text{ OLED Panel}$.",
+			expected: "Screen = 65″ OLED Panel.",
+		},
+		{
+			name:     "area calculation with text units",
+			input:    "$S = 3.5 \\text{ м} \\times 4.2 \\text{ м} = 14.7 \\text{ м}^2$.",
+			expected: "S = 3.5 м × 4.2 м = 14.7 м².",
+		},
+		{
+			name:     "budget with approximation and percent",
+			input:    "$Cost \\approx 5000 \\text{ rub} \\pm 10\\%$.",
+			expected: "Cost ≈ 5000 rub ± 10%.",
+		},
+		{
+			name:     "logic with escaped dollar in condition",
+			input:    "$If: Balance \\ge 1000\\$ \\rightarrow \\text{Buy Nvidia}$.",
+			expected: "If: Balance ≥ 1000$ → Buy Nvidia.",
+		},
+		{
+			name:     "panic condition logic",
+			input:    "$If: Balance < 0 \\rightarrow \\text{Panic}$.",
+			expected: "If: Balance < 0 → Panic.",
+		},
+		{
+			name:     "geometry circumference with pi",
+			input:    "$L = 2 \\times \\pi \\times R \\approx 42 \\text{ см}$.",
+			expected: "L = 2 × π × R ≈ 42 см.",
+		},
+		{
+			name:     "temperature with degrees celsius",
+			input:    "$T_{water} = 37^\\circ C$.",
+			expected: "T_water = 37° C.",
+		},
+		// Currency detection - should NOT be treated as math
+		{
+			name:     "simple dollar amount rejected as math",
+			input:    `Price: $3.50`,
+			expected: "Price: $3.50",
+		},
+		{
+			name:     "currency with decimal rejected as math",
+			input:    `Cost: $100.00`,
+			expected: "Cost: $100.00",
+		},
+		{
+			name:     "integer dollar amount rejected as math",
+			input:    `Total: $500`,
+			expected: "Total: $500",
+		},
+		{
+			name:     "currency with comma separator rejected as math",
+			input:    `Price: $1,234.56`,
+			expected: "Price: $1,234.56",
+		},
+		{
+			name:     "currency followed by punctuation rejected as math",
+			input:    `It costs $100!`,
+			expected: "It costs $100!",
 		},
 	}
 	for _, tt := range tests {

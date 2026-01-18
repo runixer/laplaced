@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **LaTeX arrow symbols** — `\uparrow` (↑) and `\downarrow` (↓) for notation like `Invest ↑, Debt ↓`
+
 ## [0.5.3] - 2026-01-18
 
 ### Added
