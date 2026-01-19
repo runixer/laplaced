@@ -68,10 +68,10 @@ func (s *Service) processConsolidation(ctx context.Context) {
 			}
 
 			if shouldMerge {
-				if _, err := s.mergeTopics(ctx, candidate, newSummary); err != nil {
+				if newTopicID, _, err := s.mergeTopics(ctx, candidate, newSummary); err != nil {
 					s.logger.Error("failed to merge topics", "error", err)
 				} else {
-					s.logger.Info("Merged topics", "t1", candidate.Topic1.ID, "t2", candidate.Topic2.ID, "new_summary", newSummary)
+					s.logger.Info("Merged topics", "t1", candidate.Topic1.ID, "t2", candidate.Topic2.ID, "new_topic_id", newTopicID, "new_summary", newSummary)
 					// Reload vectors after successful merge
 					s.wg.Add(1)
 					go func() {
@@ -246,15 +246,15 @@ func (s *Service) verifyMergeViaAgent(ctx context.Context, candidate storage.Mer
 	return result.ShouldMerge, result.NewSummary, usage, nil
 }
 
-func (s *Service) mergeTopics(ctx context.Context, candidate storage.MergeCandidate, newSummary string) (UsageInfo, error) {
+func (s *Service) mergeTopics(ctx context.Context, candidate storage.MergeCandidate, newSummary string) (int64, UsageInfo, error) {
 	// Fetch messages from T1 and T2 separately (don't include intermediate topics!)
 	msgs1, err := s.msgRepo.GetMessagesByTopicID(ctx, candidate.Topic1.ID)
 	if err != nil {
-		return UsageInfo{}, fmt.Errorf("failed to get messages for topic1: %w", err)
+		return 0, UsageInfo{}, fmt.Errorf("failed to get messages for topic1: %w", err)
 	}
 	msgs2, err := s.msgRepo.GetMessagesByTopicID(ctx, candidate.Topic2.ID)
 	if err != nil {
-		return UsageInfo{}, fmt.Errorf("failed to get messages for topic2: %w", err)
+		return 0, UsageInfo{}, fmt.Errorf("failed to get messages for topic2: %w", err)
 	}
 
 	// Combine and sort by ID
@@ -264,7 +264,7 @@ func (s *Service) mergeTopics(ctx context.Context, candidate storage.MergeCandid
 	sort.Slice(msgs, func(i, j int) bool { return msgs[i].ID < msgs[j].ID })
 
 	if len(msgs) == 0 {
-		return UsageInfo{}, fmt.Errorf("no messages found for topics %d and %d", candidate.Topic1.ID, candidate.Topic2.ID)
+		return 0, UsageInfo{}, fmt.Errorf("no messages found for topics %d and %d", candidate.Topic1.ID, candidate.Topic2.ID)
 	}
 
 	// Create content for embedding (only messages from T1 and T2)
@@ -282,14 +282,14 @@ func (s *Service) mergeTopics(ctx context.Context, candidate storage.MergeCandid
 		Input: []string{embeddingInput},
 	})
 	if err != nil {
-		return UsageInfo{}, err
+		return 0, UsageInfo{}, err
 	}
 	usage := UsageInfo{
 		TotalTokens: resp.Usage.TotalTokens,
 		Cost:        resp.Usage.Cost,
 	}
 	if len(resp.Data) == 0 {
-		return usage, fmt.Errorf("no embedding returned")
+		return 0, usage, fmt.Errorf("no embedding returned")
 	}
 
 	newTopic := storage.Topic{
@@ -309,7 +309,7 @@ func (s *Service) mergeTopics(ctx context.Context, candidate storage.MergeCandid
 	// Add new topic WITHOUT updating all messages in range (to preserve intermediate topics)
 	newTopicID, err := s.topicRepo.AddTopicWithoutMessageUpdate(newTopic)
 	if err != nil {
-		return usage, err
+		return 0, usage, err
 	}
 
 	// Update only messages that belonged to T1 and T2 (filter by user_id to prevent cross-user contamination)
@@ -344,5 +344,5 @@ func (s *Service) mergeTopics(ctx context.Context, candidate storage.MergeCandid
 		s.logger.Error("failed to delete topic 2", "id", candidate.Topic2.ID, "error", err)
 	}
 
-	return usage, nil
+	return newTopicID, usage, nil
 }

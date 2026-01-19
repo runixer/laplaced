@@ -274,8 +274,9 @@ func TestMergeTopics(t *testing.T) {
 			Topic2: storage.Topic{ID: 2, UserID: 123, StartMsgID: 11, EndMsgID: 20},
 		}
 
-		_, err := svc.mergeTopics(context.Background(), candidate, "Merged summary")
+		newTopicID, _, err := svc.mergeTopics(context.Background(), candidate, "Merged summary")
 		assert.NoError(t, err)
+		assert.Equal(t, int64(100), newTopicID)
 		mockStore.AssertExpectations(t)
 	})
 
@@ -298,8 +299,9 @@ func TestMergeTopics(t *testing.T) {
 			Topic2: storage.Topic{ID: 2, UserID: 123, StartMsgID: 11, EndMsgID: 20},
 		}
 
-		_, err := svc.mergeTopics(context.Background(), candidate, "Merged summary")
+		newTopicID, _, err := svc.mergeTopics(context.Background(), candidate, "Merged summary")
 		assert.Error(t, err)
+		assert.Equal(t, int64(0), newTopicID)
 	})
 
 	t.Run("CreateEmbeddings error", func(t *testing.T) {
@@ -327,8 +329,9 @@ func TestMergeTopics(t *testing.T) {
 			Topic2: storage.Topic{ID: 2, UserID: 123, StartMsgID: 11, EndMsgID: 20},
 		}
 
-		_, err := svc.mergeTopics(context.Background(), candidate, "Merged summary")
+		newTopicID, _, err := svc.mergeTopics(context.Background(), candidate, "Merged summary")
 		assert.Error(t, err)
+		assert.Equal(t, int64(0), newTopicID)
 	})
 
 	t.Run("no embedding returned", func(t *testing.T) {
@@ -358,8 +361,9 @@ func TestMergeTopics(t *testing.T) {
 			Topic2: storage.Topic{ID: 2, UserID: 123, StartMsgID: 11, EndMsgID: 20},
 		}
 
-		_, err := svc.mergeTopics(context.Background(), candidate, "Merged summary")
+		newTopicID, _, err := svc.mergeTopics(context.Background(), candidate, "Merged summary")
 		assert.Error(t, err)
+		assert.Equal(t, int64(0), newTopicID)
 		assert.Contains(t, err.Error(), "no embedding returned")
 	})
 }
@@ -384,9 +388,9 @@ func TestRunConsolidationSync(t *testing.T) {
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
 
 		stats := &ProcessingStats{}
-		count := svc.runConsolidationSync(context.Background(), 123, []int64{1, 2}, stats)
+		mergedIDs := svc.runConsolidationSync(context.Background(), 123, []int64{1, 2}, stats)
 
-		assert.Equal(t, 0, count)
+		assert.Empty(t, mergedIDs)
 		mockStore.AssertExpectations(t)
 	})
 
@@ -408,9 +412,9 @@ func TestRunConsolidationSync(t *testing.T) {
 		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
 
 		stats := &ProcessingStats{}
-		count := svc.runConsolidationSync(context.Background(), 123, []int64{1}, stats)
+		mergedIDs := svc.runConsolidationSync(context.Background(), 123, []int64{1}, stats)
 
-		assert.Equal(t, 0, count)
+		assert.Empty(t, mergedIDs)
 	})
 
 	t.Run("context cancellation during verification", func(t *testing.T) {
@@ -439,8 +443,8 @@ func TestRunConsolidationSync(t *testing.T) {
 		cancel()
 
 		stats := &ProcessingStats{}
-		count := svc.runConsolidationSync(ctx, 123, []int64{1}, stats)
+		mergedIDs := svc.runConsolidationSync(ctx, 123, []int64{1}, stats)
 
-		assert.Equal(t, 0, count)
+		assert.Empty(t, mergedIDs)
 	})
 }

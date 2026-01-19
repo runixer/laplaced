@@ -322,9 +322,9 @@ func (s *Service) processChunkWithStats(ctx context.Context, userID int64, chunk
 	return topicIDs, nil
 }
 
-// runConsolidationSync runs consolidation for specific topics and returns merge count.
-func (s *Service) runConsolidationSync(ctx context.Context, userID int64, topicIDs []int64, stats *ProcessingStats) int {
-	mergeCount := 0
+// runConsolidationSync runs consolidation for specific topics and returns merged topic IDs.
+func (s *Service) runConsolidationSync(ctx context.Context, userID int64, topicIDs []int64, stats *ProcessingStats) []int64 {
+	mergedTopicIDs := []int64{}
 
 	for {
 		candidates, err := s.findMergeCandidates(userID)
@@ -353,7 +353,7 @@ func (s *Service) runConsolidationSync(ctx context.Context, userID int64, topicI
 		merged := false
 		for _, candidate := range relevantCandidates {
 			if ctx.Err() != nil {
-				return mergeCount
+				return mergedTopicIDs
 			}
 
 			shouldMerge, newSummary, verifyUsage, err := s.verifyMerge(ctx, candidate)
@@ -364,14 +364,14 @@ func (s *Service) runConsolidationSync(ctx context.Context, userID int64, topicI
 			}
 
 			if shouldMerge {
-				mergeUsage, err := s.mergeTopics(ctx, candidate, newSummary)
+				newTopicID, mergeUsage, err := s.mergeTopics(ctx, candidate, newSummary)
 				stats.AddEmbeddingUsage(mergeUsage.TotalTokens, mergeUsage.Cost)
 				if err != nil {
 					s.logger.Error("failed to merge topics", "error", err)
 				} else {
-					mergeCount++
+					mergedTopicIDs = append(mergedTopicIDs, newTopicID)
 					merged = true
-					s.logger.Info("Merged topics (sync)", "t1", candidate.Topic1.ID, "t2", candidate.Topic2.ID)
+					s.logger.Info("Merged topics (sync)", "t1", candidate.Topic1.ID, "t2", candidate.Topic2.ID, "new_topic_id", newTopicID)
 					// Reload vectors after merge
 					if err := s.ReloadVectors(); err != nil {
 						s.logger.Error("failed to reload vectors", "error", err)
@@ -395,5 +395,5 @@ func (s *Service) runConsolidationSync(ctx context.Context, userID int64, topicI
 		_ = s.topicRepo.SetTopicConsolidationChecked(id, true)
 	}
 
-	return mergeCount
+	return mergedTopicIDs
 }

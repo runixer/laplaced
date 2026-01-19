@@ -144,6 +144,12 @@ func (s *Service) ForceProcessUserWithProgress(ctx context.Context, userID int64
 		Message: fmt.Sprintf("Extracted %d topics", len(topicIDs)),
 	})
 
+	// Build topic ID set for tracking (needed for consolidation and fact extraction)
+	topicIDSet := make(map[int64]bool)
+	for _, id := range topicIDs {
+		topicIDSet[id] = true
+	}
+
 	// 3. Run consolidation synchronously
 	onProgress(ProgressEvent{
 		Stage:   "consolidation",
@@ -152,14 +158,20 @@ func (s *Service) ForceProcessUserWithProgress(ctx context.Context, userID int64
 		Message: "Checking for similar topics to merge...",
 	})
 
-	mergeCount := s.runConsolidationSync(ctx, userID, topicIDs, stats)
-	stats.TopicsMerged = mergeCount
+	mergedTopicIDs := s.runConsolidationSync(ctx, userID, topicIDs, stats)
+
+	// Add merged topic IDs to the set for fact extraction
+	for _, mergedID := range mergedTopicIDs {
+		topicIDSet[mergedID] = true
+	}
+
+	stats.TopicsMerged = len(mergedTopicIDs)
 
 	onProgress(ProgressEvent{
 		Stage:   "consolidation",
 		Current: 1,
 		Total:   1,
-		Message: fmt.Sprintf("Merged %d topics", mergeCount),
+		Message: fmt.Sprintf("Merged %d topics", len(mergedTopicIDs)),
 	})
 
 	// 4. Process facts for new topics
@@ -185,15 +197,11 @@ func (s *Service) ForceProcessUserWithProgress(ctx context.Context, userID int64
 		s.logger.Error("failed to get pending topics", "error", err)
 	}
 
-	// Filter to only include topics we just created (that are in topicIDs)
-	topicIDSet := make(map[int64]bool)
-	for _, id := range topicIDs {
-		topicIDSet[id] = true
-	}
-
+	// Filter to only include topics we just created (including merged topics)
 	var toProcess []storage.Topic
 	for _, t := range pendingTopics {
-		if topicIDSet[t.ID] && t.ConsolidationChecked {
+		// Process if: (created/merged in this session AND checked) OR (is consolidated)
+		if (topicIDSet[t.ID] && t.ConsolidationChecked) || t.IsConsolidated {
 			toProcess = append(toProcess, t)
 		}
 	}
