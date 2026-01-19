@@ -726,3 +726,79 @@ func TestArchivist_Execute_PeopleAndFacts(t *testing.T) {
 
 	mockClient.AssertExpectations(t)
 }
+
+func TestArchivist_Execute_RawArraysFormat(t *testing.T) {
+	// Test fallback for LLM error: returns raw fact/person arrays instead of operations
+	llmResponse := `{
+		"facts": [
+			{
+				"id": 1522,
+				"content": "Updated fact about User",
+				"type": "identity",
+				"importance": 95,
+				"reason": "Clarified information"
+			},
+			{
+				"id": 1624,
+				"content": "Another fact",
+				"type": "context",
+				"importance": 70,
+				"reason": "Added context"
+			}
+		],
+		"people": [
+			{
+				"display_name": "Ivan Petrov",
+				"aliases": ["@ivanp"],
+				"circle": "Work_Inner",
+				"bio": "DevOps engineer at company X",
+				"reason": "User mentioned colleague"
+			}
+		]
+	}`
+
+	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(mockChatResponse(llmResponse), nil)
+
+	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
+	cfg := testutil.TestConfig()
+	cfg.Agents.Archivist.Model = "test-model"
+	translator := testutil.TestTranslator(t)
+
+	archivist := New(executor, translator, cfg, testutil.TestLogger(), nil)
+
+	req := &agent.Request{
+		Shared: &agent.SharedContext{
+			UserID: 123,
+		},
+		Params: map[string]any{
+			ParamMessages: []storage.Message{
+				{ID: 1, Role: "user", Content: "Update my info", CreatedAt: time.Now()},
+			},
+			ParamFacts:         []storage.Fact{},
+			ParamReferenceDate: time.Now(),
+		},
+	}
+
+	resp, err := archivist.Execute(context.Background(), req)
+	require.NoError(t, err)
+
+	result, ok := resp.Structured.(*Result)
+	require.True(t, ok)
+
+	// Verify raw facts were converted to updated (they have IDs)
+	assert.Len(t, result.Facts.Updated, 2)
+	assert.Equal(t, int64(1522), result.Facts.Updated[0].ID)
+	assert.Equal(t, "Updated fact about User", result.Facts.Updated[0].Content)
+	assert.Equal(t, "identity", result.Facts.Updated[0].Type)
+	assert.Equal(t, 95, result.Facts.Updated[0].Importance)
+
+	// Verify raw people were converted to added
+	assert.Len(t, result.People.Added, 1)
+	assert.Equal(t, "Ivan Petrov", result.People.Added[0].DisplayName)
+	assert.Equal(t, "Work_Inner", result.People.Added[0].Circle)
+	assert.Equal(t, "DevOps engineer at company X", result.People.Added[0].Bio)
+
+	mockClient.AssertExpectations(t)
+}

@@ -117,6 +117,40 @@ type ResultWithArrayFields struct {
 	People []PeopleResult `json:"people"`
 }
 
+// RawFact represents a fact in the wrong format (LLM returned array of facts instead of operations).
+type RawFact struct {
+	ID         int64  `json:"id"`
+	Content    string `json:"content"`
+	Type       string `json:"type"`
+	Importance int    `json:"importance"`
+	Reason     string `json:"reason"`
+}
+
+// toUpdatedFact converts RawFact to UpdatedFact.
+func (rf RawFact) toUpdatedFact() UpdatedFact {
+	return UpdatedFact(rf)
+}
+
+// RawPerson represents a person in the wrong format (LLM returned array of people instead of operations).
+type RawPerson struct {
+	DisplayName string   `json:"display_name"`
+	Aliases     []string `json:"aliases"`
+	Circle      string   `json:"circle"`
+	Bio         string   `json:"bio"`
+	Reason      string   `json:"reason"`
+}
+
+// toAddedPerson converts RawPerson to AddedPerson.
+func (rp RawPerson) toAddedPerson() AddedPerson {
+	return AddedPerson(rp)
+}
+
+// ResultWithRawArrays handles LLM error where it returns raw fact/person arrays instead of operations.
+type ResultWithRawArrays struct {
+	Facts  []RawFact   `json:"facts"`
+	People []RawPerson `json:"people"`
+}
+
 // PeopleRepository is the interface for loading people.
 type PeopleRepository interface {
 	GetPeople(userID int64) ([]storage.Person, error)
@@ -370,6 +404,30 @@ func (a *Archivist) parseResponse(content string) (*Result, error) {
 				converted.People.Added = append(converted.People.Added, p.Added...)
 				converted.People.Updated = append(converted.People.Updated, p.Updated...)
 				converted.People.Merged = append(converted.People.Merged, p.Merged...)
+			}
+			if hasStructuredContent(converted) {
+				return converted, nil
+			}
+		}
+	}
+
+	// Try raw arrays format (LLM error: returns fact/person arrays instead of operations)
+	var rawArraysResult ResultWithRawArrays
+	if err := json.Unmarshal([]byte(content), &rawArraysResult); err == nil {
+		if len(rawArraysResult.Facts) > 0 || len(rawArraysResult.People) > 0 {
+			// Log warning about wrong format
+			a.logger.Warn("archivist received wrong format (raw arrays instead of operations), converting",
+				"facts_count", len(rawArraysResult.Facts),
+				"people_count", len(rawArraysResult.People))
+
+			converted := &Result{}
+			// Convert raw facts to updated facts (they have IDs, so they must be updates)
+			for _, f := range rawArraysResult.Facts {
+				converted.Facts.Updated = append(converted.Facts.Updated, f.toUpdatedFact())
+			}
+			// Convert raw people to added people (assume new, caller will deduplicate)
+			for _, p := range rawArraysResult.People {
+				converted.People.Added = append(converted.People.Added, p.toAddedPerson())
 			}
 			if hasStructuredContent(converted) {
 				return converted, nil

@@ -424,6 +424,63 @@ memory:
     - Язык фактов: РУССКИЙ. Технические термины (ZTNA, Kubernetes) — на АНГЛИЙСКОМ.
     - Поле reason: СТРОГО НА РУССКОМ.
     - Если фактов > лимита: консолидируй близкие или удаляй status/context. Не удаляй identity/bio.
+
+    <json_example>
+    {
+      "facts": {
+        "added": [
+          {
+            "content": "Работает в компании X как DevOps инженер",
+            "category": "work",
+            "type": "identity",
+            "importance": 90,
+            "reason": "User упомянул место работы"
+          }
+        ],
+        "updated": [
+          {
+            "id": 1522,
+            "content": "Обновлённый текст факта",
+            "type": "context",
+            "importance": 70,
+            "reason": "Уточнена информация"
+          }
+        ],
+        "removed": [
+          {
+            "id": 1234,
+            "reason": "Факт устарел"
+          }
+        ]
+      },
+      "people": {
+        "added": [
+          {
+            "display_name": "Иван Петров",
+            "aliases": ["@ivanp", "Ваня"],
+            "circle": "Work_Inner",
+            "bio": "DevOps инженер, специализация на Kubernetes. Работает с User над проектом X.",
+            "reason": "User упомянул нового коллегу"
+          }
+        ],
+        "updated": [
+          {
+            "display_name": "Олег Петров",
+            "circle": "Work_Inner",
+            "bio": "Обновлённая биография Олега",
+            "reason": "Добавлена информация о новом проекте"
+          }
+        ],
+        "merged": [
+          {
+            "target_name": "Мария Ивановна",
+            "source_name": "Мария",
+            "reason": "Мария Ивановна — полное имя Марии, один человек"
+          }
+        ]
+      }
+    }
+    </json_example>
     </output_format>
 
     <instructions>

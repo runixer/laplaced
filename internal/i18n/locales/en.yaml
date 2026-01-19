@@ -423,6 +423,63 @@ memory:
     - Language: ENGLISH. Technical terms (ZTNA, Kubernetes) — keep in ENGLISH.
     - Field reason: STRICTLY IN ENGLISH.
     - If facts > limit: consolidate similar or delete status/context. Never delete identity/bio.
+
+    <json_example>
+    {
+      "facts": {
+        "added": [
+          {
+            "content": "Works at company X as a DevOps engineer",
+            "category": "work",
+            "type": "identity",
+            "importance": 90,
+            "reason": "User mentioned their workplace"
+          }
+        ],
+        "updated": [
+          {
+            "id": 1522,
+            "content": "Updated fact content",
+            "type": "context",
+            "importance": 70,
+            "reason": "Clarified information"
+          }
+        ],
+        "removed": [
+          {
+            "id": 1234,
+            "reason": "Fact is outdated"
+          }
+        ]
+      },
+      "people": {
+        "added": [
+          {
+            "display_name": "Ivan Petrov",
+            "aliases": ["@ivanp", "Vanya"],
+            "circle": "Work_Inner",
+            "bio": "DevOps engineer, Kubernetes specialist. Working with User on project X.",
+            "reason": "User mentioned a new colleague"
+          }
+        ],
+        "updated": [
+          {
+            "display_name": "Oleg Petrov",
+            "circle": "Work_Inner",
+            "bio": "Updated Oleg's biography",
+            "reason": "Added information about new project"
+          }
+        ],
+        "merged": [
+          {
+            "target_name": "Maria Ivanovna",
+            "source_name": "Maria",
+            "reason": "Maria Ivanovna is Maria's full name, same person"
+          }
+        ]
+      }
+    }
+    </json_example>
     </output_format>
 
     <instructions>
