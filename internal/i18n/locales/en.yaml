@@ -309,7 +309,7 @@ rag:
 
 memory:
   # Archivist system prompt
-  # Template fields: Date, UserFactsLimit, UserFactsCount, UserFacts, Conversation, KnownPeople (outputs <people> tag)
+  # Template fields: Date, UserFactsLimit, UserFactsCount
   system_prompt: |
     <role>
     You are the Archivist, a strict system keeper of facts and people. Task: maintain a CONCISE but ACCURATE log of facts and people mentioned in conversations.
@@ -483,7 +483,7 @@ memory:
     </output_format>
 
     <instructions>
-    1. Read the conversation below.
+    1. Read the conversation provided in the user message.
     2. Find EXPLICIT User statements (not Bot's).
     3. CHECK <people> SECTION FOR DUPLICATES — even if not adding new people, find and merge duplicates (identical names, shared aliases, @username).
     4. Compare with existing facts.
@@ -492,6 +492,9 @@ memory:
     7. If no changes — return empty arrays for both sections.
     </instructions>
 
+  # Archivist user prompt
+  # Template fields: UserFacts, KnownPeople, Conversation
+  user_prompt: |
     <current_facts entity="User">
     {{.UserFacts}}
     </current_facts>

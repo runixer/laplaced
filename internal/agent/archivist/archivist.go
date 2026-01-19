@@ -255,15 +255,12 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (*agent.Res
 	// Format all people with full bio (v0.5.1 unified format)
 	knownPeople := storage.FormatPeople(people, storage.TagPeople)
 
-	// Build system prompt
+	// Build system prompt (instructions only, no data)
 	maxFacts := a.cfg.RAG.MaxProfileFacts
 	systemPrompt, err := a.translator.GetTemplate(a.cfg.Bot.Language, "memory.system_prompt", prompts.ArchivistParams{
 		Date:           referenceDate.Format("2006-01-02"),
 		UserFactsLimit: maxFacts,
 		UserFactsCount: len(userFacts),
-		UserFacts:      string(userFactsJSON),
-		Conversation:   conversation,
-		KnownPeople:    knownPeople,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to build system prompt: %w", err)
@@ -275,8 +272,19 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (*agent.Res
 		systemPrompt += warning
 	}
 
+	// Build user prompt (data: facts, people, conversation)
+	userPrompt, err := a.translator.GetTemplate(a.cfg.Bot.Language, "memory.user_prompt", prompts.ArchivistParams{
+		UserFacts:    string(userFactsJSON),
+		KnownPeople:  knownPeople,
+		Conversation: conversation,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to build user prompt: %w", err)
+	}
+
 	messages_llm := []openrouter.Message{
 		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
 	}
 
 	// Single LLM call (v0.5.1: no agentic loop - all people info is in prompt)

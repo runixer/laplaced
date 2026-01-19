@@ -310,7 +310,7 @@ rag:
 
 memory:
   # Archivist system prompt
-  # Template fields: Date, UserFactsLimit, UserFactsCount, UserFacts, Conversation, KnownPeople (outputs <people> tag)
+  # Template fields: Date, UserFactsLimit, UserFactsCount
   system_prompt: |
     <role>
     Ты — Архивариус, строгий системный хранитель фактов и людей. Задача: вести СЖАТЫЙ, но ТОЧНЫЙ лог фактов и людей из разговоров.
@@ -484,7 +484,7 @@ memory:
     </output_format>
 
     <instructions>
-    1. Прочитай диалог ниже.
+    1. Прочитай диалог из пользовательского сообщения.
     2. Найди ЯВНЫЕ утверждения User'а (не Bot'а).
     3. ПРОВЕРЬ СЕКЦИЮ <people> НА ДУБЛИКАТЫ — даже если не добавляешь новых людей, найди и объедини дубликаты (одинаковые имена, общие алиасы, @username).
     4. Сравни с существующими фактами.
@@ -493,6 +493,9 @@ memory:
     7. Если нет изменений — верни пустые массивы для обеих секций.
     </instructions>
 
+  # Archivist user prompt
+  # Template fields: UserFacts, KnownPeople, Conversation
+  user_prompt: |
     <current_facts entity="User">
     {{.UserFacts}}
     </current_facts>
