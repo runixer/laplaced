@@ -35,7 +35,7 @@ func TestFormatUserProfile(t *testing.T) {
 			},
 			contains: []string{
 				"<user_profile>",
-				"[ID:1]",
+				"[Fact:1]",
 				"[identity/name]",
 				"(Updated: 2025-01-09)",
 				"Меня зовут Алексей",
@@ -63,8 +63,8 @@ func TestFormatUserProfile(t *testing.T) {
 			},
 			contains: []string{
 				"<user_profile>",
-				"[ID:1]",
-				"[ID:2]",
+				"[Fact:1]",
+				"[Fact:2]",
 				"</user_profile>",
 			},
 			notEmpty: true,

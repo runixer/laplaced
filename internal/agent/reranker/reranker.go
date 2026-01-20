@@ -517,7 +517,7 @@ func (r *Reranker) formatCandidatesForReranker(candidates []Candidate) string {
 	for _, c := range candidates {
 		date := c.Topic.CreatedAt.Format("2006-01-02")
 		sizeStr := formatSizeChars(c.SizeChars)
-		fmt.Fprintf(&sb, "[ID:%d] %s | %d msgs, %s | %s\n",
+		fmt.Fprintf(&sb, "[Topic:%d] %s | %d msgs, %s | %s\n",
 			c.TopicID, date, c.MessageCount, sizeStr, c.Topic.Summary)
 	}
 	return sb.String()
@@ -619,7 +619,7 @@ func (r *Reranker) parseResponse(content string) (*Result, error) {
 
 	// Try bare array format (only topics, no people)
 	var bareArray []TopicSelection
-	if err := json.Unmarshal([]byte(content), &bareArray); err == nil && len(bareArray) > 0 && bareArray[0].ID != 0 {
+	if err := json.Unmarshal([]byte(content), &bareArray); err == nil && len(bareArray) > 0 && bareArray[0].ID != "" {
 		return &Result{Topics: bareArray}, nil
 	}
 
@@ -646,7 +646,7 @@ func (r *Reranker) parseResponse(content string) (*Result, error) {
 
 	if len(topics) == 0 && len(resp.IDs) > 0 {
 		for _, id := range resp.IDs {
-			topics = append(topics, TopicSelection{ID: id})
+			topics = append(topics, TopicSelection{ID: fmt.Sprintf("Topic:%d", id)})
 		}
 	}
 
@@ -669,15 +669,18 @@ func (r *Reranker) parseResponse(content string) (*Result, error) {
 
 func (r *Reranker) parseTopicArray(data json.RawMessage) []TopicSelection {
 	var objFormat []TopicSelection
-	if err := json.Unmarshal(data, &objFormat); err == nil && len(objFormat) > 0 && objFormat[0].ID != 0 {
+	if err := json.Unmarshal(data, &objFormat); err == nil && len(objFormat) > 0 && objFormat[0].ID != "" {
 		return objFormat
 	}
 
 	var intFormat []int64
 	if err := json.Unmarshal(data, &intFormat); err == nil {
+		// Fallback: LLM used numeric format instead of "Topic:N"
+		r.logger.Warn("reranker returned numeric topic IDs instead of prefixed format (Topic:N)",
+			"fallback_count", len(intFormat))
 		topics := make([]TopicSelection, len(intFormat))
 		for i, id := range intFormat {
-			topics[i] = TopicSelection{ID: id}
+			topics[i] = TopicSelection{ID: fmt.Sprintf("Topic:%d", id)}
 		}
 		return topics
 	}
@@ -688,15 +691,18 @@ func (r *Reranker) parseTopicArray(data json.RawMessage) []TopicSelection {
 // parsePeopleArray parses people from JSON (v0.5.1).
 func (r *Reranker) parsePeopleArray(data json.RawMessage) []PersonSelection {
 	var objFormat []PersonSelection
-	if err := json.Unmarshal(data, &objFormat); err == nil && len(objFormat) > 0 && objFormat[0].ID != 0 {
+	if err := json.Unmarshal(data, &objFormat); err == nil && len(objFormat) > 0 && objFormat[0].ID != "" {
 		return objFormat
 	}
 
 	var intFormat []int64
 	if err := json.Unmarshal(data, &intFormat); err == nil {
+		// Fallback: LLM used numeric format instead of "Person:N"
+		r.logger.Warn("reranker returned numeric person IDs instead of prefixed format (Person:N)",
+			"fallback_count", len(intFormat))
 		people := make([]PersonSelection, len(intFormat))
 		for i, id := range intFormat {
-			people[i] = PersonSelection{ID: id}
+			people[i] = PersonSelection{ID: fmt.Sprintf("Person:%d", id)}
 		}
 		return people
 	}
@@ -710,10 +716,16 @@ func (r *Reranker) filterValidTopics(userID int64, result *Result, candidateMap 
 	var hallucinatedIDs []int64
 
 	for _, topic := range result.Topics {
-		if _, ok := candidateMap[topic.ID]; ok {
+		topicID, err := parseTopicID(topic.ID)
+		if err != nil {
+			r.logger.Warn("invalid topic ID format", "user_id", userID, "id", topic.ID, "error", err)
+			hallucinatedIDs = append(hallucinatedIDs, -1)
+			continue
+		}
+		if _, ok := candidateMap[topicID]; ok {
 			validTopics = append(validTopics, topic)
 		} else {
-			hallucinatedIDs = append(hallucinatedIDs, topic.ID)
+			hallucinatedIDs = append(hallucinatedIDs, topicID)
 		}
 	}
 
@@ -742,10 +754,16 @@ func (r *Reranker) filterValidPeople(userID int64, result *Result, peopleMap map
 	var hallucinatedIDs []int64
 
 	for _, person := range result.People {
-		if _, ok := peopleMap[person.ID]; ok {
+		personID, err := parsePersonID(person.ID)
+		if err != nil {
+			r.logger.Warn("invalid person ID format", "user_id", userID, "id", person.ID, "error", err)
+			hallucinatedIDs = append(hallucinatedIDs, -1)
+			continue
+		}
+		if _, ok := peopleMap[personID]; ok {
 			validPeople = append(validPeople, person)
 		} else {
-			hallucinatedIDs = append(hallucinatedIDs, person.ID)
+			hallucinatedIDs = append(hallucinatedIDs, personID)
 		}
 	}
 
@@ -775,7 +793,7 @@ func (r *Reranker) fallbackToVectorTop(candidates []Candidate, personCandidates 
 
 	topics := make([]TopicSelection, len(candidates))
 	for i, c := range candidates {
-		topics[i] = TopicSelection{ID: c.TopicID}
+		topics[i] = TopicSelection{ID: fmt.Sprintf("Topic:%d", c.TopicID)}
 	}
 
 	// v0.5.1: Include top-N people by vector score as well (max 3)
@@ -785,7 +803,7 @@ func (r *Reranker) fallbackToVectorTop(candidates []Candidate, personCandidates 
 	}
 	people := make([]PersonSelection, len(personCandidates))
 	for i, p := range personCandidates {
-		people[i] = PersonSelection{ID: p.PersonID}
+		people[i] = PersonSelection{ID: fmt.Sprintf("Person:%d", p.PersonID)}
 	}
 
 	return &Result{Topics: topics, People: people}
@@ -804,7 +822,7 @@ func (r *Reranker) fallbackFromState(st *state, candidates []Candidate, personCa
 		}
 		topics := make([]TopicSelection, len(ids))
 		for i, id := range ids {
-			topics[i] = TopicSelection{ID: id}
+			topics[i] = TopicSelection{ID: fmt.Sprintf("Topic:%d", id)}
 		}
 
 		// v0.5.1: Include top-N people by vector score (max 3)
@@ -814,7 +832,7 @@ func (r *Reranker) fallbackFromState(st *state, candidates []Candidate, personCa
 		}
 		people := make([]PersonSelection, len(personCandidates))
 		for i, p := range personCandidates {
-			people[i] = PersonSelection{ID: p.PersonID}
+			people[i] = PersonSelection{ID: fmt.Sprintf("Person:%d", p.PersonID)}
 		}
 
 		return &Result{Topics: topics, People: people}

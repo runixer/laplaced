@@ -38,6 +38,7 @@ func TestFacts() []storage.Fact {
 		{
 			ID:        1,
 			UserID:    TestUserID,
+			Category:  "bio",
 			Type:      "identity",
 			Content:   "Software engineer",
 			TopicID:   nil,
@@ -46,6 +47,7 @@ func TestFacts() []storage.Fact {
 		{
 			ID:        2,
 			UserID:    TestUserID,
+			Category:  "interests",
 			Type:      "preference",
 			Content:   "Prefers Go programming language",
 			TopicID:   nil,
@@ -54,6 +56,7 @@ func TestFacts() []storage.Fact {
 		{
 			ID:        3,
 			UserID:    TestUserID,
+			Category:  "interests",
 			Type:      "interest",
 			Content:   "Interested in AI and machine learning",
 			TopicID:   nil,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -282,6 +283,11 @@ func convertArchivistResult(result *archivist.Result) *MemoryUpdate {
 	}
 
 	for _, u := range result.Facts.Updated {
+		factID, err := u.GetFactID()
+		if err != nil {
+			// Skip invalid fact IDs silently
+			continue
+		}
 		update.Updated = append(update.Updated, struct {
 			ID         int64  `json:"id"`
 			Content    string `json:"content"`
@@ -289,7 +295,7 @@ func convertArchivistResult(result *archivist.Result) *MemoryUpdate {
 			Importance int    `json:"importance"`
 			Reason     string `json:"reason"`
 		}{
-			ID:         u.ID,
+			ID:         factID,
 			Content:    u.Content,
 			Type:       u.Type,
 			Importance: u.Importance,
@@ -298,11 +304,16 @@ func convertArchivistResult(result *archivist.Result) *MemoryUpdate {
 	}
 
 	for _, r := range result.Facts.Removed {
+		factID, err := r.GetFactID()
+		if err != nil {
+			// Skip invalid fact IDs silently
+			continue
+		}
 		update.Removed = append(update.Removed, struct {
 			ID     int64  `json:"id"`
 			Reason string `json:"reason"`
 		}{
-			ID:     r.ID,
+			ID:     factID,
 			Reason: r.Reason,
 		})
 	}
@@ -773,52 +784,75 @@ func (s *Service) applyPeopleUpdates(ctx context.Context, userID int64, peopleRe
 
 	// Handle Updated people
 	for _, updated := range peopleResult.Updated {
-		// Find existing person by name
+		// Try to extract person_id first (new format)
+		personIDStr, hasPersonID := updated.GetPersonID()
+
+		// Find existing person
 		var existingPerson *storage.Person
 
-		// First, try exact match on DisplayName
-		for i := range currentPeople {
-			if currentPeople[i].DisplayName == updated.DisplayName {
-				existingPerson = &currentPeople[i]
-				break
-			}
-		}
-
-		// Fallback: strip aliases in parentheses (e.g., "John Smith (@john, Johnny)" -> "John Smith")
-		if existingPerson == nil {
-			cleanName := updated.DisplayName
-			if idx := strings.Index(cleanName, " ("); idx > 0 {
-				cleanName = strings.TrimSpace(cleanName[:idx])
-			}
-			if cleanName != updated.DisplayName {
-				for i := range currentPeople {
-					if currentPeople[i].DisplayName == cleanName {
-						existingPerson = &currentPeople[i]
-						s.logger.Debug("Found person by stripped name", "original", updated.DisplayName, "clean", cleanName)
-						break
-					}
-				}
-			}
-		}
-
-		// Fallback: try matching by alias
-		if existingPerson == nil {
+		// Priority 1: Use person_id if provided
+		if hasPersonID {
+			personID, _ := strconv.ParseInt(personIDStr, 10, 64)
 			for i := range currentPeople {
-				for _, alias := range currentPeople[i].Aliases {
-					if strings.EqualFold(alias, updated.DisplayName) || strings.Contains(updated.DisplayName, alias) {
-						existingPerson = &currentPeople[i]
-						s.logger.Debug("Found person by alias", "requested", updated.DisplayName, "found", currentPeople[i].DisplayName)
-						break
-					}
-				}
-				if existingPerson != nil {
+				if currentPeople[i].ID == personID {
+					existingPerson = &currentPeople[i]
+					s.logger.Debug("Found person by person_id", "person_id", personIDStr, "name", currentPeople[i].DisplayName)
 					break
 				}
 			}
 		}
 
+		// Priority 2: Try exact match on DisplayName (fallback)
+		if existingPerson == nil && updated.DisplayName != "" {
+			for i := range currentPeople {
+				if currentPeople[i].DisplayName == updated.DisplayName {
+					existingPerson = &currentPeople[i]
+					break
+				}
+			}
+
+			// Fallback: strip aliases in parentheses (e.g., "John Smith (@john, Johnny)" -> "John Smith")
+			if existingPerson == nil {
+				cleanName := updated.DisplayName
+				if idx := strings.Index(cleanName, " ("); idx > 0 {
+					cleanName = strings.TrimSpace(cleanName[:idx])
+				}
+				if cleanName != updated.DisplayName {
+					for i := range currentPeople {
+						if currentPeople[i].DisplayName == cleanName {
+							existingPerson = &currentPeople[i]
+							s.logger.Debug("Found person by stripped name", "original", updated.DisplayName, "clean", cleanName)
+							break
+						}
+					}
+				}
+			}
+
+			// Fallback: try matching by alias
+			if existingPerson == nil {
+				for i := range currentPeople {
+					for _, alias := range currentPeople[i].Aliases {
+						if strings.EqualFold(alias, updated.DisplayName) || strings.Contains(updated.DisplayName, alias) {
+							existingPerson = &currentPeople[i]
+							s.logger.Debug("Found person by alias", "requested", updated.DisplayName, "found", currentPeople[i].DisplayName)
+							break
+						}
+					}
+					if existingPerson != nil {
+						break
+					}
+				}
+			}
+		}
+
 		if existingPerson == nil {
-			s.logger.Warn("Person to update not found", "name", updated.DisplayName)
+			if hasPersonID {
+				s.logger.Warn("Person to update not found", "person_id", personIDStr)
+			} else if updated.DisplayName != "" {
+				s.logger.Warn("Person to update not found", "name", updated.DisplayName)
+			} else {
+				s.logger.Warn("Person to update not found", "person_id", "", "name", "")
+			}
 			continue
 		}
 
@@ -912,23 +946,65 @@ func (s *Service) applyPeopleUpdates(ctx context.Context, userID int64, peopleRe
 
 	// Handle Merged people
 	for _, merged := range peopleResult.Merged {
+		// Try to extract IDs first (new format)
+		targetIDStr, hasTargetID := merged.GetTargetID()
+		sourceIDStr, hasSourceID := merged.GetSourceID()
+
 		// Find target and source persons
 		var targetPerson, sourcePerson *storage.Person
-		for _, p := range currentPeople {
-			if p.DisplayName == merged.TargetName {
-				targetPerson = &p
+
+		// Priority 1: Use person_id if provided
+		if hasTargetID {
+			targetID, _ := strconv.ParseInt(targetIDStr, 10, 64)
+			for _, p := range currentPeople {
+				if p.ID == targetID {
+					targetPerson = &p
+					break
+				}
 			}
-			if p.DisplayName == merged.SourceName {
-				sourcePerson = &p
+		}
+		if hasSourceID {
+			sourceID, _ := strconv.ParseInt(sourceIDStr, 10, 64)
+			for _, p := range currentPeople {
+				if p.ID == sourceID {
+					sourcePerson = &p
+					break
+				}
+			}
+		}
+
+		// Priority 2: Fallback to name matching (for backward compatibility)
+		if targetPerson == nil && merged.TargetName != "" {
+			for _, p := range currentPeople {
+				if p.DisplayName == merged.TargetName {
+					targetPerson = &p
+					break
+				}
+			}
+		}
+		if sourcePerson == nil && merged.SourceName != "" {
+			for _, p := range currentPeople {
+				if p.DisplayName == merged.SourceName {
+					sourcePerson = &p
+					break
+				}
 			}
 		}
 
 		if targetPerson == nil {
-			s.logger.Warn("Target person for merge not found", "target", merged.TargetName)
+			if hasTargetID {
+				s.logger.Warn("Target person for merge not found", "target_id", targetIDStr)
+			} else {
+				s.logger.Warn("Target person for merge not found", "target_name", merged.TargetName)
+			}
 			continue
 		}
 		if sourcePerson == nil {
-			s.logger.Warn("Source person for merge not found", "source", merged.SourceName)
+			if hasSourceID {
+				s.logger.Warn("Source person for merge not found", "source_id", sourceIDStr)
+			} else {
+				s.logger.Warn("Source person for merge not found", "source_name", merged.SourceName)
+			}
 			continue
 		}
 

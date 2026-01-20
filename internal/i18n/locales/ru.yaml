@@ -64,13 +64,13 @@ tools:
     parameter_description: "Поисковый запрос по истории разговоров."
   manage_memory:
     description: "Инструмент для управления долгосрочной памятью бота. Позволяет добавлять, обновлять или удалять факты о пользователе. Используй, когда пользователь явно просит 'запомни', 'забудь' или 'исправь' информацию о себе. НЕ используй для рутинного запоминания всего подряд — это делает другой процесс. ОДНАКО, ты МОЖЕШЬ и ДОЛЖЕН использовать этот инструмент самостоятельно, если пользователь сообщает КРИТИЧЕСКИ ВАЖНУЮ информацию (новые предпочтения, изменение контекста, важные планы), которую нельзя потерять при очистке контекста. ВАЖНО: Все факты и поле 'reason' сохраняй СТРОГО НА РУССКОМ ЯЗЫКЕ. Поддерживает пакетную обработку (массив операций). КРИТИЧНО: ВСЕГДА вызывай этот инструмент через function call API. ЗАПРЕЩЕНО выводить JSON в текст ответа — это ломает сохранение!"
-    parameter_description: "JSON объект с массивом операций 'operations'. Каждая операция содержит: action ('add', 'update', 'delete'), entity (например 'User'), content (сам факт), category (bio, work, hobby, etc), type (identity, context, status), importance (0-100), fact_id (для update/delete), reason (причина изменения)."
+    parameter_description: "JSON объект с массивом операций 'operations'. Каждая операция содержит: action ('add', 'update', 'delete'), entity (например 'User'), content (сам факт), category (bio, work, hobby, etc), type (identity, context, status), importance (0-100), fact_id (для update/delete, используй формат 'Fact:123'), reason (причина изменения)."
   search_people:
     description: "Инструмент для поиска людей, которых знает пользователь. ОБЯЗАТЕЛЬНО вызывай, когда пользователь спрашивает: 'кто такой...', 'найди человека...', 'ищи коллегу...', 'знаешь ли ты о...'. Ищет по имени, @username или описанию. Возвращает найденных людей с их биографией и кругом (Family, Friends, Work_Inner, Work_Outer, Other)."
     parameter_description: "Поисковый запрос — имя, @username или описание искомого человека."
   manage_people:
     description: "Инструмент для управления людьми в памяти. ОБЯЗАТЕЛЬНО вызывай, когда пользователь просит: 'запомни человека...', 'добавь человека...', 'обнови инфу о...', 'забудь о...', 'объедини... с...'. Операции: 'create' (добавить нового), 'update' (изменить существующего), 'delete' (удалить), 'merge' (объединить записи). Все биографии — НА РУССКОМ. ВАЖНО: Используй 'create' для новых людей, 'update' только для существующих."
-    parameter_description: "JSON объект с: operation ('create', 'update', 'delete', 'merge'), name (имя человека), и полями для конкретной операции. Для 'create': bio (обязательно), circle (Family/Friends/Work_Inner/Work_Outer/Other), aliases (массив), username (@хендл). Для 'update': объект updates с полями (circle, bio_append, aliases_add). Для 'delete': reason. Для 'merge': target (имя для сохранения), source (имя для объединения), reason."
+    parameter_description: "JSON объект с: operation ('create', 'update', 'delete', 'merge'), name (имя человека), и полями для конкретной операции. Для 'create': bio (обязательно), circle (Family/Friends/Work_Inner/Work_Outer/Other), aliases (массив), username (@хендл). Для 'update': person_id (используй формат 'Person:123' из префикса [Person:ID]), объект updates с полями (circle, bio_append, aliases_add). Для 'delete': reason. Для 'merge': target_id, source_id (используй формат 'Person:123'), reason."
 
 rag:
   # Unified Splitter prompt - used for both regular extraction and split mode
@@ -231,11 +231,12 @@ rag:
 
     <output_format>
     Это задача ВЫБОРА, не объяснения. После загрузки топиков верни ТОЛЬКО JSON-объект:
-    {"topic_ids": [{"reason": "краткая причина", "id": 42}], "people_ids": [{"reason": "релевантен запросу", "id": 5}]}
+    {"topic_ids": [{"reason": "краткая причина", "id": "Topic:42"}], "people_ids": [{"reason": "релевантен запросу", "id": "Person:5"}]}
 
     ПРАВИЛА:
     - Формат: объект с массивами "topic_ids" и "people_ids"
     - Каждый массив содержит объекты с полями "reason" и "id"
+    - ID ОБЯЗАТЕЛЬНО с префиксами: "Topic:N" для топиков, "Person:N" для людей
     - "reason" — ОБЯЗАТЕЛЬНО, 1 предложение
     - Если ничего не релевантно — пустые массивы: {"topic_ids": [], "people_ids": []}
     - НЕ пиши текст до или после JSON
@@ -244,21 +245,21 @@ rag:
     <examples>
     ### Пример 1: Технический вопрос
     Запрос: "Как настроить vLLM на H100?"
-    Топики: [ID:42] ML-инфраструктура на H100, [ID:18] Психологический портрет, [ID:5] Docker basics
+    Топики: [Topic:42] ML-инфраструктура на H100, [Topic:18] Психологический портрет, [Topic:5] Docker basics
     Люди: [Person:3] Иван [Work_Inner] | DevOps инженер
     Действие: get_topics_content([42, 5])
-    Результат: {"topic_ids": [{"reason": "Прямое обсуждение vLLM и H100", "id": 42}], "people_ids": [{"reason": "DevOps эксперт, может помочь", "id": 3}]}
+    Результат: {"topic_ids": [{"reason": "Прямое обсуждение vLLM и H100", "id": "Topic:42"}], "people_ids": [{"reason": "DevOps эксперт, может помочь", "id": "Person:3"}]}
 
     ### Пример 2: Личный контекст
     Запрос: "Помнишь, что Маша говорила про дачу?"
-    Топики: [ID:10] Дача с семьёй, [ID:11] Kubernetes setup, [ID:12] Маша болеет
+    Топики: [Topic:10] Дача с семьёй, [Topic:11] Kubernetes setup, [Topic:12] Маша болеет
     Люди: [Person:5] Маша [Family] | Жена, дизайнер
     Действие: get_topics_content([10, 12])
-    Результат: {"topic_ids": [{"reason": "Дача с Машей", "id": 10}, {"reason": "Дополнительный контекст о Маше", "id": 12}], "people_ids": [{"reason": "Прямое упоминание Маши", "id": 5}]}
+    Результат: {"topic_ids": [{"reason": "Дача с Машей", "id": "Topic:10"}, {"reason": "Дополнительный контекст о Маше", "id": "Topic:12"}], "people_ids": [{"reason": "Прямое упоминание Маши", "id": "Person:5"}]}
 
     ### Пример 3: Ничего не подходит
     Запрос: "Сколько стоит биткоин сейчас?"
-    Топики: [ID:1] Go рефакторинг, [ID:2] Telegram бот разработка
+    Топики: [Topic:1] Go рефакторинг, [Topic:2] Telegram бот разработка
     Люди: [Person:1] Алиса [Friends]
     Действие: get_topics_content([1, 2]) — проверяем на всякий случай
     Результат: {"topic_ids": [], "people_ids": []}
@@ -272,10 +273,11 @@ rag:
     - Возвращай people_ids ТОЛЬКО если в запросе есть секция "People candidates". Если людей нет — возвращай пустой массив: "people_ids": []
 
     КРИТИЧНО — ПРОСТРАНСТВА ID:
-    - Topic ID: из секции "Topic candidates", формат [ID:42]
-    - Person ID: из секции "People candidates", формат [Person:5]
-    - Fact ID в <user_profile> (например [ID:1918]) — это НЕ person ID! Это внутренние ссылки на факты.
+    - Topic ID: из секции "Topic candidates", формат [Topic:42] в кандидатах, возвращай как "id": "Topic:42"
+    - Person ID: из секции "People candidates", формат [Person:5] в кандидатах, возвращай как "id": "Person:5"
+    - Fact ID в <user_profile> (например [Fact:1918]) — это внутренние ссылки на факты.
     - НИКОГДА не используй fact ID из <user_profile> как person ID
+    - ВСЕГДА включай префиксы в JSON ответе: "Topic:N", "Person:N"
     </grounding>
 
     {{.Profile}}
@@ -407,18 +409,15 @@ memory:
 
     Секция facts (ТОЛЬКО о User):
     - "added": новые факты (content, category, type, importance, reason) — entity всегда "User"
-    - "updated": изменённые факты (id, content, type, importance, reason)
-    - "removed": удалённые факты (id, reason)
+    - "updated": изменённые факты (fact_id, content, type, importance, reason) — используй fact_id из префикса [Fact:N]
+    - "removed": удалённые факты (fact_id, reason) — используй fact_id из префикса [Fact:N]
 
     Секция people:
     - "added": новые люди (display_name, aliases, circle, bio, reason)
-    - "updated": существующие люди (display_name, new_display_name?, circle, bio, reason) — полностью переписывает bio; new_display_name переименует человека, старое имя уйдёт в aliases
-    - "merged": объединить двух людей (target_name, source_name, reason)
+    - "updated": существующие люди (person_id, circle, bio, reason) — используй person_id из префикса [Person:ID]
+    - "merged": объединить двух людей (target_id, source_id, reason) — используй person ID из префиксов [Person:ID]
 
-    ВАЖНО для updated: display_name должен быть ТОЧНО как в секции <people> (без алиасов в скобках!).
-    Правильно: "display_name": "Олег Петров"
-    Неправильно: "display_name": "Олег Петров (@olegp, Гелёй)"
-    ПОДСКАЗКА: Используй person_id из префикса [Person:ID] если доступен — это надёжнее поиска по имени.
+    ВАЖНО: Для updated/merged людей ВСЕГДА используй person_id из префикса [Person:ID] — это обязательно, не опционально.
 
     Правила:
     - Язык фактов: РУССКИЙ. Технические термины (ZTNA, Kubernetes) — на АНГЛИЙСКОМ.
@@ -439,7 +438,7 @@ memory:
         ],
         "updated": [
           {
-            "id": 1522,
+            "fact_id": "Fact:1522",
             "content": "Обновлённый текст факта",
             "type": "context",
             "importance": 70,
@@ -448,7 +447,7 @@ memory:
         ],
         "removed": [
           {
-            "id": 1234,
+            "fact_id": "Fact:1234",
             "reason": "Факт устарел"
           }
         ]
@@ -465,7 +464,7 @@ memory:
         ],
         "updated": [
           {
-            "display_name": "Олег Петров",
+            "person_id": "Person:5",
             "circle": "Work_Inner",
             "bio": "Обновлённая биография Олега",
             "reason": "Добавлена информация о новом проекте"
@@ -473,9 +472,9 @@ memory:
         ],
         "merged": [
           {
-            "target_name": "Мария Ивановна",
-            "source_name": "Мария",
-            "reason": "Мария Ивановна — полное имя Марии, один человек"
+            "target_id": "Person:10",
+            "source_id": "Person:5",
+            "reason": "Олег Петров и Олег П. — это один человек"
           }
         ]
       }

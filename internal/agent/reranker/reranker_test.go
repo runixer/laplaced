@@ -41,7 +41,7 @@ func TestFormatCandidatesForReranker(t *testing.T) {
 				},
 			},
 			wantLines:    1,
-			wantContains: []string{"[ID:42]", "2026-01-10", "5 msgs", "~1K chars", "Test topic"},
+			wantContains: []string{"[Topic:42]", "2026-01-10", "5 msgs", "~1K chars", "Test topic"},
 		},
 		{
 			name: "large topic with K chars",
@@ -58,7 +58,7 @@ func TestFormatCandidatesForReranker(t *testing.T) {
 				},
 			},
 			wantLines:    1,
-			wantContains: []string{"[ID:100]", "~35K chars", "50 msgs"},
+			wantContains: []string{"[Topic:100]", "~35K chars", "50 msgs"},
 		},
 		{
 			name: "small topic with raw chars",
@@ -145,42 +145,42 @@ func TestParseResponse(t *testing.T) {
 		// New format with objects
 		{
 			name:       "new format with objects",
-			content:    `{"topic_ids": [{"id": 42, "reason": "relevant discussion"}, {"id": 18, "reason": "mentions person"}]}`,
+			content:    `{"topic_ids": [{"id": "Topic:42", "reason": "relevant discussion"}, {"id": "Topic:18", "reason": "mentions person"}]}`,
 			wantTopics: []int64{42, 18},
 			wantSelections: []TopicSelection{
-				{ID: 42, Reason: "relevant discussion"},
-				{ID: 18, Reason: "mentions person"},
+				{ID: "Topic:42", Reason: "relevant discussion"},
+				{ID: "Topic:18", Reason: "mentions person"},
 			},
 			wantErr: false,
 		},
 		// Bare array format (Flash sometimes returns this)
 		{
 			name:       "bare array format",
-			content:    `[{"id": 42, "reason": "relevant"}, {"id": 18, "reason": "mentions person"}]`,
+			content:    `[{"id": "Topic:42", "reason": "relevant"}, {"id": "Topic:18", "reason": "mentions person"}]`,
 			wantTopics: []int64{42, 18},
 			wantSelections: []TopicSelection{
-				{ID: 42, Reason: "relevant"},
-				{ID: 18, Reason: "mentions person"},
+				{ID: "Topic:42", Reason: "relevant"},
+				{ID: "Topic:18", Reason: "mentions person"},
 			},
 			wantErr: false,
 		},
 		{
 			name:       "new format with empty reason",
-			content:    `{"topic_ids": [{"id": 42}]}`,
+			content:    `{"topic_ids": [{"id": "Topic:42"}]}`,
 			wantTopics: []int64{42},
 			wantSelections: []TopicSelection{
-				{ID: 42, Reason: ""},
+				{ID: "Topic:42", Reason: ""},
 			},
 			wantErr: false,
 		},
 		// LLM quirk: wraps entire response in an array
 		{
 			name:       "wrapped in array (LLM quirk)",
-			content:    `[{"topic_ids": [{"id": 5205, "reason": "discussion about limits"}, {"id": 4750, "reason": "cost context"}]}]`,
+			content:    `[{"topic_ids": [{"id": "Topic:5205", "reason": "discussion about limits"}, {"id": "Topic:4750", "reason": "cost context"}]}]`,
 			wantTopics: []int64{5205, 4750},
 			wantSelections: []TopicSelection{
-				{ID: 5205, Reason: "discussion about limits"},
-				{ID: 4750, Reason: "cost context"},
+				{ID: "Topic:5205", Reason: "discussion about limits"},
+				{ID: "Topic:4750", Reason: "cost context"},
 			},
 			wantErr: false,
 		},
@@ -287,35 +287,35 @@ func TestFilterValidTopics(t *testing.T) {
 			name: "all valid",
 			result: &Result{
 				Topics: []TopicSelection{
-					{ID: 1, Reason: "a"},
-					{ID: 2, Reason: "b"},
+					{ID: "Topic:1", Reason: "a"},
+					{ID: "Topic:2", Reason: "b"},
 				},
 			},
 			wantTopics: []TopicSelection{
-				{ID: 1, Reason: "a"},
-				{ID: 2, Reason: "b"},
+				{ID: "Topic:1", Reason: "a"},
+				{ID: "Topic:2", Reason: "b"},
 			},
 		},
 		{
 			name: "some hallucinated",
 			result: &Result{
 				Topics: []TopicSelection{
-					{ID: 1, Reason: "valid"},
-					{ID: 999, Reason: "hallucinated"},
-					{ID: 2, Reason: "also valid"},
+					{ID: "Topic:1", Reason: "valid"},
+					{ID: "Topic:999", Reason: "hallucinated"},
+					{ID: "Topic:2", Reason: "also valid"},
 				},
 			},
 			wantTopics: []TopicSelection{
-				{ID: 1, Reason: "valid"},
-				{ID: 2, Reason: "also valid"},
+				{ID: "Topic:1", Reason: "valid"},
+				{ID: "Topic:2", Reason: "also valid"},
 			},
 		},
 		{
 			name: "all hallucinated",
 			result: &Result{
 				Topics: []TopicSelection{
-					{ID: 999, Reason: "fake"},
-					{ID: 888, Reason: "also fake"},
+					{ID: "Topic:999", Reason: "fake"},
+					{ID: "Topic:888", Reason: "also fake"},
 				},
 			},
 			wantTopics: nil,
@@ -523,9 +523,9 @@ func TestFallbackFromState(t *testing.T) {
 func TestResultTopicIDs(t *testing.T) {
 	result := &Result{
 		Topics: []TopicSelection{
-			{ID: 42, Reason: "a"},
-			{ID: 18, Reason: "b"},
-			{ID: 5, Reason: "c"},
+			{ID: "Topic:42", Reason: "a"},
+			{ID: "Topic:18", Reason: "b"},
+			{ID: "Topic:5", Reason: "c"},
 		},
 	}
 

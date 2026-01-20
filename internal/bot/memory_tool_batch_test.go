@@ -26,6 +26,7 @@ func TestPerformManageMemory_BatchOperations(t *testing.T) {
 		factHistoryRepo: mockStore,
 		orClient:        mockORClient,
 		cfg:             cfg,
+		logger:          testutil.TestLogger(),
 	}
 
 	userID := int64(123)

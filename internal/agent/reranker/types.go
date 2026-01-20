@@ -4,10 +4,33 @@ package reranker
 
 import (
 	"encoding/json"
+	"fmt"
+	"regexp"
+	"strconv"
 
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/storage"
 )
+
+// parseTopicID extracts numeric ID from "Topic:N" format.
+func parseTopicID(id string) (int64, error) {
+	re := regexp.MustCompile(`^(?:Topic:)?(\d+)$`)
+	matches := re.FindStringSubmatch(id)
+	if len(matches) == 2 {
+		return strconv.ParseInt(matches[1], 10, 64)
+	}
+	return 0, fmt.Errorf("invalid topic ID format: %s", id)
+}
+
+// parsePersonID extracts numeric ID from "Person:N" format.
+func parsePersonID(id string) (int64, error) {
+	re := regexp.MustCompile(`^(?:Person:)?(\d+)$`)
+	matches := re.FindStringSubmatch(id)
+	if len(matches) == 2 {
+		return strconv.ParseInt(matches[1], 10, 64)
+	}
+	return 0, fmt.Errorf("invalid person ID format: %s", id)
+}
 
 // Request parameters for Reranker agent.
 const (
@@ -32,15 +55,27 @@ const (
 )
 
 // TopicSelection represents a selected topic with explanation.
+// ID is stored as string with prefix "Topic:N" for unified ID format.
 type TopicSelection struct {
 	Reason string `json:"reason"`
-	ID     int64  `json:"id"`
+	ID     string `json:"id"` // Format: "Topic:N"
+}
+
+// GetNumericID extracts numeric ID from "Topic:N" format.
+func (t *TopicSelection) GetNumericID() (int64, error) {
+	return parseTopicID(t.ID)
 }
 
 // PersonSelection represents a selected person with explanation (v0.5.1).
+// ID is stored as string with prefix "Person:N" for unified ID format.
 type PersonSelection struct {
 	Reason string `json:"reason"`
-	ID     int64  `json:"id"`
+	ID     string `json:"id"` // Format: "Person:N"
+}
+
+// GetNumericID extracts numeric ID from "Person:N" format.
+func (p *PersonSelection) GetNumericID() (int64, error) {
+	return parsePersonID(p.ID)
 }
 
 // Result contains the output of the reranker.
@@ -51,18 +86,22 @@ type Result struct {
 
 // TopicIDs returns just the topic IDs (for backward compatibility).
 func (r *Result) TopicIDs() []int64 {
-	ids := make([]int64, len(r.Topics))
-	for i, t := range r.Topics {
-		ids[i] = t.ID
+	ids := make([]int64, 0, len(r.Topics))
+	for _, t := range r.Topics {
+		if id, err := parseTopicID(t.ID); err == nil {
+			ids = append(ids, id)
+		}
 	}
 	return ids
 }
 
 // PeopleIDs returns just the person IDs (v0.5.1).
 func (r *Result) PeopleIDs() []int64 {
-	ids := make([]int64, len(r.People))
-	for i, p := range r.People {
-		ids[i] = p.ID
+	ids := make([]int64, 0, len(r.People))
+	for _, p := range r.People {
+		if id, err := parsePersonID(p.ID); err == nil {
+			ids = append(ids, id)
+		}
 	}
 	return ids
 }

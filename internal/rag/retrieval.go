@@ -264,9 +264,15 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 			selectedIDs := make(map[int64]bool)
 			topicReasons := make(map[int64]string)
 			for _, t := range result.Topics {
-				selectedIDs[t.ID] = true
+				// Parse "Topic:N" to numeric ID
+				topicID, err := t.GetNumericID()
+				if err != nil {
+					s.logger.Warn("invalid topic ID from reranker", "id", t.ID, "error", err)
+					continue
+				}
+				selectedIDs[topicID] = true
 				if t.Reason != "" {
-					topicReasons[t.ID] = t.Reason
+					topicReasons[topicID] = t.Reason
 				}
 			}
 

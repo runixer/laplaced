@@ -7,7 +7,7 @@ import (
 
 // FormatUserProfile formats user facts for inclusion in agent prompts.
 // Returns content wrapped in <user_profile> tags.
-// Format: - [ID:X] [Category/Type] (Updated: date) Content
+// Format: - [Fact:X] [Category/Type] (Updated: date) Content
 func FormatUserProfile(facts []Fact) string {
 	if len(facts) == 0 {
 		return "<user_profile>\n</user_profile>"
@@ -16,7 +16,7 @@ func FormatUserProfile(facts []Fact) string {
 	var sb strings.Builder
 	sb.WriteString("<user_profile>\n")
 	for _, f := range facts {
-		sb.WriteString(fmt.Sprintf("- [ID:%d] [%s/%s] (Updated: %s) %s\n",
+		sb.WriteString(fmt.Sprintf("- [Fact:%d] [%s/%s] (Updated: %s) %s\n",
 			f.ID, f.Category, f.Type, f.LastUpdated.Format("2006-01-02"), f.Content))
 	}
 	sb.WriteString("</user_profile>")

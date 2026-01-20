@@ -66,7 +66,9 @@ by the archivist agent and used for profile information.`,
 		userID := getUserID(cmd)
 		fmt.Printf("Facts for user %d: %d\n", userID, len(facts))
 		for i, fact := range facts {
-			fmt.Printf("%2d. [%s] %s\n", i+1, fact.Type, fact.Content)
+			fmt.Printf("%2d. [Fact:%d] [%s/%s] (Updated: %s) %s\n",
+				i+1, fact.ID, fact.Category, fact.Type,
+				fact.LastUpdated.Format("2006-01-02"), fact.Content)
 		}
 		return nil
 	},
@@ -102,7 +104,7 @@ created from sessions and used for RAG retrieval.`,
 		userID := getUserID(cmd)
 		fmt.Printf("Topics for user %d: %d\n", userID, len(topics))
 		for i, topic := range topics {
-			fmt.Printf("%2d. [%d] %s (msg %d-%d, %d chars)\n",
+			fmt.Printf("%2d. [Topic:%d] %s (msg %d-%d, %d chars)\n",
 				i+1, topic.ID, topic.Summary, topic.StartMsgID, topic.EndMsgID, topic.SizeChars)
 		}
 		return nil
@@ -147,7 +149,7 @@ and include contacts, family, friends, etc.`,
 			if len(person.Aliases) > 0 {
 				aliases = fmt.Sprintf(" (aliases: %s)", strings.Join(person.Aliases, ", "))
 			}
-			fmt.Printf("%2d. [%d] %s (@%s)%s\n", i+1, person.ID, person.DisplayName, username, aliases)
+			fmt.Printf("%2d. [Person:%d] %s (@%s)%s\n", i+1, person.ID, person.DisplayName, username, aliases)
 		}
 		return nil
 	},

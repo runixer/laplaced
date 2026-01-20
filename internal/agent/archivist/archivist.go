@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,7 +47,8 @@ type AddedFact struct {
 
 // UpdatedFact represents changes to an existing fact.
 type UpdatedFact struct {
-	ID         int64  `json:"id"`
+	ID         int64  `json:"id,omitempty"`      // Legacy: numeric fallback with warning
+	FactID     string `json:"fact_id,omitempty"` // Preferred: "Fact:1522" or "1522"
 	Content    string `json:"content"`
 	Type       string `json:"type,omitempty"`
 	Importance int    `json:"importance"`
@@ -54,7 +57,8 @@ type UpdatedFact struct {
 
 // RemovedFact represents a fact to be deleted.
 type RemovedFact struct {
-	ID     int64  `json:"id"`
+	ID     int64  `json:"id,omitempty"`      // Legacy: numeric fallback with warning
+	FactID string `json:"fact_id,omitempty"` // Preferred: "Fact:1234" or "1234"
 	Reason string `json:"reason"`
 }
 
@@ -76,7 +80,8 @@ type AddedPerson struct {
 
 // UpdatedPerson represents changes to an existing person.
 type UpdatedPerson struct {
-	DisplayName    string   `json:"display_name"`
+	DisplayName    string   `json:"display_name,omitempty"`     // Fallback with warning
+	PersonID       string   `json:"person_id,omitempty"`        // Preferred: "Person:5"
 	NewDisplayName string   `json:"new_display_name,omitempty"` // Rename person, old name goes to aliases
 	Aliases        []string `json:"aliases,omitempty"`          // New aliases to add
 	Circle         string   `json:"circle,omitempty"`
@@ -86,8 +91,10 @@ type UpdatedPerson struct {
 
 // MergedPerson represents a merge operation for duplicate people.
 type MergedPerson struct {
-	TargetName string `json:"target_name"` // Keep this person
-	SourceName string `json:"source_name"` // Delete this person (merge into target)
+	TargetName string `json:"target_name,omitempty"` // Fallback with warning
+	SourceName string `json:"source_name,omitempty"` // Fallback with warning
+	TargetID   string `json:"target_id,omitempty"`   // Preferred: "Person:10"
+	SourceID   string `json:"source_id,omitempty"`   // Preferred: "Person:5"
 	Reason     string `json:"reason"`
 }
 
@@ -111,6 +118,85 @@ type LegacyResult struct {
 	Removed []RemovedFact `json:"removed"`
 }
 
+// GetFactID extracts fact ID from UpdatedFact.
+// Prefers "Fact:1522" or "1522" (string), falls back to numeric id.
+// Returns 0 if no valid ID found.
+func (f *UpdatedFact) GetFactID() (int64, error) {
+	// New format: "Fact:1522" or "1522" (string)
+	if f.FactID != "" {
+		re := regexp.MustCompile(`^(?:Fact:)?(\d+)$`)
+		matches := re.FindStringSubmatch(f.FactID)
+		if len(matches) == 2 {
+			return strconv.ParseInt(matches[1], 10, 64)
+		}
+		return 0, fmt.Errorf("invalid fact_id format: %s", f.FactID)
+	}
+	// Legacy format: numeric id
+	if f.ID > 0 {
+		return f.ID, nil
+	}
+	return 0, fmt.Errorf("no fact ID provided")
+}
+
+// GetFactID extracts fact ID from RemovedFact.
+// Prefers "Fact:1234" or "1234" (string), falls back to numeric id.
+// Returns 0 if no valid ID found.
+func (f *RemovedFact) GetFactID() (int64, error) {
+	// New format: "Fact:1234" or "1234" (string)
+	if f.FactID != "" {
+		re := regexp.MustCompile(`^(?:Fact:)?(\d+)$`)
+		matches := re.FindStringSubmatch(f.FactID)
+		if len(matches) == 2 {
+			return strconv.ParseInt(matches[1], 10, 64)
+		}
+		return 0, fmt.Errorf("invalid fact_id format: %s", f.FactID)
+	}
+	// Legacy format: numeric id
+	if f.ID > 0 {
+		return f.ID, nil
+	}
+	return 0, fmt.Errorf("no fact ID provided")
+}
+
+// GetPersonID extracts person ID from UpdatedPerson.
+// Prefers "Person:5" (string), returns empty string if not found.
+func (p *UpdatedPerson) GetPersonID() (string, bool) {
+	if p.PersonID != "" {
+		re := regexp.MustCompile(`^(?:Person:)?(\d+)$`)
+		matches := re.FindStringSubmatch(p.PersonID)
+		if len(matches) == 2 {
+			return matches[1], true
+		}
+	}
+	return "", false
+}
+
+// GetTargetID extracts target person ID from MergedPerson.
+// Prefers "Person:10" (string), returns empty string if not found.
+func (p *MergedPerson) GetTargetID() (string, bool) {
+	if p.TargetID != "" {
+		re := regexp.MustCompile(`^(?:Person:)?(\d+)$`)
+		matches := re.FindStringSubmatch(p.TargetID)
+		if len(matches) == 2 {
+			return matches[1], true
+		}
+	}
+	return "", false
+}
+
+// GetSourceID extracts source person ID from MergedPerson.
+// Prefers "Person:5" (string), returns empty string if not found.
+func (p *MergedPerson) GetSourceID() (string, bool) {
+	if p.SourceID != "" {
+		re := regexp.MustCompile(`^(?:Person:)?(\d+)$`)
+		matches := re.FindStringSubmatch(p.SourceID)
+		if len(matches) == 2 {
+			return matches[1], true
+		}
+	}
+	return "", false
+}
+
 // ResultWithArrayFields handles LLM quirk where "facts" or "people" is wrapped in array.
 type ResultWithArrayFields struct {
 	Facts  []FactsResult  `json:"facts"`
@@ -128,7 +214,13 @@ type RawFact struct {
 
 // toUpdatedFact converts RawFact to UpdatedFact.
 func (rf RawFact) toUpdatedFact() UpdatedFact {
-	return UpdatedFact(rf)
+	return UpdatedFact{
+		ID:         rf.ID,
+		Content:    rf.Content,
+		Type:       rf.Type,
+		Importance: rf.Importance,
+		Reason:     rf.Reason,
+	}
 }
 
 // RawPerson represents a person in the wrong format (LLM returned array of people instead of operations).

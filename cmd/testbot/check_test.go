@@ -126,7 +126,8 @@ func TestCheckFacts(t *testing.T) {
 			} else {
 				assert.Contains(t, output, "Facts for user 123:")
 				if tt.expectCount > 0 {
-					assert.Contains(t, output, "[identity]")
+					assert.Contains(t, output, "[Fact:")
+					assert.Contains(t, output, "[bio/identity]")
 				}
 			}
 		})

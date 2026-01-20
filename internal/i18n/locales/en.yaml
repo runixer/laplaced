@@ -64,13 +64,13 @@ tools:
     parameter_description: "Search query for conversation history."
   manage_memory:
     description: "Tool for managing the bot's long-term memory. Allows adding, updating, or deleting facts about the user. Use when the user explicitly asks to 'remember', 'forget', or 'correct' information about themselves. DO NOT use for routine memorization of everything — another process does that. HOWEVER, you CAN and SHOULD use this tool independently if the user shares CRITICALLY IMPORTANT information (new preferences, context changes, important plans) that cannot be lost when context is cleared. IMPORTANT: All facts and the 'reason' field must be saved STRICTLY IN ENGLISH. Supports batch processing (array of operations). CRITICAL: ALWAYS call this tool via function call API. FORBIDDEN to output JSON in response text — this breaks saving!"
-    parameter_description: "JSON object with 'operations' array. Each operation contains: action ('add', 'update', 'delete'), entity (e.g., 'User'), content (the fact itself), category (bio, work, hobby, etc), type (identity, context, status), importance (0-100), fact_id (for update/delete), reason (reason for change)."
+    parameter_description: "JSON object with 'operations' array. Each operation contains: action ('add', 'update', 'delete'), entity (e.g. 'User'), content (the fact itself), category (bio, work, hobby, etc), type (identity, context, status), importance (0-100), fact_id (for update/delete, use 'Fact:123' format), reason (reason for change)."
   search_people:
     description: "Tool for searching people the user knows. MUST call when user asks: 'who is...', 'search for person...', 'find colleague...', 'do you know about...'. Searches by name, @username, or description. Returns matching people with their bio and circle (Family, Friends, Work_Inner, Work_Outer, Other)."
     parameter_description: "Search query — name, @username, or description of the person to find."
   manage_people:
     description: "Tool for managing people in memory. MUST call when user asks: 'remember person...', 'add person...', 'update info about...', 'forget about...', 'merge... with...'. Operations: 'create' (add new person), 'update' (modify existing), 'delete' (remove person), 'merge' (combine two records). All bio must be in ENGLISH. IMPORTANT: Use 'create' for new people, 'update' only for existing ones."
-    parameter_description: "JSON object with: operation ('create', 'update', 'delete', 'merge'), name (person's display name), and operation-specific fields. For 'create': bio (required), circle (Family/Friends/Work_Inner/Work_Outer/Other), aliases (array), username (@handle). For 'update': updates object with optional fields (circle, bio_append, aliases_add). For 'delete': reason. For 'merge': target (name to keep), source (name to merge into target), reason."
+    parameter_description: "JSON object with: operation ('create', 'update', 'delete', 'merge'), name (person's display name), and operation-specific fields. For 'create': bio (required), circle (Family/Friends/Work_Inner/Work_Outer/Other), aliases (array), username (@handle). For 'update': person_id (use 'Person:123' format from [Person:ID] prefix), updates object with optional fields (circle, bio_append, aliases_add). For 'delete': reason. For 'merge': target_id, source_id (use 'Person:123' format), reason."
 
 rag:
   # Unified Splitter prompt - used for both regular extraction and split mode
@@ -230,11 +230,12 @@ rag:
 
     <output_format>
     This is a SELECTION task, not explanation. After loading topics return ONLY JSON object:
-    {"topic_ids": [{"reason": "brief reason", "id": 42}], "people_ids": [{"reason": "relevant to query", "id": 5}]}
+    {"topic_ids": [{"reason": "brief reason", "id": "Topic:42"}], "people_ids": [{"reason": "relevant to query", "id": "Person:5"}]}
 
     RULES:
     - Format: object with "topic_ids" and "people_ids" arrays
     - Each array contains objects with "reason" and "id" fields
+    - IDs MUST include prefixes: "Topic:N" for topics, "Person:N" for people
     - "reason" — REQUIRED, 1 sentence
     - If nothing relevant — empty arrays: {"topic_ids": [], "people_ids": []}
     - DO NOT write text before or after JSON
@@ -243,21 +244,21 @@ rag:
     <examples>
     ### Example 1: Technical question
     Query: "How to configure vLLM on H100?"
-    Topics: [ID:42] ML infrastructure on H100, [ID:18] Psychological profile, [ID:5] Docker basics
+    Topics: [Topic:42] ML infrastructure on H100, [Topic:18] Psychological profile, [Topic:5] Docker basics
     People: [Person:3] John [Work_Inner] | DevOps engineer
     Action: get_topics_content([42, 5])
-    Result: {"topic_ids": [{"reason": "Direct discussion of vLLM and H100", "id": 42}], "people_ids": [{"reason": "DevOps expert who could help", "id": 3}]}
+    Result: {"topic_ids": [{"reason": "Direct discussion of vLLM and H100", "id": "Topic:42"}], "people_ids": [{"reason": "DevOps expert who could help", "id": "Person:3"}]}
 
     ### Example 2: Personal context
     Query: "Remember what Mary said about the cottage?"
-    Topics: [ID:10] Cottage with family, [ID:11] Kubernetes setup, [ID:12] Mary is sick
+    Topics: [Topic:10] Cottage with family, [Topic:11] Kubernetes setup, [Topic:12] Mary is sick
     People: [Person:5] Mary [Family] | Wife, designer
     Action: get_topics_content([10, 12])
-    Result: {"topic_ids": [{"reason": "Cottage with Mary", "id": 10}, {"reason": "Additional context about Mary", "id": 12}], "people_ids": [{"reason": "Direct mention of Mary", "id": 5}]}
+    Result: {"topic_ids": [{"reason": "Cottage with Mary", "id": "Topic:10"}, {"reason": "Additional context about Mary", "id": "Topic:12"}], "people_ids": [{"reason": "Direct mention of Mary", "id": "Person:5"}]}
 
     ### Example 3: Nothing matches
     Query: "What's the current Bitcoin price?"
-    Topics: [ID:1] Go refactoring, [ID:2] Telegram bot development
+    Topics: [Topic:1] Go refactoring, [Topic:2] Telegram bot development
     People: [Person:1] Alice [Friends]
     Action: get_topics_content([1, 2]) — check just in case
     Result: {"topic_ids": [], "people_ids": []}
@@ -271,10 +272,11 @@ rag:
     - Return people_ids ONLY if "People candidates" section exists in the query. If no people shown — return empty array: "people_ids": []
 
     CRITICAL — ID NAMESPACES:
-    - Topic IDs: from "Topic candidates" section, format [ID:42]
-    - Person IDs: from "People candidates" section, format [Person:5]
-    - Fact IDs in <user_profile> (e.g. [ID:1918]) are NOT person IDs! They are internal fact references.
+    - Topic IDs: from "Topic candidates" section, format [Topic:42] in candidates, return as "id": "Topic:42"
+    - Person IDs: from "People candidates" section, format [Person:5] in candidates, return as "id": "Person:5"
+    - Fact IDs in <user_profile> (e.g. [Fact:1918]) are internal fact references.
     - NEVER use fact IDs from <user_profile> as person IDs
+    - ALWAYS include prefixes in JSON response: "Topic:N", "Person:N"
     </grounding>
 
     {{.Profile}}
@@ -406,18 +408,15 @@ memory:
 
     Facts section (ONLY about User):
     - "added": new facts (content, category, type, importance, reason) — entity is always "User"
-    - "updated": changed facts (id, content, type, importance, reason)
-    - "removed": deleted facts (id, reason)
+    - "updated": changed facts (fact_id, content, type, importance, reason) — use fact_id from [Fact:N] prefix
+    - "removed": deleted facts (fact_id, reason) — use fact_id from [Fact:N] prefix
 
     People section:
     - "added": new people (display_name, aliases, circle, bio, reason)
-    - "updated": existing people (display_name, new_display_name?, circle, bio, reason) — rewrites bio completely; new_display_name renames the person, old name goes to aliases
-    - "merged": combine two people (target_name, source_name, reason)
+    - "updated": existing people (person_id, circle, bio, reason) — use person_id from [Person:ID] prefix
+    - "merged": combine two people (target_id, source_id, reason) — use person IDs from [Person:ID] prefixes
 
-    IMPORTANT for updated: display_name must be EXACTLY as shown in <people> (without aliases in parentheses!).
-    Correct: "display_name": "John Smith"
-    Wrong: "display_name": "John Smith (@johnsmith, Johnny)"
-    TIP: Use person_id from [Person:ID] prefix if available — it's more reliable than name matching.
+    IMPORTANT: For updated/merged people, ALWAYS use person_id from [Person:ID] prefix — it's mandatory, not optional.
 
     Rules:
     - Language: ENGLISH. Technical terms (ZTNA, Kubernetes) — keep in ENGLISH.
@@ -438,7 +437,7 @@ memory:
         ],
         "updated": [
           {
-            "id": 1522,
+            "fact_id": "Fact:1522",
             "content": "Updated fact content",
             "type": "context",
             "importance": 70,
@@ -447,7 +446,7 @@ memory:
         ],
         "removed": [
           {
-            "id": 1234,
+            "fact_id": "Fact:1234",
             "reason": "Fact is outdated"
           }
         ]
@@ -464,7 +463,7 @@ memory:
         ],
         "updated": [
           {
-            "display_name": "Oleg Petrov",
+            "person_id": "Person:5",
             "circle": "Work_Inner",
             "bio": "Updated Oleg's biography",
             "reason": "Added information about new project"
@@ -472,9 +471,9 @@ memory:
         ],
         "merged": [
           {
-            "target_name": "Maria Ivanovna",
-            "source_name": "Maria",
-            "reason": "Maria Ivanovna is Maria's full name, same person"
+            "target_id": "Person:10",
+            "source_id": "Person:5",
+            "reason": "Oleg Petrov is the same person as Oleg P."
           }
         ]
       }

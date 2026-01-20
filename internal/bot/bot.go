@@ -13,6 +13,9 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
+	"regexp"
+	"strconv"
+
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/laplace"
 	"github.com/runixer/laplaced/internal/agentlog"
@@ -544,6 +547,42 @@ func (b *Bot) getTieredCost(promptTokens, completionTokens int, logger *slog.Log
 	return totalCost
 }
 
+// parseFactID extracts fact ID from string "Fact:123" format or int.
+// Prefers "Fact:123" format, falls back to numeric for backward compatibility.
+func parseFactID(v interface{}) (int64, error) {
+	// String with prefix (new format)
+	if s, ok := v.(string); ok {
+		re := regexp.MustCompile(`^(?:Fact:)?(\d+)$`)
+		matches := re.FindStringSubmatch(s)
+		if len(matches) == 2 {
+			return strconv.ParseInt(matches[1], 10, 64)
+		}
+		return 0, fmt.Errorf("invalid fact ID format: %s", s)
+	}
+	// Numeric fallback (LLM error)
+	if f, ok := v.(float64); ok {
+		return int64(f), nil
+	}
+	return 0, fmt.Errorf("fact_id must be string or number")
+}
+
+// parsePersonID extracts person ID from string "Person:123" format or int.
+// Prefers "Person:123" format, falls back to numeric for backward compatibility.
+func parsePersonID(v interface{}) (int64, error) {
+	if s, ok := v.(string); ok {
+		re := regexp.MustCompile(`^(?:Person:)?(\d+)$`)
+		matches := re.FindStringSubmatch(s)
+		if len(matches) == 2 {
+			return strconv.ParseInt(matches[1], 10, 64)
+		}
+		return 0, fmt.Errorf("invalid person ID format: %s", s)
+	}
+	if f, ok := v.(float64); ok {
+		return int64(f), nil
+	}
+	return 0, fmt.Errorf("person_id must be string or number")
+}
+
 // memoryOpParams holds parsed parameters for a memory operation.
 type memoryOpParams struct {
 	Action     string
@@ -556,7 +595,8 @@ type memoryOpParams struct {
 }
 
 // parseMemoryOpParams extracts operation parameters from a map.
-func parseMemoryOpParams(params map[string]interface{}) memoryOpParams {
+// Returns error if fact_id is provided but invalid.
+func parseMemoryOpParams(params map[string]interface{}) (memoryOpParams, error) {
 	p := memoryOpParams{
 		Action:   params["action"].(string),
 		Content:  "",
@@ -579,10 +619,16 @@ func parseMemoryOpParams(params map[string]interface{}) memoryOpParams {
 	if v, ok := params["importance"].(float64); ok {
 		p.Importance = int(v)
 	}
-	if v, ok := params["fact_id"].(float64); ok {
-		p.FactID = int64(v)
+	// Handle fact_id (for update/delete operations) - accept both "Fact:123" and numeric
+	if v, ok := params["fact_id"]; ok {
+		id, err := parseFactID(v)
+		if err != nil {
+			// Return error - fact_id is required for update/delete and must be valid
+			return p, fmt.Errorf("invalid fact_id: %w", err)
+		}
+		p.FactID = id
 	}
-	return p
+	return p, nil
 }
 
 func (b *Bot) performAddFact(ctx context.Context, userID int64, p memoryOpParams) (string, error) {
@@ -781,26 +827,39 @@ func (b *Bot) performManageMemory(ctx context.Context, userID int64, args map[st
 	var errorCount int
 
 	for i, params := range operations {
-		p := parseMemoryOpParams(params)
+		p, err := parseMemoryOpParams(params)
+		if err != nil {
+			errorCount++
+			results = append(results, fmt.Sprintf("Op %d: Failed - %v", i+1, err))
+			continue
+		}
+
+		// Log warning if LLM used numeric fact_id format instead of "Fact:N" format
+		if v, ok := params["fact_id"]; ok && p.FactID > 0 {
+			if _, isNumeric := v.(float64); isNumeric && b.logger != nil {
+				b.logger.Warn("LLM used numeric fact_id, expected 'Fact:N' format",
+					"fact_id", p.FactID, "user_id", userID)
+			}
+		}
 
 		var result string
-		var err error
+		var opErr error
 
 		switch p.Action {
 		case "add":
-			result, err = b.performAddFact(ctx, userID, p)
+			result, opErr = b.performAddFact(ctx, userID, p)
 		case "delete":
-			result, err = b.performDeleteFact(ctx, userID, p)
+			result, opErr = b.performDeleteFact(ctx, userID, p)
 		case "update":
-			result, err = b.performUpdateFact(ctx, userID, p)
+			result, opErr = b.performUpdateFact(ctx, userID, p)
 		default:
 			result = fmt.Sprintf("Unknown action: %s", p.Action)
-			err = fmt.Errorf("unknown action")
+			opErr = fmt.Errorf("unknown action")
 		}
 
-		if err != nil {
+		if opErr != nil {
 			errorCount++
-			results = append(results, fmt.Sprintf("Op %d (%s): Failed - %s (%v)", i+1, p.Action, result, err))
+			results = append(results, fmt.Sprintf("Op %d (%s): Failed - %s (%v)", i+1, p.Action, result, opErr))
 		} else {
 			results = append(results, fmt.Sprintf("Op %d (%s): Success", i+1, p.Action))
 		}
@@ -1017,16 +1076,24 @@ func (b *Bot) performCreatePerson(ctx context.Context, userID int64, name string
 }
 
 // performUpdatePerson updates a person's information.
-// Supports both person_id (preferred) and name (fallback) for lookup.
+// Supports both person_id (preferred "Person:123" format) and name (fallback) for lookup.
 func (b *Bot) performUpdatePerson(ctx context.Context, userID int64, name string, params map[string]interface{}) (string, error) {
 	var person *storage.Person
 	var err error
 
-	// v0.5.1: Try person_id first (from <relevant_people> context)
-	if personID, ok := params["person_id"].(float64); ok && int64(personID) > 0 {
-		person, err = b.peopleRepo.GetPerson(userID, int64(personID))
-		if err != nil {
-			return fmt.Sprintf("Error finding person by ID %d: %v", int64(personID), err), nil
+	// Try person_id first (from <relevant_people> context) - accepts "Person:123" or numeric
+	if v, ok := params["person_id"]; ok {
+		personID, parseErr := parsePersonID(v)
+		if parseErr == nil && personID > 0 {
+			// Log warning if LLM used numeric format instead of "Person:N" format
+			if _, isNumeric := v.(float64); isNumeric && b.logger != nil {
+				b.logger.Warn("LLM used numeric person_id, expected 'Person:N' format",
+					"person_id", personID, "user_id", userID)
+			}
+			person, err = b.peopleRepo.GetPerson(userID, personID)
+			if err != nil {
+				return fmt.Sprintf("Error finding person by ID %d: %v", personID, err), nil
+			}
 		}
 	}
 

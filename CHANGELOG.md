@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Unified ID format with explicit prefixes** — all IDs now use explicit prefixes to prevent confusion between different entity types: `[Fact:N]` for user profile facts, `[Topic:N]` for conversation topics, `[Person:N]` for people in memory. Reranker returns prefixed IDs in JSON (`"id": "Topic:42"`, `"id": "Person:5"`), prompts require prefixed format, display updated to show `[Fact:123]` instead of generic `[ID:123]`. Hybrid parsing accepts both prefixed format (preferred) and numeric fallback (with warning logs) for backward compatibility.
+
+### Changed
+- **Reranker ID parsing** — `TopicSelection` and `PersonSelection` now use string IDs with prefixes, added `GetNumericID()` methods for backward compatibility. Accepts both `"Topic:42"` (new) and `42` (legacy with warning).
+- **Archivist JSON parsing** — supports `fact_id`/`person_id` fields (prefixed strings like `"Fact:1522"`, `"Person:5"`) alongside legacy `id` (numeric) with warning logs on fallback.
+- **manage_memory and manage_people tools** — accept both `"Fact:123"`/`"Person:123"` format (preferred) and numeric IDs (with warning) for update/delete operations.
+
 ### Fixed
 - **Archivist JSON format error** — added explicit JSON example to archivist prompt to prevent LLM from generating wrong format. Previously, the prompt only described the expected format textually, causing Gemini to return raw fact arrays (`{"facts": [{...}]}`) instead of operation structure (`{"facts": {"added": [...], "updated": [...], "removed": [...]}}`). Added fallback parser to handle malformed responses gracefully with warning log. This fixes `parse_error: json: cannot unmarshal array into Go struct field Result.facts` errors on production.
 - **Archivist profile bio duplication** — when updating existing people profiles, the archivist now intelligently merges new information with old bio instead of concatenating them. Added explicit prompt instructions: "You see the old bio in <people> section — DO NOT repeat its content! Add ONLY new information that is not already in the old bio". This fixes duplicate information appearing like "NetSec инженер в Альфа-Капитал. Владелец Keenetic" repeated twice in the same bio.
