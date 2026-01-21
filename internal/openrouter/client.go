@@ -237,7 +237,8 @@ type ChatCompletionResponse struct {
 			Role             string      `json:"role"`
 			Content          string      `json:"content"`
 			ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
-			ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
+			Reasoning        string      `json:"reasoning,omitempty"`         // Gemini 3: raw reasoning text
+			ReasoningDetails interface{} `json:"reasoning_details,omitempty"` // Structured reasoning details
 		} `json:"message"`
 		FinishReason string `json:"finish_reason,omitempty"`
 		Index        int    `json:"index"`

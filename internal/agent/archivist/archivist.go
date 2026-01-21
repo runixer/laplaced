@@ -401,6 +401,14 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (*agent.Res
 
 	resp, err := a.executor.Client().CreateChatCompletion(ctx, llmReq)
 
+	// Retry with reasoning disabled if response is empty (Gemini 3 quirk)
+	if err == nil && len(resp.Choices) > 0 && resp.Choices[0].Message.Content == "" {
+		a.logger.Warn("archivist: empty response with reasoning, retrying without",
+			"model", model, "thinking_level", thinkingLevel)
+		llmReq.Reasoning = nil
+		resp, err = a.executor.Client().CreateChatCompletion(ctx, llmReq)
+	}
+
 	tracker.EndTurn(
 		resp.DebugRequestBody,
 		resp.DebugResponseBody,
