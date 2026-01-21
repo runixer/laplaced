@@ -10,39 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/runixer/laplaced/internal/agent"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 )
-
-// mockChatResponse creates a mock ChatCompletionResponse with the given content.
-func mockChatResponse(content string) openrouter.ChatCompletionResponse {
-	var resp openrouter.ChatCompletionResponse
-	resp.Choices = append(resp.Choices, struct {
-		Message struct {
-			Role             string                `json:"role"`
-			Content          string                `json:"content"`
-			ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-			ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-		} `json:"message"`
-		FinishReason string `json:"finish_reason,omitempty"`
-		Index        int    `json:"index"`
-	}{
-		Message: struct {
-			Role             string                `json:"role"`
-			Content          string                `json:"content"`
-			ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-			ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-		}{
-			Role:    "assistant",
-			Content: content,
-		},
-	})
-	resp.Usage.PromptTokens = 200
-	resp.Usage.CompletionTokens = 50
-	resp.Usage.TotalTokens = 250
-	return resp
-}
 
 func TestSplitter_Execute(t *testing.T) {
 	messages := []storage.Message{
@@ -56,7 +26,7 @@ func TestSplitter_Execute(t *testing.T) {
 
 	mockClient := &testutil.MockOpenRouterClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(mockChatResponse(llmResponse), nil)
+		Return(testutil.MockChatResponse(llmResponse), nil)
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
 	cfg := testutil.TestConfig()

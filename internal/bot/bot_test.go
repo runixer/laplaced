@@ -124,6 +124,7 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
 			FinishReason string `json:"finish_reason,omitempty"`
@@ -133,6 +134,7 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			}{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
@@ -258,6 +260,7 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
 			FinishReason string `json:"finish_reason,omitempty"`
@@ -267,6 +270,7 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			}{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
@@ -396,6 +400,7 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
 			FinishReason string `json:"finish_reason,omitempty"`
@@ -405,6 +410,7 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			}{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
@@ -535,6 +541,7 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
 			FinishReason string `json:"finish_reason,omitempty"`
@@ -544,6 +551,7 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			}{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
@@ -683,6 +691,7 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
 			FinishReason string `json:"finish_reason,omitempty"`
@@ -692,6 +701,7 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			}{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
@@ -815,6 +825,7 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
 			FinishReason string `json:"finish_reason,omitempty"`
@@ -824,6 +835,7 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			}{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
@@ -1107,6 +1119,7 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
 			FinishReason string `json:"finish_reason,omitempty"`
@@ -1116,6 +1129,7 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			}{Role: "assistant", Content: "You said hello."}, FinishReason: "stop"},
 		},
@@ -1311,6 +1325,7 @@ func TestSendTestMessage_Success(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
 			FinishReason string `json:"finish_reason,omitempty"`
@@ -1320,6 +1335,7 @@ func TestSendTestMessage_Success(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			}{Role: "assistant", Content: "Hello! How can I help you?"}, FinishReason: "stop"},
 		},
@@ -1392,6 +1408,7 @@ func TestSendTestMessage_SaveToHistoryFalse(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
 			FinishReason string `json:"finish_reason,omitempty"`
@@ -1401,6 +1418,7 @@ func TestSendTestMessage_SaveToHistoryFalse(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			}{Role: "assistant", Content: "Response without history"}, FinishReason: "stop"},
 		},

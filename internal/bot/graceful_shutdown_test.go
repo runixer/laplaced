@@ -10,7 +10,6 @@ import (
 
 	"github.com/runixer/laplaced/internal/agent/laplace"
 	"github.com/runixer/laplaced/internal/files"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
@@ -18,42 +17,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
-
-// createSimpleChatResponse creates a simple ChatCompletionResponse for testing.
-func createSimpleChatResponse(content string) openrouter.ChatCompletionResponse {
-	return openrouter.ChatCompletionResponse{
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{
-			{Message: struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{
-				Role:    "assistant",
-				Content: content,
-			}, FinishReason: "stop"},
-		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{
-			PromptTokens:     10,
-			CompletionTokens: 5,
-			TotalTokens:      15,
-		},
-	}
-}
 
 // TestProcessMessageGroup_CompletesOnContextCancel verifies that LLM generation
 // completes and response is sent even when the parent context is cancelled.
@@ -132,7 +95,7 @@ func TestProcessMessageGroup_CompletesOnContextCancel(t *testing.T) {
 			// Simulate LLM thinking time
 			time.Sleep(100 * time.Millisecond)
 		}).
-		Return(createSimpleChatResponse("Test response"), nil)
+		Return(testutil.MockChatResponse("Test response"), nil)
 
 	// Create a context that will be cancelled shortly after starting
 	ctx, cancel := context.WithCancel(context.Background())
@@ -238,7 +201,7 @@ func TestProcessMessageGroup_LLMContextNotCancelled(t *testing.T) {
 			llmContextCancelled = ctx.Err() != nil
 			llmContextMu.Unlock()
 		}).
-		Return(createSimpleChatResponse("Test response"), nil)
+		Return(testutil.MockChatResponse("Test response"), nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -340,7 +303,7 @@ func TestProcessMessageGroup_VoiceCompletesOnContextCancel(t *testing.T) {
 	mockStore.On("Log", mock.Anything).Return(nil)
 
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(createSimpleChatResponse("Test response"), nil)
+		Return(testutil.MockChatResponse("Test response"), nil)
 
 	// Create cancellable context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -446,7 +409,7 @@ func TestProcessMessageGroup_VoiceDownloadContextNotCancelled(t *testing.T) {
 	mockStore.On("Log", mock.Anything).Return(nil)
 
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(createSimpleChatResponse("Test response"), nil)
+		Return(testutil.MockChatResponse("Test response"), nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 

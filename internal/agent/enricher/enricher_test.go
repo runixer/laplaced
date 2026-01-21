@@ -9,39 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/runixer/laplaced/internal/agent"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 )
-
-// mockChatResponse creates a mock ChatCompletionResponse with the given content.
-func mockChatResponse(content string) openrouter.ChatCompletionResponse {
-	var resp openrouter.ChatCompletionResponse
-	resp.Choices = append(resp.Choices, struct {
-		Message struct {
-			Role             string                `json:"role"`
-			Content          string                `json:"content"`
-			ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-			ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-		} `json:"message"`
-		FinishReason string `json:"finish_reason,omitempty"`
-		Index        int    `json:"index"`
-	}{
-		Message: struct {
-			Role             string                `json:"role"`
-			Content          string                `json:"content"`
-			ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-			ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-		}{
-			Role:    "assistant",
-			Content: content,
-		},
-	})
-	resp.Usage.PromptTokens = 100
-	resp.Usage.CompletionTokens = 20
-	resp.Usage.TotalTokens = 120
-	return resp
-}
 
 func TestEnricher_Execute(t *testing.T) {
 	tests := []struct {
@@ -75,7 +45,7 @@ func TestEnricher_Execute(t *testing.T) {
 			// Setup mocks
 			mockClient := &testutil.MockOpenRouterClient{}
 			mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-				Return(mockChatResponse(tt.llmResponse), nil)
+				Return(testutil.MockChatResponse(tt.llmResponse), nil)
 
 			executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
 			cfg := testutil.TestConfig()

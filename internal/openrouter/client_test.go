@@ -32,6 +32,7 @@ func TestCreateChatCompletion(t *testing.T) {
 					Role             string      `json:"role"`
 					Content          string      `json:"content"`
 					ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
+					Reasoning        string      `json:"reasoning,omitempty"`
 					ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
 				} `json:"message"`
 				FinishReason string `json:"finish_reason,omitempty"`
@@ -42,6 +43,7 @@ func TestCreateChatCompletion(t *testing.T) {
 						Role             string      `json:"role"`
 						Content          string      `json:"content"`
 						ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
+						Reasoning        string      `json:"reasoning,omitempty"`
 						ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
 					}{Role: "assistant", Content: "Hello from mock server!"},
 					FinishReason: "stop",
@@ -97,6 +99,7 @@ func TestCreateChatCompletionLogging(t *testing.T) {
 					Role             string      `json:"role"`
 					Content          string      `json:"content"`
 					ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
+					Reasoning        string      `json:"reasoning,omitempty"`
 					ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
 				} `json:"message"`
 				FinishReason string `json:"finish_reason,omitempty"`
@@ -107,6 +110,7 @@ func TestCreateChatCompletionLogging(t *testing.T) {
 						Role             string      `json:"role"`
 						Content          string      `json:"content"`
 						ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
+						Reasoning        string      `json:"reasoning,omitempty"`
 						ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
 					}{Role: "assistant", Content: "log test"},
 					FinishReason: "stop",
@@ -176,6 +180,7 @@ func TestCreateChatCompletionRetry(t *testing.T) {
 					Role             string      `json:"role"`
 					Content          string      `json:"content"`
 					ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
+					Reasoning        string      `json:"reasoning,omitempty"`
 					ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
 				} `json:"message"`
 				FinishReason string `json:"finish_reason,omitempty"`
@@ -186,6 +191,7 @@ func TestCreateChatCompletionRetry(t *testing.T) {
 						Role             string      `json:"role"`
 						Content          string      `json:"content"`
 						ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
+						Reasoning        string      `json:"reasoning,omitempty"`
 						ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
 					}{Role: "assistant", Content: "Success after retry!"},
 					FinishReason: "stop",

@@ -9,45 +9,15 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/runixer/laplaced/internal/agent"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/testutil"
 )
-
-// mockChatResponse creates a mock ChatCompletionResponse with the given content.
-func mockChatResponse(content string) openrouter.ChatCompletionResponse {
-	var resp openrouter.ChatCompletionResponse
-	resp.Choices = append(resp.Choices, struct {
-		Message struct {
-			Role             string                `json:"role"`
-			Content          string                `json:"content"`
-			ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-			ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-		} `json:"message"`
-		FinishReason string `json:"finish_reason,omitempty"`
-		Index        int    `json:"index"`
-	}{
-		Message: struct {
-			Role             string                `json:"role"`
-			Content          string                `json:"content"`
-			ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-			ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-		}{
-			Role:    "assistant",
-			Content: content,
-		},
-	})
-	resp.Usage.PromptTokens = 150
-	resp.Usage.CompletionTokens = 30
-	resp.Usage.TotalTokens = 180
-	return resp
-}
 
 func TestMerger_Execute_ShouldMerge(t *testing.T) {
 	llmResponse := `{"should_merge": true, "new_summary": "Обсуждение Go и его применения в разработке"}`
 
 	mockClient := &testutil.MockOpenRouterClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(mockChatResponse(llmResponse), nil)
+		Return(testutil.MockChatResponse(llmResponse), nil)
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
 	cfg := testutil.TestConfig()
@@ -85,7 +55,7 @@ func TestMerger_Execute_ShouldNotMerge(t *testing.T) {
 
 	mockClient := &testutil.MockOpenRouterClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(mockChatResponse(llmResponse), nil)
+		Return(testutil.MockChatResponse(llmResponse), nil)
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
 	cfg := testutil.TestConfig()

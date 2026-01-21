@@ -10,39 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/runixer/laplaced/internal/agent"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 )
-
-// mockChatResponse creates a mock ChatCompletionResponse with the given content.
-func mockChatResponse(content string) openrouter.ChatCompletionResponse {
-	var resp openrouter.ChatCompletionResponse
-	resp.Choices = append(resp.Choices, struct {
-		Message struct {
-			Role             string                `json:"role"`
-			Content          string                `json:"content"`
-			ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-			ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-		} `json:"message"`
-		FinishReason string `json:"finish_reason,omitempty"`
-		Index        int    `json:"index"`
-	}{
-		Message: struct {
-			Role             string                `json:"role"`
-			Content          string                `json:"content"`
-			ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-			ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-		}{
-			Role:    "assistant",
-			Content: content,
-		},
-	})
-	resp.Usage.PromptTokens = 500
-	resp.Usage.CompletionTokens = 100
-	resp.Usage.TotalTokens = 600
-	return resp
-}
 
 func TestArchivist_Execute_AddFacts(t *testing.T) {
 	// Response uses new format with facts section
@@ -68,7 +38,7 @@ func TestArchivist_Execute_AddFacts(t *testing.T) {
 
 	mockClient := &testutil.MockOpenRouterClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(mockChatResponse(llmResponse), nil)
+		Return(testutil.MockChatResponse(llmResponse), nil)
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
 	cfg := testutil.TestConfig()
@@ -128,7 +98,7 @@ func TestArchivist_Execute_UpdateFacts(t *testing.T) {
 
 	mockClient := &testutil.MockOpenRouterClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(mockChatResponse(llmResponse), nil)
+		Return(testutil.MockChatResponse(llmResponse), nil)
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
 	cfg := testutil.TestConfig()
@@ -183,7 +153,7 @@ func TestArchivist_Execute_RemoveFacts(t *testing.T) {
 
 	mockClient := &testutil.MockOpenRouterClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(mockChatResponse(llmResponse), nil)
+		Return(testutil.MockChatResponse(llmResponse), nil)
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
 	cfg := testutil.TestConfig()
@@ -259,7 +229,7 @@ func TestArchivist_Execute_LegacyFormat(t *testing.T) {
 
 	mockClient := &testutil.MockOpenRouterClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(mockChatResponse(llmResponse), nil)
+		Return(testutil.MockChatResponse(llmResponse), nil)
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
 	cfg := testutil.TestConfig()
@@ -321,7 +291,7 @@ func TestArchivist_Execute_ArrayFieldsFormat(t *testing.T) {
 
 	mockClient := &testutil.MockOpenRouterClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(mockChatResponse(llmResponse), nil)
+		Return(testutil.MockChatResponse(llmResponse), nil)
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
 	cfg := testutil.TestConfig()
@@ -485,7 +455,7 @@ func TestArchivist_Execute_PeopleResult(t *testing.T) {
 
 	mockClient := &testutil.MockOpenRouterClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(mockChatResponse(llmResponse), nil)
+		Return(testutil.MockChatResponse(llmResponse), nil)
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
 	cfg := testutil.TestConfig()
@@ -560,7 +530,7 @@ func TestArchivist_Execute_OnlyPeople(t *testing.T) {
 
 	mockClient := &testutil.MockOpenRouterClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(mockChatResponse(llmResponse), nil)
+		Return(testutil.MockChatResponse(llmResponse), nil)
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
 	cfg := testutil.TestConfig()
@@ -620,7 +590,7 @@ func TestArchivist_Execute_PeopleEmptyFields(t *testing.T) {
 
 	mockClient := &testutil.MockOpenRouterClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(mockChatResponse(llmResponse), nil)
+		Return(testutil.MockChatResponse(llmResponse), nil)
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
 	cfg := testutil.TestConfig()
@@ -686,7 +656,7 @@ func TestArchivist_Execute_PeopleAndFacts(t *testing.T) {
 
 	mockClient := &testutil.MockOpenRouterClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(mockChatResponse(llmResponse), nil)
+		Return(testutil.MockChatResponse(llmResponse), nil)
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
 	cfg := testutil.TestConfig()
@@ -759,7 +729,7 @@ func TestArchivist_Execute_RawArraysFormat(t *testing.T) {
 
 	mockClient := &testutil.MockOpenRouterClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(mockChatResponse(llmResponse), nil)
+		Return(testutil.MockChatResponse(llmResponse), nil)
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
 	cfg := testutil.TestConfig()

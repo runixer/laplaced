@@ -104,6 +104,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
 			FinishReason string `json:"finish_reason,omitempty"`
@@ -113,6 +114,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			}{
 				Role:    "assistant",
@@ -150,6 +152,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
 			FinishReason string `json:"finish_reason,omitempty"`
@@ -159,6 +162,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			}{
 				Role:    "assistant",
@@ -184,6 +188,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			} `json:"message"`
 			FinishReason string `json:"finish_reason,omitempty"`
@@ -193,6 +198,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 				Role             string                `json:"role"`
 				Content          string                `json:"content"`
 				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+				Reasoning        string                `json:"reasoning,omitempty"`
 				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
 			}{
 				Role:    "assistant",
