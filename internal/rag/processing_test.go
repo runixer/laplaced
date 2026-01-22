@@ -466,7 +466,7 @@ func TestProcessFactExtraction(t *testing.T) {
 			{ID: 1, UserID: 123, ConsolidationChecked: true, StartMsgID: 1, EndMsgID: 10},
 		}, nil)
 		mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return([]storage.Message{}, nil)
-		mockStore.On("SetTopicFactsExtracted", int64(1), true).Return(nil)
+		mockStore.On("SetTopicFactsExtracted", int64(123), int64(1), true).Return(nil)
 
 		translator := testutil.TestTranslator(t)
 

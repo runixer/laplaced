@@ -180,7 +180,7 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 	}
 
 	// Fetch topics (needed for summaries in reranker and for final results)
-	topics, err := s.topicRepo.GetTopicsByIDs(topicIDs)
+	topics, err := s.topicRepo.GetTopicsByIDs(userID, topicIDs)
 	if err != nil {
 		s.logger.Error("failed to load topics for retrieval", "error", err)
 		return nil, debugInfo, err
@@ -288,7 +288,7 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 			// v0.5.1: Load selected people by IDs from reranker result
 			if len(result.People) > 0 && s.peopleRepo != nil {
 				peopleIDs := result.PeopleIDs()
-				selectedPeople, err := s.peopleRepo.GetPeopleByIDs(peopleIDs)
+				selectedPeople, err := s.peopleRepo.GetPeopleByIDs(userID, peopleIDs)
 				if err != nil {
 					s.logger.Warn("failed to load selected people", "error", err)
 				} else {
@@ -484,7 +484,7 @@ func (s *Service) FindSimilarFacts(ctx context.Context, userID int64, embedding 
 		ids = append(ids, m.factID)
 	}
 
-	return s.factRepo.GetFactsByIDs(ids)
+	return s.factRepo.GetFactsByIDs(userID, ids)
 }
 
 // PersonSearchResult represents a matched person with their score.
@@ -548,7 +548,7 @@ func (s *Service) SearchPeople(ctx context.Context, userID int64, embedding []fl
 		ids = append(ids, m.personID)
 	}
 
-	people, err := s.peopleRepo.GetPeopleByIDs(ids)
+	people, err := s.peopleRepo.GetPeopleByIDs(userID, ids)
 	if err != nil {
 		return nil, err
 	}

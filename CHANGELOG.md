@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **User data isolation enforcement** — added `user_id` parameter to all storage methods that operate on user-owned data (GetFactsByIDs, GetTopicsByIDs, GetPeopleByIDs, GetFactsByTopicID, DeleteTopic, DeleteTopicCascade, SetTopicFactsExtracted, SetTopicConsolidationChecked, UpdateMessageTopic, GetMessagesByIDs, UpdateFactsTopic). All queries now include `WHERE user_id = ?` to prevent cross-user data leakage. Critical fix for `GetFactsByIDs` which previously accepted user-provided fact IDs from LLM tool calls without ownership validation.
+
+### Internal
+- **Test helper extraction** — created `internal/rag/test_helpers.go` with RAG-specific test utilities (TestRAGService, TestRAGServiceNoStart, TestRAGServiceWithSetup, SetupCommonRAGMocks, MockTopic, MockFact, MockPerson). Reduced test boilerplate from 15-25 lines to 3-12 lines per test, eliminated code duplication across consolidation_test.go, vector_test.go, shutdown_test.go.
+
 ### Added
 - **Unified ID format with explicit prefixes** — all IDs now use explicit prefixes to prevent confusion between different entity types: `[Fact:N]` for user profile facts, `[Topic:N]` for conversation topics, `[Person:N]` for people in memory. Reranker returns prefixed IDs in JSON (`"id": "Topic:42"`, `"id": "Person:5"`), prompts require prefixed format, display updated to show `[Fact:123]` instead of generic `[ID:123]`. Hybrid parsing accepts both prefixed format (preferred) and numeric fallback (with warning logs) for backward compatibility.
 
@@ -22,8 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Person merge username/telegram_id loss** — when merging people records, the target now correctly inherits username and telegram_id from source if target doesn't have them. Previously these fields were lost during merge operations.
 - **Archivist automatic deduplication** — the archivist agent now ALWAYS checks for duplicate people records and suggests merges, even when no new people are added. Previously it only checked duplicates when adding new people, leaving existing duplicates unmerged.
 - **Testbot check-people shows actual database IDs** — the `check-people` command now displays actual database IDs in brackets (e.g., `[67] John Doe`), matching the format of `check-topics` and `check-messages`. Previously it showed sequential numbers, causing confusion during debugging.
-
-### Added
 - **LaTeX arrow symbols** — `\uparrow` (↑) and `\downarrow` (↓) for notation like `Invest ↑, Debt ↓`
 
 ### Removed

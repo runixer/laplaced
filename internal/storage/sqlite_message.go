@@ -46,15 +46,16 @@ func (s *SQLiteStore) GetRecentHistory(userID int64, limit int) ([]Message, erro
 	return history, nil
 }
 
-func (s *SQLiteStore) GetMessagesByIDs(ids []int64) ([]Message, error) {
+func (s *SQLiteStore) GetMessagesByIDs(userID int64, ids []int64) ([]Message, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
 
-	query := "SELECT id, user_id, role, content, created_at, topic_id FROM history WHERE id IN (?" + strings.Repeat(",?", len(ids)-1) + ")"
-	args := make([]interface{}, len(ids))
+	query := "SELECT id, user_id, role, content, created_at, topic_id FROM history WHERE user_id = ? AND id IN (?" + strings.Repeat(",?", len(ids)-1) + ")"
+	args := make([]interface{}, len(ids)+1)
+	args[0] = userID
 	for i, id := range ids {
-		args[i] = id
+		args[i+1] = id
 	}
 
 	rows, err := s.db.Query(query, args...)
@@ -137,9 +138,9 @@ func (s *SQLiteStore) GetUnprocessedMessages(userID int64) ([]Message, error) {
 	return messages, nil
 }
 
-func (s *SQLiteStore) UpdateMessageTopic(messageID, topicID int64) error {
-	query := "UPDATE history SET topic_id = ? WHERE id = ?"
-	_, err := s.db.Exec(query, topicID, messageID)
+func (s *SQLiteStore) UpdateMessageTopic(userID int64, messageID, topicID int64) error {
+	query := "UPDATE history SET topic_id = ? WHERE id = ? AND user_id = ?"
+	_, err := s.db.Exec(query, topicID, messageID, userID)
 	return err
 }
 

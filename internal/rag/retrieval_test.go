@@ -106,7 +106,7 @@ func TestRetrieve_TopicsGrouping(t *testing.T) {
 	}, nil)
 
 	// GetTopicsByIDs (called inside Retrieve to fetch matched topics)
-	mockStore.On("GetTopicsByIDs", mock.MatchedBy(func(ids []int64) bool {
+	mockStore.On("GetTopicsByIDs", userID, mock.MatchedBy(func(ids []int64) bool {
 		// Should request IDs of matching topics (A and C)
 		return len(ids) > 0
 	})).Return(topics, nil)
@@ -275,7 +275,7 @@ func TestRetrieve_SkipEnrichment(t *testing.T) {
 
 		mockStore.On("GetAllTopics").Return([]storage.Topic{}, nil)
 		mockStore.On("GetAllFacts").Return([]storage.Fact{}, nil)
-		mockStore.On("GetTopicsByIDs", mock.Anything).Return([]storage.Topic{}, nil)
+		mockStore.On("GetTopicsByIDs", mock.Anything, mock.Anything).Return([]storage.Topic{}, nil)
 
 		// Embedding call for the query
 		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(
@@ -315,7 +315,7 @@ func TestRetrieve_NilOptions(t *testing.T) {
 
 		mockStore.On("GetAllTopics").Return([]storage.Topic{}, nil)
 		mockStore.On("GetAllFacts").Return([]storage.Fact{}, nil)
-		mockStore.On("GetTopicsByIDs", mock.Anything).Return([]storage.Topic{}, nil)
+		mockStore.On("GetTopicsByIDs", mock.Anything, mock.Anything).Return([]storage.Topic{}, nil)
 
 		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(
 			openrouter.EmbeddingResponse{

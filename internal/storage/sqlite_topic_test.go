@@ -142,9 +142,9 @@ func TestTopicCRUD(t *testing.T) {
 	assert.Equal(t, id, userTopics[0].ID)
 
 	// 4. Update Flags
-	err = store.SetTopicFactsExtracted(id, true)
+	err = store.SetTopicFactsExtracted(userID, id, true)
 	assert.NoError(t, err)
-	err = store.SetTopicConsolidationChecked(id, true)
+	err = store.SetTopicConsolidationChecked(userID, id, true)
 	assert.NoError(t, err)
 
 	// Verify Flags
@@ -153,7 +153,7 @@ func TestTopicCRUD(t *testing.T) {
 	assert.True(t, userTopics[0].ConsolidationChecked)
 
 	// 5. Delete
-	err = store.DeleteTopic(id)
+	err = store.DeleteTopic(userID, id)
 	assert.NoError(t, err)
 
 	// Verify Delete
@@ -192,7 +192,7 @@ func TestGetTopicsByIDs(t *testing.T) {
 	id3, _ := store.AddTopic(Topic{UserID: userID, Summary: "Topic 3", Embedding: []float32{0.5, 0.5}})
 
 	// Get specific IDs
-	topics, err := store.GetTopicsByIDs([]int64{id1, id3})
+	topics, err := store.GetTopicsByIDs(userID, []int64{id1, id3})
 	assert.NoError(t, err)
 	assert.Len(t, topics, 2)
 
@@ -206,12 +206,12 @@ func TestGetTopicsByIDs(t *testing.T) {
 	assert.False(t, summaries["Topic 2"])
 
 	// Empty IDs returns nil
-	topics, err = store.GetTopicsByIDs([]int64{})
+	topics, err = store.GetTopicsByIDs(userID, []int64{})
 	assert.NoError(t, err)
 	assert.Nil(t, topics)
 
 	// Non-existent IDs returns empty
-	topics, err = store.GetTopicsByIDs([]int64{999, 888})
+	topics, err = store.GetTopicsByIDs(userID, []int64{999, 888})
 	assert.NoError(t, err)
 	assert.Empty(t, topics)
 }
@@ -279,7 +279,7 @@ func TestGetMergeCandidates(t *testing.T) {
 	assert.True(t, foundT2T4, "Should find T2-T4 candidate")
 
 	// 2. Mark T1 as checked
-	_ = store.SetTopicConsolidationChecked(id1, true)
+	_ = store.SetTopicConsolidationChecked(userID, id1, true)
 	candidates, err = store.GetMergeCandidates(userID)
 	assert.NoError(t, err)
 

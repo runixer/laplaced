@@ -45,9 +45,9 @@ func (s *SQLiteStore) AddTopicWithoutMessageUpdate(topic Topic) (int64, error) {
 	return s.CreateTopic(topic)
 }
 
-func (s *SQLiteStore) DeleteTopic(id int64) error {
-	query := "DELETE FROM topics WHERE id = ?"
-	_, err := s.db.Exec(query, id)
+func (s *SQLiteStore) DeleteTopic(userID int64, id int64) error {
+	query := "DELETE FROM topics WHERE id = ? AND user_id = ?"
+	_, err := s.db.Exec(query, id, userID)
 	return err
 }
 
@@ -58,26 +58,26 @@ func (s *SQLiteStore) DeleteAllTopics(userID int64) error {
 	return err
 }
 
-func (s *SQLiteStore) DeleteTopicCascade(id int64) error {
+func (s *SQLiteStore) DeleteTopicCascade(userID int64, id int64) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 
-	// Delete facts linked to this topic
-	if _, err := tx.Exec("DELETE FROM structured_facts WHERE topic_id = ?", id); err != nil {
+	// Delete facts linked to this topic (filtered by user_id)
+	if _, err := tx.Exec("DELETE FROM structured_facts WHERE user_id = ? AND topic_id = ?", userID, id); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
 
-	// Delete history linked to this topic
+	// Delete history linked to this topic (no user_id in fact_history table)
 	if _, err := tx.Exec("DELETE FROM fact_history WHERE topic_id = ?", id); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
 
-	// Delete topic
-	if _, err := tx.Exec("DELETE FROM topics WHERE id = ?", id); err != nil {
+	// Delete topic (filtered by user_id)
+	if _, err := tx.Exec("DELETE FROM topics WHERE id = ? AND user_id = ?", id, userID); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -98,6 +98,9 @@ func (s *SQLiteStore) GetLastTopicEndMessageID(userID int64) (int64, error) {
 	return 0, nil
 }
 
+// GetAllTopics retrieves all topics across all users.
+// WARNING: Cross-user access - used for vector index loading and admin operations only.
+// Caller must handle data isolation if needed.
 func (s *SQLiteStore) GetAllTopics() ([]Topic, error) {
 	query := "SELECT id, user_id, summary, start_msg_id, end_msg_id, size_chars, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at FROM topics"
 	rows, err := s.db.Query(query)
@@ -124,6 +127,9 @@ func (s *SQLiteStore) GetAllTopics() ([]Topic, error) {
 	return topics, nil
 }
 
+// GetTopicsAfterID retrieves topics created after given ID across all users.
+// WARNING: Cross-user access - used for incremental vector index updates.
+// Caller must handle data isolation if needed.
 func (s *SQLiteStore) GetTopicsAfterID(minID int64) ([]Topic, error) {
 	query := "SELECT id, user_id, summary, start_msg_id, end_msg_id, size_chars, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at FROM topics WHERE id > ? ORDER BY id ASC"
 	rows, err := s.db.Query(query, minID)
@@ -150,21 +156,22 @@ func (s *SQLiteStore) GetTopicsAfterID(minID int64) ([]Topic, error) {
 	return topics, nil
 }
 
-func (s *SQLiteStore) GetTopicsByIDs(ids []int64) ([]Topic, error) {
+func (s *SQLiteStore) GetTopicsByIDs(userID int64, ids []int64) ([]Topic, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
 
 	// Build placeholders for IN clause
 	placeholders := make([]string, len(ids))
-	args := make([]interface{}, len(ids))
+	args := make([]interface{}, len(ids)+1)
+	args[0] = userID
 	for i, id := range ids {
 		placeholders[i] = "?"
-		args[i] = id
+		args[i+1] = id
 	}
 
 	query := fmt.Sprintf(
-		"SELECT id, user_id, summary, start_msg_id, end_msg_id, size_chars, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at FROM topics WHERE id IN (%s)",
+		"SELECT id, user_id, summary, start_msg_id, end_msg_id, size_chars, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at FROM topics WHERE user_id = ? AND id IN (%s)",
 		strings.Join(placeholders, ","),
 	)
 	rows, err := s.db.Query(query, args...)
@@ -217,15 +224,15 @@ func (s *SQLiteStore) GetTopics(userID int64) ([]Topic, error) {
 	return topics, nil
 }
 
-func (s *SQLiteStore) SetTopicFactsExtracted(topicID int64, extracted bool) error {
-	query := "UPDATE topics SET facts_extracted = ? WHERE id = ?"
-	_, err := s.db.Exec(query, extracted, topicID)
+func (s *SQLiteStore) SetTopicFactsExtracted(userID int64, topicID int64, extracted bool) error {
+	query := "UPDATE topics SET facts_extracted = ? WHERE id = ? AND user_id = ?"
+	_, err := s.db.Exec(query, extracted, topicID, userID)
 	return err
 }
 
-func (s *SQLiteStore) SetTopicConsolidationChecked(topicID int64, checked bool) error {
-	query := "UPDATE topics SET consolidation_checked = ? WHERE id = ?"
-	_, err := s.db.Exec(query, checked, topicID)
+func (s *SQLiteStore) SetTopicConsolidationChecked(userID int64, topicID int64, checked bool) error {
+	query := "UPDATE topics SET consolidation_checked = ? WHERE id = ? AND user_id = ?"
+	_, err := s.db.Exec(query, checked, topicID, userID)
 	return err
 }
 

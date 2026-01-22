@@ -76,7 +76,7 @@ func TestFactCRUD(t *testing.T) {
 	assert.Equal(t, 90, facts[0].Importance)
 
 	// 4. Get By IDs
-	byIDs, err := store.GetFactsByIDs([]int64{id})
+	byIDs, err := store.GetFactsByIDs(userID, []int64{id})
 	assert.NoError(t, err)
 	assert.Len(t, byIDs, 1)
 	assert.Equal(t, id, byIDs[0].ID)

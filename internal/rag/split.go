@@ -116,7 +116,7 @@ func (s *Service) splitTopic(ctx context.Context, topic storage.Topic) ([]int64,
 
 	if len(messages) == 0 {
 		s.logger.Warn("Topic has no messages, deleting", "topic_id", topic.ID)
-		if err := s.topicRepo.DeleteTopicCascade(topic.ID); err != nil {
+		if err := s.topicRepo.DeleteTopicCascade(topic.UserID, topic.ID); err != nil {
 			return nil, stats, fmt.Errorf("failed to delete empty topic: %w", err)
 		}
 		return nil, stats, nil
@@ -245,15 +245,15 @@ func (s *Service) splitTopic(ctx context.Context, topic storage.Topic) ([]int64,
 	}
 
 	// 6. Relink facts to first new topic
-	// UpdateFactTopic updates all facts with oldTopicID to newTopicID
+	// UpdateFactsTopic updates all facts with oldTopicID to newTopicID for a user
 	if len(newTopicIDs) > 0 {
-		facts, err := s.factRepo.GetFactsByTopicID(topic.ID)
+		facts, err := s.factRepo.GetFactsByTopicID(topic.UserID, topic.ID)
 		if err != nil {
 			s.logger.Warn("failed to get facts for topic", "topic_id", topic.ID, "error", err)
 		} else {
 			stats.FactsRelinked = len(facts)
 			if len(facts) > 0 {
-				if err := s.factRepo.UpdateFactTopic(topic.ID, newTopicIDs[0]); err != nil {
+				if err := s.factRepo.UpdateFactsTopic(topic.UserID, topic.ID, newTopicIDs[0]); err != nil {
 					s.logger.Warn("failed to relink facts", "old_topic", topic.ID, "new_topic", newTopicIDs[0], "error", err)
 					stats.FactsRelinked = 0
 				}
@@ -270,7 +270,7 @@ func (s *Service) splitTopic(ctx context.Context, topic storage.Topic) ([]int64,
 	}
 
 	// 8. Delete old topic
-	if err := s.topicRepo.DeleteTopic(topic.ID); err != nil {
+	if err := s.topicRepo.DeleteTopic(topic.UserID, topic.ID); err != nil {
 		s.logger.Error("failed to delete old topic", "topic_id", topic.ID, "error", err)
 	}
 

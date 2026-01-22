@@ -2,12 +2,8 @@ package rag
 
 import (
 	"context"
-	"log/slog"
-	"os"
 	"testing"
 
-	"github.com/runixer/laplaced/internal/config"
-	"github.com/runixer/laplaced/internal/memory"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 
@@ -71,10 +67,6 @@ func TestCosineSimilarity(t *testing.T) {
 }
 
 func TestFindSimilarFacts(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	cfg := &config.Config{}
-	cfg.RAG.Enabled = true
-
 	userID := int64(123)
 
 	t.Run("no similar facts", func(t *testing.T) {
@@ -86,14 +78,9 @@ func TestFindSimilarFacts(t *testing.T) {
 			{ID: 1, UserID: userID, Content: "unrelated", Embedding: []float32{0.0, 0.0, 1.0}},
 		}
 
-		mockStore.On("GetAllTopics").Return([]storage.Topic{}, nil)
 		mockStore.On("GetAllFacts").Return(facts, nil)
 
-		translator := testutil.TestTranslator(t)
-
-		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
-		_ = svc.Start(context.Background())
+		svc := TestRAGService(t, mockStore, mockClient)
 
 		// Query embedding that doesn't match
 		result, err := svc.FindSimilarFacts(context.Background(), userID, []float32{1.0, 0.0, 0.0}, 0.85)
@@ -110,15 +97,10 @@ func TestFindSimilarFacts(t *testing.T) {
 			{ID: 2, UserID: userID, Content: "unrelated", Embedding: []float32{0.0, 0.0, 1.0}},
 		}
 
-		mockStore.On("GetAllTopics").Return([]storage.Topic{}, nil)
 		mockStore.On("GetAllFacts").Return(facts, nil)
-		mockStore.On("GetFactsByIDs", []int64{1}).Return([]storage.Fact{facts[0]}, nil)
+		mockStore.On("GetFactsByIDs", userID, []int64{1}).Return([]storage.Fact{facts[0]}, nil)
 
-		translator := testutil.TestTranslator(t)
-
-		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
-		_ = svc.Start(context.Background())
+		svc := TestRAGService(t, mockStore, mockClient)
 
 		result, err := svc.FindSimilarFacts(context.Background(), userID, []float32{1.0, 0.0, 0.0}, 0.85)
 		assert.NoError(t, err)
@@ -129,11 +111,6 @@ func TestFindSimilarFacts(t *testing.T) {
 
 func TestLoadNewVectors(t *testing.T) {
 	t.Run("loads new topics and facts", func(t *testing.T) {
-		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-		cfg := &config.Config{
-			RAG: config.RAGConfig{Enabled: true},
-		}
-
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
@@ -146,10 +123,7 @@ func TestLoadNewVectors(t *testing.T) {
 			{ID: 1, UserID: 123, Content: "Fact 1", Embedding: embedding},
 		}, nil)
 
-		translator := testutil.TestTranslator(t)
-
-		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc := TestRAGServiceNoStart(t, mockStore, mockClient)
 
 		err := svc.LoadNewVectors()
 
@@ -158,21 +132,13 @@ func TestLoadNewVectors(t *testing.T) {
 	})
 
 	t.Run("returns early when no new data", func(t *testing.T) {
-		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-		cfg := &config.Config{
-			RAG: config.RAGConfig{Enabled: true},
-		}
-
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
 		mockStore.On("GetTopicsAfterID", int64(0)).Return([]storage.Topic{}, nil)
 		mockStore.On("GetFactsAfterID", int64(0)).Return([]storage.Fact{}, nil)
 
-		translator := testutil.TestTranslator(t)
-
-		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc := TestRAGServiceNoStart(t, mockStore, mockClient)
 
 		err := svc.LoadNewVectors()
 
@@ -181,20 +147,12 @@ func TestLoadNewVectors(t *testing.T) {
 	})
 
 	t.Run("handles topic load error", func(t *testing.T) {
-		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-		cfg := &config.Config{
-			RAG: config.RAGConfig{Enabled: true},
-		}
-
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
 		mockStore.On("GetTopicsAfterID", int64(0)).Return([]storage.Topic{}, assert.AnError)
 
-		translator := testutil.TestTranslator(t)
-
-		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc := TestRAGServiceNoStart(t, mockStore, mockClient)
 
 		err := svc.LoadNewVectors()
 
@@ -203,21 +161,13 @@ func TestLoadNewVectors(t *testing.T) {
 	})
 
 	t.Run("handles fact load error", func(t *testing.T) {
-		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-		cfg := &config.Config{
-			RAG: config.RAGConfig{Enabled: true},
-		}
-
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
 		mockStore.On("GetTopicsAfterID", int64(0)).Return([]storage.Topic{}, nil)
 		mockStore.On("GetFactsAfterID", int64(0)).Return([]storage.Fact{}, assert.AnError)
 
-		translator := testutil.TestTranslator(t)
-
-		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc := TestRAGServiceNoStart(t, mockStore, mockClient)
 
 		err := svc.LoadNewVectors()
 
@@ -226,11 +176,6 @@ func TestLoadNewVectors(t *testing.T) {
 	})
 
 	t.Run("skips topics without embeddings", func(t *testing.T) {
-		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-		cfg := &config.Config{
-			RAG: config.RAGConfig{Enabled: true},
-		}
-
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
@@ -241,10 +186,7 @@ func TestLoadNewVectors(t *testing.T) {
 		}, nil)
 		mockStore.On("GetFactsAfterID", int64(0)).Return([]storage.Fact{}, nil)
 
-		translator := testutil.TestTranslator(t)
-
-		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc := TestRAGServiceNoStart(t, mockStore, mockClient)
 
 		err := svc.LoadNewVectors()
 

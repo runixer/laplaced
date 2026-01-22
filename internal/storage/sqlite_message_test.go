@@ -107,7 +107,7 @@ func TestGetMessagesByIDs(t *testing.T) {
 
 	// Get subset
 	targetIDs := []int64{1, 3, 5}
-	msgs, err := store.GetMessagesByIDs(targetIDs)
+	msgs, err := store.GetMessagesByIDs(userID, targetIDs)
 	assert.NoError(t, err)
 	assert.Len(t, msgs, 3)
 	assert.Equal(t, int64(1), msgs[0].ID)
@@ -129,7 +129,7 @@ func TestUpdateMessageTopic(t *testing.T) {
 
 	// Update topic
 	topicID := int64(99)
-	err := store.UpdateMessageTopic(msgs[0].ID, topicID)
+	err := store.UpdateMessageTopic(userID, msgs[0].ID, topicID)
 	assert.NoError(t, err)
 
 	// Verify

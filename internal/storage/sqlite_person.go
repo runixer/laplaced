@@ -164,7 +164,7 @@ func (s *SQLiteStore) GetPeople(userID int64) ([]Person, error) {
 }
 
 // GetPeopleByIDs retrieves people by their IDs.
-func (s *SQLiteStore) GetPeopleByIDs(ids []int64) ([]Person, error) {
+func (s *SQLiteStore) GetPeopleByIDs(userID int64, ids []int64) ([]Person, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -173,12 +173,13 @@ func (s *SQLiteStore) GetPeopleByIDs(ids []int64) ([]Person, error) {
 	query := `
 		SELECT id, user_id, display_name, aliases, telegram_id, username, circle, bio, embedding, first_seen, last_seen, mention_count
 		FROM people
-		WHERE id IN (?` + placeholders + `)
+		WHERE user_id = ? AND id IN (?` + placeholders + `)
 	`
 
-	args := make([]interface{}, len(ids))
+	args := make([]interface{}, len(ids)+1)
+	args[0] = userID
 	for i, id := range ids {
-		args[i] = id
+		args[i+1] = id
 	}
 
 	rows, err := s.db.Query(query, args...)
@@ -189,7 +190,8 @@ func (s *SQLiteStore) GetPeopleByIDs(ids []int64) ([]Person, error) {
 	return s.scanPeople(rows)
 }
 
-// GetAllPeople retrieves all people across all users (for vector index loading).
+// GetAllPeople retrieves all people across all users.
+// WARNING: Cross-user access - used for vector index loading only.
 func (s *SQLiteStore) GetAllPeople() ([]Person, error) {
 	query := `
 		SELECT id, user_id, display_name, aliases, telegram_id, username, circle, bio, embedding, first_seen, last_seen, mention_count
@@ -204,7 +206,8 @@ func (s *SQLiteStore) GetAllPeople() ([]Person, error) {
 	return s.scanPeople(rows)
 }
 
-// GetPeopleAfterID retrieves people created after a given ID (for incremental index updates).
+// GetPeopleAfterID retrieves people created after a given ID across all users.
+// WARNING: Cross-user access - used for incremental vector index updates.
 func (s *SQLiteStore) GetPeopleAfterID(minID int64) ([]Person, error) {
 	query := `
 		SELECT id, user_id, display_name, aliases, telegram_id, username, circle, bio, embedding, first_seen, last_seen, mention_count

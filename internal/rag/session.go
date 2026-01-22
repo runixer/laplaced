@@ -236,7 +236,7 @@ func (s *Service) ForceProcessUserWithProgress(ctx context.Context, userID int64
 			}
 
 			if len(msgs) == 0 {
-				_ = s.topicRepo.SetTopicFactsExtracted(topic.ID, true)
+				_ = s.topicRepo.SetTopicFactsExtracted(topic.UserID, topic.ID, true)
 				s.finishProcessingTopic(topic.ID)
 				continue
 			}
@@ -266,7 +266,7 @@ func (s *Service) ForceProcessUserWithProgress(ctx context.Context, userID int64
 				*stats.TotalCost += *factStats.Cost
 			}
 
-			_ = s.topicRepo.SetTopicFactsExtracted(topic.ID, true)
+			_ = s.topicRepo.SetTopicFactsExtracted(topic.UserID, topic.ID, true)
 			s.finishProcessingTopic(topic.ID)
 		}
 

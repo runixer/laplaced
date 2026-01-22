@@ -80,14 +80,14 @@ func TestPerformManageMemory_BatchOperations(t *testing.T) {
 		},
 	}, nil)
 
-	mockStore.On("GetFactsByIDs", []int64{10}).Return([]storage.Fact{{ID: 10, Content: "Likes pizza"}}, nil)
+	mockStore.On("GetFactsByIDs", userID, []int64{10}).Return([]storage.Fact{{ID: 10, Content: "Likes pizza"}}, nil)
 
 	mockStore.On("UpdateFact", mock.MatchedBy(func(f storage.Fact) bool {
 		return f.ID == 10 && f.UserID == userID && f.Content == "Likes sushi"
 	})).Return(nil)
 
 	// Mocks for Delete
-	mockStore.On("GetFactsByIDs", []int64{20}).Return([]storage.Fact{{ID: 20, Content: "Likes burgers"}}, nil)
+	mockStore.On("GetFactsByIDs", userID, []int64{20}).Return([]storage.Fact{{ID: 20, Content: "Likes burgers"}}, nil)
 	mockStore.On("DeleteFact", userID, int64(20)).Return(nil)
 
 	// Execute
@@ -145,7 +145,7 @@ func TestPerformManageMemory_BatchOperations_PartialFailure(t *testing.T) {
 	mockStore.On("AddFactHistory", mock.Anything).Return(nil)
 
 	// Mocks for Delete (Failure)
-	mockStore.On("GetFactsByIDs", []int64{999}).Return([]storage.Fact{}, nil)
+	mockStore.On("GetFactsByIDs", userID, []int64{999}).Return([]storage.Fact{}, nil)
 	mockStore.On("DeleteFact", userID, int64(999)).Return(assert.AnError)
 
 	// Execute

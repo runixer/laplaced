@@ -87,7 +87,7 @@ func (s *Service) processConsolidation(ctx context.Context) {
 				}
 			} else {
 				// Mark T1 as checked
-				if err := s.topicRepo.SetTopicConsolidationChecked(candidate.Topic1.ID, true); err != nil {
+				if err := s.topicRepo.SetTopicConsolidationChecked(candidate.Topic1.UserID, candidate.Topic1.ID, true); err != nil {
 					s.logger.Error("failed to mark topic checked", "id", candidate.Topic1.ID, "error", err)
 				}
 			}
@@ -129,7 +129,7 @@ func (s *Service) markOrphanTopicsChecked(userID int64) {
 
 		if !hasPartner {
 			// No potential partner found, mark as checked
-			if err := s.topicRepo.SetTopicConsolidationChecked(topic.ID, true); err != nil {
+			if err := s.topicRepo.SetTopicConsolidationChecked(userID, topic.ID, true); err != nil {
 				s.logger.Error("failed to mark orphan topic checked", "id", topic.ID, "error", err)
 			} else {
 				s.logger.Debug("Marked orphan topic as checked", "id", topic.ID)
@@ -161,12 +161,12 @@ func (s *Service) findMergeCandidates(userID int64) ([]storage.MergeCandidate, e
 				"combined_size", combinedSize, "max_size", maxMergedSize)
 			// Mark both as checked to avoid re-processing
 			if !candidate.Topic1.ConsolidationChecked {
-				if err := s.topicRepo.SetTopicConsolidationChecked(candidate.Topic1.ID, true); err != nil {
+				if err := s.topicRepo.SetTopicConsolidationChecked(candidate.Topic1.UserID, candidate.Topic1.ID, true); err != nil {
 					s.logger.Error("failed to mark topic checked (size)", "id", candidate.Topic1.ID, "error", err)
 				}
 			}
 			if !candidate.Topic2.ConsolidationChecked {
-				if err := s.topicRepo.SetTopicConsolidationChecked(candidate.Topic2.ID, true); err != nil {
+				if err := s.topicRepo.SetTopicConsolidationChecked(candidate.Topic2.UserID, candidate.Topic2.ID, true); err != nil {
 					s.logger.Error("failed to mark topic checked (size)", "id", candidate.Topic2.ID, "error", err)
 				}
 			}
@@ -185,7 +185,7 @@ func (s *Service) findMergeCandidates(userID int64) ([]storage.MergeCandidate, e
 				s.logger.Debug("Skipping merge due to low similarity", "t1", candidate.Topic1.ID, "t2", candidate.Topic2.ID, "similarity", sim, "threshold", threshold)
 				// Mark T1 as checked if not already.
 				if !candidate.Topic1.ConsolidationChecked {
-					if err := s.topicRepo.SetTopicConsolidationChecked(candidate.Topic1.ID, true); err != nil {
+					if err := s.topicRepo.SetTopicConsolidationChecked(candidate.Topic1.UserID, candidate.Topic1.ID, true); err != nil {
 						s.logger.Error("failed to mark topic checked (heuristic)", "id", candidate.Topic1.ID, "error", err)
 					}
 				}
@@ -321,10 +321,10 @@ func (s *Service) mergeTopics(ctx context.Context, candidate storage.MergeCandid
 	}
 
 	// Update structured_facts
-	if err := s.factRepo.UpdateFactTopic(candidate.Topic1.ID, newTopicID); err != nil {
+	if err := s.factRepo.UpdateFactsTopic(candidate.Topic1.UserID, candidate.Topic1.ID, newTopicID); err != nil {
 		s.logger.Error("failed to update facts for topic 1", "id", candidate.Topic1.ID, "error", err)
 	}
-	if err := s.factRepo.UpdateFactTopic(candidate.Topic2.ID, newTopicID); err != nil {
+	if err := s.factRepo.UpdateFactsTopic(candidate.Topic2.UserID, candidate.Topic2.ID, newTopicID); err != nil {
 		s.logger.Error("failed to update facts for topic 2", "id", candidate.Topic2.ID, "error", err)
 	}
 
@@ -337,10 +337,10 @@ func (s *Service) mergeTopics(ctx context.Context, candidate storage.MergeCandid
 	}
 
 	// Delete old topics
-	if err := s.topicRepo.DeleteTopicCascade(candidate.Topic1.ID); err != nil {
+	if err := s.topicRepo.DeleteTopicCascade(candidate.Topic1.UserID, candidate.Topic1.ID); err != nil {
 		s.logger.Error("failed to delete topic 1", "id", candidate.Topic1.ID, "error", err)
 	}
-	if err := s.topicRepo.DeleteTopicCascade(candidate.Topic2.ID); err != nil {
+	if err := s.topicRepo.DeleteTopicCascade(candidate.Topic2.UserID, candidate.Topic2.ID); err != nil {
 		s.logger.Error("failed to delete topic 2", "id", candidate.Topic2.ID, "error", err)
 	}
 

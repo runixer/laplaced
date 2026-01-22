@@ -190,7 +190,7 @@ func (s *Service) processFactExtraction(ctx context.Context) {
 
 			if len(msgs) == 0 {
 				// Empty topic? Mark processed.
-				_ = s.topicRepo.SetTopicFactsExtracted(topic.ID, true)
+				_ = s.topicRepo.SetTopicFactsExtracted(topic.UserID, topic.ID, true)
 				s.finishProcessingTopic(topic.ID)
 				continue
 			}
@@ -210,7 +210,7 @@ func (s *Service) processFactExtraction(ctx context.Context) {
 			}
 
 			// Mark processed
-			if err := s.topicRepo.SetTopicFactsExtracted(topic.ID, true); err != nil {
+			if err := s.topicRepo.SetTopicFactsExtracted(topic.UserID, topic.ID, true); err != nil {
 				s.logger.Error("failed to mark topic processed", "topic_id", topic.ID, "error", err)
 			}
 			s.finishProcessingTopic(topic.ID)

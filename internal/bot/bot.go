@@ -697,7 +697,7 @@ func (b *Bot) performDeleteFact(ctx context.Context, userID int64, p memoryOpPar
 	}
 
 	// Fetch old fact for history
-	oldFacts, err := b.factRepo.GetFactsByIDs([]int64{p.FactID})
+	oldFacts, err := b.factRepo.GetFactsByIDs(userID, []int64{p.FactID})
 	if err != nil {
 		b.logger.Warn("failed to fetch old fact for history", "fact_id", p.FactID, "error", err)
 	}
@@ -755,7 +755,7 @@ func (b *Bot) performUpdateFact(ctx context.Context, userID int64, p memoryOpPar
 	}
 
 	// Fetch old fact for history
-	oldFacts, err := b.factRepo.GetFactsByIDs([]int64{p.FactID})
+	oldFacts, err := b.factRepo.GetFactsByIDs(userID, []int64{p.FactID})
 	if err != nil {
 		b.logger.Warn("failed to fetch old fact for history", "fact_id", p.FactID, "error", err)
 	}

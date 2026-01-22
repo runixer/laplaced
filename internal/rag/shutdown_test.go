@@ -22,15 +22,42 @@ import (
 )
 
 func TestGracefulShutdown(t *testing.T) {
-	// 1. Setup
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	cfg := &config.Config{}
-	cfg.RAG.Enabled = true
-	cfg.RAG.BackfillInterval = "50ms" // Fast interval
-	cfg.Bot.AllowedUserIDs = []int64{123}
+	cfg := TestRAGConfig(func(cfg *config.Config) {
+		cfg.RAG.BackfillInterval = "50ms" // Fast interval
+		cfg.Bot.AllowedUserIDs = []int64{123}
+	})
 
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
+	translator := testutil.TestTranslator(t)
+
+	// Mock splitter agent with delay to simulate long-running task
+	mockSplitter := new(agenttesting.MockAgent)
+	mockSplitter.On("Type").Return(string(agent.TypeSplitter)).Maybe()
+	mockSplitter.On("Execute", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		// Sleep to simulate long running task
+		time.Sleep(500 * time.Millisecond)
+	}).Return(&agent.Response{
+		Structured: &splitter.Result{
+			Topics: []splitter.ExtractedTopic{
+				{Summary: "Test topic", StartMsgID: 1, EndMsgID: 2},
+			},
+		},
+	}, nil)
+
+	// Mock archivist agent for memory.ProcessSession
+	mockArchivist := new(agenttesting.MockAgent)
+	mockArchivist.On("Type").Return(string(agent.TypeArchivist)).Maybe()
+	mockArchivist.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
+		Structured: &archivist.Result{
+			Facts: archivist.FactsResult{
+				Added:   []archivist.AddedFact{},
+				Updated: []archivist.UpdatedFact{},
+				Removed: []archivist.RemovedFact{},
+			},
+		},
+	}, nil).Maybe()
 
 	// 2. Expectations
 	// Start loads vectors
@@ -50,7 +77,7 @@ func TestGracefulShutdown(t *testing.T) {
 	// Fact extraction loop calls GetTopicsPendingFacts
 	topic := storage.Topic{ID: 1, UserID: 123, StartMsgID: 1, EndMsgID: 3, CreatedAt: time.Now(), ConsolidationChecked: true}
 	mockStore.On("GetTopicsPendingFacts", int64(123)).Return([]storage.Topic{topic}, nil)
-	mockStore.On("SetTopicFactsExtracted", int64(1), true).Return(nil)
+	mockStore.On("SetTopicFactsExtracted", int64(123), int64(1), true).Return(nil)
 
 	// It calls GetMessagesByTopicID (from processFactExtraction)
 	mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return(msgs, nil)
@@ -80,43 +107,14 @@ func TestGracefulShutdown(t *testing.T) {
 	// Mock GetFacts for memory service
 	mockStore.On("GetFacts", int64(123)).Return([]storage.Fact{}, nil).Maybe()
 
-	// Mock splitter agent with delay to simulate long-running task
-	mockSplitter := new(agenttesting.MockAgent)
-	mockSplitter.On("Type").Return(string(agent.TypeSplitter)).Maybe()
-	mockSplitter.On("Execute", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-		// Sleep to simulate long running task
-		time.Sleep(500 * time.Millisecond)
-	}).Return(&agent.Response{
-		Structured: &splitter.Result{
-			Topics: []splitter.ExtractedTopic{
-				{Summary: "Test topic", StartMsgID: 1, EndMsgID: 2},
-			},
-		},
-	}, nil)
-
-	// Mock archivist agent for memory.ProcessSession
-	mockArchivist := new(agenttesting.MockAgent)
-	mockArchivist.On("Type").Return(string(agent.TypeArchivist)).Maybe()
-	mockArchivist.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
-		Structured: &archivist.Result{
-			Facts: archivist.FactsResult{
-				Added:   []archivist.AddedFact{},
-				Updated: []archivist.UpdatedFact{},
-				Removed: []archivist.RemovedFact{},
-			},
-		},
-	}, nil).Maybe()
-
-	// Create translator with required template keys
-	translator := testutil.TestTranslator(t)
-
+	// Create services
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 	memSvc.SetArchivistAgent(mockArchivist)
 
 	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
 	svc.SetSplitterAgent(mockSplitter)
 
-	// Start
+	// Start with cancellable context
 	ctx, cancel := context.WithCancel(context.Background())
 	err := svc.Start(ctx)
 	assert.NoError(t, err)

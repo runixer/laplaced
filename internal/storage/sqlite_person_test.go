@@ -122,12 +122,12 @@ func TestGetPeopleByIDs(t *testing.T) {
 	require.NoError(t, err)
 
 	// Get specific IDs
-	result, err := store.GetPeopleByIDs([]int64{id1, id2})
+	result, err := store.GetPeopleByIDs(userID, []int64{id1, id2})
 	require.NoError(t, err)
 	assert.Len(t, result, 2)
 
 	// Empty IDs
-	empty, err := store.GetPeopleByIDs([]int64{})
+	empty, err := store.GetPeopleByIDs(userID, []int64{})
 	require.NoError(t, err)
 	assert.Empty(t, empty)
 }

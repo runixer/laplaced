@@ -167,8 +167,22 @@ func (s *Service) RepairDatabase(ctx context.Context, userID int64, dryRun bool)
 
 			// Delete orphaned topics
 			for _, id := range orphanedIDs {
-				if err := s.topicRepo.DeleteTopicCascade(id); err != nil {
-					s.logger.Error("failed to delete orphaned topic", "id", id, "error", err)
+				// When userID is 0, we need to get the owner of each topic
+				if userID == 0 {
+					// Fetch the topic to get its owner
+					allTopics, _ := s.topicRepo.GetAllTopics()
+					for _, t := range allTopics {
+						if t.ID == id {
+							if err := s.topicRepo.DeleteTopicCascade(t.UserID, id); err != nil {
+								s.logger.Error("failed to delete orphaned topic", "id", id, "error", err)
+							}
+							break
+						}
+					}
+				} else {
+					if err := s.topicRepo.DeleteTopicCascade(userID, id); err != nil {
+						s.logger.Error("failed to delete orphaned topic", "id", id, "error", err)
+					}
 				}
 			}
 			s.logger.Info("Deleted orphaned topics", "count", len(orphanedIDs))
@@ -267,12 +281,12 @@ func (s *Service) relinkFactsFromOrphanedTopics(ctx context.Context, userID int6
 			continue
 		}
 
-		facts, err := s.factRepo.GetFactsByTopicID(orphanedID)
+		facts, err := s.factRepo.GetFactsByTopicID(ownerUserID, orphanedID)
 		if err != nil {
 			continue
 		}
 		if len(facts) > 0 {
-			if err := s.factRepo.UpdateFactTopic(orphanedID, validTopicID); err != nil {
+			if err := s.factRepo.UpdateFactsTopic(ownerUserID, orphanedID, validTopicID); err != nil {
 				s.logger.Error("failed to update fact topic", "from", orphanedID, "to", validTopicID, "error", err)
 				continue
 			}
@@ -363,10 +377,26 @@ func (s *Service) FixContamination(ctx context.Context, userID int64, dryRun boo
 			s.logger.Error("failed to get orphaned topics", "error", err)
 		} else if len(orphanedIDs) > 0 {
 			for _, id := range orphanedIDs {
-				if err := s.topicRepo.DeleteTopicCascade(id); err != nil {
-					s.logger.Error("failed to delete orphaned topic", "id", id, "error", err)
+				// When userID is 0, we need to get the owner of each topic
+				if userID == 0 {
+					// Fetch the topic to get its owner
+					allTopics, _ := s.topicRepo.GetAllTopics()
+					for _, t := range allTopics {
+						if t.ID == id {
+							if err := s.topicRepo.DeleteTopicCascade(t.UserID, id); err != nil {
+								s.logger.Error("failed to delete orphaned topic", "id", id, "error", err)
+							} else {
+								stats.OrphanedTopicsDeleted++
+							}
+							break
+						}
+					}
 				} else {
-					stats.OrphanedTopicsDeleted++
+					if err := s.topicRepo.DeleteTopicCascade(userID, id); err != nil {
+						s.logger.Error("failed to delete orphaned topic", "id", id, "error", err)
+					} else {
+						stats.OrphanedTopicsDeleted++
+					}
 				}
 			}
 			s.logger.Info("Deleted orphaned topics after contamination fix", "count", stats.OrphanedTopicsDeleted)

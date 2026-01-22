@@ -9,11 +9,11 @@ type MessageRepository interface {
 	AddMessageToHistory(userID int64, message Message) error
 	ImportMessage(userID int64, message Message) error
 	GetRecentHistory(userID int64, limit int) ([]Message, error)
-	GetMessagesByIDs(ids []int64) ([]Message, error)
+	GetMessagesByIDs(userID int64, ids []int64) ([]Message, error)
 	ClearHistory(userID int64) error
 	GetMessagesInRange(ctx context.Context, userID int64, startID, endID int64) ([]Message, error)
 	GetMessagesByTopicID(ctx context.Context, topicID int64) ([]Message, error)
-	UpdateMessageTopic(messageID, topicID int64) error
+	UpdateMessageTopic(userID int64, messageID, topicID int64) error
 	UpdateMessagesTopicInRange(ctx context.Context, userID, startMsgID, endMsgID, topicID int64) error
 	GetUnprocessedMessages(userID int64) ([]Message, error)
 }
@@ -30,15 +30,15 @@ type TopicRepository interface {
 	AddTopic(topic Topic) (int64, error)
 	AddTopicWithoutMessageUpdate(topic Topic) (int64, error)
 	CreateTopic(topic Topic) (int64, error)
-	DeleteTopic(id int64) error
-	DeleteTopicCascade(id int64) error
+	DeleteTopic(userID int64, id int64) error
+	DeleteTopicCascade(userID int64, id int64) error
 	GetLastTopicEndMessageID(userID int64) (int64, error)
 	GetAllTopics() ([]Topic, error)
 	GetTopicsAfterID(minID int64) ([]Topic, error)
-	GetTopicsByIDs(ids []int64) ([]Topic, error)
+	GetTopicsByIDs(userID int64, ids []int64) ([]Topic, error)
 	GetTopics(userID int64) ([]Topic, error)
-	SetTopicFactsExtracted(topicID int64, extracted bool) error
-	SetTopicConsolidationChecked(topicID int64, checked bool) error
+	SetTopicFactsExtracted(userID int64, topicID int64, extracted bool) error
+	SetTopicConsolidationChecked(userID int64, topicID int64, checked bool) error
 	GetTopicsPendingFacts(userID int64) ([]Topic, error)
 	GetTopicsExtended(filter TopicFilter, limit, offset int, sortBy, sortDir string) (TopicResult, error)
 	GetMergeCandidates(userID int64) ([]MergeCandidate, error)
@@ -48,14 +48,14 @@ type TopicRepository interface {
 type FactRepository interface {
 	AddFact(fact Fact) (int64, error)
 	GetFacts(userID int64) ([]Fact, error)
-	GetFactsByIDs(ids []int64) ([]Fact, error)
-	GetFactsByTopicID(topicID int64) ([]Fact, error)
+	GetFactsByIDs(userID int64, ids []int64) ([]Fact, error)
+	GetFactsByTopicID(userID int64, topicID int64) ([]Fact, error)
 	GetAllFacts() ([]Fact, error)
 	GetFactsAfterID(minID int64) ([]Fact, error)
 	GetFactStats() (FactStats, error)
 	GetFactStatsByUser(userID int64) (FactStats, error)
 	UpdateFact(fact Fact) error
-	UpdateFactTopic(oldTopicID, newTopicID int64) error
+	UpdateFactsTopic(userID int64, oldTopicID, newTopicID int64) error
 	DeleteFact(userID, id int64) error
 }
 
@@ -124,7 +124,7 @@ type PeopleRepository interface {
 	// Retrieval
 	GetPerson(userID, personID int64) (*Person, error)
 	GetPeople(userID int64) ([]Person, error)
-	GetPeopleByIDs(ids []int64) ([]Person, error)
+	GetPeopleByIDs(userID int64, ids []int64) ([]Person, error)
 	GetAllPeople() ([]Person, error)
 	GetPeopleAfterID(minID int64) ([]Person, error)
 

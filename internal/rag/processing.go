@@ -379,7 +379,7 @@ func (s *Service) runConsolidationSync(ctx context.Context, userID int64, topicI
 					break // Refresh candidates
 				}
 			} else {
-				if err := s.topicRepo.SetTopicConsolidationChecked(candidate.Topic1.ID, true); err != nil {
+				if err := s.topicRepo.SetTopicConsolidationChecked(candidate.Topic1.UserID, candidate.Topic1.ID, true); err != nil {
 					s.logger.Error("failed to mark topic checked", "id", candidate.Topic1.ID, "error", err)
 				}
 			}
@@ -392,7 +392,8 @@ func (s *Service) runConsolidationSync(ctx context.Context, userID int64, topicI
 
 	// Mark remaining topics as consolidation checked
 	for _, id := range topicIDs {
-		_ = s.topicRepo.SetTopicConsolidationChecked(id, true)
+		// Get userID from the first candidate (all candidates have same user in this loop)
+		_ = s.topicRepo.SetTopicConsolidationChecked(userID, id, true)
 	}
 
 	return mergedTopicIDs

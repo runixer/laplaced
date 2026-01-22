@@ -42,6 +42,8 @@ func (s *SQLiteStore) AddFact(fact Fact) (int64, error) {
 	return id, nil
 }
 
+// GetAllFacts retrieves all facts across all users.
+// WARNING: Cross-user access - used for vector index loading only.
 func (s *SQLiteStore) GetAllFacts() ([]Fact, error) {
 	query := "SELECT id, user_id, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts"
 	rows, err := s.db.Query(query)
@@ -68,6 +70,8 @@ func (s *SQLiteStore) GetAllFacts() ([]Fact, error) {
 	return facts, nil
 }
 
+// GetFactsAfterID retrieves facts created after given ID across all users.
+// WARNING: Cross-user access - used for incremental vector index updates.
 func (s *SQLiteStore) GetFactsAfterID(minID int64) ([]Fact, error) {
 	query := "SELECT id, user_id, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE id > ? ORDER BY id ASC"
 	rows, err := s.db.Query(query, minID)
@@ -175,9 +179,10 @@ func (s *SQLiteStore) UpdateFact(fact Fact) error {
 	return err
 }
 
-func (s *SQLiteStore) UpdateFactTopic(oldTopicID, newTopicID int64) error {
-	query := "UPDATE structured_facts SET topic_id = ? WHERE topic_id = ?"
-	_, err := s.db.Exec(query, newTopicID, oldTopicID)
+// UpdateFactsTopic updates topic_id for all facts belonging to a user and old topic.
+func (s *SQLiteStore) UpdateFactsTopic(userID int64, oldTopicID, newTopicID int64) error {
+	query := "UPDATE structured_facts SET topic_id = ? WHERE user_id = ? AND topic_id = ?"
+	_, err := s.db.Exec(query, newTopicID, userID, oldTopicID)
 	return err
 }
 
@@ -220,14 +225,15 @@ func (s *SQLiteStore) GetFacts(userID int64) ([]Fact, error) {
 	return facts, nil
 }
 
-func (s *SQLiteStore) GetFactsByIDs(ids []int64) ([]Fact, error) {
+func (s *SQLiteStore) GetFactsByIDs(userID int64, ids []int64) ([]Fact, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	query := "SELECT id, user_id, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE id IN (?" + strings.Repeat(",?", len(ids)-1) + ")"
-	args := make([]interface{}, len(ids))
+	query := "SELECT id, user_id, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE user_id = ? AND id IN (?" + strings.Repeat(",?", len(ids)-1) + ")"
+	args := make([]interface{}, len(ids)+1)
+	args[0] = userID
 	for i, id := range ids {
-		args[i] = id
+		args[i+1] = id
 	}
 
 	rows, err := s.db.Query(query, args...)
@@ -254,9 +260,9 @@ func (s *SQLiteStore) GetFactsByIDs(ids []int64) ([]Fact, error) {
 	return facts, nil
 }
 
-func (s *SQLiteStore) GetFactsByTopicID(topicID int64) ([]Fact, error) {
-	query := "SELECT id, user_id, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE topic_id = ?"
-	rows, err := s.db.Query(query, topicID)
+func (s *SQLiteStore) GetFactsByTopicID(userID int64, topicID int64) ([]Fact, error) {
+	query := "SELECT id, user_id, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE user_id = ? AND topic_id = ?"
+	rows, err := s.db.Query(query, userID, topicID)
 	if err != nil {
 		return nil, err
 	}
