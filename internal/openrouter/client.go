@@ -325,7 +325,7 @@ func NewClientWithBaseURL(logger *slog.Logger, apiKey, proxyURL, baseURL string)
 	return &clientImpl{
 		httpClient: &http.Client{
 			Transport: transport,
-			Timeout:   120 * time.Second, // Global timeout for requests
+			Timeout:   300 * time.Second, // Global timeout for requests (5 min for large contexts)
 		},
 		apiKey:      apiKey,
 		apiEndpoint: baseURL,
@@ -337,11 +337,35 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 	startTime := time.Now()
 	jt := jobtype.FromContext(ctx).String()
 
+	// Calculate context size for logging (text content only, not images/files)
+	contextChars := 0
+	for _, msg := range req.Messages {
+		switch content := msg.Content.(type) {
+		case string:
+			contextChars += len(content)
+		case []interface{}:
+			// Multi-modal content (text + images)
+			for _, part := range content {
+				if partMap, ok := part.(map[string]interface{}); ok {
+					if partType, ok := partMap["type"].(string); ok && partType == "text" {
+						if text, ok := partMap["text"].(string); ok {
+							contextChars += len(text)
+						}
+					}
+				}
+			}
+		}
+	}
+	// Rough estimate: ~4 chars per token for Gemini
+	estimatedTokens := contextChars / 4
+
 	// Log request summary (full details available in Agent Debug UI)
-	c.logger.Debug("Sending request to OpenRouter",
+	c.logger.Info("Sending request to OpenRouter",
 		"model", req.Model,
 		"message_count", len(req.Messages),
 		"tools_count", len(req.Tools),
+		"context_chars", contextChars,
+		"estimated_tokens", estimatedTokens,
 	)
 
 	body, err := json.Marshal(req)
@@ -396,6 +420,10 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		responseBody, err = io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
+			if isRetryableError(err) && attempt < maxRetries {
+				lastErr = err
+				continue
+			}
 			return ChatCompletionResponse{}, err
 		}
 
@@ -523,6 +551,10 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 		responseBody, err = io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
+			if isRetryableError(err) && attempt < maxRetries {
+				lastErr = err
+				continue
+			}
 			return EmbeddingResponse{}, err
 		}
 
