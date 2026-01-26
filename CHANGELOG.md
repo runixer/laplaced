@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-01-27
+
 ### Security
 - **User data isolation enforcement** — added `user_id` parameter to all storage methods that operate on user-owned data (GetFactsByIDs, GetTopicsByIDs, GetPeopleByIDs, GetFactsByTopicID, DeleteTopic, DeleteTopicCascade, SetTopicFactsExtracted, SetTopicConsolidationChecked, UpdateMessageTopic, GetMessagesByIDs, UpdateFactsTopic). All queries now include `WHERE user_id = ?` to prevent cross-user data leakage. Critical fix for `GetFactsByIDs` which previously accepted user-provided fact IDs from LLM tool calls without ownership validation.
 
@@ -32,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Archivist automatic deduplication** — the archivist agent now ALWAYS checks for duplicate people records and suggests merges, even when no new people are added. Previously it only checked duplicates when adding new people, leaving existing duplicates unmerged.
 - **Testbot check-people shows actual database IDs** — the `check-people` command now displays actual database IDs in brackets (e.g., `[67] John Doe`), matching the format of `check-topics` and `check-messages`. Previously it showed sequential numbers, causing confusion during debugging.
 - **LaTeX arrow symbols** — `\uparrow` (↑) and `\downarrow` (↓) for notation like `Invest ↑, Debt ↓`
+- **Docker image cleanup** — disabled automatic deletion of container images from GHCR. The cleanup job was incorrectly removing tagged images, causing "manifest not found" errors when pulling versioned tags.
 
 ### Removed
 - **Legacy database code** — dropped old `facts` table (replaced by `structured_facts`), removed entity column migration logic, deleted migration scripts (`migrations/001_cleanup_other_facts.sql`, `migrations/002_drop_entity_column.sql`). All installations already on fresh schema.
