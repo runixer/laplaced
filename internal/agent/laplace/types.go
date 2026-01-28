@@ -33,6 +33,10 @@ type Response struct {
 	// Main response
 	Content string
 
+	// Error (non-nil if execution failed after partial completion)
+	// When set, Content may be empty or partial, but other fields (tokens, timing, turns) are valid
+	Error error
+
 	// Token usage
 	PromptTokens     int
 	CompletionTokens int

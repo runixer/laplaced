@@ -47,6 +47,7 @@ laplaced.db
 
 # docs
 /docs/plans/
+/docs/bugs/
 
 # Gitea CI (private infrastructure)
 .gitea/

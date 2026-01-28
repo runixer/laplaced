@@ -691,6 +691,21 @@ func (m *MockVectorSearcher) FindSimilarFacts(ctx context.Context, userID int64,
 	return args.Get(0).([]storage.Fact), args.Error(1)
 }
 
+// MockAgentLogger implements agentlog.Logger for tests.
+type MockAgentLogger struct {
+	mock.Mock
+}
+
+// Log mock for agent log entry.
+func (m *MockAgentLogger) Log(ctx context.Context, entry interface{}) {
+	m.Called(ctx, entry)
+}
+
+// NewMockAgentLogger creates a new MockAgentLogger.
+func NewMockAgentLogger() *MockAgentLogger {
+	return &MockAgentLogger{}
+}
+
 // SetupDefaultMocks configures mocks with safe defaults for background operations.
 // Call this when testing code that may trigger background loops.
 func SetupDefaultMocks(s *MockStorage) {

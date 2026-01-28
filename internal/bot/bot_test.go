@@ -3,12 +3,14 @@ package bot
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/runixer/laplaced/internal/agent/laplace"
+	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
@@ -1494,4 +1496,70 @@ func TestSendTestMessage_OpenRouterError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "laplace execution failed")
+}
+
+// TestLogExecution_WithError verifies that LogExecution correctly logs
+// partial execution failures (e.g., "max empty response retries reached").
+// This is a unit test for the secondary issue fix - ensuring failed executions
+// are logged with DebugRequestBody/DebugResponseBody for debugging.
+func TestLogExecution_WithError(t *testing.T) {
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
+
+	cfg := testutil.TestConfig()
+
+	// Create real agent logger with mock repo
+	agentLogger := agentlog.NewLogger(mockStore, logger, true)
+
+	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, translator, logger)
+	laplaceAgent.SetAgentLogger(agentLogger)
+
+	userID := int64(123)
+	cost := 0.05
+
+	// Create a partial response with error (simulating "max empty response retries")
+	respWithError := &laplace.Response{
+		Error:            errors.New("max empty response retries reached"),
+		Content:          "",
+		PromptTokens:     3000,
+		CompletionTokens: 0,
+		TotalCost:        &cost,
+		LLMDuration:      15 * time.Second,
+		ToolDuration:     5 * time.Second,
+		TotalTurns:       3,
+		RAGInfo:          nil,
+		Messages: []openrouter.Message{
+			{Role: "system", Content: "You are a helpful assistant"},
+			{Role: "user", Content: "Hello"},
+		},
+		ConversationTurns: &agentlog.ConversationTurns{
+			Turns: []agentlog.ConversationTurn{
+				{Iteration: 1, DurationMs: 5000},
+				{Iteration: 2, DurationMs: 5000},
+				{Iteration: 3, DurationMs: 5000},
+			},
+			TotalDurationMs:       15000,
+			TotalPromptTokens:     3000,
+			TotalCompletionTokens: 0,
+		},
+	}
+
+	// Mock storage to expect log entry with Success=false
+	mockStore.On("AddAgentLog", mock.MatchedBy(func(log storage.AgentLog) bool {
+		// Verify error state is logged correctly
+		return !log.Success &&
+			log.ErrorMessage == "max empty response retries reached" &&
+			log.AgentType == "laplace" &&
+			log.UserID == userID &&
+			log.PromptTokens == 3000 &&
+			log.CompletionTokens == 0
+	})).Return(nil).Maybe()
+
+	// Call LogExecution - it should log with Success=false and ErrorMessage
+	laplaceAgent.LogExecution(context.Background(), userID, respWithError, cost)
+
+	// Verify AddAgentLog was called
+	mockStore.AssertCalled(t, "AddAgentLog", mock.Anything, mock.Anything)
 }

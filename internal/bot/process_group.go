@@ -150,11 +150,29 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	// Execute
 	resp, err := b.laplaceAgent.Execute(shutdownSafeCtx, req, toolHandler)
 	if err != nil {
-		logger.Error("laplace execution failed", "error", err)
+		// Fatal error (not a partial execution failure)
+		logger.Error("laplace execution fatal error", "error", err)
 		tgStart := time.Now()
 		b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
 		totalTelegramDuration += time.Since(tgStart)
 		telegramCallCount++
+		return
+	}
+
+	// Check for partial execution error (e.g., max retries reached)
+	if resp.Error != nil {
+		logger.Error("laplace execution failed", "error", resp.Error, "total_turns", resp.TotalTurns)
+		tgStart := time.Now()
+		b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
+		totalTelegramDuration += time.Since(tgStart)
+		telegramCallCount++
+
+		// Log partial execution for debugging
+		var cost float64
+		if resp.TotalCost != nil {
+			cost = *resp.TotalCost
+		}
+		b.laplaceAgent.LogExecution(shutdownSafeCtx, userID, resp, cost)
 		return
 	}
 

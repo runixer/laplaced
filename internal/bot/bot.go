@@ -1381,7 +1381,20 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, sa
 	// Execute via Laplace agent
 	resp, err := b.laplaceAgent.Execute(ctx, req, toolHandler)
 	if err != nil {
+		// Fatal error (not a partial execution failure)
 		return nil, fmt.Errorf("laplace execution failed: %w", err)
+	}
+
+	// Check for partial execution error (e.g., max retries reached)
+	if resp.Error != nil {
+		// Log partial execution for debugging
+		var cost float64
+		if resp.TotalCost != nil {
+			cost = *resp.TotalCost
+		}
+		b.laplaceAgent.LogExecution(ctx, userID, resp, cost)
+
+		return nil, fmt.Errorf("laplace execution failed: %w", resp.Error)
 	}
 
 	// Extract timing breakdown from RAG info

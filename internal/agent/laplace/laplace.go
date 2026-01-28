@@ -163,11 +163,37 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 
 			if emptyRetries < maxEmptyRetries {
 				emptyRetries++
-				logger.Info("retrying after empty response", "attempt", emptyRetries)
+
+				// Cache-busting: add nonce to system message to bypass poisoned cache
+				// This forces OpenRouter/Google to recompute instead of replaying cached failure
+				nonce := fmt.Sprintf("\n\n[retry-bust-%d]", time.Now().UnixNano())
+				if len(orMessages) > 0 && orMessages[0].Role == "system" {
+					if contentSlice, ok := orMessages[0].Content.([]interface{}); ok {
+						contentSlice = append(contentSlice,
+							openrouter.TextPart{Type: "text", Text: nonce})
+						orMessages[0].Content = contentSlice
+					}
+				}
+
+				logger.Info("retrying after empty response with cache buster", "attempt", emptyRetries)
 				continue
 			}
 
-			return nil, errors.New("max empty response retries reached")
+			// Build partial response with error for debugging
+			promptTokens, completionTokens := tracker.TotalTokens()
+			return &Response{
+				Content:           "", // Empty due to error
+				Error:             errors.New("max empty response retries reached"),
+				PromptTokens:      promptTokens,
+				CompletionTokens:  completionTokens,
+				TotalCost:         tracker.TotalCost(),
+				LLMDuration:       totalLLMDuration,
+				ToolDuration:      totalToolDuration,
+				TotalTurns:        tracker.TurnCount(),
+				RAGInfo:           contextData.RAGInfo,
+				Messages:          orMessages,
+				ConversationTurns: tracker.Build(),
+			}, nil
 		}
 
 		// Reset retry counter on successful response
@@ -302,7 +328,8 @@ func (l *Laplace) LogExecution(ctx context.Context, userID int64, resp *Response
 		lastResponse = lastTurn.Response
 	}
 
-	l.agentLogger.Log(ctx, agentlog.Entry{
+	// Build log entry
+	entry := agentlog.Entry{
 		UserID:            userID,
 		AgentType:         agentlog.AgentLaplace,
 		InputPrompt:       fullPrompt,
@@ -316,8 +343,14 @@ func (l *Laplace) LogExecution(ctx context.Context, userID int64, resp *Response
 		DurationMs:        int(resp.LLMDuration.Milliseconds()),
 		ConversationTurns: resp.ConversationTurns,
 		Metadata:          metadata,
-		Success:           true,
-	})
+		Success:           resp.Error == nil,
+	}
+
+	if resp.Error != nil {
+		entry.ErrorMessage = resp.Error.Error()
+	}
+
+	l.agentLogger.Log(ctx, entry)
 }
 
 // formatMessagesForLog formats OpenRouter messages into a human-readable string.

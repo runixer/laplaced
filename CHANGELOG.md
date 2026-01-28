@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Laplace agent error logging** — agent execution logs are now saved even when errors occur (e.g., "max empty response retries reached"). Previously, when Laplace execution failed, the `LogExecution()` call was skipped, causing DebugRequestBody/DebugResponseBody to be lost forever. This made debugging production issues impossible since the actual request/response bodies were not logged. The agent now returns a partial Response with Error field set, allowing full logging including all conversation turns and API request/response bodies for failed executions.
+- **Cache-busting on empty response retry** — when Gemini returns an empty response (completion_tokens: 0) with finish_reason: "stop", retry attempts now add a unique nonce `[retry-bust-<timestamp>]` to the system prompt. This forces OpenRouter/Google to bypass the poisoned cache and recompute the response instead of replaying the same cached failure. Addresses a sporadic bug with `gemini-3-pro-preview` where tool results triggered a cache hit with 0 reasoning tokens and 0 completion tokens across multiple retries.
+
 ## [0.5.4] - 2026-01-27
 
 ### Security
