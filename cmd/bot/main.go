@@ -19,12 +19,12 @@ import (
 	"github.com/runixer/laplaced/internal/app"
 	"github.com/runixer/laplaced/internal/bot"
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
 	"github.com/runixer/laplaced/internal/web"
-	"github.com/runixer/laplaced/internal/yandex"
 )
 
 var Version = "dev"
@@ -154,6 +154,13 @@ func main() {
 		logger.Error("failed to initialize storage", "error", err)
 		os.Exit(1)
 	}
+
+	// Recovery: Reset zombie artifact states (v0.6.0)
+	if err := store.RecoverArtifactStates(cfg.Agents.Extractor.GetRecoveryThreshold()); err != nil {
+		logger.Warn("failed to recover artifact states", "error", err)
+		// Non-fatal: log and continue
+	}
+
 	logger.Info("Database initialized successfully.")
 
 	openrouterClient, err := openrouter.NewClient(logger, cfg.OpenRouter.APIKey, cfg.OpenRouter.ProxyURL)
@@ -162,19 +169,6 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("OpenRouter client created successfully.")
-
-	var speechKitClient yandex.Client
-	if cfg.Yandex.Enabled {
-		var err error
-		speechKitClient, err = yandex.NewSpeechKitClient(context.Background(), logger, cfg.Yandex.APIKey, cfg.Yandex.FolderID, cfg.Yandex.Language, cfg.Yandex.AudioFormat, cfg.Yandex.SampleRate, "stt.api.cloud.yandex.net:443")
-		if err != nil {
-			logger.Error("failed to create speechkit client", "error", err)
-			os.Exit(1)
-		}
-		logger.Info("Yandex SpeechKit client created successfully.")
-	} else {
-		logger.Info("Yandex SpeechKit is disabled.")
-	}
 
 	api, err := telegram.NewExtendedClient(cfg.Telegram.Token, cfg.Telegram.ProxyURL)
 	if err != nil {
@@ -197,13 +191,31 @@ func main() {
 		os.Exit(1)
 	}
 
-	b, err := bot.NewBot(logger, api, cfg, store, store, store, store, store, store, openrouterClient, speechKitClient, services.RAGService, services.ContextService, translator)
+	// Create file storage and handler if artifacts are enabled
+	var fileHandler *bot.FileHandler
+	if cfg.Artifacts.Enabled {
+		fileStorage := files.NewFileStorage(cfg.Artifacts.StoragePath, logger)
+		fileHandler = bot.NewFileHandler(fileStorage, store, logger)
+		logger.Info("Artifacts system enabled", "storage_path", cfg.Artifacts.StoragePath)
+	} else {
+		logger.Info("Artifacts system disabled")
+	}
+
+	b, err := bot.NewBot(logger, api, cfg, store, store, store, store, store, store, openrouterClient, services.RAGService, services.ContextService, translator)
 	if err != nil {
 		logger.Error("failed to create bot", "error", err)
 		os.Exit(1)
 	}
 	b.SetAgentLogger(services.AgentLogger)
 	b.SetLaplaceAgent(services.LaplaceAgent)
+
+	// Set file handler on bot's file processor if enabled
+	if fileHandler != nil {
+		b.SetFileHandler(fileHandler)
+	}
+
+	// Set artifact repository for linking artifacts to messages (v0.6.0)
+	b.SetArtifactRepo(store)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -232,13 +244,14 @@ func main() {
 	}
 
 	// Start web server for stats and webhooks
-	webServer, err := web.NewServer(ctx, logger, cfg, store, store, store, store, store, store, store, b, services.RAGService)
+	webServer, err := web.NewServer(ctx, logger, cfg, store, store, store, store, store, store, store, store, b, services.RAGService)
 	if err != nil {
 		logger.Error("failed to create web server", "error", err)
 		os.Exit(1)
 	}
 	webServer.SetAgentLogRepo(store)
-	webServer.SetPeopleRepository(store) // v0.5.1: People page
+	webServer.SetPeopleRepository(store)   // v0.5.1: People page
+	webServer.SetArtifactRepository(store) // v0.5.2: Artifacts page
 	srvDone := make(chan struct{})
 	go func() {
 		defer close(srvDone)

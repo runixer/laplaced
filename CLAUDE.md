@@ -37,20 +37,21 @@ internal/
   agent/                 # Unified agent interface and types
     archivist/           # Fact extraction from conversations
     enricher/            # Query enrichment for RAG
+    extractor/           # File metadata extraction (artifacts system)
     laplace/             # Main chat agent with tool calls
     merger/              # Topic merge verification
-    reranker/            # Topic relevance reranking
+    reranker/            # Topic relevance reranking (with artifacts)
     splitter/            # Topic extraction from conversations
     prompts/             # Shared prompt parameter types
   bot/                   # Core bot logic, message handlers, Telegram updates processing
   config/                # Configuration loading (YAML + env vars)
+  files/                 # File storage and processing utilities
   storage/               # SQLite repository layer (pure Go, no CGO)
-  rag/                   # Vector search, topic retrieval, context building
+  rag/                   # Vector search, topic/artifact retrieval, context building
   memory/                # Facts extraction, topic processing, long-term memory
   openrouter/            # LLM client (Gemini/OpenRouter API)
   telegram/              # Telegram API client wrapper
   testutil/              # Centralized test mocks, fixtures, and helpers
-  yandex/                # Yandex SpeechKit client (legacy, unused)
   web/                   # HTTP server for dashboard and webhooks
   i18n/                  # Localization (en/ru)
   markdown/              # Markdown processing
@@ -69,11 +70,13 @@ internal/
 
 1. Telegram update → `bot.ProcessUpdate()`
 2. Message grouping (waits for user to finish typing)
-3. RAG retrieval: vector search for relevant topics/facts
-4. Context assembly: system prompt + profile facts + RAG results + session messages
-5. LLM generation via OpenRouter
-6. Response sent to user
-7. Session archival → topic creation → facts extraction (async)
+3. File handling: save artifacts (images, voice, PDF, documents) with deduplication
+4. RAG retrieval: vector search for relevant topics/facts/artifacts
+5. Context assembly: system prompt + profile facts + RAG results + session messages (+ artifact content)
+6. LLM generation via OpenRouter
+7. Response sent to user
+8. Background: Extractor agent processes pending artifacts (summary, keywords, entities)
+9. Session archival → topic creation → facts extraction (async)
 
 ### Memory System
 
@@ -95,11 +98,12 @@ type Agent interface {
 
 **Agent Types:**
 - **Laplace** (`agent/laplace/`): Main chat agent with tool calls (search_history, search_web, manage_memory)
-- **Reranker** (`agent/reranker/`): Selects most relevant topics from vector search candidates using tool calls
+- **Reranker** (`agent/reranker/`): Selects most relevant topics, people, and artifacts from vector search candidates using tool calls
 - **Enricher** (`agent/enricher/`): Expands user queries with context for better RAG retrieval
 - **Splitter** (`agent/splitter/`): Extracts topic summaries from conversation chunks
 - **Merger** (`agent/merger/`): Verifies if two topics should be merged
 - **Archivist** (`agent/archivist/`): Extracts and manages user facts from conversations
+- **Extractor** (`agent/extractor/`): Processes artifact files to extract metadata (summary, keywords, entities, rag_hints)
 
 **Agent Wiring (in `cmd/bot/main.go`):**
 ```go
@@ -108,6 +112,7 @@ ragService.SetSplitterAgent(splitterAgent)
 ragService.SetRerankerAgent(rerankerAgent)
 ragService.SetMergerAgent(mergerAgent)
 memoryService.SetArchivistAgent(archivistAgent)
+ragService.SetExtractorAgent(extractorAgent)
 ```
 
 **SharedContext**: Agents receive user profile and recent topics via `agent.SharedContext` to avoid redundant DB queries.
@@ -221,14 +226,16 @@ All test mocks are centralized in `internal/testutil/` package:
 - `MockStorage` — mock for all storage repositories (implements all repo interfaces)
 - `MockOpenRouterClient` — mock for LLM client
 - `MockFileDownloader` — mock for file downloads
-- `MockYandexClient` — mock for speech recognition
 - `MockVectorSearcher` — mock for vector search interface
+- `MockArtifactRepository` — mock for artifact storage
+- `MockFileStorage` — mock for file storage operations
 
 **Fixtures (`fixtures.go`):**
 - `TestUser()`, `TestUsers()` — sample users
 - `TestFacts()` — sample facts
 - `TestTopic()`, `TestTopics()` — sample topics
 - `TestMessages()` — sample conversation messages
+- `TestArtifact()`, `TestArtifacts()` — sample artifacts (files)
 
 **Helpers (`helpers.go`):**
 - `TestLogger()` — discarding logger for tests
@@ -281,6 +288,8 @@ go run ./cmd/testbot send "test"
 # BAD - tests old compiled code
 go build -o testbot ./cmd/testbot && ./testbot send "test"
 ```
+
+**NOTE:** Never grep testbot output — it's already minimized and `--verbose` is for full error logging. Use `--db ""` for clean testing with temporary database.
 
 **Features:**
 - Full LLM integration (OpenRouter/Gemini)
@@ -428,6 +437,23 @@ Key env vars:
 - `LAPLACED_TELEGRAM_TOKEN` - Bot token
 - `LAPLACED_OPENROUTER_API_KEY` - LLM API key
 - `LAPLACED_ALLOWED_USER_IDS` - Comma-separated Telegram user IDs
+- `LAPLACED_ARTIFACTS_ENABLED` - Enable/disable artifacts system
+- `LAPLACED_ARTIFACTS_STORAGE_PATH` - Path for artifact file storage
+
+**Artifacts system config:**
+```yaml
+artifacts:
+  enabled: true
+  storage_path: "data/artifacts"
+  allowed_types: ["image", "voice", "pdf", "video_note", "video", "document"]
+
+agents:
+  extractor:
+    model: "google/gemini-3-flash-preview"
+    max_file_size_mb: 20
+    polling_interval: "30s"
+    max_concurrent: 3
+```
 
 ## Language & Prompts
 
@@ -600,3 +626,6 @@ gh run watch <run_id> --exit-status
 ## Related Documentation
 
 - @.claude/deploy.md — Production deployment via Gitea
+- @docs/architecture/artifacts-system.md — Artifacts system architecture (files storage and RAG integration)
+- @docs/architecture/flash-reranker.md — Flash reranker for intelligent RAG filtering
+- @docs/architecture/message-processing-flow.md — Message processing pipeline

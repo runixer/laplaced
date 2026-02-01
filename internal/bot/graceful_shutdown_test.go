@@ -34,7 +34,7 @@ func TestProcessMessageGroup_CompletesOnContextCancel(t *testing.T) {
 	cfg.RAG.Enabled = false
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
-	laplaceAgent := laplace.New(cfg, mockORClient, ragService, mockStore, mockStore, translator, logger)
+	laplaceAgent := laplace.New(cfg, mockORClient, ragService, mockStore, mockStore, nil, translator, logger)
 
 	bot := &Bot{
 		api:             mockAPI,
@@ -141,7 +141,7 @@ func TestProcessMessageGroup_LLMContextNotCancelled(t *testing.T) {
 	cfg.RAG.Enabled = false
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
-	laplaceAgent := laplace.New(cfg, mockORClient, ragService, mockStore, mockStore, translator, logger)
+	laplaceAgent := laplace.New(cfg, mockORClient, ragService, mockStore, mockStore, nil, translator, logger)
 
 	bot := &Bot{
 		api:             mockAPI,
@@ -243,7 +243,7 @@ func TestProcessMessageGroup_VoiceCompletesOnContextCancel(t *testing.T) {
 	cfg.RAG.Enabled = false
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
-	laplaceAgent := laplace.New(cfg, mockORClient, ragService, mockStore, mockStore, translator, logger)
+	laplaceAgent := laplace.New(cfg, mockORClient, ragService, mockStore, mockStore, nil, translator, logger)
 
 	bot := &Bot{
 		api:             mockAPI,
@@ -349,7 +349,7 @@ func TestProcessMessageGroup_VoiceDownloadContextNotCancelled(t *testing.T) {
 	cfg.RAG.Enabled = false
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
-	laplaceAgent := laplace.New(cfg, mockORClient, ragService, mockStore, mockStore, translator, logger)
+	laplaceAgent := laplace.New(cfg, mockORClient, ragService, mockStore, mockStore, nil, translator, logger)
 
 	bot := &Bot{
 		api:             mockAPI,

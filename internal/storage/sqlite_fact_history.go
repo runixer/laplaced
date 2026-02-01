@@ -80,6 +80,12 @@ func (s *SQLiteStore) GetFactHistory(userID int64, limit int) ([]FactHistory, er
 		}
 		history = append(history, h)
 	}
+
+	// Check for iteration errors (CRIT-6 fix)
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating fact history: %w", err)
+	}
+
 	return history, nil
 }
 

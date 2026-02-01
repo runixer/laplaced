@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/runixer/laplaced/internal/agent"
@@ -32,6 +33,13 @@ type FactVectorItem struct {
 type PersonVectorItem struct {
 	PersonID  int64
 	Embedding []float32
+}
+
+// ArtifactVectorItem stores artifact summary embeddings for vector search (v0.6.0).
+type ArtifactVectorItem struct {
+	ArtifactID int64
+	UserID     int64
+	Embedding  []float32
 }
 
 // ProcessingStats contains detailed statistics about session processing.
@@ -124,26 +132,36 @@ type Service struct {
 	msgRepo              storage.MessageRepository
 	maintenanceRepo      storage.MaintenanceRepository
 	peopleRepo           storage.PeopleRepository // v0.5.1: People repository
+	artifactRepo         storage.ArtifactRepository
 	client               openrouter.Client
 	memoryService        *memory.Service
 	translator           *i18n.Translator
 	agentLogger          *agentlog.Logger
-	enricherAgent        agent.Agent                  // Query enrichment agent
-	splitterAgent        agent.Agent                  // Topic splitting agent
-	mergerAgent          agent.Agent                  // Topic merging agent
-	rerankerAgent        agent.Agent                  // Topic reranking agent
-	topicVectors         map[int64][]TopicVectorItem  // UserID -> []TopicVectorItem
-	factVectors          map[int64][]FactVectorItem   // UserID -> []FactVectorItem
-	peopleVectors        map[int64][]PersonVectorItem // UserID -> []PersonVectorItem (v0.5.1)
-	maxLoadedTopicID     int64                        // Track max loaded topic ID for incremental loading
-	maxLoadedFactID      int64                        // Track max loaded fact ID for incremental loading
-	maxLoadedPersonID    int64                        // Track max loaded person ID for incremental loading (v0.5.1)
+	enricherAgent        agent.Agent                    // Query enrichment agent
+	splitterAgent        agent.Agent                    // Topic splitting agent
+	mergerAgent          agent.Agent                    // Topic merging agent
+	rerankerAgent        agent.Agent                    // Topic reranking agent
+	extractorAgent       agent.Agent                    // Artifact extraction agent (Phase 3)
+	topicVectors         map[int64][]TopicVectorItem    // UserID -> []TopicVectorItem
+	factVectors          map[int64][]FactVectorItem     // UserID -> []FactVectorItem
+	peopleVectors        map[int64][]PersonVectorItem   // UserID -> []PersonVectorItem (v0.5.1)
+	artifactVectors      map[int64][]ArtifactVectorItem // UserID -> []ArtifactVectorItem (v0.6.0)
+	maxLoadedTopicID     int64                          // Track max loaded topic ID for incremental loading
+	maxLoadedFactID      int64                          // Track max loaded fact ID for incremental loading
+	maxLoadedPersonID    int64                          // Track max loaded person ID for incremental loading (v0.5.1)
+	maxLoadedArtifactID  int64                          // Track max loaded artifact ID for incremental loading (v0.6.0)
+	contextService       *agent.ContextService          // Context service for loading user context
 	mu                   sync.RWMutex
 	stopChan             chan struct{}
 	consolidationTrigger chan struct{}
 	wg                   sync.WaitGroup
 	processingTopics     sync.Map // Track topics currently being processed for facts (prevents race condition)
 	processingUsers      sync.Map // Track users currently being processed (prevents concurrent people merges)
+	processingArtifacts  sync.Map // Track artifacts currently being processed (prevents concurrent extraction)
+
+	// Shutdown coordination (v0.6.0 - CRIT-2)
+	shuttingDown      atomic.Bool // Signal to stop accepting new work
+	inFlightArtifacts sync.Map    // artifactID -> time.Time for visibility during shutdown
 }
 
 // NewService creates a new RAG service.
@@ -162,6 +180,7 @@ func NewService(logger *slog.Logger, cfg *config.Config, topicRepo storage.Topic
 		topicVectors:         make(map[int64][]TopicVectorItem),
 		factVectors:          make(map[int64][]FactVectorItem),
 		peopleVectors:        make(map[int64][]PersonVectorItem),
+		artifactVectors:      make(map[int64][]ArtifactVectorItem),
 		stopChan:             make(chan struct{}),
 		consolidationTrigger: make(chan struct{}, 1),
 	}
@@ -192,6 +211,16 @@ func (s *Service) SetRerankerAgent(a agent.Agent) {
 	s.rerankerAgent = a
 }
 
+// SetExtractorAgent sets the artifact extraction agent.
+func (s *Service) SetExtractorAgent(a agent.Agent) {
+	s.extractorAgent = a
+}
+
+// SetArtifactRepository sets the artifact repository.
+func (s *Service) SetArtifactRepository(artifactRepo storage.ArtifactRepository) {
+	s.artifactRepo = artifactRepo
+}
+
 // tryStartProcessingTopic attempts to mark a topic as being processed.
 // Returns true if this goroutine should process it, false if another is already processing.
 func (s *Service) tryStartProcessingTopic(topicID int64) bool {
@@ -217,9 +246,26 @@ func (s *Service) finishProcessingUser(userID int64) {
 	s.processingUsers.Delete(userID)
 }
 
+// tryStartProcessingArtifact attempts to mark an artifact as being processed.
+// Returns true if this goroutine should process it, false if another is already processing.
+func (s *Service) tryStartProcessingArtifact(artifactID int64) bool {
+	_, alreadyProcessing := s.processingArtifacts.LoadOrStore(artifactID, true)
+	return !alreadyProcessing
+}
+
+// finishProcessingArtifact marks an artifact as no longer being processed.
+func (s *Service) finishProcessingArtifact(artifactID int64) {
+	s.processingArtifacts.Delete(artifactID)
+}
+
 // SetPeopleRepository sets the people repository for person search (v0.5.1).
 func (s *Service) SetPeopleRepository(pr storage.PeopleRepository) {
 	s.peopleRepo = pr
+}
+
+// SetContextService sets the context service for loading user context.
+func (s *Service) SetContextService(cs *agent.ContextService) {
+	s.contextService = cs
 }
 
 // Start initializes and starts the RAG service background loops.
@@ -231,7 +277,7 @@ func (s *Service) Start(ctx context.Context) error {
 
 	s.logger.Info("Starting RAG service...")
 
-	// 1. Load existing vectors (topics + facts)
+	// 1. Load existing vectors (topics + facts + people)
 	if err := s.ReloadVectors(); err != nil {
 		s.logger.Error("failed to load vectors", "error", err)
 	}
@@ -248,13 +294,45 @@ func (s *Service) Start(ctx context.Context) error {
 	s.wg.Add(1)
 	go s.runConsolidationLoop(ctx)
 
+	// 5. Start background artifact extraction (Phase 3, v0.6.0)
+	if s.cfg.Artifacts.Enabled {
+		s.wg.Add(1)
+		go s.artifactExtractionLoop(ctx)
+		s.logger.Info("Artifact extraction started")
+	}
+
 	return nil
 }
 
 // Stop gracefully shuts down the RAG service.
+// Signals to stop accepting new work and waits for in-flight operations to complete.
 func (s *Service) Stop() {
+	// Signal to stop accepting new work (v0.6.0 - CRIT-2)
+	s.shuttingDown.Store(true)
+
+	// Log in-flight artifacts for visibility
+	inFlightCount := 0
+	s.inFlightArtifacts.Range(func(key, value interface{}) bool {
+		artifactID := key.(int64)
+		startTime := value.(time.Time)
+		s.logger.Info("waiting for in-flight artifact",
+			"artifact_id", artifactID,
+			"running_for", time.Since(startTime).Round(time.Second).String(),
+		)
+		inFlightCount++
+		return true
+	})
+
+	if inFlightCount > 0 {
+		s.logger.Info("shutdown: waiting for in-flight work to complete",
+			"in_flight_artifacts", inFlightCount,
+		)
+	}
+
 	close(s.stopChan)
 	s.wg.Wait()
+
+	s.logger.Info("RAG service stopped")
 }
 
 // TriggerConsolidation triggers a consolidation run.
@@ -303,15 +381,16 @@ func (s *Service) ReloadVectors() error {
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	// Reset maps for full reload
 	s.topicVectors = make(map[int64][]TopicVectorItem)
 	s.factVectors = make(map[int64][]FactVectorItem)
 	s.peopleVectors = make(map[int64][]PersonVectorItem)
+	s.artifactVectors = make(map[int64][]ArtifactVectorItem)
 	s.maxLoadedTopicID = 0
 	s.maxLoadedFactID = 0
 	s.maxLoadedPersonID = 0
+	s.maxLoadedArtifactID = 0
 
 	tCount := 0
 	for _, t := range topics {
@@ -356,8 +435,25 @@ func (s *Service) ReloadVectors() error {
 		}
 	}
 
-	s.logger.Info("Loaded vectors (full)", "topics", tCount, "facts", fCount, "people", pCount)
+	// Release lock before loading artifacts (LoadNewArtifactSummaries acquires its own lock)
+	s.mu.Unlock()
+
+	// v0.6.0: Load artifact summaries BEFORE logging (so we can include count)
+	artifactCount := 0
+	if err := s.LoadNewArtifactSummaries(); err != nil {
+		s.logger.Warn("failed to load new artifact summaries", "error", err)
+		// Continue without artifact summaries - not critical
+	} else {
+		s.mu.RLock()
+		for _, userVectors := range s.artifactVectors {
+			artifactCount += len(userVectors)
+		}
+		s.mu.RUnlock()
+	}
+
+	s.logger.Info("Loaded vectors (full)", "topics", tCount, "facts", fCount, "people", pCount, "artifacts", artifactCount)
 	UpdateVectorIndexMetrics(tCount, fCount, pCount)
+
 	return nil
 }
 
@@ -465,5 +561,88 @@ func (s *Service) LoadNewVectors() error {
 		}
 		UpdateVectorIndexMetrics(totalTopics, totalFacts, totalPeople)
 	}
+
+	// v0.6.0: Load new artifact summaries (incremental)
+	// Call locked variant since we already hold s.mu.Lock()
+	if err := s.loadNewArtifactSummariesLocked(); err != nil {
+		s.logger.Warn("failed to load new artifact summaries", "error", err)
+		// Continue without artifact summaries - not critical
+	}
+
 	return nil
+}
+
+// loadNewArtifactSummariesLocked загружает artifact summaries с захваченным мьютексом.
+// Требует: s.mu.Lock() уже вызван.
+// Инкрементально добавляет новые artifact summaries к уже загруженным (как LoadNewVectors для topics/facts/people).
+func (s *Service) loadNewArtifactSummariesLocked() error {
+	if s.artifactRepo == nil {
+		s.logger.Debug("artifactRepo is nil, skipping artifact loading")
+		return nil
+	}
+
+	minArtifactID := s.maxLoadedArtifactID
+
+	// Check if another goroutine already loaded these artifacts
+	if minArtifactID < s.maxLoadedArtifactID {
+		s.logger.Debug("Skipping incremental artifact load - already loaded by another goroutine")
+		return nil
+	}
+
+	// Load artifacts per-user (same pattern as topics/facts/people for data isolation)
+	count := 0
+	users := s.cfg.Bot.AllowedUserIDs
+	if len(users) == 0 {
+		return nil
+	}
+
+	for _, userID := range users {
+		filter := storage.ArtifactFilter{UserID: userID, State: "ready"}
+		artifacts, _, err := s.artifactRepo.GetArtifacts(filter, 1000, 0)
+		if err != nil {
+			s.logger.Error("loadNewArtifactSummariesLocked: query failed", "user_id", userID, "error", err)
+			continue // Skip this user, try next
+		}
+
+		// Incremental load: append new artifacts only
+		for _, artifact := range artifacts {
+			if len(artifact.Embedding) > 0 && artifact.ID > minArtifactID {
+				s.artifactVectors[artifact.UserID] = append(
+					s.artifactVectors[artifact.UserID],
+					ArtifactVectorItem{
+						ArtifactID: artifact.ID,
+						UserID:     artifact.UserID,
+						Embedding:  artifact.Embedding,
+					},
+				)
+				if artifact.ID > s.maxLoadedArtifactID {
+					s.maxLoadedArtifactID = artifact.ID
+				}
+				count++
+			}
+		}
+	}
+
+	// Count per-user for metrics
+	perUserCounts := make(map[int64]int)
+	for userID, vectors := range s.artifactVectors {
+		perUserCounts[userID] = len(vectors)
+	}
+	UpdateArtifactSummaryMetrics(perUserCounts)
+
+	if count > 0 {
+		s.logger.Info("Loaded artifact summaries (incremental)", "new_artifacts", count, "max_id", s.maxLoadedArtifactID)
+	} else {
+		s.logger.Debug("No new artifact summaries to load", "min_id", minArtifactID)
+	}
+
+	return nil
+}
+
+// LoadNewArtifactSummaries incrementally loads only new artifact summary embeddings.
+// Called after artifact processing completes.
+func (s *Service) LoadNewArtifactSummaries() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.loadNewArtifactSummariesLocked()
 }

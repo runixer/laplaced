@@ -72,7 +72,7 @@ func (r *Reranker) Description() string {
 
 // Execute runs the reranker with the given request.
 // Required params: candidates, contextualized_query, original_query, current_messages
-// Optional params: media_parts, person_candidates (v0.5.1)
+// Optional params: media_parts, person_candidates (v0.5.1), artifact_candidates (v0.6.0)
 // Uses SharedContext for user_profile and recent_topics if available.
 func (r *Reranker) Execute(ctx context.Context, req *agent.Request) (*agent.Response, error) {
 	// Extract parameters
@@ -83,6 +83,8 @@ func (r *Reranker) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 
 	// v0.5.1: Optional person candidates
 	personCandidates, _ := req.Params[ParamPersonCandidates].([]PersonCandidate)
+	// v0.6.0: Optional artifact candidates
+	artifactCandidates, _ := req.Params[ParamArtifactCandidates].([]ArtifactCandidate)
 
 	contextualizedQuery, _ := req.Params[ParamContextualizedQuery].(string)
 	originalQuery, _ := req.Params[ParamOriginalQuery].(string)
@@ -109,7 +111,7 @@ func (r *Reranker) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 		}
 	}
 
-	result, err := r.rerank(ctx, userID, candidates, personCandidates, contextualizedQuery, originalQuery, currentMessages, userProfile, recentTopics, mediaParts)
+	result, err := r.rerank(ctx, userID, candidates, personCandidates, artifactCandidates, contextualizedQuery, originalQuery, currentMessages, userProfile, recentTopics, mediaParts)
 	if err != nil {
 		return nil, err
 	}
@@ -117,8 +119,9 @@ func (r *Reranker) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 	return &agent.Response{
 		Structured: result,
 		Metadata: map[string]any{
-			"topics_count": len(result.Topics),
-			"people_count": len(result.People),
+			"topics_count":    len(result.Topics),
+			"people_count":    len(result.People),
+			"artifacts_count": len(result.Artifacts),
 		},
 	}, nil
 }
@@ -129,6 +132,7 @@ func (r *Reranker) rerank(
 	userID int64,
 	candidates []Candidate,
 	personCandidates []PersonCandidate,
+	artifactCandidates []ArtifactCandidate,
 	contextualizedQuery string,
 	originalQuery string,
 	currentMessages string,
@@ -137,8 +141,10 @@ func (r *Reranker) rerank(
 	mediaParts []interface{},
 ) (*Result, error) {
 	cfg := r.cfg.Agents.Reranker
-	if !cfg.Enabled || len(candidates) == 0 {
-		return r.fallbackToVectorTop(candidates, personCandidates, cfg.MaxTopics), nil
+	// v0.6.0: Use LLM reranking if we have any candidates (topics, people, or artifacts)
+	// Only fallback immediately if ALL candidate lists are empty
+	if !cfg.Enabled || (len(candidates) == 0 && len(personCandidates) == 0 && len(artifactCandidates) == 0) {
+		return r.fallbackToVectorTop(candidates, personCandidates, artifactCandidates, cfg.Topics.Max), nil
 	}
 
 	// Parse timeouts
@@ -182,20 +188,24 @@ func (r *Reranker) rerank(
 
 	// v0.5.1: Build person candidate map
 	peopleMap := r.buildPeopleMap(personCandidates)
+	// v0.6.0: Build artifact candidate map
+	artifactsMap := r.buildArtifactsMap(artifactCandidates)
 
 	// Build initial prompt
 	lang := r.cfg.Bot.Language
-	selectCandidatesMax := cfg.Candidates / 2
-	if selectCandidatesMax < cfg.MaxTopics*2 {
-		selectCandidatesMax = cfg.MaxTopics * 2
+	selectCandidatesMax := cfg.Topics.CandidatesLimit / 2
+	if selectCandidatesMax < cfg.Topics.Max*2 {
+		selectCandidatesMax = cfg.Topics.Max * 2
 	}
 
 	systemPrompt, err := r.translator.GetTemplate(lang, "rag.reranker_system_prompt", prompts.RerankerParams{
 		Profile:       userProfile,
 		RecentTopics:  recentTopics,
-		MaxTopics:     cfg.MaxTopics,
-		MinCandidates: cfg.MaxTopics,
+		MaxTopics:     cfg.Topics.Max,
+		MinCandidates: cfg.Topics.Max,
 		MaxCandidates: selectCandidatesMax,
+		MaxPeople:     cfg.People.Max,
+		MaxArtifacts:  cfg.Artifacts.Max,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to build reranker system prompt: %w", err)
@@ -209,13 +219,16 @@ func (r *Reranker) rerank(
 		candidatePeople = append(candidatePeople, c.Person)
 	}
 	peopleCandidatesList := storage.FormatPeople(candidatePeople, "") // Plain list without XML wrapper
+	// v0.6.0: Format artifact candidates
+	artifactsCandidatesList := r.formatArtifactCandidates(artifactCandidates)
 	userPrompt, err := r.translator.GetTemplate(lang, "rag.reranker_user_prompt", prompts.RerankerUserParams{
-		Date:             time.Now().Format("2006-01-02"),
-		Query:            originalQuery,
-		EnrichedQuery:    contextualizedQuery,
-		CurrentMessages:  currentMessages,
-		Candidates:       candidatesList,
-		PeopleCandidates: peopleCandidatesList,
+		Date:               time.Now().Format("2006-01-02"),
+		Query:              originalQuery,
+		EnrichedQuery:      contextualizedQuery,
+		CurrentMessages:    currentMessages,
+		Candidates:         candidatesList,
+		PeopleCandidates:   peopleCandidatesList,
+		ArtifactCandidates: artifactsCandidatesList,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to build reranker user prompt: %w", err)
@@ -276,7 +289,8 @@ func (r *Reranker) rerank(
 		var toolChoice any
 		var responseFormat interface{}
 
-		if toolCallCount == 0 {
+		// v0.6.0: If no topic candidates (only artifacts/people), skip tool call and go directly to JSON
+		if toolCallCount == 0 && len(candidates) > 0 {
 			toolChoice = map[string]any{
 				"type": "function",
 				"function": map[string]any{
@@ -324,9 +338,10 @@ func (r *Reranker) rerank(
 				"reason", fallbackReason,
 			)
 			tr.fallbackReason = fallbackReason
-			result := r.fallbackFromState(st, candidates, personCandidates, cfg.MaxTopics)
+			result := r.fallbackFromState(st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max)
 			tr.selectedTopics = result.Topics
 			tr.selectedPeople = result.People
+			tr.selectedArtifacts = result.Artifacts
 			r.saveTrace(userID, originalQuery, contextualizedQuery, tr, startTime)
 			return result, nil
 		}
@@ -342,9 +357,10 @@ func (r *Reranker) rerank(
 		if len(resp.Choices) == 0 {
 			r.logger.Warn("reranker got empty response")
 			tr.fallbackReason = "empty_response"
-			result := r.fallbackFromState(st, candidates, personCandidates, cfg.MaxTopics)
+			result := r.fallbackFromState(st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max)
 			tr.selectedTopics = result.Topics
 			tr.selectedPeople = result.People
+			tr.selectedArtifacts = result.Artifacts
 			r.saveTrace(userID, originalQuery, contextualizedQuery, tr, startTime)
 			return result, nil
 		}
@@ -428,15 +444,17 @@ func (r *Reranker) rerank(
 		}
 
 		// No tool calls - expect final JSON response
-		if toolCallCount == 0 {
+		// v0.6.0: Exception: if no topic candidates, skipping tool call is expected
+		if toolCallCount == 0 && len(candidates) > 0 {
 			r.logger.Warn("reranker protocol violation: no tool calls before final response",
 				"user_id", userID,
 				"content_preview", truncateForLog(choice.Message.Content, 200),
 			)
 			tr.fallbackReason = "protocol_violation"
-			fallbackResult := r.fallbackToVectorTop(candidates, personCandidates, cfg.MaxTopics)
+			fallbackResult := r.fallbackToVectorTop(candidates, personCandidates, artifactCandidates, cfg.Topics.Max)
 			tr.selectedTopics = fallbackResult.Topics
 			tr.selectedPeople = fallbackResult.People
+			tr.selectedArtifacts = fallbackResult.Artifacts
 			r.saveTrace(userID, originalQuery, contextualizedQuery, tr, startTime)
 			return fallbackResult, nil
 		}
@@ -445,9 +463,10 @@ func (r *Reranker) rerank(
 		if err != nil {
 			r.logger.Warn("failed to parse reranker response", "error", err, "content", choice.Message.Content)
 			tr.fallbackReason = "parse_error"
-			fallbackResult := r.fallbackFromState(st, candidates, personCandidates, cfg.MaxTopics)
+			fallbackResult := r.fallbackFromState(st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max)
 			tr.selectedTopics = fallbackResult.Topics
 			tr.selectedPeople = fallbackResult.People
+			tr.selectedArtifacts = fallbackResult.Artifacts
 			r.saveTrace(userID, originalQuery, contextualizedQuery, tr, startTime)
 			return fallbackResult, nil
 		}
@@ -455,12 +474,14 @@ func (r *Reranker) rerank(
 		// Validate topics and people
 		result = r.filterValidTopics(userID, result, candidateMap)
 		result = r.filterValidPeople(userID, result, peopleMap)
-		if len(result.Topics) == 0 && len(result.People) == 0 {
+		result = r.filterValidArtifacts(userID, result, artifactsMap)
+		if len(result.Topics) == 0 && len(result.People) == 0 && len(result.Artifacts) == 0 {
 			r.logger.Warn("reranker returned no valid results (all hallucinated)", "user_id", userID)
 			tr.fallbackReason = "all_hallucinated"
-			fallbackResult := r.fallbackFromState(st, candidates, personCandidates, cfg.MaxTopics)
+			fallbackResult := r.fallbackFromState(st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max)
 			tr.selectedTopics = fallbackResult.Topics
 			tr.selectedPeople = fallbackResult.People
+			tr.selectedArtifacts = fallbackResult.Artifacts
 			r.saveTrace(userID, originalQuery, contextualizedQuery, tr, startTime)
 			return fallbackResult, nil
 		}
@@ -471,6 +492,8 @@ func (r *Reranker) rerank(
 			"topics_out", len(result.Topics),
 			"people_candidates_in", len(personCandidates),
 			"people_out", len(result.People),
+			"artifacts_candidates_in", len(artifactCandidates),
+			"artifacts_out", len(result.Artifacts),
 			"tool_calls", toolCallCount,
 			"duration_ms", int(time.Since(startTime).Milliseconds()),
 			"cost_usd", tr.tracker.TotalCostValue(),
@@ -478,6 +501,7 @@ func (r *Reranker) rerank(
 
 		tr.selectedTopics = result.Topics
 		tr.selectedPeople = result.People
+		tr.selectedArtifacts = result.Artifacts
 		r.saveTrace(userID, originalQuery, contextualizedQuery, tr, startTime)
 
 		return result, nil
@@ -486,9 +510,10 @@ func (r *Reranker) rerank(
 	// Max tool calls reached
 	r.logger.Warn("reranker max tool calls reached", "max", cfg.MaxToolCalls)
 	tr.fallbackReason = "max_tool_calls"
-	result := r.fallbackFromState(st, candidates, personCandidates, cfg.MaxTopics)
+	result := r.fallbackFromState(st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max)
 	tr.selectedTopics = result.Topics
 	tr.selectedPeople = result.People
+	tr.selectedArtifacts = result.Artifacts
 	r.saveTrace(userID, originalQuery, contextualizedQuery, tr, startTime)
 	return result, nil
 }
@@ -511,14 +536,53 @@ func (r *Reranker) buildPeopleMap(candidates []PersonCandidate) map[int64]Person
 	return m
 }
 
+// buildArtifactsMap creates a map for quick artifact lookup (v0.6.0).
+func (r *Reranker) buildArtifactsMap(candidates []ArtifactCandidate) map[int64]ArtifactCandidate {
+	m := make(map[int64]ArtifactCandidate, len(candidates))
+	for _, c := range candidates {
+		m[c.ArtifactID] = c
+	}
+	return m
+}
+
 // formatCandidatesForReranker formats candidates for the prompt.
 func (r *Reranker) formatCandidatesForReranker(candidates []Candidate) string {
 	var sb strings.Builder
 	for _, c := range candidates {
 		date := c.Topic.CreatedAt.Format("2006-01-02")
 		sizeStr := formatSizeChars(c.SizeChars)
-		fmt.Fprintf(&sb, "[Topic:%d] %s | %d msgs, %s | %s\n",
-			c.TopicID, date, c.MessageCount, sizeStr, c.Topic.Summary)
+		fmt.Fprintf(&sb, "[Topic:%d] (%.2f) %s | %d msgs, %s | %s\n",
+			c.TopicID, c.Score, date, c.MessageCount, sizeStr, c.Topic.Summary)
+	}
+	return sb.String()
+}
+
+// formatArtifactCandidates formats artifact candidates for the prompt (v0.6.0).
+func (r *Reranker) formatArtifactCandidates(candidates []ArtifactCandidate) string {
+	if len(candidates) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	for _, c := range candidates {
+		var parts []string
+
+		// Keywords
+		if len(c.Keywords) > 0 {
+			parts = append(parts, strings.Join(c.Keywords, ", "))
+		}
+		// Entities (MED-2: include extracted entities in context)
+		if len(c.Entities) > 0 {
+			parts = append(parts, "Entities: "+strings.Join(c.Entities, ", "))
+		}
+		// Note: RAGHints (Questions) removed in v0.6.0 - too verbose and redundant with summary
+
+		extrasStr := ""
+		if len(parts) > 0 {
+			extrasStr = " | " + strings.Join(parts, " | ")
+		}
+
+		fmt.Fprintf(&sb, "[Artifact:%d] (%.2f) %s: \"%s\"%s | %s\n",
+			c.ArtifactID, c.Score, c.FileType, c.OriginalName, extrasStr, c.Summary)
 	}
 	return sb.String()
 }
@@ -661,9 +725,21 @@ func (r *Reranker) parseResponse(content string) (*Result, error) {
 		people = r.parsePeopleArray(resp.People)
 	}
 
+	// v0.6.0: Parse artifacts
+	var artifacts []ArtifactSelection
+
+	if len(resp.ArtifactIDs) > 0 {
+		artifacts = r.parseArtifactArray(resp.ArtifactIDs)
+	}
+
+	if len(artifacts) == 0 && len(resp.Artifacts) > 0 {
+		artifacts = r.parseArtifactArray(resp.Artifacts)
+	}
+
 	return &Result{
-		Topics: topics,
-		People: people,
+		Topics:    topics,
+		People:    people,
+		Artifacts: artifacts,
 	}, nil
 }
 
@@ -674,7 +750,7 @@ func (r *Reranker) parseTopicArray(data json.RawMessage) []TopicSelection {
 	}
 
 	var intFormat []int64
-	if err := json.Unmarshal(data, &intFormat); err == nil {
+	if err := json.Unmarshal(data, &intFormat); err == nil && len(intFormat) > 0 {
 		// Fallback: LLM used numeric format instead of "Topic:N"
 		r.logger.Warn("reranker returned numeric topic IDs instead of prefixed format (Topic:N)",
 			"fallback_count", len(intFormat))
@@ -696,7 +772,7 @@ func (r *Reranker) parsePeopleArray(data json.RawMessage) []PersonSelection {
 	}
 
 	var intFormat []int64
-	if err := json.Unmarshal(data, &intFormat); err == nil {
+	if err := json.Unmarshal(data, &intFormat); err == nil && len(intFormat) > 0 {
 		// Fallback: LLM used numeric format instead of "Person:N"
 		r.logger.Warn("reranker returned numeric person IDs instead of prefixed format (Person:N)",
 			"fallback_count", len(intFormat))
@@ -705,6 +781,28 @@ func (r *Reranker) parsePeopleArray(data json.RawMessage) []PersonSelection {
 			people[i] = PersonSelection{ID: fmt.Sprintf("Person:%d", id)}
 		}
 		return people
+	}
+
+	return nil
+}
+
+// parseArtifactArray parses artifacts from JSON (v0.6.0).
+func (r *Reranker) parseArtifactArray(data json.RawMessage) []ArtifactSelection {
+	var objFormat []ArtifactSelection
+	if err := json.Unmarshal(data, &objFormat); err == nil && len(objFormat) > 0 && objFormat[0].ID != "" {
+		return objFormat
+	}
+
+	var intFormat []int64
+	if err := json.Unmarshal(data, &intFormat); err == nil && len(intFormat) > 0 {
+		// Fallback: LLM used numeric format instead of "Artifact:N"
+		r.logger.Warn("reranker returned numeric artifact IDs instead of prefixed format (Artifact:N)",
+			"fallback_count", len(intFormat))
+		artifacts := make([]ArtifactSelection, len(intFormat))
+		for i, id := range intFormat {
+			artifacts[i] = ArtifactSelection{ID: fmt.Sprintf("Artifact:%d", id)}
+		}
+		return artifacts
 	}
 
 	return nil
@@ -739,8 +837,9 @@ func (r *Reranker) filterValidTopics(userID int64, result *Result, candidateMap 
 	}
 
 	return &Result{
-		Topics: validTopics,
-		People: result.People, // Preserve people for next filter
+		Topics:    validTopics,
+		People:    result.People,    // Preserve people for next filter
+		Artifacts: result.Artifacts, // Preserve artifacts for next filter
 	}
 }
 
@@ -777,15 +876,66 @@ func (r *Reranker) filterValidPeople(userID int64, result *Result, peopleMap map
 	}
 
 	return &Result{
-		Topics: result.Topics,
-		People: validPeople,
+		Topics:    result.Topics,
+		People:    validPeople,
+		Artifacts: result.Artifacts, // Preserve artifacts for next filter
+	}
+}
+
+// filterValidArtifacts removes hallucinated artifact IDs (v0.6.0).
+func (r *Reranker) filterValidArtifacts(userID int64, result *Result, artifactsMap map[int64]ArtifactCandidate) *Result {
+	if len(result.Artifacts) == 0 {
+		return result
+	}
+
+	var validArtifacts []ArtifactSelection
+	var hallucinatedIDs []int64
+
+	for _, artifact := range result.Artifacts {
+		artifactID, err := parseArtifactID(artifact.ID)
+		if err != nil {
+			r.logger.Warn("invalid artifact ID format", "user_id", userID, "id", artifact.ID, "error", err)
+			hallucinatedIDs = append(hallucinatedIDs, -1)
+			continue
+		}
+		if _, ok := artifactsMap[artifactID]; ok {
+			validArtifacts = append(validArtifacts, artifact)
+		} else {
+			hallucinatedIDs = append(hallucinatedIDs, artifactID)
+		}
+	}
+
+	if len(hallucinatedIDs) > 0 {
+		r.logger.Warn("reranker hallucinated artifact IDs",
+			"user_id", userID,
+			"hallucinated_ids", hallucinatedIDs,
+			"valid_count", len(validArtifacts),
+			"total_returned", len(result.Artifacts),
+		)
+	}
+
+	return &Result{
+		Topics:    result.Topics,
+		People:    result.People,
+		Artifacts: validArtifacts,
 	}
 }
 
 // fallbackToVectorTop returns top-N candidates by vector score.
-func (r *Reranker) fallbackToVectorTop(candidates []Candidate, personCandidates []PersonCandidate, maxTopics int) *Result {
+func (r *Reranker) fallbackToVectorTop(candidates []Candidate, personCandidates []PersonCandidate, artifactCandidates []ArtifactCandidate, maxTopics int) *Result {
+	// Get config values, with defaults for tests (nil cfg)
+	var topicsMax, peopleMax, artifactsMax int
+	if r.cfg != nil {
+		topicsMax = r.cfg.Agents.Reranker.Topics.Max
+		peopleMax = r.cfg.Agents.Reranker.People.Max
+		artifactsMax = r.cfg.Agents.Reranker.Artifacts.Max
+	}
+
 	if maxTopics <= 0 {
-		maxTopics = 5
+		maxTopics = topicsMax
+		if maxTopics <= 0 {
+			maxTopics = 5
+		}
 	}
 	if len(candidates) > maxTopics {
 		candidates = candidates[:maxTopics]
@@ -796,23 +946,48 @@ func (r *Reranker) fallbackToVectorTop(candidates []Candidate, personCandidates 
 		topics[i] = TopicSelection{ID: fmt.Sprintf("Topic:%d", c.TopicID)}
 	}
 
-	// v0.5.1: Include top-N people by vector score as well (max 3)
-	maxPeople := 3
-	if len(personCandidates) > maxPeople {
-		personCandidates = personCandidates[:maxPeople]
+	// v0.5.1: Include top-N people by vector score as well
+	if peopleMax <= 0 {
+		peopleMax = 3
+	}
+	if len(personCandidates) > peopleMax {
+		personCandidates = personCandidates[:peopleMax]
 	}
 	people := make([]PersonSelection, len(personCandidates))
 	for i, p := range personCandidates {
 		people[i] = PersonSelection{ID: fmt.Sprintf("Person:%d", p.PersonID)}
 	}
 
-	return &Result{Topics: topics, People: people}
+	// v0.6.0: Include top-N artifacts by vector score as well
+	if artifactsMax <= 0 {
+		artifactsMax = 3
+	}
+	if len(artifactCandidates) > artifactsMax {
+		artifactCandidates = artifactCandidates[:artifactsMax]
+	}
+	artifacts := make([]ArtifactSelection, len(artifactCandidates))
+	for i, a := range artifactCandidates {
+		artifacts[i] = ArtifactSelection{ID: fmt.Sprintf("Artifact:%d", a.ArtifactID)}
+	}
+
+	return &Result{Topics: topics, People: people, Artifacts: artifacts}
 }
 
 // fallbackFromState returns top-N from requestedIDs if available.
-func (r *Reranker) fallbackFromState(st *state, candidates []Candidate, personCandidates []PersonCandidate, maxTopics int) *Result {
+func (r *Reranker) fallbackFromState(st *state, candidates []Candidate, personCandidates []PersonCandidate, artifactCandidates []ArtifactCandidate, maxTopics int) *Result {
+	// Get config values, with defaults for tests (nil cfg)
+	var topicsMax, peopleMax, artifactsMax int
+	if r.cfg != nil {
+		topicsMax = r.cfg.Agents.Reranker.Topics.Max
+		peopleMax = r.cfg.Agents.Reranker.People.Max
+		artifactsMax = r.cfg.Agents.Reranker.Artifacts.Max
+	}
+
 	if maxTopics <= 0 {
-		maxTopics = 5
+		maxTopics = topicsMax
+		if maxTopics <= 0 {
+			maxTopics = 5
+		}
 	}
 
 	if len(st.requestedIDs) > 0 {
@@ -825,20 +1000,34 @@ func (r *Reranker) fallbackFromState(st *state, candidates []Candidate, personCa
 			topics[i] = TopicSelection{ID: fmt.Sprintf("Topic:%d", id)}
 		}
 
-		// v0.5.1: Include top-N people by vector score (max 3)
-		maxPeople := 3
-		if len(personCandidates) > maxPeople {
-			personCandidates = personCandidates[:maxPeople]
+		// v0.5.1: Include top-N people by vector score
+		if peopleMax <= 0 {
+			peopleMax = 3
+		}
+		if len(personCandidates) > peopleMax {
+			personCandidates = personCandidates[:peopleMax]
 		}
 		people := make([]PersonSelection, len(personCandidates))
 		for i, p := range personCandidates {
 			people[i] = PersonSelection{ID: fmt.Sprintf("Person:%d", p.PersonID)}
 		}
 
-		return &Result{Topics: topics, People: people}
+		// v0.6.0: Include top-N artifacts by vector score
+		if artifactsMax <= 0 {
+			artifactsMax = 3
+		}
+		if len(artifactCandidates) > artifactsMax {
+			artifactCandidates = artifactCandidates[:artifactsMax]
+		}
+		artifacts := make([]ArtifactSelection, len(artifactCandidates))
+		for i, a := range artifactCandidates {
+			artifacts[i] = ArtifactSelection{ID: fmt.Sprintf("Artifact:%d", a.ArtifactID)}
+		}
+
+		return &Result{Topics: topics, People: people, Artifacts: artifacts}
 	}
 
-	return r.fallbackToVectorTop(candidates, personCandidates, maxTopics)
+	return r.fallbackToVectorTop(candidates, personCandidates, artifactCandidates, maxTopics)
 }
 
 // saveTrace saves the trace to storage for debugging.

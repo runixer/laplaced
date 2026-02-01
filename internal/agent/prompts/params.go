@@ -53,16 +53,19 @@ type RerankerParams struct {
 	MaxTopics     int    // Maximum topics in final selection
 	MinCandidates int    // Minimum candidates to consider before filtering
 	MaxCandidates int    // Maximum candidates to load
+	MaxPeople     int    // v0.6.0 - Maximum people in final selection
+	MaxArtifacts  int    // v0.6.0 - Maximum artifacts in final selection
 }
 
 // RerankerUserParams for rag.reranker_user_prompt template.
 type RerankerUserParams struct {
-	Date             string // Current date
-	Query            string // Original user query
-	EnrichedQuery    string // Extended search context from Enricher
-	CurrentMessages  string // Recent conversation messages
-	Candidates       string // Formatted candidate list (ID | Date | Size | Topic)
-	PeopleCandidates string // Formatted people candidate list (v0.5.1)
+	Date               string // Current date
+	Query              string // Original user query
+	EnrichedQuery      string // Extended search context from Enricher
+	CurrentMessages    string // Recent conversation messages
+	Candidates         string // Formatted candidate list (ID | Date | Size | Topic)
+	PeopleCandidates   string // Formatted people candidate list (v0.5.1)
+	ArtifactCandidates string // Formatted artifact candidate list (v0.6.0)
 }
 
 // ArchivistParams for memory.system_prompt template.
@@ -81,4 +84,23 @@ type ArchivistParams struct {
 // The main chat agent system prompt.
 type LaplaceParams struct {
 	BotName string // Bot's name (e.g., "Laplaced")
+}
+
+// ExtractorParams for extractor.system_prompt template.
+// The Extractor agent processes multimedia files and extracts structured content.
+type ExtractorParams struct {
+	BotName      string // Bot's name (e.g., "Laplaced")
+	Profile      string // Formatted <user_profile> block
+	RecentTopics string // Formatted <recent_topics> block
+	InnerCircle  string // Formatted <inner_circle> block
+}
+
+// ExtractorUserParams for extractor.user_prompt template.
+// User prompt for extractor with file metadata.
+type ExtractorUserParams struct {
+	OriginalName string // Original filename
+	FileType     string // File type (image, audio, pdf, etc.)
+	MimeType     string // MIME type
+	FileSize     int64  // File size in bytes
+	UserContext  string // User's message text when file was sent (v0.6.0)
 }

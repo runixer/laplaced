@@ -32,12 +32,24 @@ func parsePersonID(id string) (int64, error) {
 	return 0, fmt.Errorf("invalid person ID format: %s", id)
 }
 
+// parseArtifactID extracts numeric ID from "Artifact:N" format (v0.6.0).
+func parseArtifactID(id string) (int64, error) {
+	re := regexp.MustCompile(`^(?:Artifact:)?(\d+)$`)
+	matches := re.FindStringSubmatch(id)
+	if len(matches) == 2 {
+		return strconv.ParseInt(matches[1], 10, 64)
+	}
+	return 0, fmt.Errorf("invalid artifact ID format: %s", id)
+}
+
 // Request parameters for Reranker agent.
 const (
 	// ParamCandidates is the key for reranker candidates ([]Candidate).
 	ParamCandidates = "candidates"
 	// ParamPersonCandidates is the key for person candidates ([]PersonCandidate) (v0.5.1).
 	ParamPersonCandidates = "person_candidates"
+	// ParamArtifactCandidates is the key for artifact candidates ([]ArtifactCandidate) (v0.6.0).
+	ParamArtifactCandidates = "artifact_candidates"
 	// ParamContextualizedQuery is the key for enriched query (string).
 	ParamContextualizedQuery = "contextualized_query"
 	// ParamOriginalQuery is the key for original user query (string).
@@ -78,10 +90,23 @@ func (p *PersonSelection) GetNumericID() (int64, error) {
 	return parsePersonID(p.ID)
 }
 
+// ArtifactSelection represents a selected artifact with explanation (v0.6.0).
+// ID is stored as string with prefix "Artifact:N" for unified ID format.
+type ArtifactSelection struct {
+	Reason string `json:"reason"`
+	ID     string `json:"id"` // Format: "Artifact:N"
+}
+
+// GetNumericID extracts numeric ID from "Artifact:N" format.
+func (a *ArtifactSelection) GetNumericID() (int64, error) {
+	return parseArtifactID(a.ID)
+}
+
 // Result contains the output of the reranker.
 type Result struct {
-	Topics []TopicSelection  // Final selected topics with reasons
-	People []PersonSelection // Final selected people with reasons (v0.5.1)
+	Topics    []TopicSelection    // Final selected topics with reasons
+	People    []PersonSelection   // Final selected people with reasons (v0.5.1)
+	Artifacts []ArtifactSelection // Final selected artifacts with reasons (v0.6.0)
 }
 
 // TopicIDs returns just the topic IDs (for backward compatibility).
@@ -106,6 +131,17 @@ func (r *Result) PeopleIDs() []int64 {
 	return ids
 }
 
+// ArtifactIDs returns just the artifact IDs (v0.6.0).
+func (r *Result) ArtifactIDs() []int64 {
+	ids := make([]int64, 0, len(r.Artifacts))
+	for _, a := range r.Artifacts {
+		if id, err := parseArtifactID(a.ID); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
 // Candidate is a topic candidate for reranking.
 type Candidate struct {
 	TopicID      int64
@@ -122,6 +158,18 @@ type PersonCandidate struct {
 	Person   storage.Person
 }
 
+// ArtifactCandidate is an artifact candidate for reranking (v0.6.0).
+type ArtifactCandidate struct {
+	ArtifactID   int64
+	Score        float32
+	FileType     string
+	OriginalName string
+	Summary      string
+	Keywords     []string
+	Entities     []string // Named entities (people, companies, code mentioned)
+	RAGHints     []string // Questions this artifact might answer
+}
+
 // ReasoningEntry holds reasoning text for one iteration.
 type ReasoningEntry struct {
 	Iteration int    `json:"iteration"`
@@ -135,23 +183,26 @@ type state struct {
 
 // trace collects debug data for the reranker UI.
 type trace struct {
-	candidates     []storage.RerankerCandidate
-	toolCalls      []storage.RerankerToolCall
-	selectedTopics []TopicSelection
-	selectedPeople []PersonSelection // v0.5.1
-	fallbackReason string
-	reasoning      []ReasoningEntry
-	systemPrompt   string                // Full system prompt for debug UI
-	userPrompt     string                // Full user prompt for debug UI
-	tracker        *agentlog.TurnTracker // Unified turn tracking for multi-turn visualization
+	candidates        []storage.RerankerCandidate
+	toolCalls         []storage.RerankerToolCall
+	selectedTopics    []TopicSelection
+	selectedPeople    []PersonSelection   // v0.5.1
+	selectedArtifacts []ArtifactSelection // v0.6.0
+	fallbackReason    string
+	reasoning         []ReasoningEntry
+	systemPrompt      string                // Full system prompt for debug UI
+	userPrompt        string                // Full user prompt for debug UI
+	tracker           *agentlog.TurnTracker // Unified turn tracking for multi-turn visualization
 }
 
 // response is the expected JSON response from Flash.
 // Supports both old format {"topics": [42, 18]} and new format {"topics": [{"id": 42, "reason": "..."}]}.
 type response struct {
-	TopicIDs  json.RawMessage `json:"topic_ids"`
-	Topics    json.RawMessage `json:"topics"`     // Fallback: old format
-	IDs       []int64         `json:"ids"`        // Fallback: LLM sometimes uses bare "ids"
-	PeopleIDs json.RawMessage `json:"people_ids"` // v0.5.1: person IDs
-	People    json.RawMessage `json:"people"`     // v0.5.1: with reasons
+	TopicIDs    json.RawMessage `json:"topic_ids"`
+	Topics      json.RawMessage `json:"topics"`       // Fallback: old format
+	IDs         []int64         `json:"ids"`          // Fallback: LLM sometimes uses bare "ids"
+	PeopleIDs   json.RawMessage `json:"people_ids"`   // v0.5.1: person IDs
+	People      json.RawMessage `json:"people"`       // v0.5.1: with reasons
+	ArtifactIDs json.RawMessage `json:"artifact_ids"` // v0.6.0: artifact IDs
+	Artifacts   json.RawMessage `json:"artifacts"`    // v0.6.0: with reasons
 }

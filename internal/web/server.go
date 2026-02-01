@@ -9,6 +9,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -151,6 +153,7 @@ type Server struct {
 	maintenanceRepo storage.MaintenanceRepository
 	agentLogRepo    storage.AgentLogRepository
 	peopleRepo      storage.PeopleRepository
+	artifactRepo    storage.ArtifactRepository
 	bot             BotInterface
 	rag             *rag.Service
 	logger          *slog.Logger
@@ -160,7 +163,7 @@ type Server struct {
 	wg              sync.WaitGroup
 }
 
-func NewServer(ctx context.Context, logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, statsRepo storage.StatsRepository, topicRepo storage.TopicRepository, msgRepo storage.MessageRepository, factHistoryRepo storage.FactHistoryRepository, maintenanceRepo storage.MaintenanceRepository, bot BotInterface, rag *rag.Service) (*Server, error) {
+func NewServer(ctx context.Context, logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, statsRepo storage.StatsRepository, topicRepo storage.TopicRepository, msgRepo storage.MessageRepository, factHistoryRepo storage.FactHistoryRepository, maintenanceRepo storage.MaintenanceRepository, artifactRepo storage.ArtifactRepository, bot BotInterface, rag *rag.Service) (*Server, error) {
 	renderer, err := ui.NewRenderer()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize renderer: %w", err)
@@ -175,6 +178,7 @@ func NewServer(ctx context.Context, logger *slog.Logger, cfg *config.Config, fac
 		msgRepo:         msgRepo,
 		factHistoryRepo: factHistoryRepo,
 		maintenanceRepo: maintenanceRepo,
+		artifactRepo:    artifactRepo,
 		bot:             bot,
 		rag:             rag,
 		logger:          logger.With("component", "web_server"),
@@ -192,6 +196,11 @@ func (s *Server) SetAgentLogRepo(repo storage.AgentLogRepository) {
 // SetPeopleRepository sets the people repository (v0.5.1)
 func (s *Server) SetPeopleRepository(repo storage.PeopleRepository) {
 	s.peopleRepo = repo
+}
+
+// SetArtifactRepository sets the artifact repository (for debug UI).
+func (s *Server) SetArtifactRepository(repo storage.ArtifactRepository) {
+	s.artifactRepo = repo
 }
 
 func (s *Server) Start(ctx context.Context) error {
@@ -231,11 +240,17 @@ func (s *Server) Start(ctx context.Context) error {
 		mux.HandleFunc("/ui/agents/merger", instrumentHandler("agent_merger", s.agentLogHandler("merger", "Merger", "intersect", "Verifies if topics should be merged")))
 		mux.HandleFunc("/ui/agents/enricher", instrumentHandler("agent_enricher", s.agentLogHandler("enricher", "Enricher", "magic", "Expands user queries for better retrieval")))
 		mux.HandleFunc("/ui/agents/scout", instrumentHandler("agent_scout", s.agentLogHandler("scout", "Scout", "search", "Web search tool execution logs")))
+		mux.HandleFunc("/ui/agents/extractor", instrumentHandler("agent_extractor", s.agentLogHandler("extractor", "Extractor", "file-earmark-text", "Processes uploaded files into searchable chunks")))
+
+		// Agent log API endpoints
+		mux.HandleFunc("/api/agent-log/", instrumentHandler("api_agent_log", s.agentLogDetailHandler))
 
 		// Memory pages
 		mux.HandleFunc("/ui/debug/people", instrumentHandler("debug_people", s.peopleHandler))
 		mux.HandleFunc("/ui/debug/facts", instrumentHandler("debug_facts", s.factsHandler))
 		mux.HandleFunc("/ui/debug/topics", instrumentHandler("debug_topics", s.topicsHandler))
+		mux.HandleFunc("/ui/debug/artifacts", instrumentHandler("debug_artifacts", s.artifactsHandler))
+		mux.HandleFunc("/ui/debug/artifacts/download", instrumentHandler("debug_artifacts_download", s.artifactDownloadHandler))
 
 		// Redirect /ui/ to /ui/stats
 		mux.HandleFunc("/ui/", func(w http.ResponseWriter, r *http.Request) {
@@ -464,6 +479,11 @@ func (s *Server) getCommonData(r *http.Request) (ui.PageData, error) {
 	var selectedUserID int64
 	if idStr := r.URL.Query().Get("user_id"); idStr != "" {
 		_, _ = fmt.Sscanf(idStr, "%d", &selectedUserID)
+	}
+
+	// Default to first user if none selected
+	if selectedUserID == 0 && len(users) > 0 {
+		selectedUserID = users[0].ID
 	}
 
 	return ui.PageData{
@@ -1216,6 +1236,13 @@ func (s *Server) agentLogHandler(agentType, agentName, agentIcon, agentDescripti
 			return
 		}
 
+		// Clear heavy context data for list view (lazy loading will fetch on demand)
+		for i := range logs {
+			logs[i].InputContext = ""
+			logs[i].OutputContext = ""
+			logs[i].ConversationTurns = ""
+		}
+
 		data := struct {
 			AgentName        string
 			AgentIcon        string
@@ -1234,6 +1261,63 @@ func (s *Server) agentLogHandler(agentType, agentName, agentIcon, agentDescripti
 			s.logger.Error("failed to render template", "error", err)
 			http.Error(w, "Failed to render template", http.StatusInternalServerError)
 		}
+	}
+}
+
+// agentLogDetailHandler returns a single agent log with full context data.
+// Used for lazy loading when user expands a log entry.
+func (s *Server) agentLogDetailHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse log ID from URL path: /api/agent-log/{id}
+	path := r.URL.Path
+	if !strings.HasPrefix(path, "/api/agent-log/") {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	idStr := strings.TrimPrefix(path, "/api/agent-log/")
+	idStr = strings.TrimSuffix(idStr, "/")
+
+	var logID int64
+	if _, err := fmt.Sscanf(idStr, "%d", &logID); err != nil {
+		http.Error(w, "Invalid log ID", http.StatusBadRequest)
+		return
+	}
+
+	// Get user_id from query (required for access control)
+	userIDStr := r.URL.Query().Get("user_id")
+	if userIDStr == "" {
+		http.Error(w, "Missing user_id", http.StatusBadRequest)
+		return
+	}
+
+	var userID int64
+	if _, err := fmt.Sscanf(userIDStr, "%d", &userID); err != nil {
+		http.Error(w, "Invalid user_id", http.StatusBadRequest)
+		return
+	}
+
+	if s.agentLogRepo == nil {
+		http.Error(w, "Agent log repository not configured", http.StatusInternalServerError)
+		return
+	}
+
+	// Fetch full log with context
+	log, err := s.agentLogRepo.GetAgentLogFull(r.Context(), logID, userID)
+	if err != nil {
+		s.logger.Error("failed to get agent log", "log_id", logID, "user_id", userID, "error", err)
+		http.Error(w, "Agent log not found", http.StatusNotFound)
+		return
+	}
+
+	// Return JSON response
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(log); err != nil {
+		s.logger.Error("failed to encode agent log", "error", err)
 	}
 }
 
@@ -1451,5 +1535,228 @@ func (s *Server) topicsHandler(w http.ResponseWriter, r *http.Request) {
 	if err := s.renderer.Render(w, "topics.html", pageData, ui.GetFuncMap()); err != nil {
 		s.logger.Error("failed to render template", "error", err)
 		http.Error(w, "Failed to render template", http.StatusInternalServerError)
+	}
+}
+
+// artifactsHandler handles GET /ui/debug/artifacts - displays artifacts with filtering.
+func (s *Server) artifactsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	pageData, err := s.getCommonData(r)
+	if err != nil {
+		s.logger.Error("failed to get common page data", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	if s.artifactRepo == nil {
+		s.logger.Error("artifact repository not configured")
+		http.Error(w, "Artifact repository not configured", http.StatusInternalServerError)
+		return
+	}
+
+	// Parse query parameters
+	q := r.URL.Query()
+	filter := storage.ArtifactFilter{
+		UserID:   pageData.SelectedUserID,
+		State:    q.Get("state"),
+		FileType: q.Get("type"),
+	}
+
+	// Pagination
+	page := 1
+	if p := q.Get("page"); p != "" {
+		if parsed, err := strconv.Atoi(p); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+	limit := 20
+	offset := (page - 1) * limit
+
+	// Get artifacts
+	artifacts, total, err := s.artifactRepo.GetArtifacts(filter, limit, offset)
+	if err != nil {
+		s.logger.Error("failed to get artifacts", "error", err, "user_id", pageData.SelectedUserID)
+		http.Error(w, "Failed to get artifacts", http.StatusInternalServerError)
+		return
+	}
+
+	// Calculate pagination
+	totalPages := (total + int64(limit) - 1) / int64(limit)
+	if totalPages == 0 {
+		totalPages = 1
+	}
+
+	// Get stats by counting states
+	stats := struct {
+		Total   int64
+		Pending int64
+		Ready   int64
+		Failed  int64
+	}{}
+
+	// Get total count
+	allFilter := storage.ArtifactFilter{UserID: pageData.SelectedUserID}
+	_, totalCount, _ := s.artifactRepo.GetArtifacts(allFilter, 1, 0)
+	stats.Total = totalCount
+
+	// Get counts by state
+	pendingFilter := storage.ArtifactFilter{UserID: pageData.SelectedUserID, State: "pending"}
+	_, pendingCount, _ := s.artifactRepo.GetArtifacts(pendingFilter, 1, 0)
+	stats.Pending = pendingCount
+
+	readyFilter := storage.ArtifactFilter{UserID: pageData.SelectedUserID, State: "ready"}
+	_, readyCount, _ := s.artifactRepo.GetArtifacts(readyFilter, 1, 0)
+	stats.Ready = readyCount
+
+	failedFilter := storage.ArtifactFilter{UserID: pageData.SelectedUserID, State: "failed"}
+	_, failedCount, _ := s.artifactRepo.GetArtifacts(failedFilter, 1, 0)
+	stats.Failed = failedCount
+
+	data := struct {
+		Artifacts      []storage.Artifact
+		Filter         storage.ArtifactFilter
+		Total          int64
+		Page           int
+		Pages          int
+		SelectedUserID int64
+		Stats          struct {
+			Total   int64
+			Pending int64
+			Ready   int64
+			Failed  int64
+		}
+	}{
+		Artifacts:      artifacts,
+		Filter:         filter,
+		Total:          total,
+		Page:           page,
+		Pages:          int(totalPages),
+		SelectedUserID: pageData.SelectedUserID,
+		Stats:          stats,
+	}
+
+	pageData.Data = data
+
+	if err := s.renderer.Render(w, "artifacts.html", pageData, ui.GetFuncMap()); err != nil {
+		s.logger.Error("failed to render template", "error", err)
+		http.Error(w, "Failed to render template", http.StatusInternalServerError)
+	}
+}
+
+// artifactDownloadHandler handles GET /ui/debug/artifacts/download - downloads an artifact file.
+func (s *Server) artifactDownloadHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse artifact ID from query
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
+		http.Error(w, "Missing artifact ID", http.StatusBadRequest)
+		return
+	}
+
+	var artifactID int64
+	if _, err := fmt.Sscanf(idStr, "%d", &artifactID); err != nil {
+		http.Error(w, "Invalid artifact ID", http.StatusBadRequest)
+		return
+	}
+
+	// Get user_id from query (required for access control)
+	userIDStr := r.URL.Query().Get("user_id")
+	if userIDStr == "" {
+		http.Error(w, "Missing user_id", http.StatusBadRequest)
+		return
+	}
+
+	var userID int64
+	if _, err := fmt.Sscanf(userIDStr, "%d", &userID); err != nil {
+		http.Error(w, "Invalid user_id", http.StatusBadRequest)
+		return
+	}
+
+	// Validate user_id is in allowed list (CRIT-5 security fix)
+	userAllowed := false
+	for _, allowedID := range s.cfg.Bot.AllowedUserIDs {
+		if allowedID == userID {
+			userAllowed = true
+			break
+		}
+	}
+	if !userAllowed {
+		s.logger.Warn("artifact download denied: user_id not in allowed list",
+			"user_id", userID,
+			"artifact_id", artifactID,
+		)
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	// Get artifact
+	artifact, err := s.artifactRepo.GetArtifact(userID, artifactID)
+	if err != nil {
+		s.logger.Error("failed to get artifact", "artifact_id", artifactID, "user_id", userID, "error", err)
+		http.Error(w, "Artifact not found", http.StatusNotFound)
+		return
+	}
+	if artifact == nil {
+		http.Error(w, "Artifact not found", http.StatusNotFound)
+		return
+	}
+
+	// Build full file path with path traversal protection (CRIT-4 security fix)
+	fullPath := filepath.Join(s.cfg.Artifacts.StoragePath, artifact.FilePath)
+
+	// Validate that resolved path is within storage directory
+	absFullPath, err := filepath.Abs(fullPath)
+	if err != nil {
+		s.logger.Error("failed to resolve artifact path", "path", fullPath, "error", err)
+		http.Error(w, "Invalid file path", http.StatusBadRequest)
+		return
+	}
+	absStoragePath, err := filepath.Abs(s.cfg.Artifacts.StoragePath)
+	if err != nil {
+		s.logger.Error("failed to resolve storage path", "error", err)
+		http.Error(w, "Server configuration error", http.StatusInternalServerError)
+		return
+	}
+	// Ensure the file is within the storage directory (prevent path traversal)
+	if !strings.HasPrefix(absFullPath, absStoragePath+string(os.PathSeparator)) && absFullPath != absStoragePath {
+		s.logger.Warn("path traversal attempt blocked",
+			"requested_path", artifact.FilePath,
+			"resolved_path", absFullPath,
+			"storage_path", absStoragePath,
+		)
+		http.Error(w, "Invalid file path", http.StatusBadRequest)
+		return
+	}
+
+	// Read file
+	fileData, err := os.ReadFile(fullPath)
+	if err != nil {
+		s.logger.Error("failed to read artifact file", "artifact_id", artifactID, "path", fullPath, "error", err)
+		http.Error(w, "Failed to read file", http.StatusInternalServerError)
+		return
+	}
+
+	// Determine content type
+	contentType := artifact.MimeType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	// Set headers for download
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", artifact.OriginalName))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(fileData)))
+
+	// Write file data
+	if _, err := w.Write(fileData); err != nil {
+		s.logger.Error("failed to write file response", "error", err)
 	}
 }

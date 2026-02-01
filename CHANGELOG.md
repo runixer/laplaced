@@ -7,9 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
+## [0.6.0] - 2026-02-02
+
+**Long Context RAG release: Files now part of memory.**
+
+### Added
+- **Artifacts system** — files sent to the bot (images, voice, PDF, video, documents) are now saved as artifacts with semantic metadata. Files are deduplicated by SHA256 hash, processed in background by Extractor agent (Gemini Flash), and indexed for RAG retrieval. The bot can now answer questions like "what was in that PDF?" with full file content passed to context.
+- **Extractor agent** — new LLM-powered agent that extracts structured metadata from files (summary, keywords, entities, rag_hints). Uses Gemini Flash multimodal capabilities for ~500 tokens output per artifact. Processes files in background with configurable concurrency and retry logic.
+- **Artifacts web UI** — new `/ui/debug/artifacts` page showing all stored artifacts with metadata, state, and processing status. Includes file type icons, search filters, and detailed view.
+- **Video notes support** — video messages (circles) are now saved as artifacts and included in RAG retrieval.
+- **Compact history markers for text documents** — text files (.txt, .md, etc.) now save as `📄 filename (artifact:N)` in message history instead of full content. Full document content is still passed to LLM via `LLMParts` and enricher/reranker see it through `rawQuery`. This prevents topic summaries from bloating with file contents during session archival while maintaining full RAG retrieval capabilities.
+- **Gemini file format validation** — files with unsupported MIME types are rejected before processing to prevent API errors. Supported types: images (PNG, JPEG, WebP, HEIC), PDF, videos (MP4, MOV, AVI, WebM), all audio types, and text files.
+
+### Changed
+- **Reranker with artifacts** — RAG candidates now include artifacts alongside topics and people. Reranker shows artifact summaries with similarity scores and selects relevant artifacts for full context loading. Configurable per-type limits (topics, people, artifacts).
+- **Reranker candidate display with scores** — reranker candidates now show similarity scores in format `[Artifact:123] (0.68) pdf: "api-docs.pdf" | api, rest | Entities: OAuth2, JWT | Summary...`. Makes reranker decisions more transparent.
 - **Laplace agent error logging** — agent execution logs are now saved even when errors occur (e.g., "max empty response retries reached"). Previously, when Laplace execution failed, the `LogExecution()` call was skipped, causing DebugRequestBody/DebugResponseBody to be lost forever. This made debugging production issues impossible since the actual request/response bodies were not logged. The agent now returns a partial Response with Error field set, allowing full logging including all conversation turns and API request/response bodies for failed executions.
-- **Cache-busting on empty response retry** — when Gemini returns an empty response (completion_tokens: 0) with finish_reason: "stop", retry attempts now add a unique nonce `[retry-bust-<timestamp>]` to the system prompt. This forces OpenRouter/Google to bypass the poisoned cache and recompute the response instead of replaying the same cached failure. Addresses a sporadic bug with `gemini-3-pro-preview` where tool results triggered a cache hit with 0 reasoning tokens and 0 completion tokens across multiple retries.
+- **Empty LLM response handling** — empty responses (0 completion tokens) now trigger automatic retry with cache-busting nonce. Fixed bug where empty responses with finish_reason: "stop" were treated as valid.
+- **Reranker XML prompts** — reranker prompts now use XML tags for better structure compliance with Google prompting guidelines.
+- **Config refactor** — artifact extraction settings moved from `artifacts.*` to `agents.extractor.*`. Artifacts config now only contains storage settings (enabled, storage_path, allowed_types).
+
+### Removed
+- **Yandex SpeechKit** — legacy speech recognition client removed. All voice messages now use native Gemini multimodal understanding.
 
 ## [0.5.4] - 2026-01-27
 
@@ -423,7 +442,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-language support (en, ru)
 - Docker deployment
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/runixer/laplaced/compare/v0.5.4...v0.6.0
+[0.5.4]: https://github.com/runixer/laplaced/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/runixer/laplaced/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/runixer/laplaced/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/runixer/laplaced/compare/v0.5.0...v0.5.1

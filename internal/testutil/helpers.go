@@ -42,6 +42,10 @@ func TestConfig() *config.Config {
 			},
 			Splitter: config.AgentConfig{Name: "Splitter"},
 			Merger:   config.AgentConfig{Name: "Merger"},
+			Extractor: config.ExtractorAgentConfig{
+				AgentConfig:   config.AgentConfig{Name: "Extractor"},
+				MaxFileSizeMB: 10,
+			},
 		},
 		Embedding: config.EmbeddingConfig{
 			Model: "test-embedding-model",
@@ -81,14 +85,17 @@ rag:
   topic_extraction_prompt: "Extract topics {{.Profile}} {{.RecentTopics}} {{.Goal}}"
   topic_consolidation_system_prompt: "Consolidation System {{.Profile}} {{.RecentTopics}}"
   topic_consolidation_user_prompt: "Topic1: {{.Topic1Summary}}\nTopic2: {{.Topic2Summary}}"
-  reranker_system_prompt: "Reranker System {{.Profile}} {{.RecentTopics}} max={{.MaxTopics}} budget={{.TargetCharsK}}K min={{.MinCandidates}} max={{.MaxCandidates}} large={{.LargeBudgetK}}K"
-  reranker_system_prompt_simple: "Reranker Simple {{.Profile}} {{.RecentTopics}} max={{.MaxTopics}} min={{.MinCandidates}} max={{.MaxCandidates}}"
-  reranker_user_prompt: "Date: {{.Date}}\nQuery: {{.Query}}\nEnriched: {{.EnrichedQuery}}\nMessages: {{.CurrentMessages}}\nCandidates: {{.Candidates}}"
+  reranker_system_prompt: "Reranker System {{.Profile}} {{.RecentTopics}} max={{.MaxTopics}} min={{.MinCandidates}} max={{.MaxCandidates}} max_people={{.MaxPeople}} max_artifacts={{.MaxArtifacts}}"
+  reranker_user_prompt: "Date: {{.Date}}\nQuery: {{.Query}}\nEnriched: {{.EnrichedQuery}}\nMessages: {{.CurrentMessages}}\nCandidates: {{.Candidates}}\nPeopleCandidates: {{.PeopleCandidates}}\nArtifactCandidates: {{.ArtifactCandidates}}"
   reranker_tool_description: "Load topic content"
   reranker_tool_param_description: "Topic IDs"
+  reranker_media_instruction: "The user sent media content. Analyze it and select relevant context."
 memory:
   system_prompt: "Archivist {{.Date}} limit={{.UserFactsLimit}} user={{.UserFactsCount}}"
   user_prompt: "User: {{.UserFacts}}\n{{.KnownPeople}}\nConversation: {{.Conversation}}"
+extractor:
+  system_prompt: "Extractor System {{.BotName}} {{.Profile}} {{.RecentTopics}} {{.InnerCircle}}"
+  user_prompt: "File: {{.OriginalName}} Type: {{.FileType}} MimeType: {{.MimeType}} Size: {{.FileSize}}{{.UserContext}}"
 `
 	err := os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte(content), 0600)
 	if err != nil {

@@ -26,7 +26,6 @@ import (
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
-	"github.com/runixer/laplaced/internal/yandex"
 )
 
 const (
@@ -47,9 +46,9 @@ type Bot struct {
 	statsRepo       storage.StatsRepository
 	factRepo        storage.FactRepository
 	factHistoryRepo storage.FactHistoryRepository
-	peopleRepo      storage.PeopleRepository // v0.5.1: People management
+	peopleRepo      storage.PeopleRepository   // v0.5.1: People management
+	artifactRepo    storage.ArtifactRepository // v0.6.0: Link artifacts to messages
 	orClient        openrouter.Client
-	speechKitClient yandex.Client
 	ragService      *rag.Service
 	contextService  *agent.ContextService
 	laplaceAgent    *laplace.Laplace
@@ -62,7 +61,7 @@ type Bot struct {
 	wg              sync.WaitGroup
 }
 
-func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRepo storage.UserRepository, msgRepo storage.MessageRepository, statsRepo storage.StatsRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, peopleRepo storage.PeopleRepository, orClient openrouter.Client, speechKitClient yandex.Client, ragService *rag.Service, contextService *agent.ContextService, translator *i18n.Translator) (*Bot, error) {
+func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRepo storage.UserRepository, msgRepo storage.MessageRepository, statsRepo storage.StatsRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, peopleRepo storage.PeopleRepository, orClient openrouter.Client, ragService *rag.Service, contextService *agent.ContextService, translator *i18n.Translator) (*Bot, error) {
 	botLogger := logger.With("component", "bot")
 	downloader, err := telegram.NewHTTPFileDownloader(api, "https://api.telegram.org", cfg.Telegram.ProxyURL)
 	if err != nil {
@@ -70,6 +69,7 @@ func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRe
 	}
 
 	fileProcessor := files.NewProcessor(downloader, translator, cfg.Bot.Language, botLogger)
+	fileProcessor.SetMinVoiceDurationSec(cfg.Artifacts.MinVoiceDurationSeconds)
 
 	b := &Bot{
 		api:             api,
@@ -81,7 +81,6 @@ func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRe
 		factHistoryRepo: factHistoryRepo,
 		peopleRepo:      peopleRepo,
 		orClient:        orClient,
-		speechKitClient: speechKitClient,
 		ragService:      ragService,
 		contextService:  contextService,
 		downloader:      downloader,
@@ -117,6 +116,21 @@ func (b *Bot) SetAgentLogger(logger *agentlog.Logger) {
 // SetLaplaceAgent sets the Laplace chat agent
 func (b *Bot) SetLaplaceAgent(agent *laplace.Laplace) {
 	b.laplaceAgent = agent
+}
+
+// SetFileHandler sets the optional file handler for artifact saving
+func (b *Bot) SetFileHandler(handler files.FileSaver) {
+	b.fileProcessor.SetFileHandler(handler)
+}
+
+// SetArtifactRepo sets the artifact repository for linking artifacts to messages
+func (b *Bot) SetArtifactRepo(repo storage.ArtifactRepository) {
+	b.artifactRepo = repo
+}
+
+// SetFileProcessor replaces the file processor (for testing).
+func (b *Bot) SetFileProcessor(processor *files.Processor) {
+	b.fileProcessor = processor
 }
 
 func (b *Bot) setCommands() error {
@@ -234,7 +248,7 @@ func (b *Bot) ProcessUpdate(ctx context.Context, update *telegram.Update, source
 	}
 
 	// Voice messages are now grouped with text messages for better context
-	if msg.Text != "" || msg.Caption != "" || msg.Photo != nil || msg.Document != nil || msg.Voice != nil {
+	if msg.Text != "" || msg.Caption != "" || msg.Photo != nil || msg.Document != nil || msg.Voice != nil || msg.Audio != nil || msg.VideoNote != nil {
 		b.handleGroupedMessage(msg)
 	}
 }
@@ -366,6 +380,12 @@ func (b *Bot) performModelTool(ctx context.Context, userID int64, modelName stri
 
 func (b *Bot) sendResponses(ctx context.Context, chatID int64, responses []telegram.SendMessageRequest, logger *slog.Logger) {
 	for i, resp := range responses {
+		// Safety net: skip empty or whitespace-only messages to avoid Telegram API errors
+		if strings.TrimSpace(resp.Text) == "" {
+			logger.Warn("skipping empty response message", "chunk_index", i)
+			continue
+		}
+
 		logger.Debug("Sending response to user",
 			"chunk_index", i,
 			"text", resp.Text,
@@ -970,22 +990,30 @@ func (b *Bot) performManagePeople(ctx context.Context, userID int64, args map[st
 		}
 		return b.performCreatePerson(ctx, userID, name, params)
 	case "update":
-		if name == "" {
-			return "Error: name is required for update operation", nil
+		// person_id is preferred, name is fallback
+		if _, hasPersonID := params["person_id"]; !hasPersonID && name == "" {
+			return "Error: person_id or name is required for update operation", nil
 		}
 		return b.performUpdatePerson(ctx, userID, name, params)
 	case "delete":
-		if name == "" {
-			return "Error: name is required for delete operation", nil
+		// person_id is preferred, name is fallback
+		if _, hasPersonID := params["person_id"]; !hasPersonID && name == "" {
+			return "Error: person_id or name is required for delete operation", nil
 		}
 		return b.performDeletePerson(ctx, userID, name, params)
 	case "merge":
+		// target_id/source_id are preferred (Person:123 format), target/source are fallback names
+		targetID, hasTargetID := params["target_id"]
+		sourceID, hasSourceID := params["source_id"]
 		target, _ := params["target"].(string)
 		source, _ := params["source"].(string)
-		if target == "" || source == "" {
-			return "Error: target and source are required for merge operation", nil
+		if !hasTargetID && target == "" {
+			return "Error: target_id or target is required for merge operation", nil
 		}
-		return b.performMergePeople(ctx, userID, target, source, params)
+		if !hasSourceID && source == "" {
+			return "Error: source_id or source is required for merge operation", nil
+		}
+		return b.performMergePeople(ctx, userID, target, source, targetID, sourceID, params)
 	default:
 		return fmt.Sprintf("Error: unknown operation '%s'. Valid operations: create, update, delete, merge", operation), nil
 	}
@@ -1182,16 +1210,24 @@ func (b *Bot) performUpdatePerson(ctx context.Context, userID int64, name string
 }
 
 // performDeletePerson deletes a person from memory.
-// Supports both person_id (preferred) and name (fallback) for lookup.
+// Supports both person_id (preferred "Person:123" format) and name (fallback) for lookup.
 func (b *Bot) performDeletePerson(ctx context.Context, userID int64, name string, params map[string]interface{}) (string, error) {
 	var person *storage.Person
 	var err error
 
-	// v0.5.1: Try person_id first (from <relevant_people> context)
-	if personID, ok := params["person_id"].(float64); ok && int64(personID) > 0 {
-		person, err = b.peopleRepo.GetPerson(userID, int64(personID))
-		if err != nil {
-			return fmt.Sprintf("Error finding person by ID %d: %v", int64(personID), err), nil
+	// Try person_id first (from <relevant_people> context) - accepts "Person:123" or numeric
+	if v, ok := params["person_id"]; ok {
+		personID, parseErr := parsePersonID(v)
+		if parseErr == nil && personID > 0 {
+			// Log warning if LLM used numeric format instead of "Person:N" format
+			if _, isNumeric := v.(float64); isNumeric && b.logger != nil {
+				b.logger.Warn("LLM used numeric person_id, expected 'Person:N' format",
+					"person_id", personID, "user_id", userID)
+			}
+			person, err = b.peopleRepo.GetPerson(userID, personID)
+			if err != nil {
+				return fmt.Sprintf("Error finding person by ID %d: %v", personID, err), nil
+			}
 		}
 	}
 
@@ -1233,48 +1269,84 @@ func (b *Bot) performDeletePerson(ctx context.Context, userID int64, name string
 }
 
 // performMergePeople merges two people records.
-func (b *Bot) performMergePeople(ctx context.Context, userID int64, targetName, sourceName string, params map[string]interface{}) (string, error) {
-	// Find target person by name or alias
-	target, err := b.peopleRepo.FindPersonByName(userID, targetName)
-	if err != nil {
-		return fmt.Sprintf("Error finding target person: %v", err), nil
+// Supports both target_id/source_id (preferred "Person:123" format) and target/source names (fallback).
+func (b *Bot) performMergePeople(ctx context.Context, userID int64, targetName, sourceName string, targetID, sourceID interface{}, params map[string]interface{}) (string, error) {
+	var target, source *storage.Person
+	var err error
+
+	// Try target_id first (Person:123 format or numeric)
+	if targetID != nil {
+		personID, parseErr := parsePersonID(targetID)
+		if parseErr == nil && personID > 0 {
+			if _, isNumeric := targetID.(float64); isNumeric && b.logger != nil {
+				b.logger.Warn("LLM used numeric target_id, expected 'Person:N' format",
+					"target_id", personID, "user_id", userID)
+			}
+			target, err = b.peopleRepo.GetPerson(userID, personID)
+			if err != nil {
+				return fmt.Sprintf("Error finding target person by ID %d: %v", personID, err), nil
+			}
+		}
 	}
-	if target == nil {
-		// Try alias search
-		aliasPeople, err := b.peopleRepo.FindPersonByAlias(userID, targetName)
+	// Fallback to name search for target
+	if target == nil && targetName != "" {
+		target, err = b.peopleRepo.FindPersonByName(userID, targetName)
 		if err != nil {
 			return fmt.Sprintf("Error finding target person: %v", err), nil
 		}
-		if len(aliasPeople) > 0 {
-			target = &aliasPeople[0]
+		if target == nil {
+			// Try alias search
+			aliasPeople, err := b.peopleRepo.FindPersonByAlias(userID, targetName)
+			if err != nil {
+				return fmt.Sprintf("Error finding target person: %v", err), nil
+			}
+			if len(aliasPeople) > 0 {
+				target = &aliasPeople[0]
+			}
 		}
 	}
 	if target == nil {
-		return fmt.Sprintf("Target person '%s' not found", targetName), nil
+		return "Target person not found (no ID or name provided)", nil
 	}
 
-	// Find source person by name or alias
-	source, err := b.peopleRepo.FindPersonByName(userID, sourceName)
-	if err != nil {
-		return fmt.Sprintf("Error finding source person: %v", err), nil
+	// Try source_id first (Person:123 format or numeric)
+	if sourceID != nil {
+		personID, parseErr := parsePersonID(sourceID)
+		if parseErr == nil && personID > 0 {
+			if _, isNumeric := sourceID.(float64); isNumeric && b.logger != nil {
+				b.logger.Warn("LLM used numeric source_id, expected 'Person:N' format",
+					"source_id", personID, "user_id", userID)
+			}
+			source, err = b.peopleRepo.GetPerson(userID, personID)
+			if err != nil {
+				return fmt.Sprintf("Error finding source person by ID %d: %v", personID, err), nil
+			}
+		}
 	}
-	if source == nil {
-		// Try alias search
-		aliasPeople, err := b.peopleRepo.FindPersonByAlias(userID, sourceName)
+	// Fallback to name search for source
+	if source == nil && sourceName != "" {
+		source, err = b.peopleRepo.FindPersonByName(userID, sourceName)
 		if err != nil {
 			return fmt.Sprintf("Error finding source person: %v", err), nil
 		}
-		if len(aliasPeople) > 0 {
-			source = &aliasPeople[0]
+		if source == nil {
+			// Try alias search
+			aliasPeople, err := b.peopleRepo.FindPersonByAlias(userID, sourceName)
+			if err != nil {
+				return fmt.Sprintf("Error finding source person: %v", err), nil
+			}
+			if len(aliasPeople) > 0 {
+				source = &aliasPeople[0]
+			}
 		}
 	}
 	if source == nil {
-		return fmt.Sprintf("Source person '%s' not found", sourceName), nil
+		return "Source person not found (no ID or name provided)", nil
 	}
 
 	// Prevent self-merge
 	if target.ID == source.ID {
-		return fmt.Sprintf("Cannot merge '%s' with itself", targetName), nil
+		return fmt.Sprintf("Cannot merge person with itself (ID: %d)", target.ID), nil
 	}
 
 	reason, _ := params["reason"].(string)

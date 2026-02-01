@@ -207,26 +207,6 @@ func TestValidate(t *testing.T) {
 			errContains: "database.path is required",
 		},
 		{
-			name: "yandex enabled without api key",
-			modify: func(c *Config) {
-				c.Yandex.Enabled = true
-				c.Yandex.APIKey = ""
-				c.Yandex.FolderID = "folder123"
-			},
-			wantErr:     true,
-			errContains: "yandex.api_key is required",
-		},
-		{
-			name: "yandex enabled without folder id",
-			modify: func(c *Config) {
-				c.Yandex.Enabled = true
-				c.Yandex.APIKey = "api_key_123"
-				c.Yandex.FolderID = ""
-			},
-			wantErr:     true,
-			errContains: "yandex.folder_id is required",
-		},
-		{
 			name: "auth enabled without username",
 			modify: func(c *Config) {
 				c.Server.Auth.Enabled = true

@@ -4,8 +4,10 @@ package agentlog
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/runixer/laplaced/internal/storage"
@@ -88,12 +90,18 @@ func (l *Logger) Log(ctx context.Context, entry Entry) {
 		return
 	}
 
+	// Sanitize InputContext to remove large binary content (base64 images, audio, files)
+	sanitizedInputContext := SanitizeInputContext(entry.InputContext)
+
+	// Sanitize ConversationTurns to remove base64 data from Request/Response
+	sanitizedConversationTurns := SanitizeConversationTurns(entry.ConversationTurns)
+
 	// Serialize JSON fields
-	inputContext := serializeJSON(entry.InputContext)
+	inputContext := serializeJSON(sanitizedInputContext)
 	outputParsed := serializeJSON(entry.OutputParsed)
 	outputContext := serializeJSON(entry.OutputContext)
 	metadata := serializeJSON(entry.Metadata)
-	conversationTurns := serializeJSON(entry.ConversationTurns)
+	conversationTurns := serializeJSON(sanitizedConversationTurns)
 
 	log := storage.AgentLog{
 		UserID:            entry.UserID,
@@ -188,4 +196,136 @@ func serializeJSON(v interface{}) string {
 // Enabled returns whether logging is enabled.
 func (l *Logger) Enabled() bool {
 	return l.enabled
+}
+
+// SanitizeInputContext removes large binary content from InputContext to reduce DB size.
+// It recursively walks through the JSON structure and replaces file/document data with placeholders.
+// v0.6.0: Only handles FilePart format (type="file" with nested file object).
+func SanitizeInputContext(data interface{}) interface{} {
+	if data == nil {
+		return nil
+	}
+
+	// If already a string, try to parse as JSON
+	if s, ok := data.(string); ok {
+		// Try to parse as JSON array or object
+		var parsed interface{}
+		if err := json.Unmarshal([]byte(s), &parsed); err == nil {
+			return SanitizeInputContext(parsed)
+		}
+		// Not valid JSON, return as-is
+		return s
+	}
+
+	// Handle map[string]interface{} (JSON objects)
+	if m, ok := data.(map[string]interface{}); ok {
+		// Check for multimodal content parts
+		if typeVal, hasType := m["type"]; hasType {
+			typeStr, _ := typeVal.(string)
+
+			// Handle file/document type - replace large content with placeholder
+			if typeStr == "file" || typeStr == "document" {
+				// Check for nested "file" object (FilePart format)
+				if fileObj, hasFile := m["file"]; hasFile {
+					if fileMap, ok := fileObj.(map[string]interface{}); ok {
+						var filename string
+						var sizeBytes int
+
+						// Get filename from nested file object
+						if fn, ok := fileMap["filename"].(string); ok {
+							filename = fn
+						}
+
+						// Check for file_data with base64 content
+						if fileData, ok := fileMap["file_data"].(string); ok {
+							if len(fileData) > 100 && strings.HasPrefix(fileData, "data:") {
+								sizeBytes = len(fileData)
+
+								// Extract mime type for format info
+								format := "file"
+								if strings.HasPrefix(fileData, "data:application/pdf") {
+									format = "PDF"
+								} else if strings.HasPrefix(fileData, "data:image/") {
+									format = "image"
+								} else if parts := strings.Split(fileData, ";"); len(parts) > 0 {
+									if mimeParts := strings.Split(parts[0], "/"); len(mimeParts) > 1 {
+										format = mimeParts[1]
+									}
+								}
+
+								sizeKB := sizeBytes / 1024
+								placeholder := fmt.Sprintf("FILE: %s (%s, %d KB base64)", filenameOrType(filename, format), format, sizeKB)
+
+								// Return sanitized structure
+								result := map[string]interface{}{
+									"type": typeStr,
+									"file": map[string]interface{}{
+										"filename":  filenameOrType(filename, format),
+										"file_data": placeholder,
+									},
+								}
+								return result
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Recursively sanitize nested maps and slices
+		result := make(map[string]interface{})
+		for k, v := range m {
+			result[k] = SanitizeInputContext(v)
+		}
+		return result
+	}
+
+	// Handle []interface{} (JSON arrays)
+	if arr, ok := data.([]interface{}); ok {
+		result := make([]interface{}, len(arr))
+		for i, v := range arr {
+			result[i] = SanitizeInputContext(v)
+		}
+		return result
+	}
+
+	// Return primitive types as-is
+	return data
+}
+
+// filenameOrType returns the filename if available, otherwise the type
+func filenameOrType(filename, fileType string) string {
+	if filename != "" {
+		return filename
+	}
+	return fileType
+}
+
+// SanitizeConversationTurns creates a sanitized copy of ConversationTurns
+// by sanitizing the Request/Response strings in each turn.
+// It sanitizes the JSON content and marshals it back to a string.
+func SanitizeConversationTurns(ct *ConversationTurns) *ConversationTurns {
+	if ct == nil {
+		return nil
+	}
+	sanitized := &ConversationTurns{
+		TotalDurationMs:       ct.TotalDurationMs,
+		TotalPromptTokens:     ct.TotalPromptTokens,
+		TotalCompletionTokens: ct.TotalCompletionTokens,
+		TotalCost:             ct.TotalCost,
+		Turns:                 make([]ConversationTurn, len(ct.Turns)),
+	}
+	for i, turn := range ct.Turns {
+		// Sanitize and marshal back to JSON string
+		sanitizedRequest := serializeJSON(SanitizeInputContext(turn.Request))
+		sanitizedResponse := serializeJSON(SanitizeInputContext(turn.Response))
+
+		sanitized.Turns[i] = ConversationTurn{
+			Iteration:  turn.Iteration,
+			Request:    sanitizedRequest,
+			Response:   sanitizedResponse,
+			DurationMs: turn.DurationMs,
+		}
+	}
+	return sanitized
 }

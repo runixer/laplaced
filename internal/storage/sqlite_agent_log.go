@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -142,6 +143,50 @@ func (s *SQLiteStore) GetAgentLogsExtended(filter AgentLogFilter, limit, offset 
 	}
 
 	return result, nil
+}
+
+// GetAgentLogFull fetches a single agent log with full context data.
+// Validates userID to prevent cross-user access (security).
+func (s *SQLiteStore) GetAgentLogFull(ctx context.Context, id int64, userID int64) (*AgentLog, error) {
+	query := `
+		SELECT id, user_id, agent_type, input_prompt, input_context, output_response,
+			   output_parsed, output_context, model, prompt_tokens, completion_tokens,
+			   total_cost, duration_ms, metadata, success, error_message, conversation_turns, created_at
+		FROM agent_logs
+		WHERE id = ? AND user_id = ?
+	`
+	var log AgentLog
+	var conversationTurns sql.NullString
+	err := s.db.QueryRowContext(ctx, query, id, userID).Scan(
+		&log.ID,
+		&log.UserID,
+		&log.AgentType,
+		&log.InputPrompt,
+		&log.InputContext,
+		&log.OutputResponse,
+		&log.OutputParsed,
+		&log.OutputContext,
+		&log.Model,
+		&log.PromptTokens,
+		&log.CompletionTokens,
+		&log.TotalCost,
+		&log.DurationMs,
+		&log.Metadata,
+		&log.Success,
+		&log.ErrorMessage,
+		&conversationTurns,
+		&log.CreatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("agent log not found")
+		}
+		return nil, fmt.Errorf("failed to get agent log: %w", err)
+	}
+	if conversationTurns.Valid {
+		log.ConversationTurns = conversationTurns.String
+	}
+	return &log, nil
 }
 
 // scanAgentLogs scans rows into AgentLog slice.

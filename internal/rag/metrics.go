@@ -218,9 +218,10 @@ const (
 
 // Константы для типов поиска
 const (
-	searchTypeTopics = "topics"
-	searchTypeFacts  = "facts"
-	searchTypePeople = "people" // v0.5.1
+	searchTypeTopics    = "topics"
+	searchTypeFacts     = "facts"
+	searchTypePeople    = "people"    // v0.5.1
+	searchTypeArtifacts = "artifacts" // v0.5.2
 )
 
 // Константы для RAG результатов
@@ -434,4 +435,69 @@ func RecordRerankerFallback(userID int64, reason string) {
 func RecordRerankerHallucination(userID int64, count int) {
 	uid := formatUserID(userID)
 	rerankerHallucinationTotal.WithLabelValues(uid).Add(float64(count))
+}
+
+// === Artifact Extraction Metrics (Phase 3, v0.6.0) ===
+
+var (
+	// artifactExtractionJobsTotal counts artifact extraction jobs.
+	// Labels:
+	//   - user_id: идентификатор пользователя
+	//   - status: результат (success, error)
+	artifactExtractionJobsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: "artifact",
+			Name:      "extraction_jobs_total",
+			Help:      "Total number of artifact extraction jobs",
+		},
+		[]string{"user_id", "status"},
+	)
+
+	// artifactExtractionDuration measures time for artifact extraction.
+	// Labels:
+	//   - user_id: идентификатор пользователя
+	//   - status: результат (success, error)
+	artifactExtractionDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: "artifact",
+			Name:      "extraction_duration_seconds",
+			Help:      "Duration of artifact extraction in seconds",
+			// Buckets: 1s - 5min (LLM calls + chunking + embeddings)
+			Buckets: []float64{1, 5, 10, 30, 60, 120, 300},
+		},
+		[]string{"user_id", "status"},
+	)
+
+	// artifactSummaryIndexSize shows current number of artifact summaries in vector index (v0.6.0).
+	artifactSummaryIndexSize = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: "artifact",
+			Name:      "summary_index_size",
+			Help:      "Current number of artifact summaries in vector index",
+		},
+	)
+)
+
+// RecordArtifactExtraction records metrics for artifact extraction job (v0.6.0).
+func RecordArtifactExtraction(userID int64, durationSeconds float64, success bool) {
+	status := statusSuccess
+	if !success {
+		status = statusError
+	}
+
+	uid := formatUserID(userID)
+	artifactExtractionJobsTotal.WithLabelValues(uid, status).Inc()
+	artifactExtractionDuration.WithLabelValues(uid, status).Observe(durationSeconds)
+}
+
+// UpdateArtifactSummaryMetrics updates the artifact summary index size metric (v0.6.0).
+func UpdateArtifactSummaryMetrics(perUserCounts map[int64]int) {
+	total := 0
+	for _, count := range perUserCounts {
+		total += count
+	}
+	artifactSummaryIndexSize.Set(float64(total))
 }

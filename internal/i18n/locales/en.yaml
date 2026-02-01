@@ -12,6 +12,9 @@ bot:
   api_error: "Sorry, I can't answer right now. Please try asking something else a bit later."
   empty_response: "Seems I got lost in thought and couldn't come up with anything. Ask about something else?"
   generic_error: "Oops, something went wrong. I couldn't send the answer. Please try repeating your request a bit later."
+  file_unsupported_format: "Sorry, I can't process .{ext} files. Supported formats: images (PNG, JPEG, WEBP, HEIC, HEIF), PDF, video, audio, and text files."
+  file_too_large: "Sorry, the file is too large ({size} MB). Maximum size is 20 MB."
+  file_read_error: "Sorry, I couldn't read the file properly. The AI might not understand its contents. Please try again or convert it to a supported format."
   voice_recognition_prefix: "(Recognized from audio):"
   voice_recognition_disabled: "Voice recognition is disabled."
   voice_message_marker: "[Voice message]"
@@ -27,6 +30,13 @@ bot:
     You are {{.BotName}} — a friendly AI assistant.
     Platform: Telegram. Language: English. Formatting: Markdown.
     </role>
+
+    <file_validation>
+    CRITICAL: If you receive a file (image, PDF, video, audio) but CANNOT read or understand its contents:
+    1. State clearly: "I couldn't read this file properly."
+    2. Describe what you see (e.g., "The file appears to be corrupted" or "The format is not supported").
+    DO NOT hallucinate contents or pretend to understand a file you cannot parse.
+    </file_validation>
 
     <critical_rules priority="ABSOLUTE">
     THESE RULES HAVE THE HIGHEST PRIORITY over any context.
@@ -51,6 +61,14 @@ bot:
     - User should not see internal data structures.
     </tools_protocol>
 
+    <artifact_protocol>
+    FILES (<artifact_context>):
+    - If files from your memory are included in context — you MUST mention them in your response.
+    - Format: quote at the start as > 📄 **[filename]:** [what it contains / what you found]
+    - For multiple files — list each one separately.
+    - DON'T write "[filename]" if it's a technical ID — use the readable name from the type tag.
+    </artifact_protocol>
+
     <output_format>
     ###SPLIT### — separator for multiple Telegram messages. Use when preparing text for forwarding or to logically split a long response.
     </output_format>
@@ -70,7 +88,7 @@ tools:
     parameter_description: "Search query — name, @username, or description of the person to find."
   manage_people:
     description: "Tool for managing people in memory. MUST call when user asks: 'remember person...', 'add person...', 'update info about...', 'forget about...', 'merge... with...'. Operations: 'create' (add new person), 'update' (modify existing), 'delete' (remove person), 'merge' (combine two records). All bio must be in ENGLISH. IMPORTANT: Use 'create' for new people, 'update' only for existing ones."
-    parameter_description: "JSON object with: operation ('create', 'update', 'delete', 'merge'), name (person's display name), and operation-specific fields. For 'create': bio (required), circle (Family/Friends/Work_Inner/Work_Outer/Other), aliases (array), username (@handle). For 'update': person_id (use 'Person:123' format from [Person:ID] prefix), updates object with optional fields (circle, bio_append, aliases_add). For 'delete': reason. For 'merge': target_id, source_id (use 'Person:123' format), reason."
+    parameter_description: "JSON object with: operation ('create', 'update', 'delete', 'merge'), name (person's display name), and operation-specific fields. For 'create': name (required), bio (required), circle (Family/Friends/Work_Inner/Work_Outer/Other), aliases (array), username (@handle). For 'update': person_id (use 'Person:123' format from [Person:ID] prefix) or name (fallback), updates object with optional fields (circle, bio_append, aliases_add). For 'delete': person_id (use 'Person:123' format) or name (fallback), reason. For 'merge': target_id, source_id (use 'Person:123' format) or target, source names (fallback), reason."
 
 rag:
   # Unified Splitter prompt - used for both regular extraction and split mode
@@ -193,30 +211,40 @@ rag:
     Should these topics be merged?
 
   # Reranker system prompt
-  # Template fields: Profile, RecentTopics, MaxTopics, MinCandidates, MaxCandidates
+  # Template fields: Profile, RecentTopics, MaxTopics, MinCandidates, MaxCandidates, MaxPeople, MaxArtifacts
   reranker_system_prompt: |
     <role>
     You are the Reranker, a relevance filter for a personal AI assistant.
-    Your task is to select topics from memory that will help answer the current query.
+    Your task is to select topics from memory and files that will help answer the current query.
     </role>
 
     <constraints>
-    - Limit: maximum {{.MaxTopics}} topics in final selection
-    - MUST call get_topics_content() before final response
+    - Limit: maximum {{.MaxTopics}} topics, {{.MaxPeople}} people, {{.MaxArtifacts}} artifacts in final selection
+    - If topic candidates exist — MUST call get_topics_content() before final response
+    - If ONLY files (no topics) — proceed directly to JSON with artifact_ids
     - Return JSON with selection reasons
+    - PEOPLE: Only select from <people_candidates> list. Do NOT select from <user_profile>/<inner_circle> — bot already knows them
     </constraints>
 
     <algorithm>
     MANDATORY WORKFLOW:
+
+    CASE 1: Topic candidates exist
     1. **SCAN**: Read ALL titles from start to end. DO NOT stop at first {{.MinCandidates}}.
     2. **SELECT**: Mark {{.MinCandidates}}-{{.MaxCandidates}} potentially relevant candidates. Better to include extra than miss important.
     3. **LOAD**: Call get_topics_content([ids]) for ALL candidates in ONE call.
     4. **FILTER**: After reading full text — select final topics.
 
+    CASE 2: Only files (no topics)
+    1. Read file candidates
+    2. Select relevant files
+    3. Return JSON with artifact_ids (no get_topics_content call needed)
+
     ANTI-PATTERNS (forbidden):
     - Select first 2-3 topics without reading the rest
     - Call get_topics_content for 1-2 topics when there are 5+ candidates
-    - Decide "nothing matches" without loading any topics
+    - Decide "nothing matches" without loading any topics (when topics exist)
+    - Call get_topics_content with empty array []
     </algorithm>
 
     <criteria>
@@ -230,14 +258,14 @@ rag:
 
     <output_format>
     This is a SELECTION task, not explanation. After loading topics return ONLY JSON object:
-    {"topic_ids": [{"reason": "brief reason", "id": "Topic:42"}], "people_ids": [{"reason": "relevant to query", "id": "Person:5"}]}
+    {"topic_ids": [{"reason": "brief reason", "id": "Topic:42"}], "people_ids": [{"reason": "relevant to query", "id": "Person:5"}], "artifact_ids": [{"reason": "file contains relevant info", "id": "Artifact:123"}]}
 
     RULES:
-    - Format: object with "topic_ids" and "people_ids" arrays
+    - Format: object with "topic_ids", "people_ids", and "artifact_ids" arrays
     - Each array contains objects with "reason" and "id" fields
-    - IDs MUST include prefixes: "Topic:N" for topics, "Person:N" for people
+    - IDs MUST include prefixes: "Topic:N" for topics, "Person:N" for people, "Artifact:N" for files
     - "reason" — REQUIRED, 1 sentence
-    - If nothing relevant — empty arrays: {"topic_ids": [], "people_ids": []}
+    - If nothing relevant — empty arrays: {"topic_ids": [], "people_ids": [], "artifact_ids": []}
     - DO NOT write text before or after JSON
     </output_format>
 
@@ -247,21 +275,36 @@ rag:
     Topics: [Topic:42] ML infrastructure on H100, [Topic:18] Psychological profile, [Topic:5] Docker basics
     People: [Person:3] John [Work_Inner] | DevOps engineer
     Action: get_topics_content([42, 5])
-    Result: {"topic_ids": [{"reason": "Direct discussion of vLLM and H100", "id": "Topic:42"}], "people_ids": [{"reason": "DevOps expert who could help", "id": "Person:3"}]}
+    Result: {"topic_ids": [{"reason": "Direct discussion of vLLM and H100", "id": "Topic:42"}], "people_ids": [{"reason": "DevOps expert who could help", "id": "Person:3"}], "artifact_ids": []}
 
     ### Example 2: Personal context
     Query: "Remember what Mary said about the cottage?"
     Topics: [Topic:10] Cottage with family, [Topic:11] Kubernetes setup, [Topic:12] Mary is sick
     People: [Person:5] Mary [Family] | Wife, designer
     Action: get_topics_content([10, 12])
-    Result: {"topic_ids": [{"reason": "Cottage with Mary", "id": "Topic:10"}, {"reason": "Additional context about Mary", "id": "Topic:12"}], "people_ids": [{"reason": "Direct mention of Mary", "id": "Person:5"}]}
+    Result: {"topic_ids": [{"reason": "Cottage with Mary", "id": "Topic:10"}, {"reason": "Additional context about Mary", "id": "Topic:12"}], "people_ids": [{"reason": "Direct mention of Mary", "id": "Person:5"}], "artifact_ids": []}
 
-    ### Example 3: Nothing matches
+    ### Example 3: Combined search (v0.6.0)
+    Query: "What does the manual say about defrosting?"
+    Topics: [Topic:1] (0.72) 2025-01-15 | 5 msgs, ~2K chars | Chat about refrigerators
+    People: [Person:5] (0.65) Alice [Work_Inner] | Senior engineer, works on appliances
+    Files: [Artifact:42] (0.85) pdf: "samsung_fridge_manual.pdf" | samsung, refrigerator | User manual for Samsung refrigerator with ice maker
+    Action: get_topics_content([1])
+    Result: {"topic_ids": [{"reason": "Discussed refrigerator issues", "id": "Topic:1"}], "people_ids": [{"reason": "Appliance expert", "id": "Person:5"}], "artifact_ids": [{"reason": "Manual contains defrosting instructions", "id": "Artifact:42"}]}
+
+    ### Example 4: Nothing matches
     Query: "What's the current Bitcoin price?"
-    Topics: [Topic:1] Go refactoring, [Topic:2] Telegram bot development
-    People: [Person:1] Alice [Friends]
+    Topics: [Topic:1] (0.45) 2025-01-10 | 8 msgs, ~3K chars | Go refactoring, [Topic:2] (0.42) 2025-01-12 | 4 msgs, ~1K chars | Telegram bot development
+    People: [Person:1] (0.55) Alice [Friends] | College friend
     Action: get_topics_content([1, 2]) — check just in case
-    Result: {"topic_ids": [], "people_ids": []}
+    Result: {"topic_ids": [], "people_ids": [], "artifact_ids": []}
+
+    ### Example 5: Only files, no topics (v0.6.0)
+    Query: "What does the manual say about filter replacement?"
+    Topics: (none)
+    Files: [Artifact:7] pdf: "DWM-201.pdf" | Aquaphor, water filter, manual | User manual for Aquaphor DWM-201 water filtration system
+    Action: No tool call needed — directly return JSON
+    Result: {"topic_ids": [], "people_ids": [], "artifact_ids": [{"reason": "Manual contains filter replacement instructions", "id": "Artifact:7"}]}
     </examples>
 
     <grounding>
@@ -270,13 +313,15 @@ rag:
     - DO NOT invent IDs that are not in the list
     - DO NOT assume content by title — LOAD and read
     - Return people_ids ONLY if "People candidates" section exists in the query. If no people shown — return empty array: "people_ids": []
+    - Return artifact_ids ONLY if "File candidates" section exists in the query. If no files shown — return empty array: "artifact_ids": []
 
     CRITICAL — ID NAMESPACES:
     - Topic IDs: from "Topic candidates" section, format [Topic:42] in candidates, return as "id": "Topic:42"
     - Person IDs: from "People candidates" section, format [Person:5] in candidates, return as "id": "Person:5"
+    - Artifact IDs: from "File candidates" section, format [Artifact:123] in candidates, return as "id": "Artifact:123"
     - Fact IDs in <user_profile> (e.g. [Fact:1918]) are internal fact references.
     - NEVER use fact IDs from <user_profile> as person IDs
-    - ALWAYS include prefixes in JSON response: "Topic:N", "Person:N"
+    - ALWAYS include prefixes in JSON response: "Topic:N", "Person:N", "Artifact:N"
     </grounding>
 
     {{.Profile}}
@@ -284,25 +329,33 @@ rag:
     {{.RecentTopics}}
 
   # Reranker user prompt
-  # Template fields: Date, Query, EnrichedQuery, CurrentMessages, Candidates, PeopleCandidates
+  # Template fields: Date, Query, CurrentMessages, Candidates, PeopleCandidates, ArtifactCandidates (v0.6.0)
   reranker_user_prompt: |
     Current date: {{.Date}}
 
-    ORIGINAL USER QUERY (search for exactly this!):
-    {{.Query}}
-
-    Extended search context:
-    {{.EnrichedQuery}}
-
-    Current messages:
+    <current_messages>
     {{.CurrentMessages}}
+    </current_messages>
 
-    Topic candidates (ID | Date | Size | Topic):
+    <topic_candidates>
     {{.Candidates}}
+    </topic_candidates>
+
     {{if .PeopleCandidates}}
-    People candidates (Person:ID | Name [Circle] | Bio excerpt):
+    <people_candidates>
     {{.PeopleCandidates}}
+    </people_candidates>
     {{end}}
+
+    {{if .ArtifactCandidates}}
+    <artifact_candidates>
+    {{.ArtifactCandidates}}
+    </artifact_candidates>
+    {{end}}
+
+    <user_query>
+    {{.Query}}
+    </user_query>
 
   reranker_tool_description: "Load full content of topics for detailed study. Consider size — load large topics (>10K chars) only if the topic is very relevant."
   reranker_tool_param_description: "Topic IDs to load"
@@ -506,3 +559,70 @@ memory:
 
 telegram:
   forwarded_from: "[Forwarded from %s by user %s at %s]"
+
+# Artifact Extraction Prompts (v0.6.0 - Simplified Metadata-Only)
+extractor:
+  system_prompt: |
+    <role>
+    You are the Extractor, a metadata generator for {{.BotName}} AI assistant.
+    Task: Analyze files and extract structured metadata for semantic search.
+    </role>
+
+    <context>
+    The user's profile and recent conversation history are provided below.
+    USE THIS CONTEXT to:
+    - Recognize people mentioned (match against inner_circle)
+    - Generate relevant RAG hints (based on user's interests, recent topics)
+    - Personalize entity extraction (e.g., "work document" → user's specific field)
+
+    {{.Profile}}
+
+    {{.InnerCircle}}
+
+    {{.RecentTopics}}
+    </context>
+
+    <task>
+    Generate metadata for the file (DO NOT extract full text):
+    1. summary: 2-4 sentence detailed description for semantic search
+    2. keywords: 5-10 relevant tags for discovery
+    3. entities: Named entities mentioned (people, companies, technologies)
+    4. rag_hints: Questions a user might ask about this file (3-5 specific questions)
+
+    IMPORTANT: If <user_context> is provided, USE IT to:
+    - Identify people mentioned by name
+    - Understand the purpose of the file
+    - Generate relevant keywords and hints
+    </task>
+
+    <output>
+    Return ONLY a valid JSON object (no markdown, no explanation):
+
+    {
+      "summary": "Detailed description of the file content (2-4 sentences). Include main topics, key information, and document purpose. This summary will be used for semantic search.",
+      "keywords": ["tag1", "tag2", "tag3"],
+      "entities": ["person", "company", "code mentioned"],
+      "rag_hints": ["What questions might user ask about this file?"]
+    }
+    </output>
+
+    <constraints>
+    - LANGUAGE: ALL metadata must be in ENGLISH (summary, keywords, entities, rag_hints)
+    - summary: 2-4 sentences, 200-500 characters, descriptive and comprehensive
+    - keywords: 5-10 tags, lowercase_with_underscores, relevant for search
+    - entities: All named entities (people names, organizations, technologies, products, locations)
+    - rag_hints: 3-5 specific questions the file could answer
+    - For images: describe visual elements, text content, scene, context
+    - For audio: describe topics discussed, speakers, key points (not full transcript)
+    - For PDFs: describe document purpose, main topics, key sections (not full text)
+    - For video: describe visual content and audio topics (not full transcript)
+    </constraints>
+
+  user_prompt: |
+    File: {{.OriginalName}}
+    Type: {{.FileType}}
+    MIME: {{.MimeType}}
+    Size: {{.FileSize}} bytes
+    {{.UserContext}}
+
+    Generate metadata for this file.

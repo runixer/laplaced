@@ -3,6 +3,7 @@ package files
 import (
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -68,7 +69,7 @@ func TestProcessor_ProcessMessage_Photo(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345)
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -99,7 +100,7 @@ func TestProcessor_ProcessMessage_Voice(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345)
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -129,7 +130,7 @@ func TestProcessor_ProcessMessage_DocumentPDF(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345)
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -158,7 +159,7 @@ func TestProcessor_ProcessMessage_DocumentImage(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345)
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -186,7 +187,7 @@ func TestProcessor_ProcessMessage_DocumentText(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345)
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -216,7 +217,7 @@ func TestProcessor_ProcessMessage_RetryOnFailure(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345)
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -236,8 +237,273 @@ func TestProcessor_ProcessMessage_EmptyMessage(t *testing.T) {
 		Text: "Hello, no files here!",
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345)
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
 
 	require.NoError(t, err)
 	assert.Empty(t, files)
+}
+
+func TestProcessor_VoiceArtifactDurationThreshold(t *testing.T) {
+	ctx := context.Background()
+	mockDownloader := new(MockFileDownloader)
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	// Mock file saver
+	mockSaver := new(MockFileSaver)
+
+	voiceData := []byte("fake-ogg-data")
+	mockDownloader.On("DownloadFile", mock.Anything, mock.Anything).Return(voiceData, nil)
+
+	t.Run("minVoiceDurationSec=0 saves all voices", func(t *testing.T) {
+		processor := NewProcessor(mockDownloader, translator, "en", logger)
+		processor.SetFileHandler(mockSaver)
+		processor.SetMinVoiceDurationSec(0) // Save all
+
+		mockSaver.ExpectedCalls = nil
+		artifactID := int64(1)
+		mockSaver.On("SaveFile", mock.Anything, int64(12345), int64(0), "voice", "voice.ogg", "audio/ogg", mock.Anything, "").Return(&artifactID, nil)
+
+		msg := &telegram.Message{
+			Voice: &telegram.Voice{
+				FileID:   "voice-short",
+				Duration: 5, // 5 seconds
+				MimeType: "audio/ogg",
+			},
+		}
+
+		files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+		require.NoError(t, err)
+		require.Len(t, files, 1)
+		mockSaver.AssertExpectations(t)
+	})
+
+	t.Run("minVoiceDurationSec=300 skips short voices", func(t *testing.T) {
+		processor := NewProcessor(mockDownloader, translator, "en", logger)
+		processor.SetFileHandler(mockSaver)
+		processor.SetMinVoiceDurationSec(300) // 5 minutes
+
+		mockSaver.ExpectedCalls = nil
+		mockSaver.Calls = nil // Clear previous calls
+		// Should NOT call SaveFile for short voice
+
+		msg := &telegram.Message{
+			Voice: &telegram.Voice{
+				FileID:   "voice-short",
+				Duration: 30, // 30 seconds - too short
+				MimeType: "audio/ogg",
+			},
+		}
+
+		files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+		require.NoError(t, err)
+		require.Len(t, files, 1) // Still returns processed file
+		assert.Empty(t, mockSaver.Calls, "SaveFile should not be called for short voices")
+	})
+
+	t.Run("minVoiceDurationSec=300 saves long voices", func(t *testing.T) {
+		processor := NewProcessor(mockDownloader, translator, "en", logger)
+		processor.SetFileHandler(mockSaver)
+		processor.SetMinVoiceDurationSec(300) // 5 minutes
+
+		mockSaver.ExpectedCalls = nil
+		artifactID := int64(2)
+		mockSaver.On("SaveFile", mock.Anything, int64(12345), int64(0), "voice", "voice.ogg", "audio/ogg", mock.Anything, "").Return(&artifactID, nil)
+
+		msg := &telegram.Message{
+			Voice: &telegram.Voice{
+				FileID:   "voice-long",
+				Duration: 350, // 5 min 50 sec - should save
+				MimeType: "audio/ogg",
+			},
+		}
+
+		files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+		require.NoError(t, err)
+		require.Len(t, files, 1)
+		mockSaver.AssertExpectations(t)
+	})
+
+	t.Run("minVoiceDurationSec=-1 disables voice artifacts", func(t *testing.T) {
+		processor := NewProcessor(mockDownloader, translator, "en", logger)
+		processor.SetFileHandler(mockSaver)
+		processor.SetMinVoiceDurationSec(-1) // Disabled
+
+		mockSaver.ExpectedCalls = nil
+		mockSaver.Calls = nil // Clear previous calls
+		// Should NOT call SaveFile even for long voice
+
+		msg := &telegram.Message{
+			Voice: &telegram.Voice{
+				FileID:   "voice-long",
+				Duration: 600, // 10 minutes - still not saved
+				MimeType: "audio/ogg",
+			},
+		}
+
+		files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+		require.NoError(t, err)
+		require.Len(t, files, 1)
+		assert.Empty(t, mockSaver.Calls, "SaveFile should not be called when disabled")
+	})
+}
+
+// MockFileSaver is a mock implementation of FileSaver.
+type MockFileSaver struct {
+	mock.Mock
+}
+
+func (m *MockFileSaver) SaveFile(ctx context.Context, userID int64, messageID int64, fileType string, originalName string, mimeType string, reader io.Reader, messageText string) (*int64, error) {
+	args := m.Called(ctx, userID, messageID, fileType, originalName, mimeType, mock.Anything, messageText)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*int64), args.Error(1)
+}
+
+func TestIsGeminiSupported(t *testing.T) {
+	tests := []struct {
+		name     string
+		mimeType string
+		want     bool
+	}{
+		// Supported image types
+		{"PNG image", "image/png", true},
+		{"JPEG image", "image/jpeg", true},
+		{"WEBP image", "image/webp", true},
+		{"HEIC image", "image/heic", true},
+		{"HEIF image", "image/heif", true},
+		// Unsupported image types
+		{"GIF image", "image/gif", false},
+		{"BMP image", "image/bmp", false},
+		{"SVG image", "image/svg+xml", false},
+		// PDF
+		{"PDF document", "application/pdf", true},
+		// Videos
+		{"MP4 video", "video/mp4", true},
+		{"MPEG video", "video/mpeg", true},
+		{"MOV video", "video/mov", true},
+		{"AVI video", "video/avi", true},
+		{"WEBM video", "video/webm", true},
+		{"3GPP video", "video/3gpp", true},
+		{"QuickTime video", "video/quicktime", true},
+		// Unsupported video
+		{"MKV video", "video/x-matroska", false},
+		// Audio types (all supported)
+		{"OGG audio", "audio/ogg", true},
+		{"MP3 audio", "audio/mpeg", true},
+		{"WAV audio", "audio/wav", true},
+		{"M4A audio", "audio/mp4", true},
+		{"FLAC audio", "audio/flac", true},
+		// Text types (all supported)
+		{"Plain text", "text/plain", true},
+		{"Markdown", "text/markdown", true},
+		{"CSV", "text/csv", true},
+		{"JSON", "application/json", true},
+		// Unsupported document types
+		{"Word document", "application/msword", false},
+		{"Word docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", false},
+		{"Excel spreadsheet", "application/vnd.ms-excel", false},
+		{"PowerPoint", "application/vnd.ms-powerpoint", false},
+		{"ZIP archive", "application/zip", false},
+		{"Executable", "application/x-executable", false},
+		// Edge cases
+		{"Empty string", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsGeminiSupported(tt.mimeType))
+		})
+	}
+}
+
+func TestIsFileSizeAllowed(t *testing.T) {
+	tests := []struct {
+		name string
+		size int64
+		want bool
+	}{
+		{"Zero bytes", 0, false},
+		{"1 byte", 1, true},
+		{"1 MB", 1024 * 1024, true},
+		{"10 MB", 10 * 1024 * 1024, true},
+		{"20 MB (exact limit)", 20 * 1024 * 1024, true},
+		{"20 MB + 1 byte (over limit)", 20*1024*1024 + 1, false},
+		{"25 MB", 25 * 1024 * 1024, false},
+		{"100 MB", 100 * 1024 * 1024, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsFileSizeAllowed(tt.size))
+		})
+	}
+}
+
+func TestMaxFileSize(t *testing.T) {
+	assert.Equal(t, int64(20*1024*1024), MaxFileSize())
+}
+
+func TestProcessor_ProcessMessage_UnsupportedFormat(t *testing.T) {
+	ctx := context.Background()
+	mockDownloader := new(MockFileDownloader)
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	processor := NewProcessor(mockDownloader, translator, "en", logger)
+
+	msg := &telegram.Message{
+		Document: &telegram.Document{
+			FileID:   "doc-word",
+			FileName: "document.docx",
+			MimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+			FileSize: 1000,
+		},
+	}
+
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+
+	// Should return UnsupportedFormatError
+	assert.Error(t, err)
+	assert.Nil(t, files)
+	var unsupportedErr *UnsupportedFormatError
+	assert.ErrorAs(t, err, &unsupportedErr)
+	assert.Equal(t, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", unsupportedErr.MimeType)
+	assert.Equal(t, "document.docx", unsupportedErr.FileName)
+
+	// Verify no download was attempted
+	mockDownloader.AssertNotCalled(t, "DownloadFile", mock.Anything, mock.Anything)
+}
+
+func TestProcessor_ProcessMessage_FileTooLarge(t *testing.T) {
+	ctx := context.Background()
+	mockDownloader := new(MockFileDownloader)
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	processor := NewProcessor(mockDownloader, translator, "en", logger)
+
+	// File larger than 20MB
+	msg := &telegram.Message{
+		Document: &telegram.Document{
+			FileID:   "doc-large",
+			FileName: "large.pdf",
+			MimeType: "application/pdf",
+			FileSize: 25 * 1024 * 1024, // 25 MB
+		},
+	}
+
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+
+	// Should return FileTooLargeError
+	assert.Error(t, err)
+	assert.Nil(t, files)
+	var tooLargeErr *FileTooLargeError
+	assert.ErrorAs(t, err, &tooLargeErr)
+	assert.Equal(t, int64(25*1024*1024), tooLargeErr.Size)
+	assert.Equal(t, "large.pdf", tooLargeErr.FileName)
+
+	// Verify no download was attempted
+	mockDownloader.AssertNotCalled(t, "DownloadFile", mock.Anything, mock.Anything)
 }

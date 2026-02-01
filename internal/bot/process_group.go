@@ -2,10 +2,12 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"html"
 	"log/slog"
 	"math/rand/v2"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,6 +23,20 @@ import (
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
 )
+
+// fileProcessingError wraps a file processing error for identification.
+type fileProcessingError struct {
+	err          error
+	messageIndex int
+}
+
+func (e *fileProcessingError) Error() string {
+	return e.err.Error()
+}
+
+func (e *fileProcessingError) Unwrap() error {
+	return e.err
+}
 
 func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	if len(group.Messages) == 0 {
@@ -77,10 +93,31 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	defer cancelTyping()
 	go b.sendTypingActionLoop(typingCtx, chatID, lastMsg.MessageThreadID)
 
-	historyContent, rawQuery, currentUserMessageContent, err := b.prepareUserMessage(shutdownSafeCtx, group, logger)
+	historyContent, rawQuery, currentUserMessageContent, allProcessedFiles, err := b.prepareUserMessage(shutdownSafeCtx, group, logger)
 	if err != nil {
-		b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
-		return
+		// Check for file validation errors (unsupported format, too large)
+		var unsupported *files.UnsupportedFormatError
+		var tooLarge *files.FileTooLargeError
+		switch {
+		case errors.As(err, &unsupported):
+			msg := b.translator.Get(b.cfg.Bot.Language, "bot.file_unsupported_format")
+			ext := filepath.Ext(unsupported.FileName)
+			if ext == "" && unsupported.MimeType != "" {
+				ext = "(" + unsupported.MimeType + ")"
+			}
+			msg = strings.ReplaceAll(msg, "{ext}", ext)
+			b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: msg}}, logger)
+			return
+		case errors.As(err, &tooLarge):
+			msg := b.translator.Get(b.cfg.Bot.Language, "bot.file_too_large")
+			sizeMB := float64(tooLarge.Size) / (1024 * 1024)
+			msg = strings.ReplaceAll(msg, "{size}", fmt.Sprintf("%.1f", sizeMB))
+			b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: msg}}, logger)
+			return
+		default:
+			b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
+			return
+		}
 	}
 
 	if len(currentUserMessageContent) == 0 {
@@ -99,6 +136,28 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "user", Content: historyContent}); err != nil {
 		logger.Error("failed to add message to history", "error", err)
 		return
+	}
+
+	// Link artifacts to message ID (if artifact repo available)
+	// Message ID is auto-increment, so we need to get the last inserted ID
+	// For simplicity, we get the most recent message for this user
+	if len(allProcessedFiles) > 0 && b.artifactRepo != nil {
+		lastMsg, err := b.msgRepo.GetRecentHistory(userID, 1)
+		if err == nil && len(lastMsg) > 0 {
+			messageID := lastMsg[0].ID
+			for _, f := range allProcessedFiles {
+				if f.ArtifactID != nil {
+					if err := b.artifactRepo.UpdateMessageID(userID, *f.ArtifactID, messageID); err != nil {
+						logger.Warn("failed to link artifact to message",
+							"user_id", userID,
+							"artifact_id", *f.ArtifactID,
+							"message_id", messageID,
+							"error", err,
+						)
+					}
+				}
+			}
+		}
 	}
 
 	// Per-message breakdown tracking
@@ -233,7 +292,42 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	success = true
 }
 
-func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logger *slog.Logger) (string, string, []interface{}, error) {
+func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logger *slog.Logger) (string, string, []interface{}, []*files.ProcessedFile, error) {
+	// Build group text for artifact context: MessageGroup + recent session messages (v0.6.0)
+	var groupTextBuilder strings.Builder
+
+	// 1. Add recent session messages (if configured)
+	recentCount := b.cfg.Agents.Extractor.RecentMessageCount
+	if recentCount > 0 {
+		// Get message IDs from current group to exclude them
+		excludeIDs := make([]int64, len(group.Messages))
+		for i, msg := range group.Messages {
+			excludeIDs[i] = int64(msg.MessageID)
+		}
+
+		// Fetch recent session messages (excluding current group messages)
+		recentMsgs, err := b.msgRepo.GetRecentSessionMessages(ctx, group.UserID, recentCount, excludeIDs)
+		if err == nil && len(recentMsgs) > 0 {
+			for _, msg := range recentMsgs {
+				// Build content from stored messages (simplified, without full telegram.Message)
+				content := fmt.Sprintf("[%s (saved)]: %s", msg.CreatedAt.Format("2006-01-02 15:04:05"), msg.Content)
+				appendWithNewline(&groupTextBuilder, content)
+			}
+		}
+		// Log error but don't fail - recent context is optional
+		if err != nil {
+			logger.Debug("failed to fetch recent session messages", "error", err)
+		}
+	}
+
+	// 2. Add MessageGroup messages (current context)
+	for _, msg := range group.Messages {
+		if content := msg.BuildContent(b.translator, b.cfg.Bot.Language); content != "" {
+			appendWithNewline(&groupTextBuilder, content)
+		}
+	}
+	groupText := groupTextBuilder.String()
+
 	// 1. Download all files in parallel across messages
 	downloadedFiles := make([][]*files.ProcessedFile, len(group.Messages))
 
@@ -241,9 +335,11 @@ func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logge
 	for i, msg := range group.Messages {
 		i, msg := i, msg // capture for goroutine
 		g.Go(func() error {
-			result, err := b.fileProcessor.ProcessMessage(gCtx, msg, group.UserID)
+			result, err := b.fileProcessor.ProcessMessage(gCtx, msg, group.UserID, groupText)
 			if err != nil {
-				return err // context cancelled
+				// Check for file validation errors (unsupported format, too large)
+				// These are user-facing errors, return them wrapped
+				return &fileProcessingError{err: err, messageIndex: i}
 			}
 			downloadedFiles[i] = result
 			return nil
@@ -251,13 +347,21 @@ func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logge
 	}
 
 	if err := g.Wait(); err != nil {
-		return "", "", nil, err
+		// Check if this is a file processing error (validation failure)
+		var fileErr *fileProcessingError
+		if errors.As(err, &fileErr) {
+			// Return validation error for caller to handle
+			return "", "", nil, nil, fileErr.err
+		}
+		// Other errors (like context cancellation) return as-is
+		return "", "", nil, nil, err
 	}
 
 	// 2. Process messages sequentially (order preserved)
 	var historyBuilder strings.Builder
 	var rawQueryBuilder strings.Builder
 	var llmParts []interface{}
+	var allProcessedFiles []*files.ProcessedFile // Collect all files for artifact linking
 
 	for i, msg := range group.Messages {
 		// Text content (message text or caption)
@@ -269,6 +373,9 @@ func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logge
 
 		// Process pre-downloaded files
 		for _, f := range downloadedFiles[i] {
+			// Collect for artifact linking
+			allProcessedFiles = append(allProcessedFiles, f)
+
 			// Add instruction before file if present (e.g., voice handling instructions)
 			if f.Instruction != "" {
 				prefix := msg.BuildPrefix(b.translator, b.cfg.Bot.Language)
@@ -297,11 +404,21 @@ func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logge
 				)
 
 			case files.FileTypeDocument:
-				// Text document: content is already in LLMParts as TextPart
-				// Also add to history for context
-				if len(f.LLMParts) > 0 {
-					if tp, ok := f.LLMParts[0].(openrouter.TextPart); ok {
-						appendWithNewline(&historyBuilder, tp.Text)
+				// Text document: save compact marker in history instead of full content
+				// But include content in rawQuery for enricher/reranker to see current file
+				if f.ArtifactID != nil {
+					marker := fmt.Sprintf("📄 %s (artifact:%d)", f.FileName, *f.ArtifactID)
+					appendWithNewline(&historyBuilder, marker)
+				} else {
+					// Fallback: no artifact (disabled or error)
+					marker := fmt.Sprintf("📄 %s", f.FileName)
+					appendWithNewline(&historyBuilder, marker)
+				}
+				// Extract text content from LLMParts for enricher/reranker
+				// Text documents have TextPart with "filename:\n\ncontent" format
+				for _, part := range f.LLMParts {
+					if tp, ok := part.(openrouter.TextPart); ok {
+						appendWithNewline(&rawQueryBuilder, tp.Text)
 					}
 				}
 
@@ -324,7 +441,7 @@ func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logge
 		appendWithNewline(&rawQueryBuilder, txt)
 	}
 
-	return historyBuilder.String(), rawQueryBuilder.String(), llmParts, nil
+	return historyBuilder.String(), rawQueryBuilder.String(), llmParts, allProcessedFiles, nil
 }
 
 // appendWithNewline appends string to builder with newline separator if not empty.
@@ -461,6 +578,12 @@ func (b *Bot) finalizeResponse(chatID int64, messageThreadID int, userID int64, 
 
 	var responses []telegram.SendMessageRequest
 	for i, chunk := range chunks {
+		// Skip empty or whitespace-only chunks (LLM sometimes returns empty responses)
+		if strings.TrimSpace(chunk) == "" {
+			logger.Warn("skipping empty response chunk", "chunk_index", i)
+			continue
+		}
+
 		// Convert each chunk to HTML
 		htmlChunk, err := markdown.ToHTML(chunk)
 		if err != nil {

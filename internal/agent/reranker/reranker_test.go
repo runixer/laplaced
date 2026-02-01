@@ -4,11 +4,13 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFormatCandidatesForReranker(t *testing.T) {
@@ -459,7 +461,7 @@ func TestFallbackToVectorTop(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := r.fallbackToVectorTop(candidates, nil, tt.maxTopics)
+			result := r.fallbackToVectorTop(candidates, nil, nil, tt.maxTopics)
 			assert.Equal(t, tt.wantIDs, result.TopicIDs())
 		})
 	}
@@ -514,7 +516,7 @@ func TestFallbackFromState(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := r.fallbackFromState(tt.state, candidates, nil, tt.maxTopics)
+			result := r.fallbackFromState(tt.state, candidates, nil, nil, tt.maxTopics)
 			assert.Equal(t, tt.wantIDs, result.TopicIDs())
 		})
 	}
@@ -656,6 +658,847 @@ func TestFormatSizeChars(t *testing.T) {
 		t.Run(tt.want, func(t *testing.T) {
 			result := formatSizeChars(tt.chars)
 			assert.Equal(t, tt.want, result)
+		})
+	}
+}
+
+// Filtering Tests
+
+// TestFilterValidTopics_InvalidIDFormat verifies handling of malformed topic IDs.
+func TestFilterValidTopics_InvalidIDFormat(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	candidateMap := map[int64]Candidate{
+		1: {TopicID: 1},
+		2: {TopicID: 2},
+	}
+
+	result := &Result{
+		Topics: []TopicSelection{
+			{ID: "Topic:1", Reason: "valid"},
+			{ID: "NotATopic:999", Reason: "malformed"},
+			{ID: "Topic:2", Reason: "also valid"},
+		},
+	}
+
+	filtered := r.filterValidTopics(123, result, candidateMap)
+	assert.Equal(t, []int64{1, 2}, filtered.TopicIDs())
+	assert.Len(t, filtered.Topics, 2)
+}
+
+// TestFilterValidTopics_MixedValidAndInvalid verifies filtering with mix of IDs.
+func TestFilterValidTopics_MixedValidAndInvalid(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	candidateMap := map[int64]Candidate{
+		1: {TopicID: 1},
+		3: {TopicID: 3},
+		5: {TopicID: 5},
+	}
+
+	result := &Result{
+		Topics: []TopicSelection{
+			{ID: "Topic:1", Reason: "valid 1"},
+			{ID: "Topic:999", Reason: "hallucinated"},
+			{ID: "Topic:3", Reason: "valid 3"},
+			{ID: "Topic:888", Reason: "hallucinated 2"},
+			{ID: "Topic:5", Reason: "valid 5"},
+		},
+	}
+
+	filtered := r.filterValidTopics(123, result, candidateMap)
+	assert.Equal(t, []int64{1, 3, 5}, filtered.TopicIDs())
+	assert.Len(t, filtered.Topics, 3)
+}
+
+// People Filtering Tests
+
+// TestFilterValidPeople_AllValid verifies all people are kept when valid.
+func TestFilterValidPeople_AllValid(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	peopleMap := map[int64]PersonCandidate{
+		1: {PersonID: 1},
+		2: {PersonID: 2},
+	}
+
+	result := &Result{
+		Topics:    []TopicSelection{{ID: "Topic:1", Reason: "t1"}},
+		People:    []PersonSelection{{ID: "Person:1", Reason: "p1"}, {ID: "Person:2", Reason: "p2"}},
+		Artifacts: []ArtifactSelection{{ID: "Artifact:1", Reason: "a1"}},
+	}
+
+	filtered := r.filterValidPeople(123, result, peopleMap)
+	assert.Equal(t, []int64{1, 2}, filtered.PeopleIDs())
+	assert.Len(t, filtered.People, 2)
+	// Other fields preserved
+	assert.Len(t, filtered.Topics, 1)
+	assert.Len(t, filtered.Artifacts, 1)
+}
+
+// TestFilterValidPeople_SomeHallucinated filters out hallucinated people.
+func TestFilterValidPeople_SomeHallucinated(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	peopleMap := map[int64]PersonCandidate{
+		1: {PersonID: 1},
+		3: {PersonID: 3},
+	}
+
+	result := &Result{
+		People: []PersonSelection{
+			{ID: "Person:1", Reason: "valid"},
+			{ID: "Person:999", Reason: "hallucinated"},
+			{ID: "Person:3", Reason: "also valid"},
+		},
+	}
+
+	filtered := r.filterValidPeople(123, result, peopleMap)
+	assert.Equal(t, []int64{1, 3}, filtered.PeopleIDs())
+	assert.Len(t, filtered.People, 2)
+}
+
+// TestFilterValidPeople_AllHallucinated returns empty when all are invalid.
+func TestFilterValidPeople_AllHallucinated(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	peopleMap := map[int64]PersonCandidate{
+		1: {PersonID: 1},
+	}
+
+	result := &Result{
+		People: []PersonSelection{
+			{ID: "Person:999", Reason: "fake 1"},
+			{ID: "Person:888", Reason: "fake 2"},
+		},
+	}
+
+	filtered := r.filterValidPeople(123, result, peopleMap)
+	assert.Empty(t, filtered.PeopleIDs())
+	assert.Nil(t, filtered.People)
+}
+
+// TestFilterValidPeople_EmptyInput handles empty input gracefully.
+func TestFilterValidPeople_EmptyInput(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	peopleMap := map[int64]PersonCandidate{
+		1: {PersonID: 1},
+	}
+
+	result := &Result{
+		People: []PersonSelection{},
+	}
+
+	filtered := r.filterValidPeople(123, result, peopleMap)
+	assert.Empty(t, filtered.PeopleIDs())
+}
+
+// TestFilterValidPeople_InvalidIDFormat handles malformed IDs.
+func TestFilterValidPeople_InvalidIDFormat(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	peopleMap := map[int64]PersonCandidate{
+		1: {PersonID: 1},
+	}
+
+	result := &Result{
+		People: []PersonSelection{
+			{ID: "Person:1", Reason: "valid"},
+			{ID: "NotAPerson:999", Reason: "malformed"},
+		},
+	}
+
+	filtered := r.filterValidPeople(123, result, peopleMap)
+	assert.Equal(t, []int64{1}, filtered.PeopleIDs())
+}
+
+// Artifact Filtering Tests
+
+// TestFilterValidArtifacts_AllValid verifies all artifacts are kept when valid.
+func TestFilterValidArtifacts_AllValid(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	artifactsMap := map[int64]ArtifactCandidate{
+		1: {ArtifactID: 1},
+		2: {ArtifactID: 2},
+	}
+
+	result := &Result{
+		Topics:    []TopicSelection{{ID: "Topic:1", Reason: "t1"}},
+		People:    []PersonSelection{{ID: "Person:1", Reason: "p1"}},
+		Artifacts: []ArtifactSelection{{ID: "Artifact:1", Reason: "a1"}, {ID: "Artifact:2", Reason: "a2"}},
+	}
+
+	filtered := r.filterValidArtifacts(123, result, artifactsMap)
+	assert.Equal(t, []int64{1, 2}, filtered.ArtifactIDs())
+	assert.Len(t, filtered.Artifacts, 2)
+}
+
+// TestFilterValidArtifacts_SomeHallucinated filters out hallucinated artifacts.
+func TestFilterValidArtifacts_SomeHallucinated(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	artifactsMap := map[int64]ArtifactCandidate{
+		1: {ArtifactID: 1},
+		3: {ArtifactID: 3},
+	}
+
+	result := &Result{
+		Artifacts: []ArtifactSelection{
+			{ID: "Artifact:1", Reason: "valid"},
+			{ID: "Artifact:999", Reason: "hallucinated"},
+			{ID: "Artifact:3", Reason: "also valid"},
+		},
+	}
+
+	filtered := r.filterValidArtifacts(123, result, artifactsMap)
+	assert.Equal(t, []int64{1, 3}, filtered.ArtifactIDs())
+	assert.Len(t, filtered.Artifacts, 2)
+}
+
+// TestFilterValidArtifacts_AllHallucinated returns empty when all are invalid.
+func TestFilterValidArtifacts_AllHallucinated(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	artifactsMap := map[int64]ArtifactCandidate{
+		1: {ArtifactID: 1},
+	}
+
+	result := &Result{
+		Artifacts: []ArtifactSelection{
+			{ID: "Artifact:999", Reason: "fake 1"},
+			{ID: "Artifact:888", Reason: "fake 2"},
+		},
+	}
+
+	filtered := r.filterValidArtifacts(123, result, artifactsMap)
+	assert.Empty(t, filtered.ArtifactIDs())
+	assert.Nil(t, filtered.Artifacts)
+}
+
+// TestFilterValidArtifacts_EmptyInput handles empty input gracefully.
+func TestFilterValidArtifacts_EmptyInput(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	artifactsMap := map[int64]ArtifactCandidate{
+		1: {ArtifactID: 1},
+	}
+
+	result := &Result{
+		Artifacts: []ArtifactSelection{},
+	}
+
+	filtered := r.filterValidArtifacts(123, result, artifactsMap)
+	assert.Empty(t, filtered.ArtifactIDs())
+}
+
+// TestFilterValidArtifacts_InvalidIDFormat handles malformed IDs.
+func TestFilterValidArtifacts_InvalidIDFormat(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	artifactsMap := map[int64]ArtifactCandidate{
+		1: {ArtifactID: 1},
+	}
+
+	result := &Result{
+		Artifacts: []ArtifactSelection{
+			{ID: "Artifact:1", Reason: "valid"},
+			{ID: "NotAnArtifact:999", Reason: "malformed"},
+		},
+	}
+
+	filtered := r.filterValidArtifacts(123, result, artifactsMap)
+	assert.Equal(t, []int64{1}, filtered.ArtifactIDs())
+}
+
+// Array Parsing Tests
+
+// TestParsePeopleArray_ObjectFormat parses people in object format.
+func TestParsePeopleArray_ObjectFormat(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	data := []byte(`[{"id": "Person:1", "reason": "friend"}, {"id": "Person:2", "reason": "colleague"}]`)
+	result := r.parsePeopleArray(data)
+
+	require.Len(t, result, 2)
+	assert.Equal(t, "Person:1", result[0].ID)
+	assert.Equal(t, "friend", result[0].Reason)
+	assert.Equal(t, "Person:2", result[1].ID)
+	assert.Equal(t, "colleague", result[1].Reason)
+}
+
+// TestParsePeopleArray_NumericFallback handles numeric format.
+func TestParsePeopleArray_NumericFallback(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	data := []byte(`[1, 2, 3]`)
+	result := r.parsePeopleArray(data)
+
+	require.Len(t, result, 3)
+	assert.Equal(t, "Person:1", result[0].ID)
+	assert.Equal(t, "Person:2", result[1].ID)
+	assert.Equal(t, "Person:3", result[2].ID)
+}
+
+// TestParsePeopleArray_Empty handles empty array.
+func TestParsePeopleArray_Empty(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	data := []byte(`[]`)
+	result := r.parsePeopleArray(data)
+
+	assert.Nil(t, result)
+}
+
+// TestParsePeopleArray_Invalid handles invalid JSON.
+func TestParsePeopleArray_Invalid(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	data := []byte(`invalid`)
+	result := r.parsePeopleArray(data)
+
+	assert.Nil(t, result)
+}
+
+// TestParseArtifactArray_ObjectFormat parses artifacts in object format.
+func TestParseArtifactArray_ObjectFormat(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	data := []byte(`[{"id": "Artifact:1", "reason": "document"}, {"id": "Artifact:2", "reason": "image"}]`)
+	result := r.parseArtifactArray(data)
+
+	require.Len(t, result, 2)
+	assert.Equal(t, "Artifact:1", result[0].ID)
+	assert.Equal(t, "document", result[0].Reason)
+	assert.Equal(t, "Artifact:2", result[1].ID)
+	assert.Equal(t, "image", result[1].Reason)
+}
+
+// TestParseArtifactArray_NumericFallback handles numeric format.
+func TestParseArtifactArray_NumericFallback(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	data := []byte(`[1, 2, 3]`)
+	result := r.parseArtifactArray(data)
+
+	require.Len(t, result, 3)
+	assert.Equal(t, "Artifact:1", result[0].ID)
+	assert.Equal(t, "Artifact:2", result[1].ID)
+	assert.Equal(t, "Artifact:3", result[2].ID)
+}
+
+// TestParseArtifactArray_Empty handles empty array.
+func TestParseArtifactArray_Empty(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	data := []byte(`[]`)
+	result := r.parseArtifactArray(data)
+
+	assert.Nil(t, result)
+}
+
+// TestParseArtifactArray_Invalid handles invalid JSON.
+func TestParseArtifactArray_Invalid(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	data := []byte(`invalid`)
+	result := r.parseArtifactArray(data)
+
+	assert.Nil(t, result)
+}
+
+// Build Map Tests
+
+// TestBuildCandidateMap_Empty handles empty candidates.
+func TestBuildCandidateMap_Empty(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	result := r.buildCandidateMap([]Candidate{})
+
+	assert.Empty(t, result)
+}
+
+// TestBuildCandidateMap_Single builds map with single entry.
+func TestBuildCandidateMap_Single(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	candidates := []Candidate{
+		{TopicID: 42, Score: 0.9, Topic: storage.Topic{ID: 42, Summary: "Test"}},
+	}
+
+	result := r.buildCandidateMap(candidates)
+
+	assert.Len(t, result, 1)
+	assert.Contains(t, result, int64(42))
+	assert.Equal(t, int64(42), result[42].TopicID)
+}
+
+// TestBuildCandidateMap_Multiple builds map with multiple entries.
+func TestBuildCandidateMap_Multiple(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	candidates := []Candidate{
+		{TopicID: 1, Score: 0.9, Topic: storage.Topic{ID: 1, Summary: "First"}},
+		{TopicID: 2, Score: 0.8, Topic: storage.Topic{ID: 2, Summary: "Second"}},
+		{TopicID: 3, Score: 0.7, Topic: storage.Topic{ID: 3, Summary: "Third"}},
+	}
+
+	result := r.buildCandidateMap(candidates)
+
+	assert.Len(t, result, 3)
+	assert.Contains(t, result, int64(1))
+	assert.Contains(t, result, int64(2))
+	assert.Contains(t, result, int64(3))
+}
+
+// TestBuildPeopleMap_Empty handles empty candidates.
+func TestBuildPeopleMap_Empty(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	result := r.buildPeopleMap([]PersonCandidate{})
+
+	assert.Empty(t, result)
+}
+
+// TestBuildPeopleMap_Single builds map with single entry.
+func TestBuildPeopleMap_Single(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	candidates := []PersonCandidate{
+		{PersonID: 42, Score: 0.9, Person: storage.Person{ID: 42, DisplayName: "Test"}},
+	}
+
+	result := r.buildPeopleMap(candidates)
+
+	assert.Len(t, result, 1)
+	assert.Contains(t, result, int64(42))
+	assert.Equal(t, int64(42), result[42].PersonID)
+}
+
+// TestBuildPeopleMap_Multiple builds map with multiple entries.
+func TestBuildPeopleMap_Multiple(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	candidates := []PersonCandidate{
+		{PersonID: 1, Score: 0.9, Person: storage.Person{ID: 1, DisplayName: "First"}},
+		{PersonID: 2, Score: 0.8, Person: storage.Person{ID: 2, DisplayName: "Second"}},
+		{PersonID: 3, Score: 0.7, Person: storage.Person{ID: 3, DisplayName: "Third"}},
+	}
+
+	result := r.buildPeopleMap(candidates)
+
+	assert.Len(t, result, 3)
+	assert.Contains(t, result, int64(1))
+	assert.Contains(t, result, int64(2))
+	assert.Contains(t, result, int64(3))
+}
+
+// TestBuildArtifactsMap_Empty handles empty candidates.
+func TestBuildArtifactsMap_Empty(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	result := r.buildArtifactsMap([]ArtifactCandidate{})
+
+	assert.Empty(t, result)
+}
+
+// TestBuildArtifactsMap_Single builds map with single entry.
+func TestBuildArtifactsMap_Single(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	candidates := []ArtifactCandidate{
+		{ArtifactID: 42, Score: 0.9, OriginalName: "test.pdf"},
+	}
+
+	result := r.buildArtifactsMap(candidates)
+
+	assert.Len(t, result, 1)
+	assert.Contains(t, result, int64(42))
+	assert.Equal(t, int64(42), result[42].ArtifactID)
+}
+
+// TestBuildArtifactsMap_Multiple builds map with multiple entries.
+func TestBuildArtifactsMap_Multiple(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	candidates := []ArtifactCandidate{
+		{ArtifactID: 1, Score: 0.9, OriginalName: "first.pdf"},
+		{ArtifactID: 2, Score: 0.8, OriginalName: "second.pdf"},
+		{ArtifactID: 3, Score: 0.7, OriginalName: "third.pdf"},
+	}
+
+	result := r.buildArtifactsMap(candidates)
+
+	assert.Len(t, result, 3)
+	assert.Contains(t, result, int64(1))
+	assert.Contains(t, result, int64(2))
+	assert.Contains(t, result, int64(3))
+}
+
+// Format Artifact Candidates Tests
+
+// TestFormatArtifactCandidates_Empty handles empty candidates.
+func TestFormatArtifactCandidates_Empty(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	result := r.formatArtifactCandidates([]ArtifactCandidate{})
+
+	assert.Empty(t, result)
+}
+
+// TestFormatArtifactCandidates_WithKeywords formats with keywords.
+func TestFormatArtifactCandidates_WithKeywords(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	candidates := []ArtifactCandidate{
+		{ArtifactID: 1, Score: 0.9, FileType: "pdf", OriginalName: "doc.pdf", Summary: "Test doc", Keywords: []string{"kw1", "kw2"}},
+	}
+
+	result := r.formatArtifactCandidates(candidates)
+
+	assert.Contains(t, result, "[Artifact:1]")
+	assert.Contains(t, result, "pdf")
+	assert.Contains(t, result, "doc.pdf")
+	assert.Contains(t, result, "kw1, kw2")
+	assert.Contains(t, result, "Test doc")
+}
+
+// TestFormatArtifactCandidates_WithEntities formats with entities.
+func TestFormatArtifactCandidates_WithEntities(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	candidates := []ArtifactCandidate{
+		{ArtifactID: 1, Score: 0.9, FileType: "pdf", OriginalName: "doc.pdf", Summary: "Test doc", Entities: []string{"Entity1", "Entity2"}},
+	}
+
+	result := r.formatArtifactCandidates(candidates)
+
+	assert.Contains(t, result, "Entities: Entity1, Entity2")
+}
+
+// TestFormatArtifactCandidates_WithBoth formats with both keywords and entities.
+func TestFormatArtifactCandidates_WithBoth(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	candidates := []ArtifactCandidate{
+		{ArtifactID: 1, Score: 0.9, FileType: "pdf", OriginalName: "doc.pdf", Summary: "Test doc", Keywords: []string{"kw1"}, Entities: []string{"Entity1"}},
+	}
+
+	result := r.formatArtifactCandidates(candidates)
+
+	assert.Contains(t, result, "kw1")
+	assert.Contains(t, result, "Entities: Entity1")
+}
+
+// TestFormatArtifactCandidates_LongSummaryTruncation verifies summary truncation.
+func TestFormatArtifactCandidates_LongSummaryTruncation(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	r := &Reranker{logger: logger}
+
+	longSummary := strings.Repeat("word ", 100) // Long summary
+	candidates := []ArtifactCandidate{
+		{ArtifactID: 1, Score: 0.9, FileType: "pdf", OriginalName: "doc.pdf", Summary: longSummary},
+	}
+
+	result := r.formatArtifactCandidates(candidates)
+
+	// Should contain the summary (not truncated by formatArtifactCandidates)
+	assert.Contains(t, result, "word")
+}
+
+// Result Helper Methods Tests
+
+// TestResult_PeopleIDs returns people IDs from result.
+func TestResult_PeopleIDs(t *testing.T) {
+	result := &Result{
+		People: []PersonSelection{
+			{ID: "Person:42", Reason: "a"},
+			{ID: "Person:18", Reason: "b"},
+			{ID: "Person:5", Reason: "c"},
+		},
+	}
+
+	ids := result.PeopleIDs()
+	assert.Equal(t, []int64{42, 18, 5}, ids)
+}
+
+// TestResult_PeopleIDsEmpty returns empty for nil people.
+func TestResult_PeopleIDsEmpty(t *testing.T) {
+	result := &Result{People: nil}
+	ids := result.PeopleIDs()
+	assert.Empty(t, ids)
+
+	result2 := &Result{People: []PersonSelection{}}
+	ids2 := result2.PeopleIDs()
+	assert.Empty(t, ids2)
+}
+
+// TestResult_ArtifactIDs returns artifact IDs from result.
+func TestResult_ArtifactIDs(t *testing.T) {
+	result := &Result{
+		Artifacts: []ArtifactSelection{
+			{ID: "Artifact:42", Reason: "a"},
+			{ID: "Artifact:18", Reason: "b"},
+			{ID: "Artifact:5", Reason: "c"},
+		},
+	}
+
+	ids := result.ArtifactIDs()
+	assert.Equal(t, []int64{42, 18, 5}, ids)
+}
+
+// TestResult_ArtifactIDsEmpty returns empty for nil artifacts.
+func TestResult_ArtifactIDsEmpty(t *testing.T) {
+	result := &Result{Artifacts: nil}
+	ids := result.ArtifactIDs()
+	assert.Empty(t, ids)
+
+	result2 := &Result{Artifacts: []ArtifactSelection{}}
+	ids2 := result2.ArtifactIDs()
+	assert.Empty(t, ids2)
+}
+
+// ID Parsing Tests (types.go)
+
+// TestParseTopicID_ValidFormats parses valid topic ID formats.
+func TestParseTopicID_ValidFormats(t *testing.T) {
+	tests := []struct {
+		input  string
+		wantID int64
+	}{
+		{"Topic:42", 42},
+		{"Topic:1", 1},
+		{"42", 42},
+		{"999", 999},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			id, err := parseTopicID(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantID, id)
+		})
+	}
+}
+
+// TestParseTopicID_Invalid handles invalid topic ID formats.
+func TestParseTopicID_Invalid(t *testing.T) {
+	tests := []struct {
+		input string
+	}{
+		{"NotATopic:42"},
+		{"Person:42"},
+		{"Artifact:42"},
+		{"invalid"},
+		{""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			_, err := parseTopicID(tt.input)
+			assert.Error(t, err)
+		})
+	}
+}
+
+// TestParsePersonID_ValidFormats parses valid person ID formats.
+func TestParsePersonID_ValidFormats(t *testing.T) {
+	tests := []struct {
+		input  string
+		wantID int64
+	}{
+		{"Person:42", 42},
+		{"Person:1", 1},
+		{"42", 42},
+		{"999", 999},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			id, err := parsePersonID(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantID, id)
+		})
+	}
+}
+
+// TestParsePersonID_Invalid handles invalid person ID formats.
+func TestParsePersonID_Invalid(t *testing.T) {
+	tests := []struct {
+		input string
+	}{
+		{"NotAPerson:42"},
+		{"Topic:42"},
+		{"Artifact:42"},
+		{"invalid"},
+		{""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			_, err := parsePersonID(tt.input)
+			assert.Error(t, err)
+		})
+	}
+}
+
+// TestParseArtifactID_ValidFormats parses valid artifact ID formats.
+func TestParseArtifactID_ValidFormats(t *testing.T) {
+	tests := []struct {
+		input  string
+		wantID int64
+	}{
+		{"Artifact:42", 42},
+		{"Artifact:1", 1},
+		{"42", 42},
+		{"999", 999},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			id, err := parseArtifactID(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantID, id)
+		})
+	}
+}
+
+// TestParseArtifactID_Invalid handles invalid artifact ID formats.
+func TestParseArtifactID_Invalid(t *testing.T) {
+	tests := []struct {
+		input string
+	}{
+		{"NotAnArtifact:42"},
+		{"Topic:42"},
+		{"Person:42"},
+		{"invalid"},
+		{""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			_, err := parseArtifactID(tt.input)
+			assert.Error(t, err)
+		})
+	}
+}
+
+// Selection GetNumericID Tests
+
+// TestTopicSelection_GetNumericID extracts numeric ID from topic.
+func TestTopicSelection_GetNumericID(t *testing.T) {
+	tests := []struct {
+		name    string
+		id      string
+		wantID  int64
+		wantErr bool
+	}{
+		{"valid with prefix", "Topic:42", 42, false},
+		{"valid without prefix", "42", 42, false},
+		{"invalid", "invalid", 0, true},
+		{"wrong prefix", "Person:42", 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := TopicSelection{ID: tt.id}
+			id, err := ts.GetNumericID()
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantID, id)
+			}
+		})
+	}
+}
+
+// TestPersonSelection_GetNumericID extracts numeric ID from person.
+func TestPersonSelection_GetNumericID(t *testing.T) {
+	tests := []struct {
+		name    string
+		id      string
+		wantID  int64
+		wantErr bool
+	}{
+		{"valid with prefix", "Person:42", 42, false},
+		{"valid without prefix", "42", 42, false},
+		{"invalid", "invalid", 0, true},
+		{"wrong prefix", "Topic:42", 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ps := PersonSelection{ID: tt.id}
+			id, err := ps.GetNumericID()
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantID, id)
+			}
+		})
+	}
+}
+
+// TestArtifactSelection_GetNumericID extracts numeric ID from artifact.
+func TestArtifactSelection_GetNumericID(t *testing.T) {
+	tests := []struct {
+		name    string
+		id      string
+		wantID  int64
+		wantErr bool
+	}{
+		{"valid with prefix", "Artifact:42", 42, false},
+		{"valid without prefix", "42", 42, false},
+		{"invalid", "invalid", 0, true},
+		{"wrong prefix", "Topic:42", 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			as := ArtifactSelection{ID: tt.id}
+			id, err := as.GetNumericID()
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantID, id)
+			}
 		})
 	}
 }

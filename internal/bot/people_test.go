@@ -785,7 +785,7 @@ func TestPerformMergePeople_Success(t *testing.T) {
 	}
 
 	// Execute
-	result, err := bot.performMergePeople(context.Background(), userID, "John Doe", "J. Doe", params)
+	result, err := bot.performMergePeople(context.Background(), userID, "John Doe", "J. Doe", nil, nil, params)
 
 	// Verify
 	assert.NoError(t, err)
@@ -836,11 +836,11 @@ func TestPerformMergePeople_SelfMerge(t *testing.T) {
 	params := map[string]interface{}{}
 
 	// Execute
-	result, err := bot.performMergePeople(context.Background(), userID, "John Doe", "John Doe", params)
+	result, err := bot.performMergePeople(context.Background(), userID, "John Doe", "John Doe", nil, nil, params)
 
 	// Verify
 	assert.NoError(t, err)
-	assert.Contains(t, result, "Cannot merge 'John Doe' with itself")
+	assert.Contains(t, result, "Cannot merge person with itself")
 	mockStore.AssertNotCalled(t, "MergePeople", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 
@@ -888,11 +888,11 @@ func TestPerformMergePeople_SourceNotFound(t *testing.T) {
 	params := map[string]interface{}{}
 
 	// Execute
-	result, err := bot.performMergePeople(context.Background(), userID, "John Doe", "Unknown", params)
+	result, err := bot.performMergePeople(context.Background(), userID, "John Doe", "Unknown", nil, nil, params)
 
 	// Verify
 	assert.NoError(t, err)
-	assert.Contains(t, result, "Source person 'Unknown' not found")
+	assert.Contains(t, result, "Source person not found")
 	mockStore.AssertNotCalled(t, "MergePeople", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 

@@ -8,12 +8,14 @@ import (
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/archivist"
 	"github.com/runixer/laplaced/internal/agent/enricher"
+	"github.com/runixer/laplaced/internal/agent/extractor"
 	"github.com/runixer/laplaced/internal/agent/laplace"
 	"github.com/runixer/laplaced/internal/agent/merger"
 	"github.com/runixer/laplaced/internal/agent/reranker"
 	"github.com/runixer/laplaced/internal/agent/splitter"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/memory"
 	"github.com/runixer/laplaced/internal/openrouter"
@@ -31,6 +33,7 @@ type Services struct {
 	MergerAgent    *merger.Merger
 	ArchivistAgent *archivist.Archivist
 	RerankerAgent  *reranker.Reranker
+	ExtractorAgent *extractor.Extractor
 	LaplaceAgent   *laplace.Laplace
 
 	// Services
@@ -40,6 +43,7 @@ type Services struct {
 	AgentLogger    *agentlog.Logger
 	AgentExecutor  *agent.Executor
 	Translator     *i18n.Translator
+	FileStorage    *files.FileStorage
 }
 
 // SetupServices initializes all core services and agents.
@@ -79,6 +83,9 @@ func SetupServices(
 	// Create agent logger for debugging LLM calls
 	services.AgentLogger = agentlog.NewLogger(store, logger, cfg.Server.DebugMode)
 
+	// Create file storage for artifacts
+	services.FileStorage = files.NewFileStorage(cfg.Artifacts.StoragePath, logger)
+
 	// Create context service for shared user context across agents
 	services.ContextService = agent.NewContextService(store, store, cfg, logger)
 	services.ContextService.SetPeopleRepository(store)
@@ -92,6 +99,7 @@ func SetupServices(
 	services.MergerAgent = merger.New(services.AgentExecutor, translator, cfg, store, store)
 	services.ArchivistAgent = archivist.New(services.AgentExecutor, translator, cfg, logger, services.AgentLogger)
 	services.RerankerAgent = reranker.New(client, cfg, logger, translator, store, services.AgentLogger)
+	services.ExtractorAgent = extractor.New(services.AgentExecutor, translator, cfg, logger, services.FileStorage, client, store)
 
 	// Register agents in registry for discovery
 	agentRegistry := agent.NewRegistry()
@@ -100,6 +108,7 @@ func SetupServices(
 	agentRegistry.Register(services.MergerAgent)
 	agentRegistry.Register(services.ArchivistAgent)
 	agentRegistry.Register(services.RerankerAgent)
+	agentRegistry.Register(services.ExtractorAgent)
 	logger.Info("Agent registry initialized", "agents", len(agentRegistry.List()))
 
 	// Create memory service
@@ -113,17 +122,20 @@ func SetupServices(
 	services.RAGService = rag.NewService(logger, cfg, store, store, store, store, store, client, services.MemoryService, translator)
 	services.RAGService.SetAgentLogger(services.AgentLogger)
 	services.RAGService.SetPeopleRepository(store)
+	services.RAGService.SetArtifactRepository(store)
+	services.RAGService.SetContextService(services.ContextService)
 	services.RAGService.SetEnricherAgent(services.EnricherAgent)
 	services.RAGService.SetSplitterAgent(services.SplitterAgent)
 	services.RAGService.SetMergerAgent(services.MergerAgent)
 	services.RAGService.SetRerankerAgent(services.RerankerAgent)
+	services.RAGService.SetExtractorAgent(services.ExtractorAgent)
 	services.MemoryService.SetVectorSearcher(services.RAGService)
 	services.MemoryService.SetTopicRepository(store)
 
 	// Create Laplace (main chat agent)
 	// Note: Laplace is not registered in the agent registry because it has a different
 	// interface (requires ToolHandler for tool execution callbacks)
-	services.LaplaceAgent = laplace.New(cfg, client, services.RAGService, store, store, translator, logger)
+	services.LaplaceAgent = laplace.New(cfg, client, services.RAGService, store, store, store, translator, logger)
 	services.LaplaceAgent.SetAgentLogger(services.AgentLogger)
 
 	services.Translator = translator

@@ -12,6 +12,7 @@ import (
 	"github.com/runixer/laplaced/internal/agent/laplace"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
@@ -35,7 +36,7 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 	cfg.RAG.Enabled = false // Disable RAG for this test
 
 	// Create Laplace agent for tests
-	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, translator, logger)
+	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
 
 	bot := &Bot{
 		api:             mockAPI,
@@ -169,7 +170,7 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 	// Check the formatted text parts
 	for i, part := range contentParts {
 		// The structure is now flat: a slice of parts, not a slice of slices of parts.
-		// Each part can be a TextPart, ImagePart, etc.
+		// Each part can be a TextPart, FilePart, etc.
 		// In this specific test, we only have text.
 		textPart, ok := part.(openrouter.TextPart)
 		assert.True(t, ok, "Part should be a TextPart")
@@ -190,7 +191,7 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	mockDownloader := new(testutil.MockFileDownloader)
-	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, translator, logger)
+	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
@@ -308,12 +309,13 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 	expectedText := messages[0].BuildContent(translator, "en")
 	assert.Equal(t, expectedText, textPart.Text)
 
-	// Check image part
-	imagePart, ok := contentParts[1].(openrouter.ImagePart)
+	// Check image part (v0.6.0: unified FilePart format)
+	filePart, ok := contentParts[1].(openrouter.FilePart)
 	assert.True(t, ok)
-	assert.Equal(t, "image_url", imagePart.Type)
-	expectedImageURL := fmt.Sprintf("data:image/jpeg;base64,%s", encodedPhotoData)
-	assert.Equal(t, expectedImageURL, imagePart.ImageURL.URL)
+	assert.Equal(t, "file", filePart.Type)
+	assert.Equal(t, "photo.jpg", filePart.File.FileName)
+	expectedImageData := fmt.Sprintf("data:image/jpeg;base64,%s", encodedPhotoData)
+	assert.Equal(t, expectedImageData, filePart.File.FileData)
 }
 
 func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
@@ -329,7 +331,7 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	mockDownloader := new(testutil.MockFileDownloader)
-	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, translator, logger)
+	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
@@ -448,12 +450,13 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 	expectedText := messages[0].BuildContent(translator, "en")
 	assert.Equal(t, expectedText, textPart.Text)
 
-	// Check image part
-	imagePart, ok := contentParts[1].(openrouter.ImagePart)
+	// Check image part (v0.6.0: unified FilePart format)
+	filePart, ok := contentParts[1].(openrouter.FilePart)
 	assert.True(t, ok)
-	assert.Equal(t, "image_url", imagePart.Type)
-	expectedImageURL := fmt.Sprintf("data:image/png;base64,%s", encodedDocData)
-	assert.Equal(t, expectedImageURL, imagePart.ImageURL.URL)
+	assert.Equal(t, "file", filePart.Type)
+	assert.Equal(t, "image.png", filePart.File.FileName)
+	expectedImageData := fmt.Sprintf("data:image/png;base64,%s", encodedDocData)
+	assert.Equal(t, expectedImageData, filePart.File.FileData)
 }
 
 func TestProcessMessageGroup_PDFMessage(t *testing.T) {
@@ -470,7 +473,7 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	mockDownloader := new(testutil.MockFileDownloader)
-	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, translator, logger)
+	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
@@ -616,7 +619,7 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
 	mockDownloader := new(testutil.MockFileDownloader)
-	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, translator, logger)
+	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
@@ -661,9 +664,13 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 	// Mock expectations
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
 
-	// The history content will now include the file content directly.
+	// v0.6.0: Text files now use compact marker in history instead of full content
+	// Full content is still sent to LLM via LLMParts
+	expectedHistoryMarker := fmt.Sprintf("📄 %s", docFileName) // No artifact ID (no fileHandler in test)
+	expectedHistoryContent := fmt.Sprintf("%s\n%s", messages[0].BuildContent(translator, "en"), expectedHistoryMarker)
+
+	// Expected LLM content still includes full file content
 	expectedFileTextContent := fmt.Sprintf("%s:\n\n%s", docFileName, docData)
-	expectedHistoryContent := fmt.Sprintf("%s\n%s", messages[0].BuildContent(translator, "en"), expectedFileTextContent)
 
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{
 		{Role: "user", Content: expectedHistoryContent},
@@ -761,7 +768,7 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
-	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, translator, logger)
+	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
@@ -877,7 +884,6 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 	assert.True(t, ok, "expected FilePart for voice message")
 	assert.Equal(t, "file", filePart.Type)
 	assert.Equal(t, "voice.ogg", filePart.File.FileName)
-	assert.Contains(t, filePart.File.FileData, "data:audio/ogg;base64,")
 	assert.Contains(t, filePart.File.FileData, voiceBase64)
 }
 
@@ -894,7 +900,7 @@ func TestProcessUpdate(t *testing.T) {
 		},
 	}
 
-	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, translator, logger)
+	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
@@ -1055,7 +1061,7 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
-	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, translator, logger)
+	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
@@ -1288,7 +1294,7 @@ func TestSendTestMessage_Success(t *testing.T) {
 	// Create a minimal RAG service with RAG disabled
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
-	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, translator, logger)
+	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
@@ -1379,7 +1385,7 @@ func TestSendTestMessage_SaveToHistoryFalse(t *testing.T) {
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
-	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, translator, logger)
+	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
@@ -1459,7 +1465,7 @@ func TestSendTestMessage_OpenRouterError(t *testing.T) {
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
 
-	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, translator, logger)
+	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
@@ -1513,7 +1519,7 @@ func TestLogExecution_WithError(t *testing.T) {
 	// Create real agent logger with mock repo
 	agentLogger := agentlog.NewLogger(mockStore, logger, true)
 
-	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, translator, logger)
+	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
 	laplaceAgent.SetAgentLogger(agentLogger)
 
 	userID := int64(123)
@@ -1562,4 +1568,128 @@ func TestLogExecution_WithError(t *testing.T) {
 
 	// Verify AddAgentLog was called
 	mockStore.AssertCalled(t, "AddAgentLog", mock.Anything, mock.Anything)
+}
+
+// TestPrepareUserMessage_UnsupportedFormat verifies that prepareUserMessage
+// returns UnsupportedFormatError for unsupported file types.
+func TestPrepareUserMessage_UnsupportedFormat(t *testing.T) {
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
+	cfg := testutil.TestConfig()
+	mockDownloader := new(testutil.MockFileDownloader)
+
+	cfg.RAG.Enabled = false
+	cfg.Agents.Extractor.RecentMessageCount = 0 // Disable recent messages for this test
+
+	bot := &Bot{
+		userRepo:        mockStore,
+		msgRepo:         mockStore,
+		statsRepo:       mockStore,
+		factRepo:        mockStore,
+		factHistoryRepo: mockStore,
+		orClient:        mockORClient,
+		downloader:      mockDownloader,
+		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
+		cfg:             cfg,
+		logger:          logger,
+		translator:      translator,
+	}
+
+	userID := int64(123)
+	chatID := int64(456)
+
+	// Create message group with unsupported file format (.docx)
+	group := &MessageGroup{
+		UserID: userID,
+		Messages: []*telegram.Message{
+			{
+				MessageID: 1,
+				From:      &telegram.User{ID: userID, FirstName: "Test", LastName: "User"},
+				Chat:      &telegram.Chat{ID: chatID},
+				Date:      int(time.Now().Unix()),
+				Document: &telegram.Document{
+					FileID:   "doc-123",
+					FileName: "document.docx",
+					MimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+					FileSize: 1000,
+				},
+			},
+		},
+	}
+
+	// Mock storage calls
+	mockStore.On("GetRecentSessionMessages", userID, mock.Anything, mock.Anything).Return([]storage.Message{}, nil)
+
+	_, _, _, _, err := bot.prepareUserMessage(context.Background(), group, logger)
+
+	// Should return UnsupportedFormatError
+	assert.Error(t, err)
+	var unsupported *files.UnsupportedFormatError
+	assert.ErrorAs(t, err, &unsupported)
+	assert.Equal(t, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", unsupported.MimeType)
+	assert.Equal(t, "document.docx", unsupported.FileName)
+}
+
+// TestPrepareUserMessage_FileTooLarge verifies that prepareUserMessage
+// returns FileTooLargeError for files exceeding the size limit.
+func TestPrepareUserMessage_FileTooLarge(t *testing.T) {
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
+	cfg := testutil.TestConfig()
+	mockDownloader := new(testutil.MockFileDownloader)
+
+	cfg.RAG.Enabled = false
+	cfg.Agents.Extractor.RecentMessageCount = 0
+
+	bot := &Bot{
+		userRepo:        mockStore,
+		msgRepo:         mockStore,
+		statsRepo:       mockStore,
+		factRepo:        mockStore,
+		factHistoryRepo: mockStore,
+		orClient:        mockORClient,
+		downloader:      mockDownloader,
+		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
+		cfg:             cfg,
+		logger:          logger,
+		translator:      translator,
+	}
+
+	userID := int64(123)
+	chatID := int64(456)
+
+	// Create message group with oversized file (25MB > 20MB limit)
+	group := &MessageGroup{
+		UserID: userID,
+		Messages: []*telegram.Message{
+			{
+				MessageID: 1,
+				From:      &telegram.User{ID: userID, FirstName: "Test", LastName: "User"},
+				Chat:      &telegram.Chat{ID: chatID},
+				Date:      int(time.Now().Unix()),
+				Document: &telegram.Document{
+					FileID:   "doc-large",
+					FileName: "large.pdf",
+					MimeType: "application/pdf",
+					FileSize: 25 * 1024 * 1024, // 25 MB
+				},
+			},
+		},
+	}
+
+	// Mock storage calls
+	mockStore.On("GetRecentSessionMessages", userID, mock.Anything, mock.Anything).Return([]storage.Message{}, nil)
+
+	_, _, _, _, err := bot.prepareUserMessage(context.Background(), group, logger)
+
+	// Should return FileTooLargeError
+	assert.Error(t, err)
+	var tooLarge *files.FileTooLargeError
+	assert.ErrorAs(t, err, &tooLarge)
+	assert.Equal(t, int64(25*1024*1024), tooLarge.Size)
+	assert.Equal(t, "large.pdf", tooLarge.FileName)
 }

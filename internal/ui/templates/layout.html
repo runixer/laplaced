@@ -50,6 +50,7 @@
                             <li><a class="dropdown-item" href="/ui/agents/enricher"><i class="bi bi-magic"></i> Enricher</a></li>
                             <li><hr class="dropdown-divider"></li>
                             <li><span class="dropdown-header">Tools</span></li>
+                            <li><a class="dropdown-item" href="/ui/agents/extractor"><i class="bi bi-file-earmark-text"></i> Extractor</a></li>
                             <li><a class="dropdown-item" href="/ui/agents/scout"><i class="bi bi-search"></i> Scout</a></li>
                         </ul>
                     </li>
@@ -61,6 +62,8 @@
                             <li><a class="dropdown-item" href="/ui/debug/topics"><i class="bi bi-chat-square-text"></i> Topics</a></li>
                             <li><a class="dropdown-item" href="/ui/debug/facts"><i class="bi bi-lightbulb"></i> Facts</a></li>
                             <li><a class="dropdown-item" href="/ui/debug/people"><i class="bi bi-people"></i> People</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="/ui/debug/artifacts"><i class="bi bi-file-earmark"></i> Artifacts</a></li>
                         </ul>
                     </li>
                     <li class="nav-item dropdown">
@@ -78,7 +81,6 @@
                 <div class="d-flex align-items-center">
                     <span class="text-light me-2">User:</span>
                     <select class="form-select form-select-sm" style="width: auto;" onchange="switchUser(this.value)">
-                        <option value="">All Users</option>
                         {{range .Users}}
                         <option value="{{.ID}}" {{if eq .ID $.SelectedUserID}}selected{{end}}>
                             {{if .FirstName}}{{.FirstName}} {{.LastName}}{{else}}{{.Username}}{{end}} ({{.ID}})

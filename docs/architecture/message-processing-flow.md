@@ -147,15 +147,21 @@ flowchart LR
 Сообщение 3 → [таймер 2s] → ✓ Обработка группы
 ```
 
-### 3. Скачивание файлов
+### 3. Скачивание файлов и сохранение артефактов
 
 Файлы скачиваются **параллельно** через `errgroup`:
 
 | Тип | Обработка | Формат для LLM |
 |-----|-----------|----------------|
-| Voice | Скачивание OGG | `AudioPart` (base64) |
-| Photo | Скачивание JPEG | `ImagePart` (data URL) |
+| Voice | Скачивание OGG | `FilePart` (data URL) |
+| Photo | Скачивание JPEG | `FilePart` (data URL) |
 | PDF/Document | Скачивание | Gemini PDF parser plugin |
+| Video Note | Скачивание MP4 | `FilePart` (data URL) |
+
+**Артефакты (v0.6.0):** Все файлы сохраняются как артефакты с:
+- Дедупликация по SHA256
+- Фоновая обработка через Extractor agent (metadata extraction)
+- Индексация для RAG retrieval
 
 **Retry:** Exponential backoff (500ms, 1s, 2s) при ошибках Telegram API.
 
@@ -178,19 +184,21 @@ flowchart LR
 
 2. **Vector Search**
    - Создаём embedding запроса
-   - Cosine similarity по topics и facts
+   - Cosine similarity по topics, facts, artifacts (v0.6.0)
    - Top-50 кандидатов для reranker
 
 3. **Flash Reranker** (v0.4.1+)
    - Agentic фильтрация: Flash видит 50 summaries (~3K токенов)
    - Tool call `get_topics_content([ids])` для загрузки содержимого
-   - Финальный выбор: до 15 топиков с reason и excerpt
+   - Финальный выбор: до 15 топиков, 10 людей, 10 артефактов (v0.6.0)
    - **Multimodal (v0.4.5):** медиа передаётся в reranker
+   - **Artifacts (v0.6.0):** артефакты с similarity scores, выбирает релевантные файлы
    - Fallback на vector top-5 при timeout/error
 
 4. **Context Assembly**
    - Topics → загружаем связанные сообщения (или excerpt для больших)
    - Facts → добавляем релевантные факты
+   - Artifacts (v0.6.0) → загружаем полное содержимое выбранных файлов (base64)
 
 ### 5. LLM Generation (Tool Loop)
 

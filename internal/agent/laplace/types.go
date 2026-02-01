@@ -64,6 +64,9 @@ type ToolHandler interface {
 
 // ContextData contains pre-built context for LLM.
 type ContextData struct {
+	// User identification
+	UserID int64 // v0.6.0: User ID for artifact loading
+
 	// System prompt components
 	BaseSystemPrompt string
 	ProfileFacts     string
@@ -74,7 +77,9 @@ type ContextData struct {
 	RecentHistory []storage.Message
 
 	// RAG results
-	RAGResults     []rag.TopicSearchResult
-	RAGInfo        *rag.RetrievalDebugInfo
-	RelevantPeople []storage.Person // v0.5.1: People selected by reranker
+	RAGResults          []rag.TopicSearchResult
+	ArtifactResults     []rag.ArtifactResult // v0.6.0: Artifact summary matches
+	SelectedArtifactIDs []int64              // v0.6.0: Artifact IDs selected by reranker for full content loading
+	RAGInfo             *rag.RetrievalDebugInfo
+	RelevantPeople      []storage.Person // v0.5.1: People selected by reranker
 }

@@ -222,6 +222,50 @@ type PersonResult struct {
 	TotalCount int
 }
 
+// Artifact represents a file stored in the artifacts system.
+// v0.6.0: Simplified with summary-based search (no chunks, no full_text).
+type Artifact struct {
+	ID        int64 `json:"id"`
+	UserID    int64 `json:"user_id"`
+	MessageID int64 `json:"message_id"`
+
+	// File metadata
+	FileType     string `json:"file_type"` // 'image', 'voice', 'pdf', 'video_note', 'document'
+	FilePath     string `json:"file_path"` // Relative path from storage dir
+	FileSize     int64  `json:"file_size"` // Bytes
+	MimeType     string `json:"mime_type"`
+	OriginalName string `json:"original_name"` // From Telegram
+
+	// Deduplication
+	ContentHash string `json:"content_hash"` // SHA256 of file content
+
+	// Processing status
+	State        string  `json:"state"` // 'pending', 'processing', 'ready', 'failed'
+	ErrorMessage *string `json:"error_message,omitempty"`
+
+	// Retry tracking (v0.6.0 - CRIT-3)
+	RetryCount   int        `json:"retry_count"`
+	LastFailedAt *time.Time `json:"last_failed_at,omitempty"`
+
+	// AI-generated metadata (summary-based search, populated in Phase 2)
+	Summary   *string   `json:"summary,omitempty"`   // 2-4 sentence description
+	Keywords  *string   `json:"keywords,omitempty"`  // JSON array: ["tag1", "tag2"]
+	Entities  *string   `json:"entities,omitempty"`  // JSON array: ["person", "company"]
+	RAGHints  *string   `json:"rag_hints,omitempty"` // JSON array: ["what questions?"]
+	Embedding []float32 `json:"embedding,omitempty"` // Summary embedding for vector search
+
+	// Timestamps
+	CreatedAt   time.Time  `json:"created_at"`
+	ProcessedAt *time.Time `json:"processed_at"`
+
+	// Usage tracking (v0.6.0)
+	ContextLoadCount int        `json:"context_load_count"` // How many times loaded into LLM context
+	LastLoadedAt     *time.Time `json:"last_loaded_at"`     // Last time loaded
+
+	// User context (v0.6.0) - text of message(s) when file was sent
+	UserContext *string `json:"user_context,omitempty"`
+}
+
 type Storage interface {
 	MessageRepository
 	UserRepository
@@ -233,6 +277,7 @@ type Storage interface {
 	MaintenanceRepository
 	AgentLogRepository
 	PeopleRepository
+	ArtifactRepository
 }
 
 type SQLiteStore struct {
@@ -661,6 +706,139 @@ func (s *SQLiteStore) migrate() error {
 	// Drop legacy facts table (replaced by structured_facts)
 	if _, err := s.db.Exec(`DROP TABLE IF EXISTS facts`); err != nil {
 		s.logger.Warn("failed to drop legacy facts table", "error", err)
+	}
+
+	// Create artifacts table for file storage system (v0.6.0 - Simplified metadata-only)
+	artifactsTableQuery := `
+		CREATE TABLE IF NOT EXISTS artifacts (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			message_id INTEGER NOT NULL,
+
+			-- File metadata
+			file_type TEXT NOT NULL,
+			file_path TEXT NOT NULL,
+			file_size INTEGER,
+			mime_type TEXT,
+			original_name TEXT,
+
+			-- Deduplication
+			content_hash TEXT NOT NULL,
+
+			-- Processing status (must be before UNIQUE constraint!)
+			state TEXT NOT NULL DEFAULT 'pending',
+			error_message TEXT,
+
+			-- Retry tracking (v0.6.0 - CRIT-3)
+			retry_count INTEGER DEFAULT 0,
+			last_failed_at TIMESTAMP,
+
+			-- AI-generated metadata (summary-based search)
+			summary TEXT,
+			keywords TEXT,
+			entities TEXT,
+			rag_hints TEXT,
+			embedding BLOB,
+
+			-- Timestamps
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			processed_at TIMESTAMP,
+
+			-- Usage tracking (v0.6.0)
+			context_load_count INTEGER DEFAULT 0,
+			last_loaded_at TIMESTAMP,
+
+			-- User context (v0.6.0)
+			user_context TEXT,
+
+			-- Constraints
+			UNIQUE(user_id, content_hash),
+			FOREIGN KEY (user_id) REFERENCES users(id),
+			FOREIGN KEY (message_id) REFERENCES history(id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_artifacts_user_id ON artifacts(user_id);
+		CREATE INDEX IF NOT EXISTS idx_artifacts_status ON artifacts(user_id, state);
+		CREATE INDEX IF NOT EXISTS idx_artifacts_hash ON artifacts(user_id, content_hash);
+		CREATE INDEX IF NOT EXISTS idx_artifacts_message_id ON artifacts(user_id, message_id);
+		CREATE INDEX IF NOT EXISTS idx_artifacts_type ON artifacts(user_id, file_type);
+	`
+	if _, err := s.db.Exec(artifactsTableQuery); err != nil {
+		return fmt.Errorf("failed to create artifacts table: %w", err)
+	}
+
+	// Migration: Drop old artifact_chunks table if exists (v0.6.0)
+	if _, err := s.db.Exec(`DROP TABLE IF EXISTS artifact_chunks`); err != nil {
+		s.logger.Warn("failed to drop legacy artifact_chunks table", "error", err)
+	}
+
+	// Migration: Add new metadata columns if missing (v0.6.0)
+	var entitiesColExists, ragHintsColExists, embeddingColExists int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('artifacts') WHERE name='entities'`).Scan(&entitiesColExists)
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('artifacts') WHERE name='rag_hints'`).Scan(&ragHintsColExists)
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('artifacts') WHERE name='embedding'`).Scan(&embeddingColExists)
+
+	if entitiesColExists == 0 {
+		if _, err := s.db.Exec(`ALTER TABLE artifacts ADD COLUMN entities TEXT`); err != nil {
+			s.logger.Warn("failed to add entities column", "error", err)
+		}
+	}
+	if ragHintsColExists == 0 {
+		if _, err := s.db.Exec(`ALTER TABLE artifacts ADD COLUMN rag_hints TEXT`); err != nil {
+			s.logger.Warn("failed to add rag_hints column", "error", err)
+		}
+	}
+	if embeddingColExists == 0 {
+		if _, err := s.db.Exec(`ALTER TABLE artifacts ADD COLUMN embedding BLOB`); err != nil {
+			s.logger.Warn("failed to add embedding column", "error", err)
+		}
+	}
+
+	// Migration: Remove old columns if they exist (v0.6.0)
+	// Note: SQLite doesn't support DROP COLUMN directly, we'll recreate the table
+	// Check if we need to migrate by looking for old columns
+	var oldColumnsExist int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('artifacts') WHERE name IN ('full_text', 'description', 'chunk_count')`).Scan(&oldColumnsExist)
+	if oldColumnsExist > 0 {
+		s.logger.Info("migrating artifacts table: removing old columns (full_text, description, chunk_count)")
+		// For now, just warn - the columns will be ignored
+		// A full migration would require recreating the table, which is risky
+		s.logger.Warn("old artifact columns detected - please recreate database for clean schema")
+	}
+
+	// Migration: Add retry columns for failed artifacts (v0.6.0 - CRIT-3)
+	var retryCountExists int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('artifacts') WHERE name='retry_count'`).Scan(&retryCountExists)
+	if retryCountExists == 0 {
+		s.logger.Info("migrating artifacts table: adding retry columns")
+		if _, err := s.db.Exec(`ALTER TABLE artifacts ADD COLUMN retry_count INTEGER DEFAULT 0`); err != nil {
+			s.logger.Warn("failed to add retry_count column", "error", err)
+		}
+		if _, err := s.db.Exec(`ALTER TABLE artifacts ADD COLUMN last_failed_at TIMESTAMP`); err != nil {
+			s.logger.Warn("failed to add last_failed_at column", "error", err)
+		}
+	}
+
+	// Migration: Add usage tracking columns (v0.6.0)
+	var contextLoadCountExists int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('artifacts') WHERE name='context_load_count'`).Scan(&contextLoadCountExists)
+	if contextLoadCountExists == 0 {
+		s.logger.Info("migrating artifacts table: adding usage tracking columns")
+		if _, err := s.db.Exec(`ALTER TABLE artifacts ADD COLUMN context_load_count INTEGER DEFAULT 0`); err != nil {
+			s.logger.Warn("failed to add context_load_count column", "error", err)
+		}
+		if _, err := s.db.Exec(`ALTER TABLE artifacts ADD COLUMN last_loaded_at TIMESTAMP`); err != nil {
+			s.logger.Warn("failed to add last_loaded_at column", "error", err)
+		}
+	}
+
+	// Migration: Add user_context column (v0.6.0)
+	var userContextExists int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('artifacts') WHERE name='user_context'`).Scan(&userContextExists)
+	if userContextExists == 0 {
+		s.logger.Info("migrating artifacts table: adding user_context column")
+		if _, err := s.db.Exec(`ALTER TABLE artifacts ADD COLUMN user_context TEXT`); err != nil {
+			s.logger.Warn("failed to add user_context column", "error", err)
+		}
 	}
 
 	return nil

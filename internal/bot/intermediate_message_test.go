@@ -34,7 +34,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 	}
 
 	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
-	laplaceAgent := laplace.New(cfg, mockORClient, ragService, mockStore, mockStore, translator, logger)
+	laplaceAgent := laplace.New(cfg, mockORClient, ragService, mockStore, mockStore, nil, translator, logger)
 
 	bot := &Bot{
 		api:             mockAPI,

@@ -2,14 +2,19 @@ package laplace
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/prompts"
+	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
@@ -46,10 +51,13 @@ func (l *Laplace) BuildMessages(
 		})
 	}
 
-	// RAG Results and Relevant People (if any) - combined in user prompt
+	// RAG Results, Artifacts, and Relevant People (if any) - combined in user prompt
 	var contextParts []string
 	if len(contextData.RAGResults) > 0 {
 		contextParts = append(contextParts, formatRAGResults(contextData.RAGResults, enrichedQuery))
+	}
+	if len(contextData.ArtifactResults) > 0 {
+		contextParts = append(contextParts, formatArtifactResults(contextData.ArtifactResults, enrichedQuery))
 	}
 	if len(contextData.RelevantPeople) > 0 {
 		contextParts = append(contextParts, storage.FormatPeople(contextData.RelevantPeople, storage.TagRelevantPeople))
@@ -63,18 +71,44 @@ func (l *Laplace) BuildMessages(
 		})
 	}
 
+	// v0.6.0: Load full artifact content for selected artifacts (Long Context RAG)
+	if len(contextData.SelectedArtifactIDs) > 0 {
+		artifactParts, err := l.loadArtifactFullContent(ctx, contextData.UserID, contextData.SelectedArtifactIDs)
+		if err != nil {
+			l.logger.Warn("failed to load artifact content", "error", err)
+		}
+		// Insert loaded content before recent history so the LLM has full file context
+		if len(artifactParts) > 0 {
+			orMessages = append(orMessages, openrouter.Message{
+				Role:    "user",
+				Content: artifactParts,
+			})
+		}
+	}
+
 	// Add Recent History (active session)
-	for _, hMsg := range contextData.RecentHistory {
+	currentMessageAdded := false
+	for i, hMsg := range contextData.RecentHistory {
 		var contentParts []interface{}
 
-		if hMsg.Content == currentMessageContent && currentMessageParts != nil && hMsg.Role == "user" {
+		// For the last user message in history, use multimodal parts if available
+		// We check if this is the last message AND it's a user message AND we have multimodal content
+		isLastMessage := i == len(contextData.RecentHistory)-1
+		if isLastMessage && hMsg.Role == "user" && currentMessageParts != nil && len(currentMessageParts) > 0 {
+			// Use multimodal content for the current user message
 			contentParts = currentMessageParts
+			currentMessageAdded = true
 		} else {
 			contentParts = []interface{}{
 				openrouter.TextPart{Type: "text", Text: hMsg.Content},
 			}
 		}
 		orMessages = append(orMessages, openrouter.Message{Role: hMsg.Role, Content: contentParts})
+	}
+
+	// Fallback: if current message wasn't added via history (edge case), add it separately
+	if !currentMessageAdded && currentMessageParts != nil && len(currentMessageParts) > 0 {
+		orMessages = append(orMessages, openrouter.Message{Role: "user", Content: currentMessageParts})
 	}
 
 	return orMessages
@@ -87,7 +121,9 @@ func (l *Laplace) LoadContextData(
 	rawQuery string,
 	currentMessageParts []interface{},
 ) (*ContextData, error) {
-	data := &ContextData{}
+	data := &ContextData{
+		UserID: userID, // v0.6.0: Store userID for artifact loading
+	}
 
 	// Get unprocessed messages (session history)
 	unprocessedHistory, err := l.msgRepo.GetUnprocessedMessages(userID)
@@ -159,11 +195,11 @@ func (l *Laplace) LoadContextData(
 			enrichmentContext = availableHistory[len(availableHistory)-count:]
 		}
 
-		// Extract media parts for multimodal RAG
+		// Extract media parts for multimodal RAG (v0.6.0: unified on FilePart)
 		var mediaParts []interface{}
 		for _, part := range currentMessageParts {
 			switch part.(type) {
-			case openrouter.ImagePart, openrouter.FilePart:
+			case openrouter.FilePart:
 				mediaParts = append(mediaParts, part)
 			}
 		}
@@ -180,12 +216,220 @@ func (l *Laplace) LoadContextData(
 			l.logger.Error("RAG retrieval failed", "error", err)
 		} else if result != nil {
 			data.RAGResults = deduplicateTopics(result.Topics, recentHistory)
+			data.ArtifactResults = result.Artifacts               // v0.5.2
+			data.SelectedArtifactIDs = result.SelectedArtifactIDs // v0.6.0: IDs selected by reranker for full content loading
 			data.RAGInfo = debugInfo
 			data.RelevantPeople = result.People // v0.5.1: selected by reranker
 		}
 	}
 
 	return data, nil
+}
+
+// loadArtifactFullContent loads full artifact content as multimodal parts (v0.6.0).
+// Returns a slice of content parts (FilePart for all file types) for the given artifact IDs.
+// Respects max and max_context_bytes from reranker.artifacts config (v0.6.0).
+func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID int64, artifactIDs []int64) ([]interface{}, error) {
+	if l.artifactRepo == nil || len(artifactIDs) == 0 || l.storagePath == "" {
+		return nil, nil
+	}
+
+	// Get limits from reranker config with defaults (v0.6.0)
+	maxArtifacts := l.cfg.Agents.Reranker.Artifacts.Max
+	if maxArtifacts <= 0 {
+		maxArtifacts = 10
+	}
+	maxBytes := l.cfg.Agents.Reranker.Artifacts.MaxContextBytes
+	if maxBytes <= 0 {
+		maxBytes = 20 * 1024 * 1024 // 20MB default (aligned with Telegram Bot API limit)
+	}
+
+	var contentParts []interface{}
+	var totalBytes int
+	loadedCount := 0
+	// Track successfully loaded artifact IDs for usage counting (v0.6.0)
+	var loadedArtifactIDs []int64
+
+	for _, artifactID := range artifactIDs {
+		// Check artifact count limit (v0.6.0)
+		if loadedCount >= maxArtifacts {
+			l.logger.Info("artifact count limit reached",
+				"loaded", loadedCount,
+				"max", maxArtifacts,
+				"remaining", len(artifactIDs)-loadedCount,
+			)
+			break
+		}
+
+		artifact, err := l.artifactRepo.GetArtifact(userID, artifactID)
+		if err != nil {
+			l.logger.Warn("failed to load artifact", "artifact_id", artifactID, "error", err)
+			continue
+		}
+		if artifact == nil || artifact.State != "ready" {
+			l.logger.Debug("artifact not ready", "artifact_id", artifactID, "state", artifact.State)
+			continue
+		}
+
+		// Validate MIME type is supported by Gemini (skip unsupported old artifacts)
+		if artifact.MimeType != "" && !files.IsGeminiSupported(artifact.MimeType) {
+			l.logger.Debug("skipping artifact with unsupported MIME type",
+				"artifact_id", artifactID,
+				"mime_type", artifact.MimeType,
+				"original_name", artifact.OriginalName,
+			)
+			continue
+		}
+
+		// Check cumulative size limit BEFORE reading file (v0.6.0)
+		if totalBytes+int(artifact.FileSize) > maxBytes {
+			l.logger.Info("artifact size limit would be exceeded",
+				"artifact_id", artifactID,
+				"artifact_size", artifact.FileSize,
+				"current_total", totalBytes,
+				"max_bytes", maxBytes,
+			)
+			break
+		}
+
+		// Build full file path
+		fullPath := filepath.Join(l.storagePath, artifact.FilePath)
+
+		// Read file content
+		fileData, err := os.ReadFile(fullPath)
+		if err != nil {
+			l.logger.Warn("failed to read artifact file", "artifact_id", artifactID, "path", fullPath, "error", err)
+			continue
+		}
+
+		// Update tracking (v0.6.0)
+		totalBytes += len(fileData)
+		loadedCount++
+		loadedArtifactIDs = append(loadedArtifactIDs, artifact.ID)
+
+		// Encode as base64
+		base64Data := base64.StdEncoding.EncodeToString(fileData)
+
+		// Build display name for the artifact
+		displayName := artifact.OriginalName
+		if displayName == "" {
+			displayName = fmt.Sprintf("artifact_%d", artifact.ID)
+		}
+
+		// Format date for display (e.g., "31 янв 2026")
+		dateStr := artifact.CreatedAt.Format("2 Jan 2006")
+		if artifact.CreatedAt.Year() == time.Now().Year() {
+			// For current year, show shorter format (e.g., "31 янв")
+			dateStr = artifact.CreatedAt.Format("2 Jan")
+		}
+
+		// Add text label to identify the artifact (helps LLM follow artifact_protocol)
+		contentParts = append(contentParts, openrouter.TextPart{
+			Type: "text",
+			Text: fmt.Sprintf("📄 %s (%s)", displayName, dateStr),
+		})
+
+		// Create appropriate content part based on file type
+		switch artifact.FileType {
+		case "pdf", "document":
+			// PDF and documents use FilePart with data URL format
+			fileName := artifact.OriginalName
+			if fileName == "" {
+				fileName = fmt.Sprintf("artifact_%d.pdf", artifact.ID)
+			}
+			// Build MIME type for data URL
+			mimeType := artifact.MimeType
+			if mimeType == "" {
+				if artifact.FileType == "pdf" {
+					mimeType = "application/pdf"
+				} else {
+					mimeType = "application/octet-stream"
+				}
+			}
+			contentParts = append(contentParts, openrouter.FilePart{
+				Type: "file",
+				File: openrouter.File{
+					FileName: fileName,
+					FileData: fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data),
+				},
+			})
+		case "image", "photo":
+			// Images use FilePart (v0.6.0: unified format)
+			mimeType := artifact.MimeType
+			if mimeType == "" {
+				mimeType = "image/jpeg"
+			}
+			fileName := artifact.OriginalName
+			if fileName == "" {
+				fileName = fmt.Sprintf("image_%d", artifact.ID)
+			}
+			contentParts = append(contentParts, openrouter.FilePart{
+				Type: "file",
+				File: openrouter.File{
+					FileName: fileName,
+					FileData: "data:" + mimeType + ";base64," + base64Data,
+				},
+			})
+		case "voice", "audio", "video_note", "video":
+			// Audio and video use FilePart
+			fileName := artifact.OriginalName
+			if fileName == "" {
+				// Generate filename from type
+				ext := "ogg" // default
+				if artifact.MimeType != "" {
+					switch artifact.MimeType {
+					case "audio/mpeg", "audio/mp3":
+						ext = "mp3"
+					case "audio/wav":
+						ext = "wav"
+					case "audio/ogg":
+						ext = "ogg"
+					case "audio/m4a":
+						ext = "m4a"
+					case "video/mp4":
+						ext = "mp4"
+					}
+				}
+				fileName = fmt.Sprintf("artifact_%d.%s", artifact.ID, ext)
+			}
+			mimeType := artifact.MimeType
+			if mimeType == "" {
+				mimeType = "audio/ogg"
+			}
+			contentParts = append(contentParts, openrouter.FilePart{
+				Type: "file",
+				File: openrouter.File{
+					FileName: fileName,
+					FileData: fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data),
+				},
+			})
+		default:
+			l.logger.Warn("unknown artifact file type", "artifact_id", artifactID, "file_type", artifact.FileType)
+			continue
+		}
+
+		l.logger.Debug("loaded artifact for context", "artifact_id", artifactID, "file_type", artifact.FileType, "size_bytes", len(fileData))
+	}
+
+	if loadedCount > 0 {
+		l.logger.Debug("artifact loading complete",
+			"loaded_count", loadedCount,
+			"total_bytes", totalBytes,
+			"max_artifacts", maxArtifacts,
+			"max_bytes", maxBytes,
+		)
+	}
+
+	// Track artifact usage (v0.6.0)
+	// Synchronous to avoid race condition on shutdown (CRIT-1 fix).
+	// Latency impact is negligible (~5-10ms) compared to LLM call.
+	if len(loadedArtifactIDs) > 0 && l.artifactRepo != nil {
+		if err := l.artifactRepo.IncrementContextLoadCount(userID, loadedArtifactIDs); err != nil {
+			l.logger.Warn("failed to increment artifact load count", "error", err)
+		}
+	}
+
+	return contentParts, nil
 }
 
 // deduplicateTopics removes messages from retrieved topics that are already present in recent history.
@@ -263,6 +507,63 @@ func formatRAGResults(results []rag.TopicSearchResult, query string) string {
 func escapeXMLAttr(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, "\"", "&quot;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
+}
+
+// formatArtifactResults formats artifact summaries as XML for the LLM context (v0.6.0).
+func formatArtifactResults(artifacts []rag.ArtifactResult, query string) string {
+	if len(artifacts) == 0 {
+		return ""
+	}
+
+	var content strings.Builder
+	content.WriteString("<artifact_context query=\"")
+	content.WriteString(escapeXMLAttr(query))
+	content.WriteString("\">\n")
+
+	for _, artifactRes := range artifacts {
+		fileType := artifactRes.FileType
+		if artifactRes.OriginalName != "" {
+			fileType = fmt.Sprintf("%s (%s)", fileType, artifactRes.OriginalName)
+		}
+
+		content.WriteString("  <artifact id=\"")
+		content.WriteString(fmt.Sprintf("%d", artifactRes.ArtifactID))
+		content.WriteString("\" type=\"")
+		content.WriteString(escapeXMLAttr(fileType))
+		content.WriteString("\" relevance=\"")
+		content.WriteString(fmt.Sprintf("%.2f", artifactRes.Score))
+		content.WriteString("\">\n")
+
+		if artifactRes.Summary != "" {
+			content.WriteString("    <summary>")
+			content.WriteString(escapeXMLAttr(artifactRes.Summary))
+			content.WriteString("</summary>\n")
+		}
+
+		if len(artifactRes.Keywords) > 0 {
+			content.WriteString("    <keywords>")
+			for i, kw := range artifactRes.Keywords {
+				if i > 0 {
+					content.WriteString(", ")
+				}
+				content.WriteString(escapeXMLText(kw))
+			}
+			content.WriteString("</keywords>\n")
+		}
+
+		content.WriteString("  </artifact>\n")
+	}
+
+	content.WriteString("</artifact_context>")
+	return content.String()
+}
+
+// escapeXMLText escapes special characters for XML text content.
+func escapeXMLText(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, "<", "&lt;")
 	s = strings.ReplaceAll(s, ">", "&gt;")
 	return s

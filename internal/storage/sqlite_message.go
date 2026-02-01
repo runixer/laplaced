@@ -168,3 +168,48 @@ func (s *SQLiteStore) UpdateMessagesTopicInRange(ctx context.Context, userID, st
 	_, err := s.db.ExecContext(ctx, query, topicID, userID, startMsgID, endMsgID)
 	return err
 }
+
+// GetRecentSessionMessages returns the last N unprocessed messages (topic_id IS NULL) for artifact context (v0.6.0).
+// Excludes messageIDs to avoid duplicates with MessageGroup messages.
+func (s *SQLiteStore) GetRecentSessionMessages(ctx context.Context, userID int64, limit int, excludeIDs []int64) ([]Message, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+
+	query := "SELECT id, user_id, role, content, created_at, topic_id FROM history WHERE user_id = ? AND topic_id IS NULL"
+	args := []interface{}{userID}
+
+	// Add exclusion for MessageGroup message IDs to avoid duplicates
+	if len(excludeIDs) > 0 {
+		placeholders := strings.Repeat(",?", len(excludeIDs)-1)
+		query += " AND id NOT IN (?" + placeholders + ")"
+		for _, id := range excludeIDs {
+			args = append(args, id)
+		}
+	}
+
+	query += " ORDER BY created_at DESC, id DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var messages []Message
+	for rows.Next() {
+		var msg Message
+		if err := rows.Scan(&msg.ID, &msg.UserID, &msg.Role, &msg.Content, &msg.CreatedAt, &msg.TopicID); err != nil {
+			return nil, err
+		}
+		messages = append(messages, msg)
+	}
+
+	// Reverse to get chronological order
+	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+		messages[i], messages[j] = messages[j], messages[i]
+	}
+
+	return messages, nil
+}

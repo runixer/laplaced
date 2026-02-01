@@ -4,6 +4,7 @@ package testutil
 
 import (
 	"context"
+	"time"
 
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
@@ -134,6 +135,14 @@ func (m *MockStorage) UpdateMessagesTopicInRange(ctx context.Context, userID, st
 
 func (m *MockStorage) GetUnprocessedMessages(userID int64) ([]storage.Message, error) {
 	args := m.Called(userID)
+	if args.Get(0) == nil {
+		return []storage.Message{}, args.Error(1)
+	}
+	return args.Get(0).([]storage.Message), args.Error(1)
+}
+
+func (m *MockStorage) GetRecentSessionMessages(ctx context.Context, userID int64, limit int, excludeIDs []int64) ([]storage.Message, error) {
+	args := m.Called(ctx, userID, limit, excludeIDs)
 	if args.Get(0) == nil {
 		return []storage.Message{}, args.Error(1)
 	}
@@ -509,6 +518,14 @@ func (m *MockStorage) GetAgentLogsExtended(filter storage.AgentLogFilter, limit,
 	return args.Get(0).(storage.AgentLogResult), args.Error(1)
 }
 
+func (m *MockStorage) GetAgentLogFull(ctx context.Context, id int64, userID int64) (*storage.AgentLog, error) {
+	args := m.Called(ctx, id, userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*storage.AgentLog), args.Error(1)
+}
+
 // PeopleRepository methods
 
 func (m *MockStorage) AddPerson(person storage.Person) (int64, error) {
@@ -668,16 +685,6 @@ func (m *MockFileDownloader) DownloadFileAsBase64(ctx context.Context, fileID st
 	return args.String(0), args.Error(1)
 }
 
-// MockYandexClient implements yandex.SpeechKitClient for tests.
-type MockYandexClient struct {
-	mock.Mock
-}
-
-func (m *MockYandexClient) Recognize(ctx context.Context, audioData []byte) (string, error) {
-	args := m.Called(ctx, audioData)
-	return args.String(0), args.Error(1)
-}
-
 // MockVectorSearcher implements rag.VectorSearcher for tests.
 type MockVectorSearcher struct {
 	mock.Mock
@@ -718,4 +725,86 @@ func SetupDefaultMocks(s *MockStorage) {
 	s.On("GetTopicsPendingFacts", mock.Anything).Return([]storage.Topic{}, nil).Maybe()
 	s.On("GetUnprocessedMessages", mock.Anything).Return([]storage.Message{}, nil).Maybe()
 	s.On("GetRecentHistory", mock.Anything, mock.Anything).Return([]storage.Message{}, nil).Maybe()
+	s.On("GetRecentSessionMessages", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]storage.Message{}, nil).Maybe()
+}
+
+// ArtifactRepository methods
+
+func (m *MockStorage) AddArtifact(artifact storage.Artifact) (int64, error) {
+	args := m.Called(artifact)
+	if args.Get(0) == nil {
+		return 0, args.Error(1)
+	}
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockStorage) GetArtifact(userID, artifactID int64) (*storage.Artifact, error) {
+	args := m.Called(userID, artifactID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*storage.Artifact), args.Error(1)
+}
+
+func (m *MockStorage) GetByHash(userID int64, contentHash string) (*storage.Artifact, error) {
+	args := m.Called(userID, contentHash)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*storage.Artifact), args.Error(1)
+}
+
+func (m *MockStorage) GetPendingArtifacts(userID int64, maxRetries int) ([]storage.Artifact, error) {
+	args := m.Called(userID, maxRetries)
+	if args.Get(0) == nil {
+		return []storage.Artifact{}, args.Error(1)
+	}
+	return args.Get(0).([]storage.Artifact), args.Error(1)
+}
+
+func (m *MockStorage) GetArtifacts(filter storage.ArtifactFilter, limit, offset int) ([]storage.Artifact, int64, error) {
+	args := m.Called(filter, limit, offset)
+	if args.Get(0) == nil {
+		return []storage.Artifact{}, 0, args.Error(1)
+	}
+	return args.Get(0).([]storage.Artifact), args.Get(1).(int64), args.Error(2)
+}
+
+func (m *MockStorage) UpdateArtifact(artifact storage.Artifact) error {
+	args := m.Called(artifact)
+	return args.Error(0)
+}
+
+func (m *MockStorage) RecoverArtifactStates(threshold time.Duration) error {
+	args := m.Called(threshold)
+	return args.Error(0)
+}
+
+func (m *MockStorage) GetArtifactsByIDs(userID int64, artifactIDs []int64) ([]storage.Artifact, error) {
+	args := m.Called(userID, artifactIDs)
+	if args.Get(0) == nil {
+		return []storage.Artifact{}, args.Error(1)
+	}
+	return args.Get(0).([]storage.Artifact), args.Error(1)
+}
+
+func (m *MockStorage) IncrementContextLoadCount(userID int64, artifactIDs []int64) error {
+	args := m.Called(userID, artifactIDs)
+	return args.Error(0)
+}
+
+func (m *MockStorage) UpdateMessageID(userID, artifactID, messageID int64) error {
+	args := m.Called(userID, artifactID, messageID)
+	return args.Error(0)
+}
+
+// MockToolHandler implements laplace.ToolHandler for tests.
+type MockToolHandler struct {
+	mock.Mock
+}
+
+// ExecuteToolCall executes a tool call and returns the result.
+func (m *MockToolHandler) ExecuteToolCall(toolName string, arguments string) (string, error) {
+	args := m.Called(toolName, arguments)
+	return args.String(0), args.Error(1)
 }

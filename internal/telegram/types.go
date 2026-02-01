@@ -28,6 +28,8 @@ type Message struct {
 	Photo           []PhotoSize    `json:"photo,omitempty"`
 	Document        *Document      `json:"document,omitempty"`
 	Voice           *Voice         `json:"voice,omitempty"`
+	Audio           *Audio         `json:"audio,omitempty"`
+	VideoNote       *VideoNote     `json:"video_note,omitempty"`
 	ForwardOrigin   *MessageOrigin `json:"forward_origin,omitempty"`
 }
 
@@ -73,6 +75,28 @@ type Voice struct {
 	Duration     int    `json:"duration"`
 	MimeType     string `json:"mime_type,omitempty"`
 	FileSize     int    `json:"file_size,omitempty"`
+}
+
+// Audio represents an audio file (MP3, etc.).
+type Audio struct {
+	FileID       string `json:"file_id"`
+	FileUniqueID string `json:"file_unique_id"`
+	Duration     int    `json:"duration"`
+	Performers   string `json:"performer,omitempty"`
+	Title        string `json:"title,omitempty"`
+	FileName     string `json:"file_name,omitempty"`
+	MimeType     string `json:"mime_type,omitempty"`
+	FileSize     int    `json:"file_size,omitempty"`
+}
+
+// VideoNote represents a video message (video circle).
+type VideoNote struct {
+	FileID       string     `json:"file_id"`
+	FileUniqueID string     `json:"file_unique_id"`
+	Length       int        `json:"length"`   // Video width and height (diameter of the video message)
+	Duration     int        `json:"duration"` // Duration of the video in seconds
+	Thumbnail    *PhotoSize `json:"thumbnail,omitempty"`
+	FileSize     int        `json:"file_size,omitempty"`
 }
 
 // MessageOrigin represents the origin of a message.

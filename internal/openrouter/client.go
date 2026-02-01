@@ -127,25 +127,20 @@ func calculateBackoff(attempt int) time.Duration {
 	return delay + jitter
 }
 
-type ImageURL struct {
-	URL string `json:"url"`
-}
-
-type ImagePart struct {
-	Type     string   `json:"type"`
-	ImageURL ImageURL `json:"image_url"`
-}
-
+// File represents a file for multimodal content (v0.6.0: unified format).
 type File struct {
 	FileName string `json:"filename"`
-	FileData string `json:"file_data"`
+	FileData string `json:"file_data"` // data URL format: "data:mime/type;base64,..."
 }
 
+// FilePart represents a file part in multimodal messages (v0.6.0: unified format).
+// This is the recommended format for all file types: images, PDFs, audio, video.
 type FilePart struct {
-	Type string `json:"type"`
+	Type string `json:"type"` // "file"
 	File File   `json:"file"`
 }
 
+// TextPart represents a text part in messages.
 type TextPart struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
@@ -371,6 +366,28 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 	body, err := json.Marshal(req)
 	if err != nil {
 		return ChatCompletionResponse{}, err
+	}
+
+	// Debug: log request body to inspect multimodal content
+	if len(body) > 0 {
+		// Check if file_data is present in the request (v0.6.0: unified FilePart format)
+		bodyStr := string(body)
+		hasFileData := strings.Contains(bodyStr, "file_data")
+
+		c.logger.Debug("OpenRouter request body analysis",
+			"body_length", len(body),
+			"has_file_data", hasFileData,
+			"message_count", len(req.Messages),
+		)
+
+		// Log preview for inspection
+		preview := bodyStr
+		if len(preview) > 5000 {
+			preview = preview[:5000] + "... (truncated, total: " + fmt.Sprintf("%d", len(body)) + " bytes)"
+		}
+		c.logger.Debug("OpenRouter request body preview",
+			"body_preview", preview,
+		)
 	}
 
 	endpoint, err := url.JoinPath(c.apiEndpoint, "chat/completions")

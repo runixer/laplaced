@@ -61,13 +61,27 @@ agents:
     name: "Reranker"
     # model: uses default
     enabled: true
-    candidates: 50
-    max_topics: 5
-    max_people: 10
     timeout: "60s"
     turn_timeout: "30s"
     max_tool_calls: 3
     thinking_level: "minimal"
+
+    # Per-type limits (v0.6.0)
+    topics:
+      candidates_limit: 50
+      max: 5
+    people:
+      candidates_limit: 20
+      max: 10
+    artifacts:
+      candidates_limit: 20
+      max: 10                # Max artifacts in final selection (also used as max_context_artifacts)
+      max_context_bytes: 52428800  # 50MB cumulative limit for artifact content
+
+    # Legacy fields (deprecated, for migration only)
+    candidates: 50
+    max_topics: 5
+    max_people: 10
 
   # Splitter - splits large topics into smaller ones
   splitter:
@@ -78,6 +92,19 @@ agents:
   merger:
     name: "Merger"
     # model: uses default
+
+  # Extractor - extracts content from artifacts (images, audio, PDF, etc.)
+  extractor:
+    name: "Extractor"
+    model: "google/gemini-3-flash-preview"
+    # Processing settings (v0.6.0)
+    max_file_size_mb: 20        # Max file size for extraction
+    timeout: "2m"               # Max time for single artifact extraction
+    max_retries: 3              # Max retry attempts for failed artifacts
+    polling_interval: "30s"     # How often to check for pending artifacts
+    max_concurrent: 3           # Max artifacts to process simultaneously
+    recovery_threshold: "10m"   # How long 'processing' state before recovery on startup
+    recent_message_count: 10    # Number of recent session messages to include in artifact context (0 = disable)
 
 # Embedding Configuration
 embedding:
@@ -122,9 +149,9 @@ bot:
 database:
   path: "data/laplaced.db"
 
-# Yandex Cloud SpeechKit Configuration (Optional)
-yandex:
-  enabled: false
-  api_key: ""
-  folder_id: ""
-  language: "ru-RU"
+# Artifacts Configuration (v0.6.0)
+artifacts:
+  enabled: true
+  storage_path: "data/artifacts"
+  allowed_types: ["image", "voice", "pdf", "video_note", "video", "document"]
+  min_voice_duration_seconds: 300  # Only save voice messages >= 5min as artifacts (0 = save all, -1 = disable)

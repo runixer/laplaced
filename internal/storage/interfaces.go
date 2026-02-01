@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"time"
 )
 
 // MessageRepository handles message history operations.
@@ -16,6 +17,7 @@ type MessageRepository interface {
 	UpdateMessageTopic(userID int64, messageID, topicID int64) error
 	UpdateMessagesTopicInRange(ctx context.Context, userID, startMsgID, endMsgID, topicID int64) error
 	GetUnprocessedMessages(userID int64) ([]Message, error)
+	GetRecentSessionMessages(ctx context.Context, userID int64, limit int, excludeIDs []int64) ([]Message, error)
 }
 
 // UserRepository handles user data operations.
@@ -112,6 +114,7 @@ type AgentLogRepository interface {
 	AddAgentLog(log AgentLog) error
 	GetAgentLogs(agentType string, userID int64, limit int) ([]AgentLog, error)
 	GetAgentLogsExtended(filter AgentLogFilter, limit, offset int) (AgentLogResult, error)
+	GetAgentLogFull(ctx context.Context, id int64, userID int64) (*AgentLog, error)
 }
 
 // PeopleRepository handles people from the user's social graph.
@@ -143,4 +146,31 @@ type PeopleRepository interface {
 	// Maintenance
 	CountPeopleWithoutEmbedding(userID int64) (int, error)
 	GetPeopleWithoutEmbedding(userID int64) ([]Person, error)
+}
+
+// ArtifactFilter defines filtering options for artifact queries.
+type ArtifactFilter struct {
+	UserID   int64
+	State    string // "pending", "processing", "ready", "failed", or "" for all
+	FileType string // "image", "voice", "pdf", "video_note", "document", or "" for all
+}
+
+// ArtifactRepository handles artifact file metadata operations.
+type ArtifactRepository interface {
+	AddArtifact(artifact Artifact) (int64, error)
+	GetArtifact(userID, artifactID int64) (*Artifact, error)
+	GetByHash(userID int64, contentHash string) (*Artifact, error)
+	// GetPendingArtifacts returns artifacts ready for processing:
+	// - state='pending' (new artifacts)
+	// - state='failed' with retry_count < maxRetries and sufficient backoff elapsed (v0.6.0)
+	GetPendingArtifacts(userID int64, maxRetries int) ([]Artifact, error)
+	GetArtifacts(filter ArtifactFilter, limit, offset int) ([]Artifact, int64, error)
+	UpdateArtifact(artifact Artifact) error
+	RecoverArtifactStates(threshold time.Duration) error
+	GetArtifactsByIDs(userID int64, artifactIDs []int64) ([]Artifact, error)
+	// IncrementContextLoadCount tracks usage when artifacts are loaded into LLM context (v0.6.0)
+	IncrementContextLoadCount(userID int64, artifactIDs []int64) error
+	// UpdateMessageID links artifact to history message (called after message is saved)
+	// Requires userID for proper data isolation.
+	UpdateMessageID(userID, artifactID, messageID int64) error
 }

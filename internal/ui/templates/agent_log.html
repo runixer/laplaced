@@ -617,7 +617,7 @@
     {{else}}
 
     {{range $idx, $log := .Data.Logs}}
-    <div class="card log-entry">
+    <div class="card log-entry" data-log-id="{{$log.ID}}" data-log-idx="{{$idx}}">
         <div class="card-header log-header d-flex justify-content-between align-items-center" onclick="toggleLog({{$idx}})">
             <div>
                 <span class="badge {{if $log.Success}}success-badge{{else}}error-badge{{end}} me-2">
@@ -657,72 +657,17 @@
             </div>
         </div>
         <div class="card-body log-content" id="log-{{$idx}}">
+            <div class="loading-placeholder">
+                <div class="spinner-border spinner-border-sm text-muted" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <span class="text-muted ms-2">Loading log details...</span>
+            </div>
             {{if not $log.Success}}
-            <div class="alert alert-danger">
+            <div class="alert alert-danger mt-2">
                 <strong>Error:</strong> {{$log.ErrorMessage}}
             </div>
             {{end}}
-
-            {{if $log.ConversationTurns}}
-            <!-- Multi-turn conversation display -->
-            <div class="conversation-turns mb-3" id="conv-turns-{{$idx}}">
-                <h6>
-                    <i class="bi bi-arrow-repeat"></i> Multi-Turn Conversation
-                    <span class="badge bg-info turns-count">Loading...</span>
-                </h6>
-                <div class="accordion" id="turns-accordion-{{$idx}}">
-                    <!-- Turns will be rendered by JavaScript -->
-                </div>
-            </div>
-            <script>
-            (function() {
-                const turnsData = {{$log.ConversationTurns | jsString}};
-                // Defer until DOM is ready and renderConversationTurns is defined
-                if (document.readyState === 'loading') {
-                    document.addEventListener('DOMContentLoaded', function() {
-                        renderConversationTurns({{$idx}}, turnsData);
-                    });
-                } else {
-                    // DOM already loaded, but function may not be defined yet - defer to next tick
-                    setTimeout(function() {
-                        renderConversationTurns({{$idx}}, turnsData);
-                    }, 0);
-                }
-            })();
-            </script>
-            {{else}}
-            {{if $log.InputContext}}
-            <div class="mb-3">
-                <h6>
-                    API Request
-                    <button class="btn btn-sm btn-outline-secondary ms-2" onclick="toggleRawJSON({{$idx}}); event.stopPropagation();">
-                        <i class="bi bi-code"></i> Raw JSON
-                    </button>
-                </h6>
-                <div class="openrouter-request" id="or-request-{{$idx}}"></div>
-                <div class="json-view mt-2" id="or-raw-{{$idx}}" style="display: none;">{{$log.InputContext | prettyJSON}}</div>
-            </div>
-            {{end}}
-
-            {{if $log.OutputContext}}
-            <div class="mb-3">
-                <h6>
-                    API Response
-                    <button class="btn btn-sm btn-outline-secondary ms-2" onclick="toggleRawResponseJSON({{$idx}}); event.stopPropagation();">
-                        <i class="bi bi-code"></i> Raw JSON
-                    </button>
-                </h6>
-                <div class="openrouter-response" id="or-response-{{$idx}}"></div>
-                <div class="json-view mt-2" id="or-response-raw-{{$idx}}" style="display: none;">{{$log.OutputContext | prettyJSON}}</div>
-            </div>
-            {{else}}
-            <div class="mb-3">
-                <h6>Output Response</h6>
-                <div class="response-view">{{if $log.OutputResponse}}{{$log.OutputResponse}}{{else}}<em>No response</em>{{end}}</div>
-            </div>
-            {{end}}
-            {{end}}
-
         </div>
     </div>
     {{end}}
@@ -733,9 +678,168 @@
 
 {{define "scripts"}}
 <script>
-function toggleLog(idx) {
+// Track which logs have been loaded
+const loadedLogs = new Set();
+
+// Selected user ID for API calls
+const selectedUserID = {{.SelectedUserID}};
+
+// Get selected user ID from URL query params
+function getSelectedUserID() {
+    return selectedUserID;
+}
+
+// Toggle log visibility and lazy load content if needed
+async function toggleLog(idx) {
     const content = document.getElementById('log-' + idx);
-    content.classList.toggle('show');
+    const logEntry = document.querySelector(`[data-log-idx="${idx}"]`);
+    const logId = logEntry?.getAttribute('data-log-id');
+
+    // If already loaded, just toggle visibility
+    if (loadedLogs.has(idx)) {
+        content.classList.toggle('show');
+        return;
+    }
+
+    // Fetch full log data
+    const userId = getSelectedUserID();
+    if (!userId) {
+        content.innerHTML = '<div class="alert alert-warning">User ID not found</div>';
+        content.classList.add('show');
+        return;
+    }
+
+    if (!logId) {
+        content.innerHTML = '<div class="alert alert-warning">Log ID not found</div>';
+        content.classList.add('show');
+        return;
+    }
+
+    // Show loading state
+    content.innerHTML = `
+        <div class="d-flex justify-content-center">
+            <div class="spinner-border spinner-border-sm text-muted" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <span class="text-muted ms-2">Loading log details...</span>
+        </div>
+    `;
+    content.classList.add('show');
+
+    try {
+        const response = await fetch(`/api/agent-log/${logId}?user_id=${userId}`);
+        if (!response.ok) {
+            throw new Error('Failed to load log details');
+        }
+        const logData = await response.json();
+
+        // Render log content
+        renderLogContent(idx, logData);
+        loadedLogs.add(idx);
+    } catch (error) {
+        console.error('Failed to load log:', error);
+        content.innerHTML = `
+            <div class="alert alert-danger">
+                <strong>Error:</strong> Failed to load log details
+            </div>
+        `;
+    }
+}
+
+// Render log content from fetched data
+function renderLogContent(idx, logData) {
+    const content = document.getElementById('log-' + idx);
+    if (!content) return;
+
+    let html = '';
+
+    // Error message if failed
+    if (!logData.Success && logData.ErrorMessage) {
+        html += `
+            <div class="alert alert-danger">
+                <strong>Error:</strong> ${escapeHtml(logData.ErrorMessage)}
+            </div>
+        `;
+    }
+
+    // Multi-turn conversation display
+    if (logData.ConversationTurns) {
+        html += renderMultiTurnConversation(idx, logData.ConversationTurns);
+    } else {
+        // Single turn: API Request
+        if (logData.InputContext) {
+            html += `
+                <div class="mb-3">
+                    <h6>
+                        API Request
+                        <button class="btn btn-sm btn-outline-secondary ms-2" onclick="toggleRawJSON(${idx}); event.stopPropagation();">
+                            <i class="bi bi-code"></i> Raw JSON
+                        </button>
+                    </h6>
+                    <div class="openrouter-request" id="or-request-${idx}"></div>
+                    <div class="json-view mt-2" id="or-raw-${idx}" style="display: none;">${escapeHtml(JSON.stringify(JSON.parse(logData.InputContext), null, 2))}</div>
+                </div>
+            `;
+        }
+
+        // API Response
+        if (logData.OutputContext) {
+            html += `
+                <div class="mb-3">
+                    <h6>
+                        API Response
+                        <button class="btn btn-sm btn-outline-secondary ms-2" onclick="toggleRawResponseJSON(${idx}); event.stopPropagation();">
+                            <i class="bi bi-code"></i> Raw JSON
+                        </button>
+                    </h6>
+                    <div class="openrouter-response" id="or-response-${idx}"></div>
+                    <div class="json-view mt-2" id="or-response-raw-${idx}" style="display: none;">${escapeHtml(JSON.stringify(JSON.parse(logData.OutputContext), null, 2))}</div>
+                </div>
+            `;
+        } else if (logData.OutputResponse) {
+            html += `
+                <div class="mb-3">
+                    <h6>Output Response</h6>
+                    <div class="response-view">${escapeHtml(logData.OutputResponse)}</div>
+                </div>
+            `;
+        }
+    }
+
+    content.innerHTML = html;
+
+    // Initialize viewers after content is rendered
+    if (logData.ConversationTurns) {
+        try {
+            const turnsData = JSON.parse(logData.ConversationTurns);
+            renderConversationTurns(idx, logData.ConversationTurns);
+        } catch (e) {
+            console.error('Failed to parse conversation turns:', e);
+        }
+    } else {
+        if (logData.InputContext) {
+            new OpenRouterRequestViewer('or-request-' + idx, logData.InputContext);
+        }
+        if (logData.OutputContext) {
+            new OpenRouterResponseViewer('or-response-' + idx, logData.OutputContext);
+        }
+    }
+}
+
+// Render multi-turn conversation HTML (for lazy loading)
+function renderMultiTurnConversation(idx, turnsDataStr) {
+    let html = `
+        <div class="conversation-turns mb-3" id="conv-turns-${idx}">
+            <h6>
+                <i class="bi bi-arrow-repeat"></i> Multi-Turn Conversation
+                <span class="badge bg-info turns-count">Loading...</span>
+            </h6>
+            <div class="accordion" id="turns-accordion-${idx}">
+                <!-- Turns will be rendered by JavaScript -->
+            </div>
+        </div>
+    `;
+    return html;
 }
 
 function toggleRawJSON(idx) {
@@ -1338,11 +1442,16 @@ class OpenRouterRequestViewer {
             const name = (tc.function && tc.function.name) || 'unknown';
             let args = (tc.function && tc.function.arguments) || '{}';
 
-            try {
-                const parsed = JSON.parse(args);
-                const expanded = this.deepParseJson(parsed);
-                args = JSON.stringify(expanded, null, 2);
-            } catch (e) {}
+            // Handle case where arguments is already an object (not a string)
+            if (typeof args !== 'string') {
+                args = JSON.stringify(args, null, 2);
+            } else {
+                try {
+                    const parsed = JSON.parse(args);
+                    const expanded = this.deepParseJson(parsed);
+                    args = JSON.stringify(expanded, null, 2);
+                } catch (e) {}
+            }
 
             html += '<div class="or-tool-call">' +
                 '<span class="or-tool-badge"><i class="bi bi-gear"></i> Tool Call</span> ' +
@@ -1515,9 +1624,12 @@ class OpenRouterResponseViewer {
         html += '<span class="orr-role">' + this.escapeHtml(role) + '</span>';
         html += '</div>';
 
-        // Content
+        // Content - handle both string and object (JSON) content
         if (content) {
-            html += '<div class="orr-content">' + this.escapeHtml(content) + '</div>';
+            const displayContent = typeof content === 'object'
+                ? JSON.stringify(content, null, 2)
+                : content;
+            html += '<div class="orr-content">' + this.escapeHtml(displayContent) + '</div>';
         }
 
         // Tool calls
@@ -1568,11 +1680,16 @@ class OpenRouterResponseViewer {
             const name = (tc.function && tc.function.name) || 'unknown';
             let args = (tc.function && tc.function.arguments) || '{}';
 
-            try {
-                const parsed = JSON.parse(args);
-                const expanded = this.deepParseJson(parsed);
-                args = JSON.stringify(expanded, null, 2);
-            } catch (e) {}
+            // Handle case where arguments is already an object (not a string)
+            if (typeof args !== 'string') {
+                args = JSON.stringify(args, null, 2);
+            } else {
+                try {
+                    const parsed = JSON.parse(args);
+                    const expanded = this.deepParseJson(parsed);
+                    args = JSON.stringify(expanded, null, 2);
+                } catch (e) {}
+            }
 
             html += '<div class="or-tool-call">' +
                 '<span class="or-tool-badge"><i class="bi bi-gear"></i> Tool Call</span> ' +
@@ -1621,18 +1738,6 @@ class OpenRouterResponseViewer {
     }
 }
 
-// Initialize viewers on page load
-document.addEventListener('DOMContentLoaded', function() {
-    {{range $idx, $log := .Data.Logs}}
-    {{if not $log.ConversationTurns}}
-    {{if $log.InputContext}}
-    new OpenRouterRequestViewer('or-request-{{$idx}}', {{$log.InputContext | jsString}});
-    {{end}}
-    {{if $log.OutputContext}}
-    new OpenRouterResponseViewer('or-response-{{$idx}}', {{$log.OutputContext | jsString}});
-    {{end}}
-    {{end}}
-    {{end}}
-});
+// No initialization needed - logs are loaded on-demand via lazy loading
 </script>
 {{end}}

@@ -28,18 +28,33 @@ type AgentConfig struct {
 	Model string `yaml:"model"`
 }
 
+// RerankerTypeConfig defines per-type reranker limits (v0.6.0).
+// RerankerTypeConfig defines per-type reranker limits (v0.6.0).
+type RerankerTypeConfig struct {
+	CandidatesLimit int `yaml:"candidates_limit" env:"LAPLACED_RERANKER_TOPICS_CANDIDATES_LIMIT"`
+	Max             int `yaml:"max" env:"LAPLACED_RERANKER_TOPICS_MAX"`
+	MaxContextBytes int `yaml:"max_context_bytes,omitempty" env:"LAPLACED_RERANKER_TOPICS_MAX_CONTEXT_BYTES"` // For artifacts only (v0.6.0)
+}
+
 // RerankerAgentConfig extends AgentConfig with reranker-specific settings.
 type RerankerAgentConfig struct {
 	AgentConfig        `yaml:",inline"`
 	Enabled            bool   `yaml:"enabled" env:"LAPLACED_RERANKER_ENABLED"`
-	Candidates         int    `yaml:"candidates" env:"LAPLACED_RERANKER_CANDIDATES"`
-	MaxTopics          int    `yaml:"max_topics" env:"LAPLACED_RERANKER_MAX_TOPICS"`
-	MaxPeople          int    `yaml:"max_people" env:"LAPLACED_RERANKER_MAX_PEOPLE"`
 	Timeout            string `yaml:"timeout" env:"LAPLACED_RERANKER_TIMEOUT"`
 	TurnTimeout        string `yaml:"turn_timeout" env:"LAPLACED_RERANKER_TURN_TIMEOUT"`
 	MaxToolCalls       int    `yaml:"max_tool_calls" env:"LAPLACED_RERANKER_MAX_TOOL_CALLS"`
 	ThinkingLevel      string `yaml:"thinking_level" env:"LAPLACED_RERANKER_THINKING_LEVEL"`
 	TargetContextChars int    `yaml:"target_context_chars" env:"LAPLACED_RERANKER_TARGET_CONTEXT_CHARS"`
+
+	// Per-type limits (v0.6.0)
+	Topics    RerankerTypeConfig `yaml:"topics"`
+	People    RerankerTypeConfig `yaml:"people"`
+	Artifacts RerankerTypeConfig `yaml:"artifacts"`
+
+	// Legacy fields (deprecated, kept for migration)
+	Candidates int `yaml:"candidates" env:"LAPLACED_RERANKER_CANDIDATES"`
+	MaxTopics  int `yaml:"max_topics" env:"LAPLACED_RERANKER_MAX_TOPICS"`
+	MaxPeople  int `yaml:"max_people" env:"LAPLACED_RERANKER_MAX_PEOPLE"`
 }
 
 // ArchivistAgentConfig extends AgentConfig with archivist-specific settings.
@@ -58,6 +73,68 @@ func (a *ArchivistAgentConfig) GetModel(defaultModel string) string {
 	return defaultModel
 }
 
+// ExtractorAgentConfig defines configuration for the Extractor agent (v0.6.0).
+// Processing settings were moved from ArtifactsConfig to keep agent-related config together.
+type ExtractorAgentConfig struct {
+	AgentConfig `yaml:",inline"` // Name, Model
+
+	// Processing settings (moved from ArtifactsConfig in v0.6.0)
+	MaxFileSizeMB      int    `yaml:"max_file_size_mb" env:"LAPLACED_EXTRACTOR_MAX_FILE_SIZE_MB"`
+	Timeout            string `yaml:"timeout" env:"LAPLACED_EXTRACTOR_TIMEOUT"`
+	MaxRetries         int    `yaml:"max_retries" env:"LAPLACED_EXTRACTOR_MAX_RETRIES"`
+	PollingInterval    string `yaml:"polling_interval" env:"LAPLACED_EXTRACTOR_POLLING_INTERVAL"`
+	MaxConcurrent      int    `yaml:"max_concurrent" env:"LAPLACED_EXTRACTOR_MAX_CONCURRENT"`
+	RecoveryThreshold  string `yaml:"recovery_threshold" env:"LAPLACED_EXTRACTOR_RECOVERY_THRESHOLD"`
+	RecentMessageCount int    `yaml:"recent_message_count" env:"LAPLACED_EXTRACTOR_RECENT_MESSAGE_COUNT"` // Number of recent session messages to include in artifact context (0 = disable)
+}
+
+// GetModel returns the extractor's model, falling back to default if not set.
+func (e *ExtractorAgentConfig) GetModel(defaultModel string) string {
+	if e.Model != "" {
+		return e.Model
+	}
+	return defaultModel
+}
+
+// GetTimeout returns the timeout for artifact processing.
+// Defaults to 2 minutes if not configured.
+func (e *ExtractorAgentConfig) GetTimeout() time.Duration {
+	if e.Timeout == "" {
+		return 2 * time.Minute
+	}
+	d, err := time.ParseDuration(e.Timeout)
+	if err != nil || d == 0 {
+		return 2 * time.Minute
+	}
+	return d
+}
+
+// GetPollingInterval returns the interval for polling pending artifacts.
+// Defaults to 30 seconds if not configured.
+func (e *ExtractorAgentConfig) GetPollingInterval() time.Duration {
+	if e.PollingInterval == "" {
+		return 30 * time.Second
+	}
+	d, err := time.ParseDuration(e.PollingInterval)
+	if err != nil || d == 0 {
+		return 30 * time.Second
+	}
+	return d
+}
+
+// GetRecoveryThreshold returns the threshold for recovering zombie artifact states.
+// Defaults to 10 minutes if not configured.
+func (e *ExtractorAgentConfig) GetRecoveryThreshold() time.Duration {
+	if e.RecoveryThreshold == "" {
+		return 10 * time.Minute
+	}
+	d, err := time.ParseDuration(e.RecoveryThreshold)
+	if err != nil || d == 0 {
+		return 10 * time.Minute
+	}
+	return d
+}
+
 // AgentsConfig defines all agents in the system.
 type AgentsConfig struct {
 	Default   AgentConfig          `yaml:"default"`                            // Default model for all agents
@@ -68,6 +145,7 @@ type AgentsConfig struct {
 	Reranker  RerankerAgentConfig  `yaml:"reranker"`                           // Filters and ranks RAG candidates
 	Splitter  AgentConfig          `yaml:"splitter"`                           // Splits large topics
 	Merger    AgentConfig          `yaml:"merger"`                             // Merges similar topics
+	Extractor ExtractorAgentConfig `yaml:"extractor"`                          // Extracts content from artifacts
 }
 
 // GetModel returns the agent's model, falling back to default if not set.
@@ -94,13 +172,15 @@ func (a *AgentsConfig) GetChatModel() string {
 	return a.Chat.GetModel(a.Default.Model)
 }
 
-type YandexConfig struct {
-	Enabled     bool   `yaml:"enabled" env:"LAPLACED_YANDEX_ENABLED"`
-	APIKey      string `yaml:"api_key" env:"LAPLACED_YANDEX_API_KEY"`
-	FolderID    string `yaml:"folder_id" env:"LAPLACED_YANDEX_FOLDER_ID"`
-	Language    string `yaml:"language"`
-	AudioFormat string `yaml:"audio_format"`
-	SampleRate  string `yaml:"sample_rate"`
+// ArtifactsConfig defines configuration for the artifacts system (v0.6.0).
+// Processing settings moved to agents.extractor. RAG settings moved to rag and agents.reranker.artifacts.
+type ArtifactsConfig struct {
+	Enabled      bool     `yaml:"enabled" env:"LAPLACED_ARTIFACTS_ENABLED"`
+	StoragePath  string   `yaml:"storage_path" env:"LAPLACED_ARTIFACTS_STORAGE_PATH"`
+	AllowedTypes []string `yaml:"allowed_types"`
+
+	// Voice settings (about storage filtering, not extraction)
+	MinVoiceDurationSeconds int `yaml:"min_voice_duration_seconds" env:"LAPLACED_ARTIFACTS_MIN_VOICE_DURATION_SECONDS"` // 0 = save all, -1 = disable voice artifacts
 }
 
 type PriceTier struct {
@@ -219,7 +299,7 @@ type Config struct {
 	Database   struct {
 		Path string `yaml:"path" env:"LAPLACED_DATABASE_PATH"`
 	} `yaml:"database"`
-	Yandex YandexConfig `yaml:"yandex"`
+	Artifacts ArtifactsConfig `yaml:"artifacts"`
 }
 
 // Load loads configuration from the specified file path.
@@ -289,16 +369,6 @@ func (c *Config) Validate() error {
 		errs = append(errs, errors.New("database.path is required"))
 	}
 
-	// Yandex requires api_key and folder_id if enabled
-	if c.Yandex.Enabled {
-		if c.Yandex.APIKey == "" {
-			errs = append(errs, errors.New("yandex.api_key is required when yandex.enabled is true"))
-		}
-		if c.Yandex.FolderID == "" {
-			errs = append(errs, errors.New("yandex.folder_id is required when yandex.enabled is true"))
-		}
-	}
-
 	// Server auth requires username if enabled (password is auto-generated if not set)
 	if c.Server.Auth.Enabled {
 		if c.Server.Auth.Username == "" {
@@ -362,13 +432,47 @@ func (c *Config) Validate() error {
 		errs = append(errs, errors.New("embedding.model is required"))
 	}
 
-	// Reranker agent validation
+	// Reranker agent validation (v0.6.0: nested config with legacy fallback)
 	r := &c.Agents.Reranker
-	if r.Candidates <= 0 {
-		errs = append(errs, fmt.Errorf("agents.reranker.candidates must be positive, got %d", r.Candidates))
+
+	// Migrate legacy values to nested config if not set
+	if r.Topics.CandidatesLimit == 0 && r.Candidates > 0 {
+		r.Topics.CandidatesLimit = r.Candidates
 	}
-	if r.MaxTopics <= 0 {
-		errs = append(errs, fmt.Errorf("agents.reranker.max_topics must be positive, got %d", r.MaxTopics))
+	if r.Topics.Max == 0 && r.MaxTopics > 0 {
+		r.Topics.Max = r.MaxTopics
+	}
+	if r.People.Max == 0 && r.MaxPeople > 0 {
+		r.People.Max = r.MaxPeople
+	}
+	if r.People.CandidatesLimit == 0 {
+		r.People.CandidatesLimit = 20 // Default
+	}
+	if r.Artifacts.CandidatesLimit == 0 {
+		r.Artifacts.CandidatesLimit = 20 // Default
+	}
+	if r.Artifacts.Max == 0 {
+		r.Artifacts.Max = 5 // Default
+	}
+
+	// Validate nested config
+	if r.Topics.CandidatesLimit <= 0 {
+		errs = append(errs, fmt.Errorf("agents.reranker.topics.candidates_limit must be positive, got %d", r.Topics.CandidatesLimit))
+	}
+	if r.Topics.Max <= 0 {
+		errs = append(errs, fmt.Errorf("agents.reranker.topics.max must be positive, got %d", r.Topics.Max))
+	}
+	if r.People.CandidatesLimit <= 0 {
+		errs = append(errs, fmt.Errorf("agents.reranker.people.candidates_limit must be positive, got %d", r.People.CandidatesLimit))
+	}
+	if r.People.Max <= 0 {
+		errs = append(errs, fmt.Errorf("agents.reranker.people.max must be positive, got %d", r.People.Max))
+	}
+	if r.Artifacts.CandidatesLimit <= 0 {
+		errs = append(errs, fmt.Errorf("agents.reranker.artifacts.candidates_limit must be positive, got %d", r.Artifacts.CandidatesLimit))
+	}
+	if r.Artifacts.Max <= 0 {
+		errs = append(errs, fmt.Errorf("agents.reranker.artifacts.max must be positive, got %d", r.Artifacts.Max))
 	}
 	if r.MaxToolCalls <= 0 {
 		errs = append(errs, fmt.Errorf("agents.reranker.max_tool_calls must be positive, got %d", r.MaxToolCalls))
@@ -394,6 +498,23 @@ func (c *Config) Validate() error {
 	if c.Bot.TurnWaitDuration != "" {
 		if _, err := time.ParseDuration(c.Bot.TurnWaitDuration); err != nil {
 			errs = append(errs, fmt.Errorf("bot.turn_wait_duration: invalid duration format %q: %w", c.Bot.TurnWaitDuration, err))
+		}
+	}
+
+	// Artifacts validation
+	if c.Artifacts.Enabled {
+		if c.Artifacts.StoragePath == "" {
+			errs = append(errs, errors.New("artifacts.storage_path is required when artifacts.enabled is true"))
+		}
+		if len(c.Artifacts.AllowedTypes) == 0 {
+			errs = append(errs, errors.New("artifacts.allowed_types must not be empty"))
+		}
+	}
+
+	// Extractor agent validation (v0.6.0)
+	if c.Artifacts.Enabled {
+		if c.Agents.Extractor.MaxFileSizeMB <= 0 {
+			errs = append(errs, fmt.Errorf("agents.extractor.max_file_size_mb must be positive, got %d", c.Agents.Extractor.MaxFileSizeMB))
 		}
 	}
 

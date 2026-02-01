@@ -296,7 +296,6 @@ func setupTestBot(cfg *config.Config, logger *slog.Logger, dbPath string, dbChan
 		tb.store,
 		tb.store,
 		client,
-		nil, // No speech kit client
 		services.RAGService,
 		services.ContextService,
 		translator,

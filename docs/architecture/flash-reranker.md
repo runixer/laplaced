@@ -4,7 +4,7 @@
 
 ## Обзор
 
-Flash Reranker — компонент RAG pipeline, который использует LLM (Gemini Flash) для интеллектуального отбора релевантных топиков и людей из памяти.
+Flash Reranker — компонент RAG pipeline, который использует LLM (Gemini Flash) для интеллектуального отбора релевантных топиков, людей и артефактов из памяти.
 
 **Проблема:** Vector search возвращает Top-50 кандидатов по косинусному сходству, но:
 - Все 50 в контекст не влезут (~100K токенов)
@@ -204,7 +204,7 @@ Reranker ВИДИТ аудио + 50 саммари → точная фильтр
 ```
 
 **Реализация:**
-- `RetrievalOptions.MediaParts` — slice с `ImagePart`, `AudioPart`, `FilePart`
+- `RetrievalOptions.MediaParts` — slice с `FilePart` (unified format for all media)
 - `enrichQuery()` строит multimodal message при наличии медиа
 - `rerankCandidates()` включает медиа в user prompt
 

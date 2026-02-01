@@ -18,6 +18,7 @@ const (
 	TypeArchivist    AgentType = "archivist"
 	TypeDeduplicator AgentType = "deduplicator"
 	TypeScout        AgentType = "scout"
+	TypeExtractor    AgentType = "extractor"
 )
 
 // String implements fmt.Stringer.

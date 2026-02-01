@@ -2,6 +2,7 @@ package rag
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -58,6 +59,9 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 	if opts == nil {
 		opts = &RetrievalOptions{}
 	}
+
+	// v0.6.0: Selected artifact IDs (will be populated by reranker)
+	var selectedArtifactIDs []int64
 
 	var enrichedQuery string
 	if opts.SkipEnrichment {
@@ -150,9 +154,32 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		}
 	}
 
+	// v0.6.0: Search artifact summaries for reranker candidates (v0.6.0: uses artifacts.enabled + rag.enabled)
+	var artifactCandidates []reranker.ArtifactCandidate
+	if s.cfg.Artifacts.Enabled && s.cfg.RAG.Enabled && s.cfg.Agents.Reranker.Enabled && len(s.artifactVectors) > 0 {
+		artifacts, err := s.SearchArtifactsBySummary(ctx, userID, qVec, float32(minSafetyThreshold))
+		if err != nil {
+			s.logger.Warn("artifact summary search failed", "error", err)
+		} else {
+			for _, ar := range artifacts {
+				artifactCandidates = append(artifactCandidates, reranker.ArtifactCandidate{
+					ArtifactID:   ar.ArtifactID,
+					Score:        ar.Score,
+					FileType:     ar.FileType,
+					OriginalName: ar.OriginalName,
+					Summary:      ar.Summary,
+					Keywords:     ar.Keywords,
+					Entities:     ar.Entities,
+					RAGHints:     ar.RAGHints,
+				})
+			}
+		}
+	}
+
 	// Determine how many candidates to consider
 	rerankerCfg := s.cfg.Agents.Reranker
-	useReranker := rerankerCfg.Enabled && len(matches) > 0
+	// v0.6.0: Reranker should run if we have topics, artifacts, or people to filter
+	useReranker := rerankerCfg.Enabled && (len(matches) > 0 || len(artifactCandidates) > 0 || len(personCandidates) > 0)
 
 	var maxCandidates int
 	if useReranker {
@@ -255,7 +282,7 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		currentMessages := s.formatSessionMessages(opts.History)
 
 		// Run reranker agent
-		result, err := s.rerankViaAgent(ctx, userID, candidates, personCandidates, contextualizedQuery, query, currentMessages, userProfile, recentTopics, opts.MediaParts)
+		result, err := s.rerankViaAgent(ctx, userID, candidates, personCandidates, artifactCandidates, contextualizedQuery, query, currentMessages, userProfile, recentTopics, opts.MediaParts)
 		if err != nil {
 			s.logger.Warn("reranker failed, falling back to vector search", "error", err)
 			RecordRerankerFallback(userID, "error")
@@ -305,6 +332,11 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 			} else {
 				// No people selected by reranker
 				personCandidates = nil
+			}
+
+			// v0.6.0: Extract selected artifact IDs from reranker result
+			if len(result.Artifacts) > 0 {
+				selectedArtifactIDs = result.ArtifactIDs()
 			}
 		}
 	} else {
@@ -363,9 +395,65 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		selectedPeople = append(selectedPeople, pc.Person)
 	}
 
+	// v0.6.0: Build artifact results from selected artifact IDs only.
+	// This ensures consistency: artifacts shown in <artifact_context> have full content loaded.
+	// If reranker selected artifacts, filter artifactCandidates by selected IDs.
+	// If reranker is disabled, select top-N by vector score (fallback).
+	var artifactResults []ArtifactResult
+
+	if s.cfg.Artifacts.Enabled && s.cfg.RAG.Enabled && len(artifactCandidates) > 0 {
+		if len(selectedArtifactIDs) > 0 {
+			// Reranker selected specific artifacts: filter by selected IDs
+			selectedSet := make(map[int64]bool, len(selectedArtifactIDs))
+			for _, id := range selectedArtifactIDs {
+				selectedSet[id] = true
+			}
+			for _, ac := range artifactCandidates {
+				if selectedSet[ac.ArtifactID] {
+					artifactResults = append(artifactResults, ArtifactResult{
+						ArtifactID:   ac.ArtifactID,
+						FileType:     ac.FileType,
+						OriginalName: ac.OriginalName,
+						Summary:      ac.Summary,
+						Keywords:     ac.Keywords,
+						Entities:     ac.Entities,
+						RAGHints:     ac.RAGHints,
+						Score:        ac.Score,
+					})
+				}
+			}
+		} else if !useReranker {
+			// Reranker disabled: select top-N by vector score (fallback)
+			maxArtifacts := rerankerCfg.Artifacts.Max
+			if maxArtifacts <= 0 {
+				maxArtifacts = 3
+			}
+			for i, ac := range artifactCandidates {
+				if i >= maxArtifacts {
+					break
+				}
+				artifactResults = append(artifactResults, ArtifactResult{
+					ArtifactID:   ac.ArtifactID,
+					FileType:     ac.FileType,
+					OriginalName: ac.OriginalName,
+					Summary:      ac.Summary,
+					Keywords:     ac.Keywords,
+					Entities:     ac.Entities,
+					RAGHints:     ac.RAGHints,
+					Score:        ac.Score,
+				})
+				// Also add to selectedArtifactIDs so full content gets loaded
+				selectedArtifactIDs = append(selectedArtifactIDs, ac.ArtifactID)
+			}
+		}
+		// If useReranker && len(selectedArtifactIDs) == 0: reranker chose nothing, show nothing
+	}
+
 	return &RetrievalResult{
-		Topics: results,
-		People: selectedPeople,
+		Topics:              results,
+		People:              selectedPeople,
+		Artifacts:           artifactResults,     // Summary matches for display
+		SelectedArtifactIDs: selectedArtifactIDs, // IDs selected by reranker for full content loading
 	}, debugInfo, nil
 }
 
@@ -493,10 +581,24 @@ type PersonSearchResult struct {
 	Score  float32
 }
 
+// ArtifactResult represents a matched artifact with its metadata (v0.6.0).
+type ArtifactResult struct {
+	ArtifactID   int64
+	FileType     string
+	OriginalName string
+	Summary      string
+	Keywords     []string
+	Entities     []string // Named entities (people, companies, code mentioned)
+	RAGHints     []string // Questions this artifact might answer
+	Score        float32
+}
+
 // RetrievalResult contains both topics and selected people from RAG retrieval.
 type RetrievalResult struct {
-	Topics []TopicSearchResult
-	People []storage.Person // Selected by reranker (excludes inner circle)
+	Topics              []TopicSearchResult
+	People              []storage.Person // Selected by reranker (excludes inner circle)
+	Artifacts           []ArtifactResult // v0.6.0: Artifact summary matches
+	SelectedArtifactIDs []int64          // v0.6.0: Artifact IDs selected by reranker for full content loading
 }
 
 // SearchPeople searches for people by vector similarity (v0.5.1).
@@ -585,6 +687,108 @@ func (s *Service) SearchPeople(ctx context.Context, userID int64, embedding []fl
 	return results, nil
 }
 
+// SearchArtifactsBySummary searches for artifacts by summary embedding similarity.
+// Returns top N artifacts.
+func (s *Service) SearchArtifactsBySummary(
+	ctx context.Context,
+	userID int64,
+	embedding []float32,
+	threshold float32,
+) ([]ArtifactResult, error) {
+	userVectors := s.artifactVectors[userID]
+	if len(userVectors) == 0 {
+		return nil, nil
+	}
+
+	searchStart := time.Now()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	type match struct {
+		artifactID int64
+		score      float32
+	}
+	var matches []match
+	vectorsScanned := len(userVectors)
+
+	for _, item := range userVectors {
+		score := cosineSimilarity(embedding, item.Embedding)
+		if score > threshold {
+			matches = append(matches, match{
+				artifactID: item.ArtifactID,
+				score:      score,
+			})
+		}
+	}
+
+	RecordVectorSearch(userID, searchTypeArtifacts, time.Since(searchStart).Seconds(), vectorsScanned)
+	RecordRAGCandidates(userID, searchTypeArtifacts, len(matches))
+
+	// Sort by score
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].score > matches[j].score
+	})
+
+	if len(matches) == 0 {
+		return nil, nil
+	}
+
+	// Load artifact details
+	artifactIDs := make([]int64, len(matches))
+	for i, m := range matches {
+		artifactIDs[i] = m.artifactID
+	}
+
+	artifacts, err := s.artifactRepo.GetArtifactsByIDs(userID, artifactIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load artifacts: %w", err)
+	}
+
+	// Build score map
+	scoreMap := make(map[int64]float32)
+	for _, m := range matches {
+		scoreMap[m.artifactID] = m.score
+	}
+
+	// Build results
+	var results []ArtifactResult
+	for _, artifact := range artifacts {
+		var keywords, entities, ragHints []string
+		if artifact.Keywords != nil {
+			_ = json.Unmarshal([]byte(*artifact.Keywords), &keywords)
+		}
+		if artifact.Entities != nil {
+			_ = json.Unmarshal([]byte(*artifact.Entities), &entities)
+		}
+		if artifact.RAGHints != nil {
+			_ = json.Unmarshal([]byte(*artifact.RAGHints), &ragHints)
+		}
+
+		summary := ""
+		if artifact.Summary != nil {
+			summary = *artifact.Summary
+		}
+
+		results = append(results, ArtifactResult{
+			ArtifactID:   artifact.ID,
+			FileType:     artifact.FileType,
+			OriginalName: artifact.OriginalName,
+			Summary:      summary,
+			Keywords:     keywords,
+			Entities:     entities,
+			RAGHints:     ragHints,
+			Score:        scoreMap[artifact.ID],
+		})
+	}
+
+	// Sort results by score
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+
+	return results, nil
+}
+
 func cosineSimilarity(a, b []float32) float32 {
 	if len(a) != len(b) {
 		return 0
@@ -607,6 +811,7 @@ func (s *Service) rerankViaAgent(
 	userID int64,
 	candidates []reranker.Candidate,
 	personCandidates []reranker.PersonCandidate,
+	artifactCandidates []reranker.ArtifactCandidate, // v0.6.0
 	contextualizedQuery string,
 	originalQuery string,
 	currentMessages string,
@@ -624,6 +829,7 @@ func (s *Service) rerankViaAgent(
 		Params: map[string]any{
 			reranker.ParamCandidates:          candidates,
 			reranker.ParamPersonCandidates:    personCandidates,
+			reranker.ParamArtifactCandidates:  artifactCandidates, // v0.6.0
 			reranker.ParamContextualizedQuery: contextualizedQuery,
 			reranker.ParamOriginalQuery:       originalQuery,
 			reranker.ParamCurrentMessages:     currentMessages,

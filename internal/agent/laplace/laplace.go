@@ -26,14 +26,16 @@ const (
 
 // Laplace is the main chat agent that handles user conversations.
 type Laplace struct {
-	cfg         *config.Config
-	orClient    openrouter.Client
-	ragService  *rag.Service
-	msgRepo     storage.MessageRepository
-	factRepo    storage.FactRepository
-	translator  *i18n.Translator
-	agentLogger *agentlog.Logger
-	logger      *slog.Logger
+	cfg          *config.Config
+	orClient     openrouter.Client
+	ragService   rag.Retriever
+	msgRepo      storage.MessageRepository
+	factRepo     storage.FactRepository
+	artifactRepo storage.ArtifactRepository // v0.6.0: For loading full artifact content
+	storagePath  string                     // v0.6.0: Base path for artifact files
+	translator   *i18n.Translator
+	agentLogger  *agentlog.Logger
+	logger       *slog.Logger
 
 	// Pre-built tools
 	tools []openrouter.Tool
@@ -43,21 +45,28 @@ type Laplace struct {
 func New(
 	cfg *config.Config,
 	orClient openrouter.Client,
-	ragService *rag.Service,
+	ragService rag.Retriever,
 	msgRepo storage.MessageRepository,
 	factRepo storage.FactRepository,
+	artifactRepo storage.ArtifactRepository, // v0.6.0
 	translator *i18n.Translator,
 	logger *slog.Logger,
 ) *Laplace {
+	storagePath := ""
+	if cfg.Artifacts.Enabled {
+		storagePath = cfg.Artifacts.StoragePath
+	}
 	return &Laplace{
-		cfg:        cfg,
-		orClient:   orClient,
-		ragService: ragService,
-		msgRepo:    msgRepo,
-		factRepo:   factRepo,
-		translator: translator,
-		logger:     logger.With("agent", "laplace"),
-		tools:      BuildTools(cfg, translator),
+		cfg:          cfg,
+		orClient:     orClient,
+		ragService:   ragService,
+		msgRepo:      msgRepo,
+		factRepo:     factRepo,
+		artifactRepo: artifactRepo,
+		storagePath:  storagePath,
+		translator:   translator,
+		logger:       logger.With("agent", "laplace"),
+		tools:        BuildTools(cfg, translator),
 	}
 }
 

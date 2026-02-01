@@ -1,0 +1,162 @@
+{{define "title"}}Artifacts{{end}}
+
+{{define "styles"}}
+<style>
+    .status-pending { background-color: #ffc107; color: #000; }
+    .status-processing { background-color: #0dcaf0; color: #000; }
+    .status-ready { background-color: #198754; }
+    .status-failed { background-color: #dc3545; }
+
+    .type-image { background-color: #6f42c1; }
+    .type-voice { background-color: #fd7e14; }
+    .type-pdf { background-color: #d63384; }
+    .type-video_note { background-color: #0d6efd; }
+    .type-document { background-color: #6c757d; }
+    .type-audio { background-color: #fd7e14; }
+    .type-video { background-color: #0d6efd; }
+    .type-photo { background-color: #6f42c1; }
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="container-fluid">
+    <!-- Stats Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h5 class="card-title">{{.Data.Stats.Total}}</h5>
+                    <p class="card-text text-muted">Total Artifacts</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h5 class="card-title text-warning">{{.Data.Stats.Pending}}</h5>
+                    <p class="card-text text-muted">Pending</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h5 class="card-title text-success">{{.Data.Stats.Ready}}</h5>
+                    <p class="card-text text-muted">Ready</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h5 class="card-title text-danger">{{.Data.Stats.Failed}}</h5>
+                    <p class="card-text text-muted">Failed</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="row mb-3">
+        <div class="col-md-3">
+            <select class="form-select" onchange="applyFilter('state', this.value)">
+                <option value="">All States</option>
+                <option value="pending" {{if eq .Data.Filter.State "pending"}}selected{{end}}>Pending</option>
+                <option value="processing" {{if eq .Data.Filter.State "processing"}}selected{{end}}>Processing</option>
+                <option value="ready" {{if eq .Data.Filter.State "ready"}}selected{{end}}>Ready</option>
+                <option value="failed" {{if eq .Data.Filter.State "failed"}}selected{{end}}>Failed</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <select class="form-select" onchange="applyFilter('type', this.value)">
+                <option value="">All Types</option>
+                <option value="image" {{if eq .Data.Filter.FileType "image"}}selected{{end}}>Image</option>
+                <option value="photo" {{if eq .Data.Filter.FileType "photo"}}selected{{end}}>Photo</option>
+                <option value="voice" {{if eq .Data.Filter.FileType "voice"}}selected{{end}}>Voice</option>
+                <option value="audio" {{if eq .Data.Filter.FileType "audio"}}selected{{end}}>Audio</option>
+                <option value="video" {{if eq .Data.Filter.FileType "video"}}selected{{end}}>Video</option>
+                <option value="video_note" {{if eq .Data.Filter.FileType "video_note"}}selected{{end}}>Video Note</option>
+                <option value="pdf" {{if eq .Data.Filter.FileType "pdf"}}selected{{end}}>PDF</option>
+                <option value="document" {{if eq .Data.Filter.FileType "document"}}selected{{end}}>Document</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Artifacts Table -->
+    <div class="table-responsive">
+        <table class="table table-striped table-hover" id="artifactsTable">
+            <thead class="table-light">
+                <tr>
+                    <th>ID</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>File Name</th>
+                    <th>Size</th>
+                    <th>Summary</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{range .Data.Artifacts}}
+                <tr data-artifact-id="{{.ID}}">
+                    <td class="text-muted small">{{.ID}}</td>
+                    <td><span class="badge type-{{.FileType}}">{{.FileType}}</span></td>
+                    <td><span class="badge status-{{.State}}">{{.State}}</span></td>
+                    <td>{{.OriginalName}}</td>
+                    <td class="text-muted small">{{formatBytes .FileSize}}</td>
+                    <td class="text-truncate" style="max-width: 300px;" title="{{derefString .Summary}}">{{derefString .Summary}}</td>
+                    <td class="text-muted small">{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
+                    <td>
+                        <a href="/ui/debug/artifacts/download?id={{.ID}}&user_id={{$.Data.SelectedUserID}}" class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-download"></i> Download
+                        </a>
+                    </td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    {{if gt .Data.Pages 1}}
+    <nav>
+        <ul class="pagination">
+            <li class="page-item {{if eq .Data.Page 1}}disabled{{end}}">
+                <a class="page-link" href="?page={{sub .Data.Page 1}}&state={{.Data.Filter.State}}&type={{.Data.Filter.FileType}}">Previous</a>
+            </li>
+            {{range seq 1 .Data.Pages}}
+            <li class="page-item {{if eq . $.Data.Page}}active{{end}}">
+                <a class="page-link" href="?page={{.}}&state={{$.Data.Filter.State}}&type={{$.Data.Filter.FileType}}">{{.}}</a>
+            </li>
+            {{end}}
+            <li class="page-item {{if eq .Data.Page .Data.Pages}}disabled{{end}}">
+                <a class="page-link" href="?page={{add .Data.Page 1}}&state={{.Data.Filter.State}}&type={{$.Data.Filter.FileType}}">Next</a>
+            </li>
+        </ul>
+    </nav>
+    {{end}}
+
+    <!-- Empty State -->
+    {{if not .Data.Artifacts}}
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle"></i>
+        No artifacts found. Artifacts will appear here when files are sent to the bot.
+    </div>
+    {{end}}
+</div>
+{{end}}
+
+{{define "scripts"}}
+<script>
+function applyFilter(key, value) {
+    const url = new URL(window.location.href);
+    if (value) {
+        url.searchParams.set(key, value);
+    } else {
+        url.searchParams.delete(key);
+    }
+    window.location.href = url.toString();
+}
+</script>
+{{end}}
