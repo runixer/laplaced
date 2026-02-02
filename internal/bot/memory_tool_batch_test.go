@@ -2,8 +2,10 @@ package bot
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
+	"github.com/runixer/laplaced/internal/bot/tools"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
@@ -18,16 +20,7 @@ func TestPerformManageMemory_BatchOperations(t *testing.T) {
 	mockORClient := new(testutil.MockOpenRouterClient)
 	cfg := testutil.TestConfig()
 	cfg.Embedding.Model = "test-embedding-model"
-	bot := &Bot{
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		orClient:        mockORClient,
-		cfg:             cfg,
-		logger:          testutil.TestLogger(),
-	}
+	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, testutil.TestLogger())
 
 	userID := int64(123)
 	queryJSON := `{
@@ -52,9 +45,6 @@ func TestPerformManageMemory_BatchOperations(t *testing.T) {
 			}
 		]
 	}`
-	args := map[string]interface{}{
-		"query": queryJSON,
-	}
 
 	// Mocks for Add
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req openrouter.EmbeddingRequest) bool {
@@ -91,7 +81,8 @@ func TestPerformManageMemory_BatchOperations(t *testing.T) {
 	mockStore.On("DeleteFact", userID, int64(20)).Return(nil)
 
 	// Execute
-	result, err := bot.performManageMemory(context.Background(), userID, args)
+	arguments, _ := json.Marshal(map[string]string{"query": queryJSON})
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_memory", string(arguments))
 
 	// Assert
 	assert.NoError(t, err)
@@ -110,15 +101,7 @@ func TestPerformManageMemory_BatchOperations_PartialFailure(t *testing.T) {
 	mockORClient := new(testutil.MockOpenRouterClient)
 	cfg := testutil.TestConfig()
 	cfg.Embedding.Model = "test-embedding-model"
-	bot := &Bot{
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		orClient:        mockORClient,
-		cfg:             cfg,
-	}
+	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, testutil.TestLogger())
 
 	userID := int64(123)
 	queryJSON := `{
@@ -133,9 +116,6 @@ func TestPerformManageMemory_BatchOperations_PartialFailure(t *testing.T) {
 			}
 		]
 	}`
-	args := map[string]interface{}{
-		"query": queryJSON,
-	}
 
 	// Mocks for Add (Success)
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{
@@ -149,7 +129,8 @@ func TestPerformManageMemory_BatchOperations_PartialFailure(t *testing.T) {
 	mockStore.On("DeleteFact", userID, int64(999)).Return(assert.AnError)
 
 	// Execute
-	result, err := bot.performManageMemory(context.Background(), userID, args)
+	arguments, _ := json.Marshal(map[string]string{"query": queryJSON})
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_memory", string(arguments))
 
 	// Assert
 	assert.NoError(t, err) // The function itself shouldn't return error, but report it in string

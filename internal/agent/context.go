@@ -170,3 +170,39 @@ func MustFromContext(ctx context.Context) *SharedContext {
 	}
 	return shared
 }
+
+// GetSharedContext extracts profile, recent topics, and inner circle from
+// SharedContext (request or context.Context).
+//
+// Returns empty XML-tagged defaults if SharedContext is not available.
+// Callers that need DB fallback should implement it themselves.
+//
+// This helper eliminates duplicated fallback logic across agents.
+func GetSharedContext(ctx context.Context, req *Request) (profile, recentTopics, innerCircle string) {
+	// Try request.Shared first
+	if req != nil && req.Shared != nil {
+		return req.Shared.Profile, req.Shared.RecentTopics, req.Shared.InnerCircle
+	}
+	// Try context.Context
+	if shared := FromContext(ctx); shared != nil {
+		return shared.Profile, shared.RecentTopics, shared.InnerCircle
+	}
+	// Empty defaults for tests/background jobs
+	return "<user_profile>\n</user_profile>",
+		"<recent_topics>\n</recent_topics>",
+		"<inner_circle>\n</inner_circle>"
+}
+
+// GetUserID extracts user ID from request SharedContext or params.
+// Returns 0 if not found.
+func GetUserID(req *Request) int64 {
+	if req != nil && req.Shared != nil {
+		return req.Shared.UserID
+	}
+	if req != nil && req.Params != nil {
+		if userID, ok := req.Params["user_id"].(int64); ok {
+			return userID
+		}
+	}
+	return 0
+}

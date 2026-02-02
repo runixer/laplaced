@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/runixer/laplaced/internal/agent/laplace"
+	"github.com/runixer/laplaced/internal/bot/tools"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
@@ -49,6 +50,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 		logger:          logger,
 		translator:      translator,
 		laplaceAgent:    laplaceAgent,
+		toolExecutor:    tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger),
 	}
 	bot.messageGrouper = NewMessageGrouper(bot, logger, 0, bot.processMessageGroup)
 

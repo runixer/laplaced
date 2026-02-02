@@ -281,20 +281,7 @@ func (ex *Extractor) generateSummaryEmbedding(
 // getContext returns profile, recent topics, and inner circle from SharedContext.
 // Returns empty defaults if SharedContext is not available (for tests/background jobs).
 func (ex *Extractor) getContext(ctx context.Context, req *agent.Request) (profile, recentTopics, innerCircle string) {
-	// Try SharedContext from request first
-	if req.Shared != nil {
-		return req.Shared.Profile, req.Shared.RecentTopics, req.Shared.InnerCircle
-	}
-
-	// Also check context.Context for SharedContext
-	if shared := agent.FromContext(ctx); shared != nil {
-		return shared.Profile, shared.RecentTopics, shared.InnerCircle
-	}
-
-	// No SharedContext available - return empty defaults for tests
-	return "<user_profile>\n</user_profile>",
-		"<recent_topics>\n</recent_topics>",
-		"<inner_circle>\n</inner_circle>"
+	return agent.GetSharedContext(ctx, req)
 }
 
 // buildMultimodalMessages constructs multimodal messages with file content for the LLM.

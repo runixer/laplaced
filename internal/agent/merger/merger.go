@@ -168,25 +168,17 @@ func (m *Merger) getTopicSummaries(req *agent.Request) (string, string) {
 
 // getUserID extracts user ID from request.
 func (m *Merger) getUserID(req *agent.Request) int64 {
-	if req.Shared != nil {
-		return req.Shared.UserID
-	}
-	if req.Params != nil {
-		if userID, ok := req.Params["user_id"].(int64); ok {
-			return userID
-		}
-	}
-	return 0
+	return agent.GetUserID(req)
 }
 
 // getContext returns profile and recent topics.
 func (m *Merger) getContext(ctx context.Context, req *agent.Request, userID int64) (profile, recentTopics string) {
 	// Try SharedContext first
-	if req.Shared != nil {
-		return req.Shared.Profile, req.Shared.RecentTopics
-	}
-	if shared := agent.FromContext(ctx); shared != nil {
-		return shared.Profile, shared.RecentTopics
+	profile, recentTopics, _ = agent.GetSharedContext(ctx, req)
+
+	// If SharedContext was populated, return it
+	if profile != "" && profile != "<user_profile>\n</user_profile>" {
+		return profile, recentTopics
 	}
 
 	// Fallback: load directly for background jobs

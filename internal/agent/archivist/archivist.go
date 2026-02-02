@@ -660,15 +660,7 @@ func (a *Archivist) getUser(req *agent.Request) *storage.User {
 
 // getUserID extracts user ID from request.
 func (a *Archivist) getUserID(req *agent.Request) int64 {
-	if req.Shared != nil {
-		return req.Shared.UserID
-	}
-	if req.Params != nil {
-		if userID, ok := req.Params["user_id"].(int64); ok {
-			return userID
-		}
-	}
-	return 0
+	return agent.GetUserID(req)
 }
 
 // buildConversation formats messages for the prompt.

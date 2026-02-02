@@ -270,6 +270,53 @@ func (c *RAGConfig) GetRecentTopicsInContext() int {
 	return c.RecentTopicsInContext
 }
 
+// GetMinSafetyThreshold returns the minimum cosine similarity for vector search.
+// Falls back to DefaultMinSafetyThreshold (0.1) if not configured.
+// This relaxed threshold prioritizes recall over precision.
+func (c *RAGConfig) GetMinSafetyThreshold() float64 {
+	if c.MinSafetyThreshold > 0 {
+		return c.MinSafetyThreshold
+	}
+	return DefaultMinSafetyThreshold
+}
+
+// GetConsolidationThreshold returns the minimum similarity for topic consolidation.
+// Falls back to DefaultConsolidationThreshold (0.75) if not configured.
+// This strict threshold ensures we only merge very similar topics.
+func (c *RAGConfig) GetConsolidationThreshold() float64 {
+	if c.ConsolidationSimilarityThreshold > 0 {
+		return c.ConsolidationSimilarityThreshold
+	}
+	return DefaultConsolidationThreshold
+}
+
+// GetRetrievedTopicsCount returns the max topics to retrieve without reranker.
+// Falls back to DefaultRetrievedTopicsCount (10) if not configured.
+func (c *RAGConfig) GetRetrievedTopicsCount() int {
+	if c.RetrievedTopicsCount > 0 {
+		return c.RetrievedTopicsCount
+	}
+	return DefaultRetrievedTopicsCount
+}
+
+// GetMaxMergedSizeChars returns the max character count for merged topics.
+// Falls back to DefaultMaxMergedSizeChars (50000) if not configured.
+func (c *RAGConfig) GetMaxMergedSizeChars() int {
+	if c.MaxMergedSizeChars > 0 {
+		return c.MaxMergedSizeChars
+	}
+	return DefaultMaxMergedSizeChars
+}
+
+// GetMaxChunkSize returns the max messages per chunk before forced split.
+// Falls back to DefaultMaxChunkSize (400) if not configured.
+func (c *RAGConfig) GetMaxChunkSize() int {
+	if c.MaxChunkSize > 0 {
+		return c.MaxChunkSize
+	}
+	return DefaultMaxChunkSize
+}
+
 type Config struct {
 	Log struct {
 		Level string `yaml:"level" env:"LAPLACED_LOG_LEVEL"`

@@ -55,6 +55,12 @@ func TestConfig() *config.Config {
 			MaxContextMessages: 50,
 			MaxProfileFacts:    50,
 		},
+		Tools: []config.ToolConfig{
+			{Name: "search_history", Model: "memory"},
+			{Name: "manage_memory", Model: "memory"},
+			{Name: "search_people", Model: "memory"},
+			{Name: "manage_people", Model: "memory"},
+		},
 	}
 }
 

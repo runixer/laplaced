@@ -143,18 +143,8 @@ func (e *Enricher) Description() string {
 // getContext returns profile and recent topics from SharedContext.
 // Returns empty strings if SharedContext is not available.
 func (e *Enricher) getContext(ctx context.Context, req *agent.Request) (profile, recentTopics string) {
-	// Try SharedContext from request first
-	if req.Shared != nil {
-		return req.Shared.Profile, req.Shared.RecentTopics
-	}
-
-	// Also check context.Context for SharedContext
-	if shared := agent.FromContext(ctx); shared != nil {
-		return shared.Profile, shared.RecentTopics
-	}
-
-	// No SharedContext available - return empty (for tests)
-	return "", ""
+	profile, recentTopics, _ = agent.GetSharedContext(ctx, req)
+	return profile, recentTopics
 }
 
 // getHistory extracts conversation history from request params.

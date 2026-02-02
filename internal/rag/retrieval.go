@@ -116,10 +116,7 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 	userVectors := s.topicVectors[userID]
 	vectorsScanned := len(userVectors)
 	// Use a minimal safety threshold to avoid complete garbage, but much lower than strict content matching
-	minSafetyThreshold := s.cfg.RAG.MinSafetyThreshold
-	if minSafetyThreshold == 0 {
-		minSafetyThreshold = 0.1
-	}
+	minSafetyThreshold := s.cfg.RAG.GetMinSafetyThreshold()
 
 	for _, item := range userVectors {
 		score := cosineSimilarity(qVec, item.Embedding)
@@ -190,10 +187,7 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		}
 	} else {
 		// Legacy behavior: limit by retrieved_topics_count
-		maxCandidates = s.cfg.RAG.RetrievedTopicsCount
-		if maxCandidates <= 0 {
-			maxCandidates = 10
-		}
+		maxCandidates = s.cfg.RAG.GetRetrievedTopicsCount()
 	}
 
 	if len(matches) > maxCandidates {
@@ -491,10 +485,7 @@ func (s *Service) RetrieveFacts(ctx context.Context, userID int64, query string)
 	var matches []match
 	userVectors := s.factVectors[userID]
 	vectorsScanned := len(userVectors)
-	minSafetyThreshold := s.cfg.RAG.MinSafetyThreshold
-	if minSafetyThreshold == 0 {
-		minSafetyThreshold = 0.1
-	}
+	minSafetyThreshold := s.cfg.RAG.GetMinSafetyThreshold()
 
 	for _, item := range userVectors {
 		score := cosineSimilarity(qVec, item.Embedding)

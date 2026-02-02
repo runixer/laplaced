@@ -2,8 +2,10 @@ package bot
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
+	"github.com/runixer/laplaced/internal/bot/tools"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
@@ -16,7 +18,7 @@ func TestParseMemoryOpParams(t *testing.T) {
 	tests := []struct {
 		name   string
 		params map[string]interface{}
-		want   memoryOpParams
+		want   tools.MemoryOpParams
 	}{
 		{
 			name: "all fields present",
@@ -29,7 +31,7 @@ func TestParseMemoryOpParams(t *testing.T) {
 				"importance": float64(85),
 				"fact_id":    float64(42),
 			},
-			want: memoryOpParams{
+			want: tools.MemoryOpParams{
 				Action:     "add",
 				Content:    "Likes Go",
 				Category:   "tech",
@@ -44,7 +46,7 @@ func TestParseMemoryOpParams(t *testing.T) {
 			params: map[string]interface{}{
 				"action": "delete",
 			},
-			want: memoryOpParams{
+			want: tools.MemoryOpParams{
 				Action: "delete",
 			},
 		},
@@ -55,7 +57,7 @@ func TestParseMemoryOpParams(t *testing.T) {
 				"fact_id":    float64(123),
 				"importance": float64(50),
 			},
-			want: memoryOpParams{
+			want: tools.MemoryOpParams{
 				Action:     "update",
 				FactID:     123,
 				Importance: 50,
@@ -65,7 +67,7 @@ func TestParseMemoryOpParams(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseMemoryOpParams(tt.params)
+			got, err := tools.ParseMemoryOpParams(tt.params)
 			assert.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
@@ -78,21 +80,11 @@ func TestPerformManageMemory_Add(t *testing.T) {
 	mockORClient := new(testutil.MockOpenRouterClient)
 	cfg := testutil.TestConfig()
 	cfg.Embedding.Model = "test-embedding-model"
-	bot := &Bot{
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		orClient:        mockORClient,
-		cfg:             cfg,
-	}
+
+	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, testutil.TestLogger())
 
 	userID := int64(123)
 	queryJSON := `{"action": "add", "content": "Likes pizza", "category": "food", "type": "preference", "importance": 80}`
-	args := map[string]interface{}{
-		"query": queryJSON,
-	}
 
 	// Mocks
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req openrouter.EmbeddingRequest) bool {
@@ -109,8 +101,9 @@ func TestPerformManageMemory_Add(t *testing.T) {
 
 	mockStore.On("AddFactHistory", mock.Anything).Return(nil)
 
-	// Execute
-	result, err := bot.performManageMemory(context.Background(), userID, args)
+	// Execute - properly escape the JSON
+	arguments, _ := json.Marshal(map[string]string{"query": queryJSON})
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_memory", string(arguments))
 
 	// Assert
 	assert.NoError(t, err)
@@ -121,25 +114,25 @@ func TestPerformManageMemory_Add(t *testing.T) {
 }
 
 func TestPerformManageMemory_InvalidJSON(t *testing.T) {
-	bot := &Bot{}
-	userID := int64(123)
-	args := map[string]interface{}{
-		"query": "{invalid json",
-	}
+	cfg := testutil.TestConfig()
+	toolExecutor := tools.NewToolExecutor(nil, nil, nil, cfg, testutil.TestLogger())
 
-	result, err := bot.performManageMemory(context.Background(), userID, args)
+	userID := int64(123)
+
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_memory", `{"query":"{invalid json"}`)
 
 	assert.NoError(t, err) // It returns error string, not error object
 	assert.Contains(t, result, "Error parsing query JSON")
 }
 
 func TestPerformManageMemory_MissingQuery(t *testing.T) {
-	bot := &Bot{}
-	userID := int64(123)
-	args := map[string]interface{}{}
+	cfg := testutil.TestConfig()
+	toolExecutor := tools.NewToolExecutor(nil, nil, nil, cfg, testutil.TestLogger())
 
-	result, err := bot.performManageMemory(context.Background(), userID, args)
+	userID := int64(123)
+
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_memory", `{}`)
 
 	assert.NoError(t, err)
-	assert.Equal(t, "Error: query argument is missing", result)
+	assert.Contains(t, result, "Error: query argument is missing")
 }

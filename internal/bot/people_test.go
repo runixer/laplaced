@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/runixer/laplaced/internal/bot/tools"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
 	"github.com/runixer/laplaced/internal/testutil"
@@ -453,29 +454,13 @@ func TestExtractForwardedPeople_NilPeopleRepo(t *testing.T) {
 
 func TestPerformSearchPeople_FoundByUsername(t *testing.T) {
 	// Setup
-	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
 	cfg := testutil.TestConfig()
-	mockAPI := new(testutil.MockBotAPI)
-	mockDownloader := new(testutil.MockFileDownloader)
 
-	bot := &Bot{
-		api:             mockAPI,
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		peopleRepo:      mockStore,
-		orClient:        mockORClient,
-		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
-		cfg:             cfg,
-		logger:          logger,
-		translator:      translator,
-	}
+	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
+	toolExecutor.SetPeopleRepository(mockStore)
 
 	userID := int64(123)
 
@@ -493,7 +478,7 @@ func TestPerformSearchPeople_FoundByUsername(t *testing.T) {
 	mockStore.On("FindPersonByUsername", userID, "johndoe").Return(foundPerson, nil).Once()
 
 	// Execute
-	result, err := bot.performSearchPeople(context.Background(), userID, "@johndoe")
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "search_people", `{"query":"@johndoe"}`)
 
 	// Verify
 	assert.NoError(t, err)
@@ -508,30 +493,13 @@ func TestPerformSearchPeople_FoundByUsername(t *testing.T) {
 
 func TestPerformSearchPeople_FoundByName(t *testing.T) {
 	// Setup
-	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
 	cfg := testutil.TestConfig()
-	mockAPI := new(testutil.MockBotAPI)
-	mockDownloader := new(testutil.MockFileDownloader)
 
-	bot := &Bot{
-		api:             mockAPI,
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		peopleRepo:      mockStore,
-		orClient:        mockORClient,
-		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
-		cfg:             cfg,
-		logger:          logger,
-		translator:      translator,
-		ragService:      nil, // No RAG for this test
-	}
+	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
+	toolExecutor.SetPeopleRepository(mockStore)
 
 	userID := int64(123)
 
@@ -548,7 +516,7 @@ func TestPerformSearchPeople_FoundByName(t *testing.T) {
 	mockStore.On("FindPersonByName", userID, "Jane Smith").Return(foundPerson, nil).Once()
 
 	// Execute
-	result, err := bot.performSearchPeople(context.Background(), userID, "Jane Smith")
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "search_people", `{"query":"Jane Smith"}`)
 
 	// Verify
 	assert.NoError(t, err)
@@ -560,30 +528,13 @@ func TestPerformSearchPeople_FoundByName(t *testing.T) {
 
 func TestPerformSearchPeople_NotFound(t *testing.T) {
 	// Setup
-	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
 	cfg := testutil.TestConfig()
-	mockAPI := new(testutil.MockBotAPI)
-	mockDownloader := new(testutil.MockFileDownloader)
 
-	bot := &Bot{
-		api:             mockAPI,
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		peopleRepo:      mockStore,
-		orClient:        mockORClient,
-		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
-		cfg:             cfg,
-		logger:          logger,
-		translator:      translator,
-		ragService:      nil,
-	}
+	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
+	toolExecutor.SetPeopleRepository(mockStore)
 
 	userID := int64(123)
 
@@ -592,7 +543,7 @@ func TestPerformSearchPeople_NotFound(t *testing.T) {
 	mockStore.On("FindPersonByAlias", userID, "unknown").Return([]storage.Person{}, nil).Once()
 
 	// Execute
-	result, err := bot.performSearchPeople(context.Background(), userID, "unknown")
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "search_people", `{"query":"unknown"}`)
 
 	// Verify
 	assert.NoError(t, err)
@@ -602,29 +553,13 @@ func TestPerformSearchPeople_NotFound(t *testing.T) {
 
 func TestPerformUpdatePerson_Success(t *testing.T) {
 	// Setup
-	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
 	cfg := testutil.TestConfig()
-	mockAPI := new(testutil.MockBotAPI)
-	mockDownloader := new(testutil.MockFileDownloader)
 
-	bot := &Bot{
-		api:             mockAPI,
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		peopleRepo:      mockStore,
-		orClient:        mockORClient,
-		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
-		cfg:             cfg,
-		logger:          logger,
-		translator:      translator,
-	}
+	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
+	toolExecutor.SetPeopleRepository(mockStore)
 
 	userID := int64(123)
 
@@ -651,16 +586,9 @@ func TestPerformUpdatePerson_Success(t *testing.T) {
 		return p.ID == 1 && p.Circle == "Work_Inner" && p.Bio == "Engineer Manager"
 	})).Return(nil).Once()
 
-	params := map[string]interface{}{
-		"updates": map[string]interface{}{
-			"circle":      "Work_Inner",
-			"bio_append":  "Manager",
-			"aliases_add": []interface{}{"JD", "Johnny"},
-		},
-	}
-
 	// Execute
-	result, err := bot.performUpdatePerson(context.Background(), userID, "John Doe", params)
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+		`{"query":"{\"operation\":\"update\",\"name\":\"John Doe\",\"updates\":{\"circle\":\"Work_Inner\",\"bio_append\":\"Manager\",\"aliases_add\":[\"JD\",\"Johnny\"]}}"}`)
 
 	// Verify
 	assert.NoError(t, err)
@@ -671,29 +599,13 @@ func TestPerformUpdatePerson_Success(t *testing.T) {
 
 func TestPerformUpdatePerson_PersonNotFound(t *testing.T) {
 	// Setup
-	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
 	cfg := testutil.TestConfig()
-	mockAPI := new(testutil.MockBotAPI)
-	mockDownloader := new(testutil.MockFileDownloader)
 
-	bot := &Bot{
-		api:             mockAPI,
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		peopleRepo:      mockStore,
-		orClient:        mockORClient,
-		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
-		cfg:             cfg,
-		logger:          logger,
-		translator:      translator,
-	}
+	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
+	toolExecutor.SetPeopleRepository(mockStore)
 
 	userID := int64(123)
 
@@ -701,14 +613,9 @@ func TestPerformUpdatePerson_PersonNotFound(t *testing.T) {
 	mockStore.On("FindPersonByName", userID, "Unknown").Return((*storage.Person)(nil), nil).Once()
 	mockStore.On("FindPersonByAlias", userID, "Unknown").Return([]storage.Person{}, nil).Once()
 
-	params := map[string]interface{}{
-		"updates": map[string]interface{}{
-			"circle": "Friends",
-		},
-	}
-
 	// Execute
-	result, err := bot.performUpdatePerson(context.Background(), userID, "Unknown", params)
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+		`{"query":"{\"operation\":\"update\",\"name\":\"Unknown\",\"updates\":{\"circle\":\"Friends\"}}"}`)
 
 	// Verify
 	assert.NoError(t, err)
@@ -718,29 +625,13 @@ func TestPerformUpdatePerson_PersonNotFound(t *testing.T) {
 
 func TestPerformMergePeople_Success(t *testing.T) {
 	// Setup
-	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
 	cfg := testutil.TestConfig()
-	mockAPI := new(testutil.MockBotAPI)
-	mockDownloader := new(testutil.MockFileDownloader)
 
-	bot := &Bot{
-		api:             mockAPI,
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		peopleRepo:      mockStore,
-		orClient:        mockORClient,
-		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
-		cfg:             cfg,
-		logger:          logger,
-		translator:      translator,
-	}
+	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
+	toolExecutor.SetPeopleRepository(mockStore)
 
 	userID := int64(123)
 
@@ -780,12 +671,9 @@ func TestPerformMergePeople_Success(t *testing.T) {
 		(*int64)(nil),  // newTelegramID (both are nil)
 	).Return(nil).Once()
 
-	params := map[string]interface{}{
-		"reason": "Same person",
-	}
-
 	// Execute
-	result, err := bot.performMergePeople(context.Background(), userID, "John Doe", "J. Doe", nil, nil, params)
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+		`{"query":"{\"operation\":\"merge\",\"target\":\"John Doe\",\"source\":\"J. Doe\",\"reason\":\"Same person\"}"}`)
 
 	// Verify
 	assert.NoError(t, err)
@@ -795,29 +683,13 @@ func TestPerformMergePeople_Success(t *testing.T) {
 
 func TestPerformMergePeople_SelfMerge(t *testing.T) {
 	// Setup
-	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
 	cfg := testutil.TestConfig()
-	mockAPI := new(testutil.MockBotAPI)
-	mockDownloader := new(testutil.MockFileDownloader)
 
-	bot := &Bot{
-		api:             mockAPI,
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		peopleRepo:      mockStore,
-		orClient:        mockORClient,
-		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
-		cfg:             cfg,
-		logger:          logger,
-		translator:      translator,
-	}
+	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
+	toolExecutor.SetPeopleRepository(mockStore)
 
 	userID := int64(123)
 
@@ -833,10 +705,9 @@ func TestPerformMergePeople_SelfMerge(t *testing.T) {
 	// Mock: find source (same person)
 	mockStore.On("FindPersonByName", userID, "John Doe").Return(person, nil).Once()
 
-	params := map[string]interface{}{}
-
 	// Execute
-	result, err := bot.performMergePeople(context.Background(), userID, "John Doe", "John Doe", nil, nil, params)
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+		`{"query":"{\"operation\":\"merge\",\"target\":\"John Doe\",\"source\":\"John Doe\"}"}`)
 
 	// Verify
 	assert.NoError(t, err)
@@ -846,29 +717,13 @@ func TestPerformMergePeople_SelfMerge(t *testing.T) {
 
 func TestPerformMergePeople_SourceNotFound(t *testing.T) {
 	// Setup
-	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
 	cfg := testutil.TestConfig()
-	mockAPI := new(testutil.MockBotAPI)
-	mockDownloader := new(testutil.MockFileDownloader)
 
-	bot := &Bot{
-		api:             mockAPI,
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		peopleRepo:      mockStore,
-		orClient:        mockORClient,
-		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
-		cfg:             cfg,
-		logger:          logger,
-		translator:      translator,
-	}
+	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
+	toolExecutor.SetPeopleRepository(mockStore)
 
 	userID := int64(123)
 
@@ -885,10 +740,9 @@ func TestPerformMergePeople_SourceNotFound(t *testing.T) {
 	mockStore.On("FindPersonByName", userID, "Unknown").Return((*storage.Person)(nil), nil).Once()
 	mockStore.On("FindPersonByAlias", userID, "Unknown").Return([]storage.Person{}, nil).Once()
 
-	params := map[string]interface{}{}
-
 	// Execute
-	result, err := bot.performMergePeople(context.Background(), userID, "John Doe", "Unknown", nil, nil, params)
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+		`{"query":"{\"operation\":\"merge\",\"target\":\"John Doe\",\"source\":\"Unknown\"}"}`)
 
 	// Verify
 	assert.NoError(t, err)
@@ -898,29 +752,13 @@ func TestPerformMergePeople_SourceNotFound(t *testing.T) {
 
 func TestPerformCreatePerson_Success(t *testing.T) {
 	// Setup
-	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
 	cfg := testutil.TestConfig()
-	mockAPI := new(testutil.MockBotAPI)
-	mockDownloader := new(testutil.MockFileDownloader)
 
-	bot := &Bot{
-		api:             mockAPI,
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		peopleRepo:      mockStore,
-		orClient:        mockORClient,
-		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
-		cfg:             cfg,
-		logger:          logger,
-		translator:      translator,
-	}
+	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
+	toolExecutor.SetPeopleRepository(mockStore)
 
 	userID := int64(123)
 
@@ -940,14 +778,9 @@ func TestPerformCreatePerson_Success(t *testing.T) {
 			len(p.Aliases) == 2 && p.MentionCount == 1
 	})).Return(int64(1), nil).Once()
 
-	params := map[string]interface{}{
-		"circle":  "Friends",
-		"bio":     "Software engineer",
-		"aliases": []interface{}{"Johnny", "JD"},
-	}
-
 	// Execute
-	result, err := bot.performCreatePerson(context.Background(), userID, "John Doe", params)
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+		`{"query":"{\"operation\":\"create\",\"name\":\"John Doe\",\"circle\":\"Friends\",\"bio\":\"Software engineer\",\"aliases\":[\"Johnny\",\"JD\"]}"}`)
 
 	// Verify
 	assert.NoError(t, err)
@@ -960,29 +793,13 @@ func TestPerformCreatePerson_Success(t *testing.T) {
 
 func TestPerformCreatePerson_AlreadyExists(t *testing.T) {
 	// Setup
-	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
 	cfg := testutil.TestConfig()
-	mockAPI := new(testutil.MockBotAPI)
-	mockDownloader := new(testutil.MockFileDownloader)
 
-	bot := &Bot{
-		api:             mockAPI,
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		peopleRepo:      mockStore,
-		orClient:        mockORClient,
-		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
-		cfg:             cfg,
-		logger:          logger,
-		translator:      translator,
-	}
+	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
+	toolExecutor.SetPeopleRepository(mockStore)
 
 	userID := int64(123)
 
@@ -995,10 +812,9 @@ func TestPerformCreatePerson_AlreadyExists(t *testing.T) {
 	// Mock: person found by name
 	mockStore.On("FindPersonByName", userID, "John Doe").Return(existingPerson, nil).Once()
 
-	params := map[string]interface{}{}
-
 	// Execute
-	result, err := bot.performCreatePerson(context.Background(), userID, "John Doe", params)
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+		`{"query":"{\"operation\":\"create\",\"name\":\"John Doe\"}"}`)
 
 	// Verify
 	assert.NoError(t, err)
@@ -1011,29 +827,13 @@ func TestPerformCreatePerson_AlreadyExists(t *testing.T) {
 
 func TestPerformCreatePerson_AliasAlreadyExists(t *testing.T) {
 	// Setup
-	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
 	cfg := testutil.TestConfig()
-	mockAPI := new(testutil.MockBotAPI)
-	mockDownloader := new(testutil.MockFileDownloader)
 
-	bot := &Bot{
-		api:             mockAPI,
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		peopleRepo:      mockStore,
-		orClient:        mockORClient,
-		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
-		cfg:             cfg,
-		logger:          logger,
-		translator:      translator,
-	}
+	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
+	toolExecutor.SetPeopleRepository(mockStore)
 
 	userID := int64(123)
 
@@ -1050,10 +850,9 @@ func TestPerformCreatePerson_AliasAlreadyExists(t *testing.T) {
 	// Mock: alias matches
 	mockStore.On("FindPersonByAlias", userID, "Johnny").Return([]storage.Person{*existingPerson}, nil).Once()
 
-	params := map[string]interface{}{}
-
 	// Execute
-	result, err := bot.performCreatePerson(context.Background(), userID, "Johnny", params)
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+		`{"query":"{\"operation\":\"create\",\"name\":\"Johnny\"}"}`)
 
 	// Verify
 	assert.NoError(t, err)
@@ -1066,29 +865,13 @@ func TestPerformCreatePerson_AliasAlreadyExists(t *testing.T) {
 
 func TestPerformCreatePerson_WithUsername(t *testing.T) {
 	// Setup
-	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
 	cfg := testutil.TestConfig()
-	mockAPI := new(testutil.MockBotAPI)
-	mockDownloader := new(testutil.MockFileDownloader)
 
-	bot := &Bot{
-		api:             mockAPI,
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		peopleRepo:      mockStore,
-		orClient:        mockORClient,
-		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
-		cfg:             cfg,
-		logger:          logger,
-		translator:      translator,
-	}
+	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
+	toolExecutor.SetPeopleRepository(mockStore)
 
 	userID := int64(123)
 
@@ -1104,12 +887,9 @@ func TestPerformCreatePerson_WithUsername(t *testing.T) {
 		return p.Username != nil && *p.Username == "janedoe" // @ should be stripped
 	})).Return(int64(1), nil).Once()
 
-	params := map[string]interface{}{
-		"username": "@janedoe", // Should be stripped to janedoe
-	}
-
 	// Execute
-	result, err := bot.performCreatePerson(context.Background(), userID, "Jane Doe", params)
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+		`{"query":"{\"operation\":\"create\",\"name\":\"Jane Doe\",\"username\":\"@janedoe\"}"}`)
 
 	// Verify
 	assert.NoError(t, err)
@@ -1119,29 +899,13 @@ func TestPerformCreatePerson_WithUsername(t *testing.T) {
 
 func TestPerformDeletePerson_Success(t *testing.T) {
 	// Setup
-	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
 	cfg := testutil.TestConfig()
-	mockAPI := new(testutil.MockBotAPI)
-	mockDownloader := new(testutil.MockFileDownloader)
 
-	bot := &Bot{
-		api:             mockAPI,
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		peopleRepo:      mockStore,
-		orClient:        mockORClient,
-		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
-		cfg:             cfg,
-		logger:          logger,
-		translator:      translator,
-	}
+	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
+	toolExecutor.SetPeopleRepository(mockStore)
 
 	userID := int64(123)
 
@@ -1157,12 +921,9 @@ func TestPerformDeletePerson_Success(t *testing.T) {
 	// Mock: delete
 	mockStore.On("DeletePerson", userID, int64(1)).Return(nil).Once()
 
-	params := map[string]interface{}{
-		"reason": "Duplicate entry",
-	}
-
 	// Execute
-	result, err := bot.performDeletePerson(context.Background(), userID, "John Doe", params)
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+		`{"query":"{\"operation\":\"delete\",\"name\":\"John Doe\",\"reason\":\"Duplicate entry\"}"}`)
 
 	// Verify
 	assert.NoError(t, err)
@@ -1172,29 +933,13 @@ func TestPerformDeletePerson_Success(t *testing.T) {
 
 func TestPerformDeletePerson_ByID(t *testing.T) {
 	// Setup
-	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
 	cfg := testutil.TestConfig()
-	mockAPI := new(testutil.MockBotAPI)
-	mockDownloader := new(testutil.MockFileDownloader)
 
-	bot := &Bot{
-		api:             mockAPI,
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		peopleRepo:      mockStore,
-		orClient:        mockORClient,
-		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
-		cfg:             cfg,
-		logger:          logger,
-		translator:      translator,
-	}
+	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
+	toolExecutor.SetPeopleRepository(mockStore)
 
 	userID := int64(123)
 
@@ -1210,12 +955,9 @@ func TestPerformDeletePerson_ByID(t *testing.T) {
 	// Mock: delete
 	mockStore.On("DeletePerson", userID, int64(42)).Return(nil).Once()
 
-	params := map[string]interface{}{
-		"person_id": float64(42),
-	}
-
 	// Execute
-	result, err := bot.performDeletePerson(context.Background(), userID, "", params)
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+		`{"query":"{\"operation\":\"delete\",\"person_id\":42}"}`)
 
 	// Verify
 	assert.NoError(t, err)
@@ -1225,29 +967,13 @@ func TestPerformDeletePerson_ByID(t *testing.T) {
 
 func TestPerformDeletePerson_NotFound(t *testing.T) {
 	// Setup
-	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
 	cfg := testutil.TestConfig()
-	mockAPI := new(testutil.MockBotAPI)
-	mockDownloader := new(testutil.MockFileDownloader)
 
-	bot := &Bot{
-		api:             mockAPI,
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		peopleRepo:      mockStore,
-		orClient:        mockORClient,
-		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
-		cfg:             cfg,
-		logger:          logger,
-		translator:      translator,
-	}
+	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
+	toolExecutor.SetPeopleRepository(mockStore)
 
 	userID := int64(123)
 
@@ -1257,10 +983,9 @@ func TestPerformDeletePerson_NotFound(t *testing.T) {
 	// Mock: no alias matches
 	mockStore.On("FindPersonByAlias", userID, "Unknown").Return([]storage.Person{}, nil).Once()
 
-	params := map[string]interface{}{}
-
 	// Execute
-	result, err := bot.performDeletePerson(context.Background(), userID, "Unknown", params)
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+		`{"query":"{\"operation\":\"delete\",\"name\":\"Unknown\"}"}`)
 
 	// Verify
 	assert.NoError(t, err)

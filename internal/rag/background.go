@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/jobtype"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -12,7 +13,7 @@ func (s *Service) backgroundLoop(ctx context.Context) {
 	defer s.wg.Done()
 	interval, err := time.ParseDuration(s.cfg.RAG.BackfillInterval) // We can reuse this or use ChunkInterval
 	if err != nil {
-		interval = 1 * time.Minute
+		interval = config.DefaultBackfillInterval
 	}
 
 	ticker := time.NewTicker(interval)
@@ -58,10 +59,7 @@ func (s *Service) processTopicChunking(ctx context.Context, userID int64) {
 	}
 
 	// 2. Identify chunks
-	maxChunkSize := s.cfg.RAG.MaxChunkSize
-	if maxChunkSize == 0 {
-		maxChunkSize = 400
-	}
+	maxChunkSize := s.cfg.RAG.GetMaxChunkSize()
 	var currentChunk []storage.Message
 	if len(messages) > 0 {
 		currentChunk = append(currentChunk, messages[0])
@@ -82,7 +80,7 @@ func (s *Service) processTopicChunking(ctx context.Context, userID int64) {
 
 			// Mark as background job for metrics (topic extraction is maintenance)
 			runCtx := jobtype.WithJobType(context.Background(), jobtype.Background)
-			runCtx, cancel := context.WithTimeout(runCtx, 10*time.Minute)
+			runCtx, cancel := context.WithTimeout(runCtx, config.DefaultChunkProcessingTimeout)
 			err := s.processChunk(runCtx, userID, currentChunk)
 			cancel()
 
@@ -107,7 +105,7 @@ func (s *Service) processTopicChunking(ctx context.Context, userID int64) {
 
 			// Mark as background job for metrics (topic extraction is maintenance)
 			runCtx := jobtype.WithJobType(context.Background(), jobtype.Background)
-			runCtx, cancel := context.WithTimeout(runCtx, 10*time.Minute)
+			runCtx, cancel := context.WithTimeout(runCtx, config.DefaultChunkProcessingTimeout)
 			err := s.processChunk(runCtx, userID, currentChunk)
 			cancel()
 
@@ -120,7 +118,7 @@ func (s *Service) processTopicChunking(ctx context.Context, userID int64) {
 
 func (s *Service) factExtractionLoop(ctx context.Context) {
 	defer s.wg.Done()
-	interval := 1 * time.Minute // Check every minute
+	interval := config.DefaultFactExtractionInterval // Check every minute
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -197,7 +195,7 @@ func (s *Service) processFactExtraction(ctx context.Context) {
 
 			// Process facts
 			// Use a detached context to ensure completion even if shutdown is triggered
-			runCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			runCtx, cancel := context.WithTimeout(context.Background(), config.DefaultChunkProcessingTimeout)
 			err = s.memoryService.ProcessSession(runCtx, userID, msgs, topic.CreatedAt, topic.ID)
 			cancel()
 

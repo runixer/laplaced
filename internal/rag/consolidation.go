@@ -9,6 +9,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/merger"
+	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/jobtype"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
@@ -17,7 +18,7 @@ import (
 func (s *Service) runConsolidationLoop(ctx context.Context) {
 	defer s.wg.Done()
 	// Check every 10 minutes
-	interval := 10 * time.Minute
+	interval := config.DefaultConsolidationInterval
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -100,7 +101,7 @@ func (s *Service) processConsolidation(ctx context.Context) {
 }
 
 // markOrphanTopicsChecked marks topics that have no potential merge partner as consolidation-checked.
-// A topic is an "orphan" if there's no unchecked topic within 100 message IDs after it.
+// A topic is an "orphan" if there's no unchecked topic within DefaultMergeGapThreshold message IDs after it.
 func (s *Service) markOrphanTopicsChecked(userID int64) {
 	pendingTopics, err := s.topicRepo.GetTopicsPendingFacts(userID)
 	if err != nil {
@@ -119,9 +120,9 @@ func (s *Service) markOrphanTopicsChecked(userID int64) {
 			if other.ID <= topic.ID {
 				continue
 			}
-			// Check proximity (same logic as GetMergeCandidates: gap < 100 messages)
+			// Check proximity (same logic as GetMergeCandidates: gap < DefaultMergeGapThreshold messages)
 			gap := other.StartMsgID - topic.EndMsgID
-			if gap > 0 && gap < 100 && !other.ConsolidationChecked {
+			if gap > 0 && gap < config.DefaultMergeGapThreshold && !other.ConsolidationChecked {
 				hasPartner = true
 				break
 			}
@@ -145,10 +146,7 @@ func (s *Service) findMergeCandidates(userID int64) ([]storage.MergeCandidate, e
 	}
 
 	// Get max merged size from config (default 50K chars)
-	maxMergedSize := s.cfg.RAG.MaxMergedSizeChars
-	if maxMergedSize == 0 {
-		maxMergedSize = 50000
-	}
+	maxMergedSize := s.cfg.RAG.GetMaxMergedSizeChars()
 
 	var filteredCandidates []storage.MergeCandidate
 
@@ -176,10 +174,7 @@ func (s *Service) findMergeCandidates(userID int64) ([]storage.MergeCandidate, e
 		// Similarity check
 		if len(candidate.Topic1.Embedding) > 0 && len(candidate.Topic2.Embedding) > 0 {
 			sim := cosineSimilarity(candidate.Topic1.Embedding, candidate.Topic2.Embedding)
-			threshold := s.cfg.RAG.ConsolidationSimilarityThreshold
-			if threshold == 0 {
-				threshold = 0.75
-			}
+			threshold := s.cfg.RAG.GetConsolidationThreshold()
 			if float64(sim) < threshold {
 				// Heuristic failed: topics are not similar enough.
 				s.logger.Debug("Skipping merge due to low similarity", "t1", candidate.Topic1.ID, "t2", candidate.Topic2.ID, "similarity", sim, "threshold", threshold)

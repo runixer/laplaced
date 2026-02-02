@@ -92,24 +92,8 @@ func (r *Reranker) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 	mediaParts, _ := req.Params[ParamMediaParts].([]interface{})
 
 	// Get user profile and recent topics from SharedContext
-	var userProfile, recentTopics string
-	var userID int64
-	if req.Shared != nil {
-		userID = req.Shared.UserID
-		userProfile = req.Shared.Profile
-		recentTopics = req.Shared.RecentTopics
-	} else if shared := agent.FromContext(ctx); shared != nil {
-		userID = shared.UserID
-		userProfile = shared.Profile
-		recentTopics = shared.RecentTopics
-	}
-
-	// Get userID from params if not in SharedContext
-	if userID == 0 {
-		if id, ok := req.Params["user_id"].(int64); ok {
-			userID = id
-		}
-	}
+	userProfile, recentTopics, _ := agent.GetSharedContext(ctx, req)
+	userID := agent.GetUserID(req)
 
 	result, err := r.rerank(ctx, userID, candidates, personCandidates, artifactCandidates, contextualizedQuery, originalQuery, currentMessages, userProfile, recentTopics, mediaParts)
 	if err != nil {
