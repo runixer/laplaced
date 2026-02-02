@@ -202,6 +202,13 @@ func matchInlineCode(runes []rune, start int) (raw string, end int) {
 	return "", start
 }
 
+// matchDisplayMath finds display math delimited by $$, \[, or $\n...\n$.
+//
+// Complexity: MEDIUM (CC=34) - handles multiple formats, escaping, edge cases
+// Dependencies: none (pure string parsing)
+// Side effects: none
+//
+// Returns content, raw match, and end position (start if no match).
 func matchDisplayMath(runes []rune, start int) (content, raw string, end int) {
 	// Try $$...$$
 	if start+1 < len(runes) && runes[start] == '$' && runes[start+1] == '$' {
@@ -253,6 +260,13 @@ func matchDisplayMath(runes []rune, start int) (content, raw string, end int) {
 	return "", "", start
 }
 
+// matchInlineMath finds inline math delimited by single $ signs.
+//
+// Complexity: MEDIUM (CC=46) - handles currency detection, escaping, edge cases
+// Dependencies: none (pure string parsing)
+// Side effects: none
+//
+// Returns content, raw match, and end position (start if no match).
 func matchInlineMath(runes []rune, start int) (content, raw string, end int) {
 	if runes[start] != '$' {
 		return "", "", start

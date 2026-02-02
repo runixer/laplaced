@@ -227,6 +227,13 @@ func (l *Laplace) LoadContextData(
 }
 
 // loadArtifactFullContent loads full artifact content as multimodal parts (v0.6.0).
+// loadArtifactFullContent loads full file content for artifacts as FilePart structs.
+//
+// Complexity: MEDIUM (CC=37) - artifact loading, validation, size tracking
+// Dependencies: artifactRepo, files storage
+// Side effects: Reads files from disk
+// Error handling: Skips failed artifacts, logs warnings
+//
 // Returns a slice of content parts (FilePart for all file types) for the given artifact IDs.
 // Respects max and max_context_bytes from reranker.artifacts config (v0.6.0).
 func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID int64, artifactIDs []int64) ([]interface{}, error) {

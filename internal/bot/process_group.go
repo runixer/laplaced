@@ -615,6 +615,12 @@ func (b *Bot) finalizeResponse(chatID int64, messageThreadID int, userID int64, 
 }
 
 // extractForwardedPeople extracts people information from forwarded messages.
+//
+// Complexity: MEDIUM (CC=33) - nested conditions, person lookup, deduplication
+// Dependencies: peopleRepo
+// Side effects: Creates/updates people in DB
+// Error handling: Continues on individual errors, logs stats
+//
 // When a message is forwarded from a user, we can capture their telegram_id and username
 // for the People graph (v0.5.1).
 func (b *Bot) extractForwardedPeople(ctx context.Context, userID int64, messages []*telegram.Message, logger *slog.Logger) {

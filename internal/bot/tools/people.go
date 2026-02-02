@@ -316,6 +316,12 @@ func (e *ToolExecutor) performDeletePerson(ctx context.Context, userID int64, na
 }
 
 // performMergePeople merges two people records.
+//
+// Complexity: MEDIUM-HIGH (CC=43) - handles ID parsing, name/alias fallbacks, validation
+// Dependencies: peopleRepo
+// Side effects: Merges people in DB, regenerates embeddings
+// Error handling: Returns formatted error messages for LLM consumption
+//
 // Supports both target_id/source_id (preferred "Person:123" format) and target/source names (fallback).
 func (e *ToolExecutor) performMergePeople(ctx context.Context, userID int64, targetName, sourceName string, targetID, sourceID interface{}, params map[string]interface{}) (string, error) {
 	var target, source *storage.Person

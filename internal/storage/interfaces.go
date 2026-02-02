@@ -1,3 +1,25 @@
+// Package storage provides SQLite repository interfaces and implementations.
+//
+// Repository Pattern:
+//   - All repositories are interfaces for testability
+//   - SQLiteStore implements all 12+ interfaces
+//   - Methods return wrapped errors with context
+//
+// Critical Invariants (MUST READ):
+//   - Message IDs are GLOBAL auto-increment, NOT per-user
+//   - ANY query using ID ranges MUST include user_id filter
+//   - Example: WHERE id >= ? AND id <= ? AND user_id = ?
+//
+// Thread Safety:
+//   - SQLiteStore uses a single connection with WAL mode
+//   - Concurrent reads are safe
+//   - Writes are serialized by SQLite
+//
+// Usage Example:
+//
+//	mockStorage := testutil.NewMockStorage()
+//	mockStorage.On("GetFacts", userID).Return(testutil.TestFacts(), nil)
+//	svc := NewService(mockStorage, ...)
 package storage
 
 import (
@@ -6,6 +28,11 @@ import (
 )
 
 // MessageRepository handles message history operations.
+//
+// Messages represent the conversation log between user and assistant.
+// Message IDs are globally auto-incremented across all users.
+//
+// Critical: Any range query MUST include user_id filter to prevent data leakage.
 type MessageRepository interface {
 	AddMessageToHistory(userID int64, message Message) error
 	ImportMessage(userID int64, message Message) error
@@ -28,6 +55,17 @@ type UserRepository interface {
 }
 
 // TopicRepository handles topic operations.
+//
+// Topics are compressed summaries of conversation chunks created after
+// session archival (inactivity timeout or force-close). Each topic has
+// an embedding vector for RAG retrieval.
+//
+// Key Fields:
+//   - StartMsgID/EndMsgID: Message range (inclusive)
+//   - SizeChars: Total character count for size tracking
+//   - Embedding: Vector for semantic search
+//
+// Note: Message IDs within a topic are guaranteed to be from the same user.
 type TopicRepository interface {
 	AddTopic(topic Topic) (int64, error)
 	AddTopicWithoutMessageUpdate(topic Topic) (int64, error)
@@ -47,6 +85,16 @@ type TopicRepository interface {
 }
 
 // FactRepository handles fact operations.
+//
+// Facts are structured pieces of information extracted from conversations
+// by the Archivist agent. They form the user's long-term profile memory.
+//
+// Fact Types:
+//   - identity: Core user information (name, location)
+//   - importance: User-defined importance score (0-100)
+//   - Facts with importance ≥ 90 are always included in profile
+//
+// Each fact has an embedding vector for semantic search and deduplication.
 type FactRepository interface {
 	AddFact(fact Fact) (int64, error)
 	GetFacts(userID int64) ([]Fact, error)

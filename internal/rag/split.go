@@ -105,6 +105,13 @@ func (s *Service) SplitLargeTopics(ctx context.Context, userID int64, thresholdC
 }
 
 // splitTopic splits a single large topic into smaller ones.
+//
+// Complexity: MEDIUM (CC=34) - LLM call, validation, DB updates
+// Dependencies: msgRepo, topicRepo, splitterAgent
+// Side effects: Creates new topics, updates message topic_ids, deletes original
+// Error handling: Returns partial stats on failure
+//
+// Split is triggered when topic exceeds SizeChars threshold.
 func (s *Service) splitTopic(ctx context.Context, topic storage.Topic) ([]int64, *SplitStats, error) {
 	stats := &SplitStats{}
 

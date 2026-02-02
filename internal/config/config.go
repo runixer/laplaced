@@ -401,6 +401,12 @@ func DefaultConfigBytes() []byte {
 }
 
 // Validate checks configuration for required fields and valid ranges.
+//
+// Complexity: HIGH (CC=55) - validates many config fields with conditional checks
+// Dependencies: none (pure validation)
+// Side effects: none
+// Error handling: Accumulates all validation errors before returning
+//
 // Returns an error describing all validation failures.
 func (c *Config) Validate() error {
 	var errs []error

@@ -104,6 +104,12 @@ func (r *Reranker) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 }
 
 // rerank is the main reranking logic.
+//
+// Complexity: MEDIUM-HIGH (CC=42) - agentic loop with tool calls, fallbacks, error handling
+// Dependencies: orClient, cfg
+// Side effects: Logs to agentlog
+// Error handling: Returns fallback result on timeout/API error
+//
 // Uses agentic loop with tool calls to select relevant topics, people, and artifacts.
 func (r *Reranker) rerank(
 	ctx context.Context,
