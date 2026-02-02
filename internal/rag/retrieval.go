@@ -6,11 +6,8 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strings"
 	"time"
 
-	"github.com/runixer/laplaced/internal/agent"
-	"github.com/runixer/laplaced/internal/agent/reranker"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -60,283 +57,76 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		opts = &RetrievalOptions{}
 	}
 
-	// v0.6.0: Selected artifact IDs (will be populated by reranker)
-	var selectedArtifactIDs []int64
+	// 1. Enrich query if enabled
+	enrichedQuery := s.enrichQueryIfEnabled(ctx, userID, query, opts, debugInfo)
 
-	var enrichedQuery string
-	if opts.SkipEnrichment {
-		enrichedQuery = query
-	} else {
-		// Enrich query
-		var err error
-		var prompt string
-		var tokens int
-		enrichStart := time.Now()
-		enrichedQuery, prompt, tokens, err = s.enrichQuery(ctx, userID, query, opts.History, opts.MediaParts)
-		RecordRAGEnrichment(userID, time.Since(enrichStart).Seconds())
-		debugInfo.EnrichmentPrompt = prompt
-		debugInfo.EnrichmentTokens = tokens
-
-		if err != nil {
-			s.logger.Error("failed to enrich query", "error", err)
-			enrichedQuery = query
-		} else {
-			s.logger.Debug("Enriched query", "original", query, "new", enrichedQuery)
-		}
-	}
-	debugInfo.EnrichedQuery = enrichedQuery
-
-	// Embedding for query
-	embeddingStart := time.Now()
-	resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-		Model: s.cfg.Embedding.Model,
-		Input: []string{enrichedQuery},
-	})
-	embeddingDuration := time.Since(embeddingStart).Seconds()
+	// 2. Create embedding
+	embedding, err := s.createEmbedding(ctx, userID, enrichedQuery)
 	if err != nil {
-		RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeTopics, embeddingDuration, false, 0, nil)
 		return nil, debugInfo, err
 	}
-	if len(resp.Data) == 0 {
-		RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeTopics, embeddingDuration, false, 0, nil)
-		return nil, debugInfo, fmt.Errorf("no embedding returned")
-	}
-	RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeTopics, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
-	qVec := resp.Data[0].Embedding
 
-	// Search topics
-	searchStart := time.Now()
-	s.mu.RLock()
-	type match struct {
-		topicID int64
-		score   float32
-		reason  string // Reranker reason (filled after reranking)
-	}
-	var matches []match
-	userVectors := s.topicVectors[userID]
-	vectorsScanned := len(userVectors)
-	// Use a minimal safety threshold to avoid complete garbage, but much lower than strict content matching
-	minSafetyThreshold := s.cfg.RAG.GetMinSafetyThreshold()
+	// 3. Search topics using extracted searchTopicCandidates
+	topicCandidates, _ := s.searchTopicCandidates(userID, embedding, 0)
 
-	for _, item := range userVectors {
-		score := cosineSimilarity(qVec, item.Embedding)
-		// Relaxed logic: Collect everything above minimal safety threshold
-		if float64(score) > minSafetyThreshold {
-			matches = append(matches, match{topicID: item.TopicID, score: score})
-		}
-	}
-	s.mu.RUnlock()
-	RecordVectorSearch(userID, searchTypeTopics, time.Since(searchStart).Seconds(), vectorsScanned)
-	RecordRAGCandidates(userID, searchTypeTopics, len(matches))
-
-	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].score > matches[j].score
-	})
-
-	// v0.5.1: Search people vectors (excluding inner circle - they're already in system prompt)
-	var personCandidates []reranker.PersonCandidate
-	innerCircles := []string{"Work_Inner", "Family"}
-	if s.peopleRepo != nil && s.cfg.Agents.Reranker.Enabled {
-		peopleResults, err := s.SearchPeople(ctx, userID, qVec, float32(minSafetyThreshold), 20, innerCircles)
-		if err != nil {
-			s.logger.Warn("failed to search people", "error", err)
-		} else {
-			for _, pr := range peopleResults {
-				personCandidates = append(personCandidates, reranker.PersonCandidate{
-					PersonID: pr.Person.ID,
-					Score:    pr.Score,
-					Person:   pr.Person,
-				})
-			}
-		}
+	// Convert to topicCandidate type for pipeline functions
+	var matches []topicCandidate
+	for _, tc := range topicCandidates {
+		matches = append(matches, topicCandidate{topicID: tc.topicID, score: tc.score})
 	}
 
-	// v0.6.0: Search artifact summaries for reranker candidates (v0.6.0: uses artifacts.enabled + rag.enabled)
-	var artifactCandidates []reranker.ArtifactCandidate
-	if s.cfg.Artifacts.Enabled && s.cfg.RAG.Enabled && s.cfg.Agents.Reranker.Enabled && len(s.artifactVectors) > 0 {
-		artifacts, err := s.SearchArtifactsBySummary(ctx, userID, qVec, float32(minSafetyThreshold))
-		if err != nil {
-			s.logger.Warn("artifact summary search failed", "error", err)
-		} else {
-			for _, ar := range artifacts {
-				artifactCandidates = append(artifactCandidates, reranker.ArtifactCandidate{
-					ArtifactID:   ar.ArtifactID,
-					Score:        ar.Score,
-					FileType:     ar.FileType,
-					OriginalName: ar.OriginalName,
-					Summary:      ar.Summary,
-					Keywords:     ar.Keywords,
-					Entities:     ar.Entities,
-					RAGHints:     ar.RAGHints,
-				})
-			}
-		}
-	}
+	// 4. Search people and artifacts
+	threshold := float32(s.cfg.RAG.GetMinSafetyThreshold())
+	personCandidates, artifactCandidates := s.searchPeopleAndArtifacts(ctx, userID, embedding, threshold)
 
-	// Determine how many candidates to consider
-	rerankerCfg := s.cfg.Agents.Reranker
-	// v0.6.0: Reranker should run if we have topics, artifacts, or people to filter
-	useReranker := rerankerCfg.Enabled && (len(matches) > 0 || len(artifactCandidates) > 0 || len(personCandidates) > 0)
+	// 5. Determine if reranker should be used
+	useReranker := s.shouldUseReranker(len(matches), len(personCandidates), len(artifactCandidates))
+	maxCandidates := s.getMaxCandidates(useReranker)
 
-	var maxCandidates int
-	if useReranker {
-		// For reranker, take more candidates for intelligent filtering
-		maxCandidates = rerankerCfg.Candidates
-		if maxCandidates <= 0 {
-			maxCandidates = 50
-		}
-	} else {
-		// Legacy behavior: limit by retrieved_topics_count
-		maxCandidates = s.cfg.RAG.GetRetrievedTopicsCount()
-	}
+	// 6. Limit candidates
+	matches = limitMatches(matches, maxCandidates)
 
-	if len(matches) > maxCandidates {
-		matches = matches[:maxCandidates]
-	}
-
-	// Collect topic IDs from matches
-	topicIDs := make([]int64, len(matches))
-	for i, m := range matches {
-		topicIDs[i] = m.topicID
-	}
-
-	// Fetch topics (needed for summaries in reranker and for final results)
-	topics, err := s.topicRepo.GetTopicsByIDs(userID, topicIDs)
+	// 7. Load topic map
+	topicMap, err := s.loadTopicMap(ctx, userID, matches)
 	if err != nil {
 		s.logger.Error("failed to load topics for retrieval", "error", err)
 		return nil, debugInfo, err
 	}
-	topicMap := make(map[int64]storage.Topic)
-	for _, t := range topics {
-		topicMap[t.ID] = t
-	}
 
-	// Apply reranker if enabled
+	// 8. Apply reranker or use vector search results
+	var rerankerOut *rerankerOutput
 	if useReranker {
-		RecordRerankerCandidatesInput(userID, len(matches))
-
-		// Build reranker candidates with topic metadata
-		candidates := make([]reranker.Candidate, 0, len(matches))
-		for _, m := range matches {
-			if topic, ok := topicMap[m.topicID]; ok {
-				msgCount := int(topic.EndMsgID - topic.StartMsgID + 1)
-				if msgCount < 0 {
-					msgCount = 0
-				}
-				candidates = append(candidates, reranker.Candidate{
-					TopicID:      m.topicID,
-					Score:        m.score,
-					Topic:        topic,
-					MessageCount: msgCount,
-					SizeChars:    topic.SizeChars, // Use real size from DB
-				})
-			}
-		}
-
-		// Call reranker
-		// contextualizedQuery = enrichedQuery or original query
-		contextualizedQuery := debugInfo.EnrichedQuery
-		if contextualizedQuery == "" {
-			contextualizedQuery = query
-		}
-
-		// Load user profile and recent topics for reranker context
-		// Try to use SharedContext if available (loaded once in processMessageGroup)
-		var userProfile string
-		var recentTopics string
-
-		if shared := agent.FromContext(ctx); shared != nil {
-			// Use pre-loaded data from SharedContext
-			// Use compact format (no Fact IDs) to prevent ID confusion with Person/Topic/Artifact
-			userProfile = FormatUserProfileCompact(shared.ProfileFacts)
-			recentTopics = shared.RecentTopics
-		} else {
-			// Fallback: load directly (for tests or when contextService is not configured)
-			// Use compact format (no Fact IDs) to prevent ID confusion
-			allFacts, err := s.factRepo.GetFacts(userID)
-			if err == nil {
-				userProfile = FormatUserProfileCompact(FilterProfileFacts(allFacts))
-			} else {
-				s.logger.Warn("failed to load facts for reranker", "error", err)
-				userProfile = FormatUserProfileCompact(nil)
-			}
-
-			// Load recent topics for reranker context
-			recentTopicsCount := s.cfg.RAG.GetRecentTopicsInContext()
-			if recentTopicsCount > 0 {
-				topics, err := s.GetRecentTopics(userID, recentTopicsCount)
-				if err != nil {
-					s.logger.Warn("failed to get recent topics for reranker", "error", err)
-				}
-				recentTopics = FormatRecentTopics(topics)
-			} else {
-				recentTopics = FormatRecentTopics(nil)
-			}
-		}
-
-		// Format current session messages for reranker
-		currentMessages := s.formatSessionMessages(opts.History)
-
-		// Run reranker agent
-		result, err := s.rerankViaAgent(ctx, userID, candidates, personCandidates, artifactCandidates, contextualizedQuery, query, currentMessages, userProfile, recentTopics, opts.MediaParts)
+		// Prepare reranker context
+		userProfile, recentTopics, currentMessages, err := s.prepareRerankerContext(ctx, userID, opts.History)
 		if err != nil {
-			s.logger.Warn("reranker failed, falling back to vector search", "error", err)
+			s.logger.Warn("failed to prepare reranker context", "error", err)
+		}
+
+		// Build reranker input
+		rerankerInput := rerankerInput{
+			topicCandidates:     matches,
+			topicMap:            topicMap,
+			personCandidates:    personCandidates,
+			artifactCandidates:  artifactCandidates,
+			contextualizedQuery: enrichedQuery,
+			originalQuery:       query,
+			currentMessages:     currentMessages,
+			userProfile:         userProfile,
+			recentTopics:        recentTopics,
+			mediaParts:          opts.MediaParts,
+		}
+
+		// Execute reranker
+		rerankerOut, err = s.executeReranker(ctx, userID, rerankerInput)
+		if err != nil {
+			s.logger.Warn("reranker failed, using vector search results", "error", err)
 			RecordRerankerFallback(userID, "error")
 		} else {
-			// Build maps for selected topics and reasons
-			selectedIDs := make(map[int64]bool)
-			topicReasons := make(map[int64]string)
-			for _, t := range result.Topics {
-				// Parse "Topic:N" to numeric ID
-				topicID, err := t.GetNumericID()
-				if err != nil {
-					s.logger.Warn("invalid topic ID from reranker", "id", t.ID, "error", err)
-					continue
-				}
-				selectedIDs[topicID] = true
-				if t.Reason != "" {
-					topicReasons[topicID] = t.Reason
-				}
-			}
-
-			var filteredMatches []match
-			for _, m := range matches {
-				if selectedIDs[m.topicID] {
-					m.reason = topicReasons[m.topicID]
-					filteredMatches = append(filteredMatches, m)
-				}
-			}
-			matches = filteredMatches
-
-			// v0.5.1: Load selected people by IDs from reranker result
-			if len(result.People) > 0 && s.peopleRepo != nil {
-				peopleIDs := result.PeopleIDs()
-				selectedPeople, err := s.peopleRepo.GetPeopleByIDs(userID, peopleIDs)
-				if err != nil {
-					s.logger.Warn("failed to load selected people", "error", err)
-				} else {
-					// Store in personCandidates for later use
-					// (personCandidates will be converted to result.People)
-					personCandidates = nil // Clear candidates, we'll rebuild
-					for _, p := range selectedPeople {
-						personCandidates = append(personCandidates, reranker.PersonCandidate{
-							PersonID: p.ID,
-							Person:   p,
-						})
-					}
-				}
-			} else {
-				// No people selected by reranker
-				personCandidates = nil
-			}
-
-			// v0.6.0: Extract selected artifact IDs from reranker result
-			if len(result.Artifacts) > 0 {
-				selectedArtifactIDs = result.ArtifactIDs()
-			}
+			// Filter matches by reranker selection
+			matches = filterMatchesByReranker(matches, rerankerOut.selectedTopicIDs, rerankerOut.topicReasons)
 		}
 	} else {
-		// Legacy behavior: limit by maxTopics (already applied above)
+		// Legacy behavior: limit by maxTopics
 		maxTopics := s.cfg.RAG.RetrievedTopicsCount
 		if maxTopics <= 0 {
 			maxTopics = 10
@@ -346,111 +136,61 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		}
 	}
 
-	var results []TopicSearchResult
-	seenMsgIDs := make(map[int64]bool)
-
-	for _, m := range matches {
-		topic, ok := topicMap[m.topicID]
-		if !ok {
-			continue
-		}
-
-		msgs, err := s.msgRepo.GetMessagesByTopicID(ctx, topic.ID)
-		if err != nil {
-			s.logger.Error("failed to get messages for topic", "topic_id", topic.ID, "error", err)
-			continue
-		}
-
-		var topicMsgs []storage.Message
-		for _, msg := range msgs {
-			if !seenMsgIDs[msg.ID] {
-				seenMsgIDs[msg.ID] = true
-				topicMsgs = append(topicMsgs, msg)
-			}
-		}
-
-		if len(topicMsgs) > 0 {
-			results = append(results, TopicSearchResult{
-				Topic:    topic,
-				Score:    m.score,
-				Messages: topicMsgs,
-				Reason:   m.reason,
-			})
-		}
+	// 9. Build final result
+	result, err := s.buildRetrievalResult(ctx, userID, matches, topicMap, rerankerOut, artifactCandidates, useReranker)
+	if err != nil {
+		return nil, debugInfo, err
 	}
 
-	debugInfo.Results = results
-
-	// Record RAG metrics
-	RecordRAGRetrieval(userID, len(results) > 0)
+	// 10. Record metrics
+	debugInfo.Results = result.Topics
+	RecordRAGRetrieval(userID, len(result.Topics) > 0)
 	RecordRAGLatency(userID, opts.Source, time.Since(startTime).Seconds())
 
-	// v0.5.1: Build final result with selected people
-	var selectedPeople []storage.Person
-	for _, pc := range personCandidates {
-		selectedPeople = append(selectedPeople, pc.Person)
+	return result, debugInfo, nil
+}
+
+// enrichQueryIfEnabled enriches the query if enrichment is not skipped.
+func (s *Service) enrichQueryIfEnabled(ctx context.Context, userID int64, query string, opts *RetrievalOptions, debugInfo *RetrievalDebugInfo) string {
+	if opts.SkipEnrichment {
+		debugInfo.EnrichedQuery = query
+		return query
 	}
 
-	// v0.6.0: Build artifact results from selected artifact IDs only.
-	// This ensures consistency: artifacts shown in <artifact_context> have full content loaded.
-	// If reranker selected artifacts, filter artifactCandidates by selected IDs.
-	// If reranker is disabled, select top-N by vector score (fallback).
-	var artifactResults []ArtifactResult
+	enrichStart := time.Now()
+	enrichedQuery, prompt, tokens, err := s.enrichQuery(ctx, userID, query, opts.History, opts.MediaParts)
+	RecordRAGEnrichment(userID, time.Since(enrichStart).Seconds())
+	debugInfo.EnrichmentPrompt = prompt
+	debugInfo.EnrichmentTokens = tokens
 
-	if s.cfg.Artifacts.Enabled && s.cfg.RAG.Enabled && len(artifactCandidates) > 0 {
-		if len(selectedArtifactIDs) > 0 {
-			// Reranker selected specific artifacts: filter by selected IDs
-			selectedSet := make(map[int64]bool, len(selectedArtifactIDs))
-			for _, id := range selectedArtifactIDs {
-				selectedSet[id] = true
-			}
-			for _, ac := range artifactCandidates {
-				if selectedSet[ac.ArtifactID] {
-					artifactResults = append(artifactResults, ArtifactResult{
-						ArtifactID:   ac.ArtifactID,
-						FileType:     ac.FileType,
-						OriginalName: ac.OriginalName,
-						Summary:      ac.Summary,
-						Keywords:     ac.Keywords,
-						Entities:     ac.Entities,
-						RAGHints:     ac.RAGHints,
-						Score:        ac.Score,
-					})
-				}
-			}
-		} else if !useReranker {
-			// Reranker disabled: select top-N by vector score (fallback)
-			maxArtifacts := rerankerCfg.Artifacts.Max
-			if maxArtifacts <= 0 {
-				maxArtifacts = 3
-			}
-			for i, ac := range artifactCandidates {
-				if i >= maxArtifacts {
-					break
-				}
-				artifactResults = append(artifactResults, ArtifactResult{
-					ArtifactID:   ac.ArtifactID,
-					FileType:     ac.FileType,
-					OriginalName: ac.OriginalName,
-					Summary:      ac.Summary,
-					Keywords:     ac.Keywords,
-					Entities:     ac.Entities,
-					RAGHints:     ac.RAGHints,
-					Score:        ac.Score,
-				})
-				// Also add to selectedArtifactIDs so full content gets loaded
-				selectedArtifactIDs = append(selectedArtifactIDs, ac.ArtifactID)
-			}
-		}
-		// If useReranker && len(selectedArtifactIDs) == 0: reranker chose nothing, show nothing
+	if err != nil {
+		s.logger.Error("failed to enrich query", "error", err)
+		debugInfo.EnrichedQuery = query
+		return query
 	}
+	s.logger.Debug("Enriched query", "original", query, "new", enrichedQuery)
+	debugInfo.EnrichedQuery = enrichedQuery
+	return enrichedQuery
+}
 
-	return &RetrievalResult{
-		Topics:              results,
-		People:              selectedPeople,
-		Artifacts:           artifactResults,     // Summary matches for display
-		SelectedArtifactIDs: selectedArtifactIDs, // IDs selected by reranker for full content loading
-	}, debugInfo, nil
+// createEmbedding creates an embedding for the given query.
+func (s *Service) createEmbedding(ctx context.Context, userID int64, query string) ([]float32, error) {
+	embeddingStart := time.Now()
+	resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
+		Model: s.cfg.Embedding.Model,
+		Input: []string{query},
+	})
+	embeddingDuration := time.Since(embeddingStart).Seconds()
+	if err != nil {
+		RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeTopics, embeddingDuration, false, 0, nil)
+		return nil, err
+	}
+	if len(resp.Data) == 0 {
+		RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeTopics, embeddingDuration, false, 0, nil)
+		return nil, fmt.Errorf("no embedding returned")
+	}
+	RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeTopics, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
+	return resp.Data[0].Embedding, nil
 }
 
 func (s *Service) RetrieveFacts(ctx context.Context, userID int64, query string) ([]storage.Fact, error) {
@@ -476,95 +216,55 @@ func (s *Service) RetrieveFacts(ctx context.Context, userID int64, query string)
 	RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeFacts, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
 	qVec := resp.Data[0].Embedding
 
-	searchStart := time.Now()
+	// Use generic vector search
 	s.mu.RLock()
-	type match struct {
-		factID int64
-		score  float32
-	}
-	var matches []match
 	userVectors := s.factVectors[userID]
-	vectorsScanned := len(userVectors)
-	minSafetyThreshold := s.cfg.RAG.GetMinSafetyThreshold()
-
-	for _, item := range userVectors {
-		score := cosineSimilarity(qVec, item.Embedding)
-		if float64(score) > minSafetyThreshold {
-			matches = append(matches, match{factID: item.FactID, score: score})
-		}
+	items := make([]embeddingItem, len(userVectors))
+	for i := range userVectors {
+		items[i] = userVectors[i]
 	}
 	s.mu.RUnlock()
-	RecordVectorSearch(userID, searchTypeFacts, time.Since(searchStart).Seconds(), vectorsScanned)
-	RecordRAGCandidates(userID, searchTypeFacts, len(matches))
 
-	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].score > matches[j].score
+	results := s.vectorSearch(userID, qVec, items, VectorSearchConfig{
+		Limit:      10,
+		MetricType: searchTypeFacts,
 	})
 
-	if len(matches) > 10 { // Limit to 10 facts
-		matches = matches[:10]
+	if len(results) == 0 {
+		return nil, nil
 	}
 
 	// Fetch facts
-	allFacts, err := s.factRepo.GetFacts(userID)
-	if err != nil {
-		return nil, err
+	var ids []int64
+	for _, r := range results {
+		ids = append(ids, r.ID)
 	}
-
-	factMap := make(map[int64]storage.Fact)
-	for _, f := range allFacts {
-		factMap[f.ID] = f
-	}
-
-	var results []storage.Fact
-	for _, m := range matches {
-		if f, ok := factMap[m.factID]; ok {
-			results = append(results, f)
-		}
-	}
-
-	return results, nil
+	return s.factRepo.GetFactsByIDs(userID, ids)
 }
 
 func (s *Service) FindSimilarFacts(ctx context.Context, userID int64, embedding []float32, threshold float32) ([]storage.Fact, error) {
-	searchStart := time.Now()
 	s.mu.RLock()
-
 	userVectors := s.factVectors[userID]
-	vectorsScanned := len(userVectors)
-	type match struct {
-		factID int64
-		score  float32
-	}
-	var matches []match
-
-	for _, item := range userVectors {
-		score := cosineSimilarity(embedding, item.Embedding)
-		if score > threshold {
-			matches = append(matches, match{factID: item.FactID, score: score})
-		}
+	items := make([]embeddingItem, len(userVectors))
+	for i := range userVectors {
+		items[i] = userVectors[i]
 	}
 	s.mu.RUnlock()
-	RecordVectorSearch(userID, searchTypeFacts, time.Since(searchStart).Seconds(), vectorsScanned)
-	RecordRAGCandidates(userID, searchTypeFacts, len(matches))
 
-	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].score > matches[j].score
+	results := s.vectorSearch(userID, embedding, items, VectorSearchConfig{
+		Limit:      5,
+		Threshold:  threshold,
+		MetricType: searchTypeFacts,
 	})
 
-	if len(matches) > 5 {
-		matches = matches[:5]
-	}
-
-	if len(matches) == 0 {
+	if len(results) == 0 {
 		return nil, nil
 	}
 
 	var ids []int64
-	for _, m := range matches {
-		ids = append(ids, m.factID)
+	for _, r := range results {
+		ids = append(ids, r.ID)
 	}
-
 	return s.factRepo.GetFactsByIDs(userID, ids)
 }
 
@@ -796,100 +496,4 @@ func cosineSimilarity(a, b []float32) float32 {
 		return 0
 	}
 	return dot / (float32(math.Sqrt(float64(magA))) * float32(math.Sqrt(float64(magB))))
-}
-
-// rerankViaAgent delegates reranking to the Reranker agent.
-func (s *Service) rerankViaAgent(
-	ctx context.Context,
-	userID int64,
-	candidates []reranker.Candidate,
-	personCandidates []reranker.PersonCandidate,
-	artifactCandidates []reranker.ArtifactCandidate, // v0.6.0
-	contextualizedQuery string,
-	originalQuery string,
-	currentMessages string,
-	userProfile string,
-	recentTopics string,
-	mediaParts []interface{},
-) (*reranker.Result, error) {
-	if s.rerankerAgent == nil {
-		return nil, fmt.Errorf("reranker agent not configured")
-	}
-	startTime := time.Now()
-
-	// Build request
-	req := &agent.Request{
-		Params: map[string]any{
-			reranker.ParamCandidates:          candidates,
-			reranker.ParamPersonCandidates:    personCandidates,
-			reranker.ParamArtifactCandidates:  artifactCandidates, // v0.6.0
-			reranker.ParamContextualizedQuery: contextualizedQuery,
-			reranker.ParamOriginalQuery:       originalQuery,
-			reranker.ParamCurrentMessages:     currentMessages,
-			reranker.ParamMediaParts:          mediaParts,
-			"user_id":                         userID,
-		},
-	}
-
-	// Try to get SharedContext from ctx
-	if shared := agent.FromContext(ctx); shared != nil {
-		req.Shared = shared
-	} else {
-		// Fallback: create minimal shared context for the agent
-		req.Shared = &agent.SharedContext{
-			UserID:       userID,
-			Profile:      userProfile,
-			RecentTopics: recentTopics,
-			Language:     s.cfg.Bot.Language,
-		}
-	}
-
-	resp, err := s.rerankerAgent.Execute(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-
-	result, ok := resp.Structured.(*reranker.Result)
-	if !ok {
-		return nil, fmt.Errorf("unexpected result type from reranker agent")
-	}
-
-	// Record metrics
-	duration := time.Since(startTime).Seconds()
-	RecordRerankerDuration(userID, duration)
-	RecordRerankerCandidatesOutput(userID, len(result.Topics))
-
-	return result, nil
-}
-
-// formatSessionMessages formats the current session history for the reranker prompt.
-func (s *Service) formatSessionMessages(history []storage.Message) string {
-	if len(history) == 0 {
-		return "(no current session messages)"
-	}
-
-	var sb strings.Builder
-	// Take last N messages to avoid overwhelming the reranker
-	maxMessages := 10
-	start := 0
-	if len(history) > maxMessages {
-		start = len(history) - maxMessages
-		fmt.Fprintf(&sb, "... (%d earlier messages omitted)\n\n", start)
-	}
-
-	for _, m := range history[start:] {
-		role := m.Role
-		if role == "assistant" {
-			role = "Assistant"
-		} else if role == "user" {
-			role = "User"
-		}
-		// Truncate very long messages
-		content := m.Content
-		if len(content) > 500 {
-			content = content[:500] + "..."
-		}
-		fmt.Fprintf(&sb, "[%s]: %s\n", role, content)
-	}
-	return sb.String()
 }

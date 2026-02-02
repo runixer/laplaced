@@ -200,8 +200,8 @@ func TestRetrieveFacts(t *testing.T) {
 			Data: []openrouter.EmbeddingObject{{Embedding: []float32{1.0, 0.0, 0.0}}},
 		}, nil)
 
-		// GetFacts for fetching full fact data
-		mockStore.On("GetFacts", userID).Return(facts, nil)
+		// GetFactsByIDs for fetching fact data (updated from GetFacts)
+		mockStore.On("GetFactsByIDs", userID, []int64{1}).Return([]storage.Fact{facts[0]}, nil)
 
 		translator := testutil.TestTranslator(t)
 
