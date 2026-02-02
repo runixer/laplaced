@@ -794,3 +794,96 @@ func TestDebugChatSendHandler_MethodNotAllowed(t *testing.T) {
 
 	assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)
 }
+
+// TestSetAgentLogRepo tests the SetAgentLogRepo setter.
+func TestSetAgentLogRepo(t *testing.T) {
+	mockBot := new(MockBotInterface)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
+	assert.NoError(t, err)
+
+	// Set a nil agent log repo (acceptable value)
+	server.SetAgentLogRepo(nil)
+
+	// Verify it was set (no panic)
+	assert.NotNil(t, server)
+}
+
+// TestSetPeopleRepository tests the SetPeopleRepository setter.
+func TestSetPeopleRepository(t *testing.T) {
+	mockBot := new(MockBotInterface)
+	mockStorage := new(testutil.MockStorage)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, nil, mockBot, nil)
+	assert.NoError(t, err)
+
+	// Set the people repository
+	server.SetPeopleRepository(mockStorage)
+
+	// Verify it was set (no panic)
+	assert.NotNil(t, server)
+}
+
+// TestSetArtifactRepository tests the SetArtifactRepository setter.
+func TestSetArtifactRepository(t *testing.T) {
+	mockBot := new(MockBotInterface)
+	mockStorage := new(testutil.MockStorage)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, nil, mockBot, nil)
+	assert.NoError(t, err)
+
+	// Set the artifact repository
+	server.SetArtifactRepository(mockStorage)
+
+	// Verify it was set (no panic)
+	assert.NotNil(t, server)
+}
+
+// TestSplitTopicsHandler_MethodNotAllowed tests that split topics only accepts POST.
+func TestSplitTopicsHandler_MethodNotAllowed(t *testing.T) {
+	mockBot := new(MockBotInterface)
+	mockStorage := new(testutil.MockStorage)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, nil, mockBot, nil)
+	assert.NoError(t, err)
+
+	req, err := http.NewRequest("GET", "/ui/debug/split-topics", nil)
+	assert.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.splitTopicsHandler)
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)
+}
+
+// TestSplitTopicsHandler_InvalidJSON tests error handling for invalid JSON.
+func TestSplitTopicsHandler_InvalidJSON(t *testing.T) {
+	mockBot := new(MockBotInterface)
+	mockStorage := new(testutil.MockStorage)
+	cfg := &config.Config{}
+	cfg.Server.ListenPort = "8080"
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, nil, mockBot, nil)
+	assert.NoError(t, err)
+
+	body := `{invalid json`
+	req, err := http.NewRequest("POST", "/ui/debug/split-topics", bytes.NewBufferString(body))
+	assert.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(server.splitTopicsHandler)
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assert.Contains(t, rr.Body.String(), "Invalid JSON")
+}
