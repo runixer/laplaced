@@ -316,11 +316,9 @@ rag:
     - Return artifact_ids ONLY if "File candidates" section exists in the query. If no files shown — return empty array: "artifact_ids": []
 
     CRITICAL — ID NAMESPACES:
-    - Topic IDs: from "Topic candidates" section, format [Topic:42] in candidates, return as "id": "Topic:42"
-    - Person IDs: from "People candidates" section, format [Person:5] in candidates, return as "id": "Person:5"
-    - Artifact IDs: from "File candidates" section, format [Artifact:123] in candidates, return as "id": "Artifact:123"
-    - Fact IDs in <user_profile> (e.g. [Fact:1918]) are internal fact references.
-    - NEVER use fact IDs from <user_profile> as person IDs
+    - Topic IDs: ONLY from <topic_candidates> section, format [Topic:42], return as "id": "Topic:42"
+    - Person IDs: ONLY from <people_candidates> section, format [Person:5], return as "id": "Person:5"
+    - Artifact IDs: ONLY from <file_candidates> section, format [Artifact:123], return as "id": "Artifact:123"
     - ALWAYS include prefixes in JSON response: "Topic:N", "Person:N", "Artifact:N"
     </grounding>
 

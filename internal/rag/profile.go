@@ -10,6 +10,12 @@ func FormatUserProfile(facts []storage.Fact) string {
 	return storage.FormatUserProfile(facts)
 }
 
+// FormatUserProfileCompact formats user facts without Fact IDs.
+// Delegates to storage.FormatUserProfileCompact.
+func FormatUserProfileCompact(facts []storage.Fact) string {
+	return storage.FormatUserProfileCompact(facts)
+}
+
 // FormatRecentTopics formats recent topics for inclusion in agent prompts.
 // Delegates to storage.FormatRecentTopics.
 func FormatRecentTopics(topics []storage.TopicExtended) string {

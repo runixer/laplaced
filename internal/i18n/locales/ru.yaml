@@ -316,11 +316,9 @@ rag:
     - Возвращай artifact_ids ТОЛЬКО если в запросе есть секция "File candidates". Если файлов нет — возвращай пустой массив: "artifact_ids": []
 
     КРИТИЧНО — ПРОСТРАНСТВА ID:
-    - Topic ID: из секции "Topic candidates", формат [Topic:42] в кандидатах, возвращай как "id": "Topic:42"
-    - Person ID: из секции "People candidates", формат [Person:5] в кандидатах, возвращай как "id": "Person:5"
-    - Artifact ID: из секции "File candidates", формат [Artifact:123] в кандидатах, возвращай как "id": "Artifact:123"
-    - Fact ID в <user_profile> (например [Fact:1918]) — это внутренние ссылки на факты.
-    - НИКОГДА не используй fact ID из <user_profile> как person ID
+    - Topic ID: ТОЛЬКО из секции <topic_candidates>, формат [Topic:42], возвращай как "id": "Topic:42"
+    - Person ID: ТОЛЬКО из секции <people_candidates>, формат [Person:5], возвращай как "id": "Person:5"
+    - Artifact ID: ТОЛЬКО из секции <file_candidates>, формат [Artifact:123], возвращай как "id": "Artifact:123"
     - ВСЕГДА включай префиксы в JSON ответе: "Topic:N", "Person:N", "Artifact:N"
     </grounding>
 

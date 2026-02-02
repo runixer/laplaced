@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Reranker fact ID hallucination** — Flash confused `[Fact:N]` format with `[Person:N]`/`[Topic:N]` and returned Fact IDs as Person/Topic IDs. Fixed by using compact format for reranker (facts without `[Fact:N]` prefix) while preserving full format for Archivist which needs IDs for update/delete operations.
+
 ## [0.6.0] - 2026-02-02
 
 **Long Context RAG release: Files now part of memory.**

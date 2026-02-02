@@ -8,6 +8,7 @@ import (
 // FormatUserProfile formats user facts for inclusion in agent prompts.
 // Returns content wrapped in <user_profile> tags.
 // Format: - [Fact:X] [Category/Type] (Updated: date) Content
+// Use this for agents that need Fact IDs (e.g., Archivist for update/delete).
 func FormatUserProfile(facts []Fact) string {
 	if len(facts) == 0 {
 		return "<user_profile>\n</user_profile>"
@@ -18,6 +19,26 @@ func FormatUserProfile(facts []Fact) string {
 	for _, f := range facts {
 		sb.WriteString(fmt.Sprintf("- [Fact:%d] [%s/%s] (Updated: %s) %s\n",
 			f.ID, f.Category, f.Type, f.LastUpdated.Format("2006-01-02"), f.Content))
+	}
+	sb.WriteString("</user_profile>")
+	return sb.String()
+}
+
+// FormatUserProfileCompact formats user facts without Fact IDs.
+// Returns content wrapped in <user_profile> tags.
+// Format: - [Category/Type] (Updated: date) Content
+// Use this for agents that don't need Fact IDs (e.g., Reranker, Laplace).
+// This prevents ID format confusion with [Person:N], [Topic:N], [Artifact:N].
+func FormatUserProfileCompact(facts []Fact) string {
+	if len(facts) == 0 {
+		return "<user_profile>\n</user_profile>"
+	}
+
+	var sb strings.Builder
+	sb.WriteString("<user_profile>\n")
+	for _, f := range facts {
+		sb.WriteString(fmt.Sprintf("- [%s/%s] (%s) %s\n",
+			f.Category, f.Type, f.LastUpdated.Format("2006-01-02"), f.Content))
 	}
 	sb.WriteString("</user_profile>")
 	return sb.String()

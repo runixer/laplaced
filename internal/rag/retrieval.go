@@ -253,16 +253,18 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 
 		if shared := agent.FromContext(ctx); shared != nil {
 			// Use pre-loaded data from SharedContext
-			userProfile = shared.Profile
+			// Use compact format (no Fact IDs) to prevent ID confusion with Person/Topic/Artifact
+			userProfile = FormatUserProfileCompact(shared.ProfileFacts)
 			recentTopics = shared.RecentTopics
 		} else {
 			// Fallback: load directly (for tests or when contextService is not configured)
+			// Use compact format (no Fact IDs) to prevent ID confusion
 			allFacts, err := s.factRepo.GetFacts(userID)
 			if err == nil {
-				userProfile = FormatUserProfile(FilterProfileFacts(allFacts))
+				userProfile = FormatUserProfileCompact(FilterProfileFacts(allFacts))
 			} else {
 				s.logger.Warn("failed to load facts for reranker", "error", err)
-				userProfile = FormatUserProfile(nil)
+				userProfile = FormatUserProfileCompact(nil)
 			}
 
 			// Load recent topics for reranker context
