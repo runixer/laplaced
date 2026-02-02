@@ -183,6 +183,17 @@ type ArtifactsConfig struct {
 	MinVoiceDurationSeconds int `yaml:"min_voice_duration_seconds" env:"LAPLACED_ARTIFACTS_MIN_VOICE_DURATION_SECONDS"` // 0 = save all, -1 = disable voice artifacts
 }
 
+// MemoryConfig defines configuration for memory operations.
+type MemoryConfig struct {
+	FactDefaultImportance int `yaml:"fact_default_importance" env:"LAPLACED_MEMORY_FACT_DEFAULT_IMPORTANCE"`
+}
+
+// SearchConfig defines configuration for search operations.
+type SearchConfig struct {
+	PeopleSimilarityThreshold float64 `yaml:"people_similarity_threshold" env:"LAPLACED_SEARCH_PEOPLE_SIMILARITY_THRESHOLD"`
+	PeopleMaxResults          int     `yaml:"people_max_results" env:"LAPLACED_SEARCH_PEOPLE_MAX_RESULTS"`
+}
+
 type PriceTier struct {
 	UpToTokens     int     `yaml:"up_to_tokens"`
 	PromptCost     float64 `yaml:"prompt_cost"`
@@ -317,6 +328,33 @@ func (c *RAGConfig) GetMaxChunkSize() int {
 	return DefaultMaxChunkSize
 }
 
+// GetFactDefaultImportance returns the default importance for facts without explicit importance.
+// Falls back to DefaultFactDefaultImportance (50) if not configured.
+func (c *MemoryConfig) GetFactDefaultImportance() int {
+	if c.FactDefaultImportance > 0 {
+		return c.FactDefaultImportance
+	}
+	return DefaultFactDefaultImportance
+}
+
+// GetPeopleSimilarityThreshold returns the minimum similarity for people vector search.
+// Falls back to DefaultPeopleSimilarityThreshold (0.3) if not configured.
+func (c *SearchConfig) GetPeopleSimilarityThreshold() float64 {
+	if c.PeopleSimilarityThreshold > 0 {
+		return c.PeopleSimilarityThreshold
+	}
+	return DefaultPeopleSimilarityThreshold
+}
+
+// GetPeopleMaxResults returns the max results for people vector search.
+// Falls back to DefaultPeopleMaxResults (5) if not configured.
+func (c *SearchConfig) GetPeopleMaxResults() int {
+	if c.PeopleMaxResults > 0 {
+		return c.PeopleMaxResults
+	}
+	return DefaultPeopleMaxResults
+}
+
 type Config struct {
 	Log struct {
 		Level string `yaml:"level" env:"LAPLACED_LOG_LEVEL"`
@@ -347,6 +385,8 @@ type Config struct {
 		Path string `yaml:"path" env:"LAPLACED_DATABASE_PATH"`
 	} `yaml:"database"`
 	Artifacts ArtifactsConfig `yaml:"artifacts"`
+	Memory    MemoryConfig    `yaml:"memory"`
+	Search    SearchConfig    `yaml:"search"`
 }
 
 // Load loads configuration from the specified file path.

@@ -31,9 +31,14 @@ func ParseFactID(v interface{}) (int64, error) {
 		}
 		return 0, fmt.Errorf("invalid fact ID format: %s", s)
 	}
-	// Numeric fallback (LLM error)
-	if f, ok := v.(float64); ok {
-		return int64(f), nil
+	// Numeric fallback (LLM error) - handle float64, int, int64
+	switch num := v.(type) {
+	case float64:
+		return int64(num), nil
+	case int:
+		return int64(num), nil
+	case int64:
+		return num, nil
 	}
 	return 0, fmt.Errorf("fact_id must be string or number")
 }
@@ -49,8 +54,14 @@ func ParsePersonID(v interface{}) (int64, error) {
 		}
 		return 0, fmt.Errorf("invalid person ID format: %s", s)
 	}
-	if f, ok := v.(float64); ok {
-		return int64(f), nil
+	// Numeric fallback (LLM error) - handle float64, int, int64
+	switch num := v.(type) {
+	case float64:
+		return int64(num), nil
+	case int:
+		return int64(num), nil
+	case int64:
+		return num, nil
 	}
 	return 0, fmt.Errorf("person_id must be string or number")
 }
@@ -58,8 +69,18 @@ func ParsePersonID(v interface{}) (int64, error) {
 // ParseMemoryOpParams extracts operation parameters from a map.
 // Returns error if fact_id is provided but invalid.
 func ParseMemoryOpParams(params map[string]interface{}) (MemoryOpParams, error) {
+	// Check for required action field
+	actionVal, hasAction := params["action"]
+	if !hasAction {
+		return MemoryOpParams{}, fmt.Errorf("missing action field")
+	}
+	action, ok := actionVal.(string)
+	if !ok {
+		return MemoryOpParams{}, fmt.Errorf("action must be a string")
+	}
+
 	p := MemoryOpParams{
-		Action:   params["action"].(string),
+		Action:   action,
 		Content:  "",
 		Category: "",
 		FactType: "",

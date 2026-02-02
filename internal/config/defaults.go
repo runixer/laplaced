@@ -32,4 +32,11 @@ const (
 
 	// Chunking
 	DefaultMaxChunkSize = 400 // Max messages per chunk before forced split
+
+	// Memory
+	DefaultFactDefaultImportance = 50 // Default importance for facts without explicit importance
+
+	// Search
+	DefaultPeopleSimilarityThreshold = 0.3 // Minimum similarity for people vector search
+	DefaultPeopleMaxResults          = 5   // Max results for people vector search
 )

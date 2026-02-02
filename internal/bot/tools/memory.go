@@ -35,7 +35,7 @@ func (e *ToolExecutor) performAddFact(ctx context.Context, userID int64, p Memor
 	}
 	importance := p.Importance
 	if importance == 0 {
-		importance = 50
+		importance = e.cfg.Memory.GetFactDefaultImportance()
 	}
 
 	fact := storage.Fact{
@@ -133,7 +133,7 @@ func (e *ToolExecutor) performUpdateFact(ctx context.Context, userID int64, p Me
 	}
 	importance := p.Importance
 	if importance == 0 {
-		importance = 50
+		importance = e.cfg.Memory.GetFactDefaultImportance()
 	}
 
 	// Fetch old fact for history

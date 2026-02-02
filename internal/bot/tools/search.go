@@ -88,7 +88,7 @@ func (e *ToolExecutor) performSearchPeople(ctx context.Context, userID int64, ar
 			Input: []string{query},
 		})
 		if err == nil && len(resp.Data) > 0 {
-			results, err := e.ragService.SearchPeople(ctx, userID, resp.Data[0].Embedding, 0.3, 5, nil) // nil = no circle exclusion
+			results, err := e.ragService.SearchPeople(ctx, userID, resp.Data[0].Embedding, float32(e.cfg.Search.GetPeopleSimilarityThreshold()), e.cfg.Search.GetPeopleMaxResults(), nil) // nil = no circle exclusion
 			if err == nil {
 				for _, r := range results {
 					people = append(people, r.Person)
