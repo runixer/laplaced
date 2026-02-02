@@ -134,7 +134,7 @@ type Service struct {
 	peopleRepo           storage.PeopleRepository // v0.5.1: People repository
 	artifactRepo         storage.ArtifactRepository
 	client               openrouter.Client
-	memoryService        *memory.Service
+	memoryService        MemoryService
 	translator           *i18n.Translator
 	agentLogger          *agentlog.Logger
 	enricherAgent        agent.Agent                    // Query enrichment agent
@@ -164,7 +164,11 @@ type Service struct {
 	inFlightArtifacts sync.Map    // artifactID -> time.Time for visibility during shutdown
 }
 
-// NewService creates a new RAG service.
+// NewService creates a new RAG service with required dependencies.
+// Optional dependencies (agents, repos) must be set via setter methods.
+//
+// Deprecated: Use NewServiceBuilder().Build() for better validation and fluent API.
+// This method is kept for backward compatibility.
 func NewService(logger *slog.Logger, cfg *config.Config, topicRepo storage.TopicRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, msgRepo storage.MessageRepository, maintenanceRepo storage.MaintenanceRepository, client openrouter.Client, memoryService *memory.Service, translator *i18n.Translator) *Service {
 	return &Service{
 		logger:               logger.With("component", "rag"),

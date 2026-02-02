@@ -59,6 +59,3 @@ laplaced.db
 .claude/
 bin/
 logs/
-
-# migrations (personal)
-migrations/

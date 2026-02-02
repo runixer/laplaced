@@ -118,17 +118,37 @@ func SetupServices(
 	services.MemoryService.SetPeopleRepository(store)
 	services.ArchivistAgent.SetPeopleRepository(store)
 
-	// Create RAG service
-	services.RAGService = rag.NewService(logger, cfg, store, store, store, store, store, client, services.MemoryService, translator)
-	services.RAGService.SetAgentLogger(services.AgentLogger)
-	services.RAGService.SetPeopleRepository(store)
-	services.RAGService.SetArtifactRepository(store)
-	services.RAGService.SetContextService(services.ContextService)
-	services.RAGService.SetEnricherAgent(services.EnricherAgent)
-	services.RAGService.SetSplitterAgent(services.SplitterAgent)
-	services.RAGService.SetMergerAgent(services.MergerAgent)
-	services.RAGService.SetRerankerAgent(services.RerankerAgent)
-	services.RAGService.SetExtractorAgent(services.ExtractorAgent)
+	// Create RAG service using fluent builder API
+	var err error
+	services.RAGService, err = rag.NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(client).
+		WithTopicRepository(store).
+		WithFactRepository(store).
+		WithFactHistoryRepository(store).
+		WithMessageRepository(store).
+		WithMaintenanceRepository(store).
+		WithMemoryService(services.MemoryService).
+		WithTranslator(translator).
+		// Optional agents
+		WithEnricher(services.EnricherAgent).
+		WithSplitter(services.SplitterAgent).
+		WithMerger(services.MergerAgent).
+		WithReranker(services.RerankerAgent).
+		WithExtractor(services.ExtractorAgent).
+		// Optional repos
+		WithPeopleRepository(store).
+		WithArtifactRepository(store).
+		// Optional services
+		WithAgentLogger(services.AgentLogger).
+		WithContextService(services.ContextService).
+		Build()
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to build RAG service: %w", err)
+	}
+
 	services.MemoryService.SetVectorSearcher(services.RAGService)
 	services.MemoryService.SetTopicRepository(store)
 

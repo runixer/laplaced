@@ -14,8 +14,6 @@ import (
 )
 
 func TestFormatCandidatesForReranker(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	tests := []struct {
 		name         string
@@ -83,7 +81,7 @@ func TestFormatCandidatesForReranker(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := r.formatCandidatesForReranker(tt.candidates)
+			result := formatCandidatesForReranker(tt.candidates)
 
 			if tt.wantLines == 0 {
 				assert.Empty(t, result)
@@ -99,7 +97,6 @@ func TestFormatCandidatesForReranker(t *testing.T) {
 
 func TestParseResponse(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	tests := []struct {
 		name           string
@@ -196,7 +193,7 @@ func TestParseResponse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := r.parseResponse(tt.content)
+			result, err := parseResponse(tt.content, logger)
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -215,8 +212,6 @@ func TestParseResponse(t *testing.T) {
 }
 
 func TestParseToolCallIDs(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	tests := []struct {
 		name      string
@@ -257,7 +252,7 @@ func TestParseToolCallIDs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ids, err := r.parseToolCallIDs(tt.arguments)
+			ids, err := parseToolCallIDs(tt.arguments)
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -272,7 +267,6 @@ func TestParseToolCallIDs(t *testing.T) {
 
 func TestFilterValidTopics(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	candidateMap := map[int64]Candidate{
 		1: {TopicID: 1},
@@ -333,7 +327,7 @@ func TestFilterValidTopics(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			filtered := r.filterValidTopics(123, tt.result, candidateMap)
+			filtered := filterValidTopics(123, tt.result, candidateMap, logger)
 			assert.Equal(t, tt.wantTopics, filtered.Topics)
 		})
 	}
@@ -417,7 +411,6 @@ func TestExtractJSONFromResponse(t *testing.T) {
 
 func TestFallbackToVectorTop(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	candidates := []Candidate{
 		{TopicID: 1, Score: 0.9},
@@ -461,7 +454,7 @@ func TestFallbackToVectorTop(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := r.fallbackToVectorTop(candidates, nil, nil, tt.maxTopics)
+			result := fallbackToVectorTop(nil, candidates, nil, nil, tt.maxTopics, logger)
 			assert.Equal(t, tt.wantIDs, result.TopicIDs())
 		})
 	}
@@ -469,7 +462,6 @@ func TestFallbackToVectorTop(t *testing.T) {
 
 func TestFallbackFromState(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	candidates := []Candidate{
 		{TopicID: 1, Score: 0.9},
@@ -516,7 +508,7 @@ func TestFallbackFromState(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := r.fallbackFromState(tt.state, candidates, nil, nil, tt.maxTopics)
+			result := fallbackFromState(nil, tt.state, candidates, nil, nil, tt.maxTopics, logger)
 			assert.Equal(t, tt.wantIDs, result.TopicIDs())
 		})
 	}
@@ -572,11 +564,6 @@ func TestLoadTopicsContent(t *testing.T) {
 		},
 	}
 
-	r := &Reranker{
-		logger:  logger,
-		msgRepo: mockRepo,
-	}
-
 	candidateMap := map[int64]Candidate{
 		1: {
 			TopicID: 1,
@@ -589,9 +576,8 @@ func TestLoadTopicsContent(t *testing.T) {
 	}
 
 	tr := &trace{candidates: []storage.RerankerCandidate{{TopicID: 1}, {TopicID: 2}}}
-	st := &state{}
 
-	content := r.loadTopicsContent(context.Background(), 123, []int64{1, 2}, candidateMap, tr, st)
+	content := loadTopicsContent(context.Background(), 123, []int64{1, 2}, candidateMap, mockRepo, logger, tr)
 
 	assert.Contains(t, content, "=== Topic 1 ===")
 	assert.Contains(t, content, "=== Topic 2 ===")
@@ -667,7 +653,6 @@ func TestFormatSizeChars(t *testing.T) {
 // TestFilterValidTopics_InvalidIDFormat verifies handling of malformed topic IDs.
 func TestFilterValidTopics_InvalidIDFormat(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	candidateMap := map[int64]Candidate{
 		1: {TopicID: 1},
@@ -682,7 +667,7 @@ func TestFilterValidTopics_InvalidIDFormat(t *testing.T) {
 		},
 	}
 
-	filtered := r.filterValidTopics(123, result, candidateMap)
+	filtered := filterValidTopics(123, result, candidateMap, logger)
 	assert.Equal(t, []int64{1, 2}, filtered.TopicIDs())
 	assert.Len(t, filtered.Topics, 2)
 }
@@ -690,7 +675,6 @@ func TestFilterValidTopics_InvalidIDFormat(t *testing.T) {
 // TestFilterValidTopics_MixedValidAndInvalid verifies filtering with mix of IDs.
 func TestFilterValidTopics_MixedValidAndInvalid(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	candidateMap := map[int64]Candidate{
 		1: {TopicID: 1},
@@ -708,7 +692,7 @@ func TestFilterValidTopics_MixedValidAndInvalid(t *testing.T) {
 		},
 	}
 
-	filtered := r.filterValidTopics(123, result, candidateMap)
+	filtered := filterValidTopics(123, result, candidateMap, logger)
 	assert.Equal(t, []int64{1, 3, 5}, filtered.TopicIDs())
 	assert.Len(t, filtered.Topics, 3)
 }
@@ -718,7 +702,6 @@ func TestFilterValidTopics_MixedValidAndInvalid(t *testing.T) {
 // TestFilterValidPeople_AllValid verifies all people are kept when valid.
 func TestFilterValidPeople_AllValid(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	peopleMap := map[int64]PersonCandidate{
 		1: {PersonID: 1},
@@ -731,7 +714,7 @@ func TestFilterValidPeople_AllValid(t *testing.T) {
 		Artifacts: []ArtifactSelection{{ID: "Artifact:1", Reason: "a1"}},
 	}
 
-	filtered := r.filterValidPeople(123, result, peopleMap)
+	filtered := filterValidPeople(123, result, peopleMap, logger)
 	assert.Equal(t, []int64{1, 2}, filtered.PeopleIDs())
 	assert.Len(t, filtered.People, 2)
 	// Other fields preserved
@@ -742,7 +725,6 @@ func TestFilterValidPeople_AllValid(t *testing.T) {
 // TestFilterValidPeople_SomeHallucinated filters out hallucinated people.
 func TestFilterValidPeople_SomeHallucinated(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	peopleMap := map[int64]PersonCandidate{
 		1: {PersonID: 1},
@@ -757,7 +739,7 @@ func TestFilterValidPeople_SomeHallucinated(t *testing.T) {
 		},
 	}
 
-	filtered := r.filterValidPeople(123, result, peopleMap)
+	filtered := filterValidPeople(123, result, peopleMap, logger)
 	assert.Equal(t, []int64{1, 3}, filtered.PeopleIDs())
 	assert.Len(t, filtered.People, 2)
 }
@@ -765,7 +747,6 @@ func TestFilterValidPeople_SomeHallucinated(t *testing.T) {
 // TestFilterValidPeople_AllHallucinated returns empty when all are invalid.
 func TestFilterValidPeople_AllHallucinated(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	peopleMap := map[int64]PersonCandidate{
 		1: {PersonID: 1},
@@ -778,7 +759,7 @@ func TestFilterValidPeople_AllHallucinated(t *testing.T) {
 		},
 	}
 
-	filtered := r.filterValidPeople(123, result, peopleMap)
+	filtered := filterValidPeople(123, result, peopleMap, logger)
 	assert.Empty(t, filtered.PeopleIDs())
 	assert.Nil(t, filtered.People)
 }
@@ -786,7 +767,6 @@ func TestFilterValidPeople_AllHallucinated(t *testing.T) {
 // TestFilterValidPeople_EmptyInput handles empty input gracefully.
 func TestFilterValidPeople_EmptyInput(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	peopleMap := map[int64]PersonCandidate{
 		1: {PersonID: 1},
@@ -796,14 +776,13 @@ func TestFilterValidPeople_EmptyInput(t *testing.T) {
 		People: []PersonSelection{},
 	}
 
-	filtered := r.filterValidPeople(123, result, peopleMap)
+	filtered := filterValidPeople(123, result, peopleMap, logger)
 	assert.Empty(t, filtered.PeopleIDs())
 }
 
 // TestFilterValidPeople_InvalidIDFormat handles malformed IDs.
 func TestFilterValidPeople_InvalidIDFormat(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	peopleMap := map[int64]PersonCandidate{
 		1: {PersonID: 1},
@@ -816,7 +795,7 @@ func TestFilterValidPeople_InvalidIDFormat(t *testing.T) {
 		},
 	}
 
-	filtered := r.filterValidPeople(123, result, peopleMap)
+	filtered := filterValidPeople(123, result, peopleMap, logger)
 	assert.Equal(t, []int64{1}, filtered.PeopleIDs())
 }
 
@@ -825,7 +804,6 @@ func TestFilterValidPeople_InvalidIDFormat(t *testing.T) {
 // TestFilterValidArtifacts_AllValid verifies all artifacts are kept when valid.
 func TestFilterValidArtifacts_AllValid(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	artifactsMap := map[int64]ArtifactCandidate{
 		1: {ArtifactID: 1},
@@ -838,7 +816,7 @@ func TestFilterValidArtifacts_AllValid(t *testing.T) {
 		Artifacts: []ArtifactSelection{{ID: "Artifact:1", Reason: "a1"}, {ID: "Artifact:2", Reason: "a2"}},
 	}
 
-	filtered := r.filterValidArtifacts(123, result, artifactsMap)
+	filtered := filterValidArtifacts(123, result, artifactsMap, logger)
 	assert.Equal(t, []int64{1, 2}, filtered.ArtifactIDs())
 	assert.Len(t, filtered.Artifacts, 2)
 }
@@ -846,7 +824,6 @@ func TestFilterValidArtifacts_AllValid(t *testing.T) {
 // TestFilterValidArtifacts_SomeHallucinated filters out hallucinated artifacts.
 func TestFilterValidArtifacts_SomeHallucinated(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	artifactsMap := map[int64]ArtifactCandidate{
 		1: {ArtifactID: 1},
@@ -861,7 +838,7 @@ func TestFilterValidArtifacts_SomeHallucinated(t *testing.T) {
 		},
 	}
 
-	filtered := r.filterValidArtifacts(123, result, artifactsMap)
+	filtered := filterValidArtifacts(123, result, artifactsMap, logger)
 	assert.Equal(t, []int64{1, 3}, filtered.ArtifactIDs())
 	assert.Len(t, filtered.Artifacts, 2)
 }
@@ -869,7 +846,6 @@ func TestFilterValidArtifacts_SomeHallucinated(t *testing.T) {
 // TestFilterValidArtifacts_AllHallucinated returns empty when all are invalid.
 func TestFilterValidArtifacts_AllHallucinated(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	artifactsMap := map[int64]ArtifactCandidate{
 		1: {ArtifactID: 1},
@@ -882,7 +858,7 @@ func TestFilterValidArtifacts_AllHallucinated(t *testing.T) {
 		},
 	}
 
-	filtered := r.filterValidArtifacts(123, result, artifactsMap)
+	filtered := filterValidArtifacts(123, result, artifactsMap, logger)
 	assert.Empty(t, filtered.ArtifactIDs())
 	assert.Nil(t, filtered.Artifacts)
 }
@@ -890,7 +866,6 @@ func TestFilterValidArtifacts_AllHallucinated(t *testing.T) {
 // TestFilterValidArtifacts_EmptyInput handles empty input gracefully.
 func TestFilterValidArtifacts_EmptyInput(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	artifactsMap := map[int64]ArtifactCandidate{
 		1: {ArtifactID: 1},
@@ -900,14 +875,13 @@ func TestFilterValidArtifacts_EmptyInput(t *testing.T) {
 		Artifacts: []ArtifactSelection{},
 	}
 
-	filtered := r.filterValidArtifacts(123, result, artifactsMap)
+	filtered := filterValidArtifacts(123, result, artifactsMap, logger)
 	assert.Empty(t, filtered.ArtifactIDs())
 }
 
 // TestFilterValidArtifacts_InvalidIDFormat handles malformed IDs.
 func TestFilterValidArtifacts_InvalidIDFormat(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	artifactsMap := map[int64]ArtifactCandidate{
 		1: {ArtifactID: 1},
@@ -920,7 +894,7 @@ func TestFilterValidArtifacts_InvalidIDFormat(t *testing.T) {
 		},
 	}
 
-	filtered := r.filterValidArtifacts(123, result, artifactsMap)
+	filtered := filterValidArtifacts(123, result, artifactsMap, logger)
 	assert.Equal(t, []int64{1}, filtered.ArtifactIDs())
 }
 
@@ -929,10 +903,9 @@ func TestFilterValidArtifacts_InvalidIDFormat(t *testing.T) {
 // TestParsePeopleArray_ObjectFormat parses people in object format.
 func TestParsePeopleArray_ObjectFormat(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	data := []byte(`[{"id": "Person:1", "reason": "friend"}, {"id": "Person:2", "reason": "colleague"}]`)
-	result := r.parsePeopleArray(data)
+	result := parsePeopleArray(data, logger)
 
 	require.Len(t, result, 2)
 	assert.Equal(t, "Person:1", result[0].ID)
@@ -944,10 +917,9 @@ func TestParsePeopleArray_ObjectFormat(t *testing.T) {
 // TestParsePeopleArray_NumericFallback handles numeric format.
 func TestParsePeopleArray_NumericFallback(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	data := []byte(`[1, 2, 3]`)
-	result := r.parsePeopleArray(data)
+	result := parsePeopleArray(data, logger)
 
 	require.Len(t, result, 3)
 	assert.Equal(t, "Person:1", result[0].ID)
@@ -958,10 +930,9 @@ func TestParsePeopleArray_NumericFallback(t *testing.T) {
 // TestParsePeopleArray_Empty handles empty array.
 func TestParsePeopleArray_Empty(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	data := []byte(`[]`)
-	result := r.parsePeopleArray(data)
+	result := parsePeopleArray(data, logger)
 
 	assert.Nil(t, result)
 }
@@ -969,10 +940,9 @@ func TestParsePeopleArray_Empty(t *testing.T) {
 // TestParsePeopleArray_Invalid handles invalid JSON.
 func TestParsePeopleArray_Invalid(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	data := []byte(`invalid`)
-	result := r.parsePeopleArray(data)
+	result := parsePeopleArray(data, logger)
 
 	assert.Nil(t, result)
 }
@@ -980,10 +950,9 @@ func TestParsePeopleArray_Invalid(t *testing.T) {
 // TestParseArtifactArray_ObjectFormat parses artifacts in object format.
 func TestParseArtifactArray_ObjectFormat(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	data := []byte(`[{"id": "Artifact:1", "reason": "document"}, {"id": "Artifact:2", "reason": "image"}]`)
-	result := r.parseArtifactArray(data)
+	result := parseArtifactArray(data, logger)
 
 	require.Len(t, result, 2)
 	assert.Equal(t, "Artifact:1", result[0].ID)
@@ -995,10 +964,9 @@ func TestParseArtifactArray_ObjectFormat(t *testing.T) {
 // TestParseArtifactArray_NumericFallback handles numeric format.
 func TestParseArtifactArray_NumericFallback(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	data := []byte(`[1, 2, 3]`)
-	result := r.parseArtifactArray(data)
+	result := parseArtifactArray(data, logger)
 
 	require.Len(t, result, 3)
 	assert.Equal(t, "Artifact:1", result[0].ID)
@@ -1009,10 +977,9 @@ func TestParseArtifactArray_NumericFallback(t *testing.T) {
 // TestParseArtifactArray_Empty handles empty array.
 func TestParseArtifactArray_Empty(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	data := []byte(`[]`)
-	result := r.parseArtifactArray(data)
+	result := parseArtifactArray(data, logger)
 
 	assert.Nil(t, result)
 }
@@ -1020,10 +987,9 @@ func TestParseArtifactArray_Empty(t *testing.T) {
 // TestParseArtifactArray_Invalid handles invalid JSON.
 func TestParseArtifactArray_Invalid(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	data := []byte(`invalid`)
-	result := r.parseArtifactArray(data)
+	result := parseArtifactArray(data, logger)
 
 	assert.Nil(t, result)
 }
@@ -1032,24 +998,20 @@ func TestParseArtifactArray_Invalid(t *testing.T) {
 
 // TestBuildCandidateMap_Empty handles empty candidates.
 func TestBuildCandidateMap_Empty(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
-	result := r.buildCandidateMap([]Candidate{})
+	result := buildCandidateMap([]Candidate{})
 
 	assert.Empty(t, result)
 }
 
 // TestBuildCandidateMap_Single builds map with single entry.
 func TestBuildCandidateMap_Single(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	candidates := []Candidate{
 		{TopicID: 42, Score: 0.9, Topic: storage.Topic{ID: 42, Summary: "Test"}},
 	}
 
-	result := r.buildCandidateMap(candidates)
+	result := buildCandidateMap(candidates)
 
 	assert.Len(t, result, 1)
 	assert.Contains(t, result, int64(42))
@@ -1058,8 +1020,6 @@ func TestBuildCandidateMap_Single(t *testing.T) {
 
 // TestBuildCandidateMap_Multiple builds map with multiple entries.
 func TestBuildCandidateMap_Multiple(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	candidates := []Candidate{
 		{TopicID: 1, Score: 0.9, Topic: storage.Topic{ID: 1, Summary: "First"}},
@@ -1067,7 +1027,7 @@ func TestBuildCandidateMap_Multiple(t *testing.T) {
 		{TopicID: 3, Score: 0.7, Topic: storage.Topic{ID: 3, Summary: "Third"}},
 	}
 
-	result := r.buildCandidateMap(candidates)
+	result := buildCandidateMap(candidates)
 
 	assert.Len(t, result, 3)
 	assert.Contains(t, result, int64(1))
@@ -1077,24 +1037,20 @@ func TestBuildCandidateMap_Multiple(t *testing.T) {
 
 // TestBuildPeopleMap_Empty handles empty candidates.
 func TestBuildPeopleMap_Empty(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
-	result := r.buildPeopleMap([]PersonCandidate{})
+	result := buildPeopleMap([]PersonCandidate{})
 
 	assert.Empty(t, result)
 }
 
 // TestBuildPeopleMap_Single builds map with single entry.
 func TestBuildPeopleMap_Single(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	candidates := []PersonCandidate{
 		{PersonID: 42, Score: 0.9, Person: storage.Person{ID: 42, DisplayName: "Test"}},
 	}
 
-	result := r.buildPeopleMap(candidates)
+	result := buildPeopleMap(candidates)
 
 	assert.Len(t, result, 1)
 	assert.Contains(t, result, int64(42))
@@ -1103,8 +1059,6 @@ func TestBuildPeopleMap_Single(t *testing.T) {
 
 // TestBuildPeopleMap_Multiple builds map with multiple entries.
 func TestBuildPeopleMap_Multiple(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	candidates := []PersonCandidate{
 		{PersonID: 1, Score: 0.9, Person: storage.Person{ID: 1, DisplayName: "First"}},
@@ -1112,7 +1066,7 @@ func TestBuildPeopleMap_Multiple(t *testing.T) {
 		{PersonID: 3, Score: 0.7, Person: storage.Person{ID: 3, DisplayName: "Third"}},
 	}
 
-	result := r.buildPeopleMap(candidates)
+	result := buildPeopleMap(candidates)
 
 	assert.Len(t, result, 3)
 	assert.Contains(t, result, int64(1))
@@ -1122,24 +1076,20 @@ func TestBuildPeopleMap_Multiple(t *testing.T) {
 
 // TestBuildArtifactsMap_Empty handles empty candidates.
 func TestBuildArtifactsMap_Empty(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
-	result := r.buildArtifactsMap([]ArtifactCandidate{})
+	result := buildArtifactsMap([]ArtifactCandidate{})
 
 	assert.Empty(t, result)
 }
 
 // TestBuildArtifactsMap_Single builds map with single entry.
 func TestBuildArtifactsMap_Single(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
 
 	candidates := []ArtifactCandidate{
 		{ArtifactID: 42, Score: 0.9, OriginalName: "test.pdf"},
 	}
 
-	result := r.buildArtifactsMap(candidates)
+	result := buildArtifactsMap(candidates)
 
 	assert.Len(t, result, 1)
 	assert.Contains(t, result, int64(42))
@@ -1148,16 +1098,13 @@ func TestBuildArtifactsMap_Single(t *testing.T) {
 
 // TestBuildArtifactsMap_Multiple builds map with multiple entries.
 func TestBuildArtifactsMap_Multiple(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
-
 	candidates := []ArtifactCandidate{
 		{ArtifactID: 1, Score: 0.9, OriginalName: "first.pdf"},
 		{ArtifactID: 2, Score: 0.8, OriginalName: "second.pdf"},
 		{ArtifactID: 3, Score: 0.7, OriginalName: "third.pdf"},
 	}
 
-	result := r.buildArtifactsMap(candidates)
+	result := buildArtifactsMap(candidates)
 
 	assert.Len(t, result, 3)
 	assert.Contains(t, result, int64(1))
@@ -1169,24 +1116,17 @@ func TestBuildArtifactsMap_Multiple(t *testing.T) {
 
 // TestFormatArtifactCandidates_Empty handles empty candidates.
 func TestFormatArtifactCandidates_Empty(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
-
-	result := r.formatArtifactCandidates([]ArtifactCandidate{})
-
+	result := formatArtifactCandidates([]ArtifactCandidate{})
 	assert.Empty(t, result)
 }
 
 // TestFormatArtifactCandidates_WithKeywords formats with keywords.
 func TestFormatArtifactCandidates_WithKeywords(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
-
 	candidates := []ArtifactCandidate{
 		{ArtifactID: 1, Score: 0.9, FileType: "pdf", OriginalName: "doc.pdf", Summary: "Test doc", Keywords: []string{"kw1", "kw2"}},
 	}
 
-	result := r.formatArtifactCandidates(candidates)
+	result := formatArtifactCandidates(candidates)
 
 	assert.Contains(t, result, "[Artifact:1]")
 	assert.Contains(t, result, "pdf")
@@ -1197,45 +1137,33 @@ func TestFormatArtifactCandidates_WithKeywords(t *testing.T) {
 
 // TestFormatArtifactCandidates_WithEntities formats with entities.
 func TestFormatArtifactCandidates_WithEntities(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
-
 	candidates := []ArtifactCandidate{
 		{ArtifactID: 1, Score: 0.9, FileType: "pdf", OriginalName: "doc.pdf", Summary: "Test doc", Entities: []string{"Entity1", "Entity2"}},
 	}
 
-	result := r.formatArtifactCandidates(candidates)
-
+	result := formatArtifactCandidates(candidates)
 	assert.Contains(t, result, "Entities: Entity1, Entity2")
 }
 
 // TestFormatArtifactCandidates_WithBoth formats with both keywords and entities.
 func TestFormatArtifactCandidates_WithBoth(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
-
 	candidates := []ArtifactCandidate{
 		{ArtifactID: 1, Score: 0.9, FileType: "pdf", OriginalName: "doc.pdf", Summary: "Test doc", Keywords: []string{"kw1"}, Entities: []string{"Entity1"}},
 	}
 
-	result := r.formatArtifactCandidates(candidates)
-
+	result := formatArtifactCandidates(candidates)
 	assert.Contains(t, result, "kw1")
 	assert.Contains(t, result, "Entities: Entity1")
 }
 
 // TestFormatArtifactCandidates_LongSummaryTruncation verifies summary truncation.
 func TestFormatArtifactCandidates_LongSummaryTruncation(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	r := &Reranker{logger: logger}
-
 	longSummary := strings.Repeat("word ", 100) // Long summary
 	candidates := []ArtifactCandidate{
 		{ArtifactID: 1, Score: 0.9, FileType: "pdf", OriginalName: "doc.pdf", Summary: longSummary},
 	}
 
-	result := r.formatArtifactCandidates(candidates)
-
+	result := formatArtifactCandidates(candidates)
 	// Should contain the summary (not truncated by formatArtifactCandidates)
 	assert.Contains(t, result, "word")
 }

@@ -1,3 +1,4 @@
+//nolint:staticcheck // Tests use deprecated NewService for backward compatibility testing
 package bot
 
 import (
