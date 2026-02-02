@@ -2,15 +2,10 @@ package memory
 
 import (
 	"context"
-	"io"
-	"log/slog"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/runixer/laplaced/internal/agent/archivist"
-	"github.com/runixer/laplaced/internal/config"
-	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 
@@ -20,16 +15,12 @@ import (
 
 func TestApplyPeopleUpdates_AddNewPerson(t *testing.T) {
 	// Setup
-	mockStore := new(testutil.MockStorage)
-	mockOR := new(testutil.MockOpenRouterClient)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	cfg := &config.Config{}
-	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+	ts := setupTestServices(t)
+	svc := ts.Service
+	mockStore := ts.Store
+	mockOR := ts.ORClient
 
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
-	svc.SetPeopleRepository(mockStore)
-
-	userID := int64(123)
+	userID := testutil.TestUserID
 	referenceDate := time.Now()
 
 	peopleResult := archivist.PeopleResult{
@@ -71,14 +62,10 @@ func TestApplyPeopleUpdates_AddNewPerson(t *testing.T) {
 
 func TestApplyPeopleUpdates_SkipDuplicatePerson(t *testing.T) {
 	// Setup
-	mockStore := new(testutil.MockStorage)
-	mockOR := new(testutil.MockOpenRouterClient)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	cfg := &config.Config{}
-	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
-
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
-	svc.SetPeopleRepository(mockStore)
+	ts := setupTestServices(t)
+	svc := ts.Service
+	mockStore := ts.Store
+	mockOR := ts.ORClient
 
 	userID := int64(123)
 	referenceDate := time.Now()
@@ -118,16 +105,12 @@ func TestApplyPeopleUpdates_SkipDuplicatePerson(t *testing.T) {
 
 func TestApplyPeopleUpdates_NameVariation_AddBecomesUpdate(t *testing.T) {
 	// Setup: test Russian naming pattern "Мария" -> "Мария Ивановна"
-	mockStore := new(testutil.MockStorage)
-	mockOR := new(testutil.MockOpenRouterClient)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	cfg := &config.Config{}
-	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+	ts := setupTestServices(t)
+	svc := ts.Service
+	mockStore := ts.Store
+	mockOR := ts.ORClient
 
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
-	svc.SetPeopleRepository(mockStore)
-
-	userID := int64(123)
+	userID := testutil.TestUserID
 	referenceDate := time.Now()
 
 	existingPeople := []storage.Person{
@@ -175,16 +158,12 @@ func TestApplyPeopleUpdates_NameVariation_AddBecomesUpdate(t *testing.T) {
 
 func TestApplyPeopleUpdates_AddPersonByAlias(t *testing.T) {
 	// Setup
-	mockStore := new(testutil.MockStorage)
-	mockOR := new(testutil.MockOpenRouterClient)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	cfg := &config.Config{}
-	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+	ts := setupTestServices(t)
+	svc := ts.Service
+	mockStore := ts.Store
+	mockOR := ts.ORClient
 
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
-	svc.SetPeopleRepository(mockStore)
-
-	userID := int64(123)
+	userID := testutil.TestUserID
 	referenceDate := time.Now()
 
 	existingPeople := []storage.Person{
@@ -223,16 +202,12 @@ func TestApplyPeopleUpdates_AddPersonByAlias(t *testing.T) {
 
 func TestApplyPeopleUpdates_ExistingPerson(t *testing.T) {
 	// Setup
-	mockStore := new(testutil.MockStorage)
-	mockOR := new(testutil.MockOpenRouterClient)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	cfg := &config.Config{}
-	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+	ts := setupTestServices(t)
+	svc := ts.Service
+	mockStore := ts.Store
+	mockOR := ts.ORClient
 
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
-	svc.SetPeopleRepository(mockStore)
-
-	userID := int64(123)
+	userID := testutil.TestUserID
 	referenceDate := time.Now()
 
 	existingPeople := []storage.Person{
@@ -286,16 +261,12 @@ func TestApplyPeopleUpdates_ExistingPerson(t *testing.T) {
 
 func TestApplyPeopleUpdates_UpdatePersonWithRename(t *testing.T) {
 	// Setup
-	mockStore := new(testutil.MockStorage)
-	mockOR := new(testutil.MockOpenRouterClient)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	cfg := &config.Config{}
-	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+	ts := setupTestServices(t)
+	svc := ts.Service
+	mockStore := ts.Store
+	mockOR := ts.ORClient
 
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
-	svc.SetPeopleRepository(mockStore)
-
-	userID := int64(123)
+	userID := testutil.TestUserID
 	referenceDate := time.Now()
 
 	existingPeople := []storage.Person{
@@ -342,16 +313,12 @@ func TestApplyPeopleUpdates_UpdatePersonWithRename(t *testing.T) {
 
 func TestApplyPeopleUpdates_MergePeople(t *testing.T) {
 	// Setup
-	mockStore := new(testutil.MockStorage)
-	mockOR := new(testutil.MockOpenRouterClient)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	cfg := &config.Config{}
-	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+	ts := setupTestServices(t)
+	svc := ts.Service
+	mockStore := ts.Store
+	mockOR := ts.ORClient
 
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
-	svc.SetPeopleRepository(mockStore)
-
-	userID := int64(123)
+	userID := testutil.TestUserID
 	referenceDate := time.Now()
 
 	existingPeople := []storage.Person{
@@ -419,16 +386,12 @@ func TestApplyPeopleUpdates_MergePeople(t *testing.T) {
 
 func TestApplyPeopleUpdates_MergePersonNotFound(t *testing.T) {
 	// Setup
-	mockStore := new(testutil.MockStorage)
-	mockOR := new(testutil.MockOpenRouterClient)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	cfg := &config.Config{}
-	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+	ts := setupTestServices(t)
+	svc := ts.Service
+	mockStore := ts.Store
+	mockOR := ts.ORClient
 
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
-	svc.SetPeopleRepository(mockStore)
-
-	userID := int64(123)
+	userID := testutil.TestUserID
 	referenceDate := time.Now()
 
 	existingPeople := []storage.Person{
@@ -463,16 +426,12 @@ func TestApplyPeopleUpdates_MergePersonNotFound(t *testing.T) {
 
 func TestApplyPeopleUpdates_UpdatePersonNotFound(t *testing.T) {
 	// Setup
-	mockStore := new(testutil.MockStorage)
-	mockOR := new(testutil.MockOpenRouterClient)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	cfg := &config.Config{}
-	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+	ts := setupTestServices(t)
+	svc := ts.Service
+	mockStore := ts.Store
+	mockOR := ts.ORClient
 
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
-	svc.SetPeopleRepository(mockStore)
-
-	userID := int64(123)
+	userID := testutil.TestUserID
 	referenceDate := time.Now()
 
 	existingPeople := []storage.Person{} // Empty
@@ -501,16 +460,12 @@ func TestApplyPeopleUpdates_UpdatePersonNotFound(t *testing.T) {
 
 func TestApplyPeopleUpdates_Complex(t *testing.T) {
 	// Setup: test multiple operations in one call
-	mockStore := new(testutil.MockStorage)
-	mockOR := new(testutil.MockOpenRouterClient)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	cfg := &config.Config{}
-	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+	ts := setupTestServices(t)
+	svc := ts.Service
+	mockStore := ts.Store
+	mockOR := ts.ORClient
 
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
-	svc.SetPeopleRepository(mockStore)
-
-	userID := int64(123)
+	userID := testutil.TestUserID
 	referenceDate := time.Now()
 
 	existingPeople := []storage.Person{
@@ -592,16 +547,12 @@ func TestApplyPeopleUpdates_Complex(t *testing.T) {
 func TestApplyPeopleUpdates_MergeWithUsernameAndTelegramID(t *testing.T) {
 	// Test that username and telegram_id are correctly preserved during merge
 	// This reproduces the bug where target person lost username from source
-	mockStore := new(testutil.MockStorage)
-	mockOR := new(testutil.MockOpenRouterClient)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	cfg := &config.Config{}
-	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+	ts := setupTestServices(t)
+	svc := ts.Service
+	mockStore := ts.Store
+	mockOR := ts.ORClient
 
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
-	svc.SetPeopleRepository(mockStore)
-
-	userID := int64(123)
+	userID := testutil.TestUserID
 	referenceDate := time.Now()
 
 	username := "alice_smith"
