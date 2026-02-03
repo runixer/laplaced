@@ -507,3 +507,62 @@ func TestProcessor_ProcessMessage_FileTooLarge(t *testing.T) {
 	// Verify no download was attempted
 	mockDownloader.AssertNotCalled(t, "DownloadFile", mock.Anything, mock.Anything)
 }
+
+func TestProcessor_ProcessMessage_Audio(t *testing.T) {
+	ctx := context.Background()
+	mockDownloader := new(MockFileDownloader)
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	processor := NewProcessor(mockDownloader, translator, "en", logger)
+
+	audioData := []byte("fake-mp3-data")
+	mockDownloader.On("DownloadFile", mock.Anything, "audio-123").Return(audioData, nil)
+
+	msg := &telegram.Message{
+		Audio: &telegram.Audio{
+			FileID:   "audio-123",
+			Duration: 30,
+			MimeType: "audio/mpeg",
+			FileName: "song.mp3",
+		},
+	}
+
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	assert.Equal(t, FileTypeAudio, files[0].FileType)
+	assert.Equal(t, "audio-123", files[0].FileID)
+	assert.Equal(t, "audio/mpeg", files[0].MimeType)
+	assert.Equal(t, "song.mp3", files[0].FileName)
+	mockDownloader.AssertExpectations(t)
+}
+
+func TestProcessor_ProcessMessage_VideoNote(t *testing.T) {
+	ctx := context.Background()
+	mockDownloader := new(MockFileDownloader)
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	processor := NewProcessor(mockDownloader, translator, "en", logger)
+
+	videoNoteData := []byte("fake-mp4-data")
+	mockDownloader.On("DownloadFile", mock.Anything, "video-123").Return(videoNoteData, nil)
+
+	msg := &telegram.Message{
+		VideoNote: &telegram.VideoNote{
+			FileID:   "video-123",
+			Duration: 15,
+		},
+	}
+
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	assert.Equal(t, FileTypeVideoNote, files[0].FileType)
+	assert.Equal(t, "video-123", files[0].FileID)
+	assert.Equal(t, "video/mp4", files[0].MimeType)
+	mockDownloader.AssertExpectations(t)
+}
