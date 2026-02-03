@@ -124,3 +124,100 @@ func TestTurnTracker_TotalDuration(t *testing.T) {
 	duration := tracker.TotalDuration()
 	assert.GreaterOrEqual(t, duration.Milliseconds(), int64(50))
 }
+
+func TestTurnTracker_TotalCostValue(t *testing.T) {
+	tests := []struct {
+		name          string
+		setupTurns    func(*TurnTracker)
+		expectedValue float64
+	}{
+		{
+			name: "no turns",
+			setupTurns: func(t *TurnTracker) {
+				// No turns added
+			},
+			expectedValue: 0.0,
+		},
+		{
+			name: "no cost data",
+			setupTurns: func(t *TurnTracker) {
+				tracker := t
+				tracker.StartTurn()
+				tracker.EndTurn(`{}`, `{}`, 100, 50, nil)
+			},
+			expectedValue: 0.0,
+		},
+		{
+			name: "single turn with cost",
+			setupTurns: func(t *TurnTracker) {
+				tracker := t
+				tracker.StartTurn()
+				cost := 0.001
+				tracker.EndTurn(`{}`, `{}`, 100, 50, &cost)
+			},
+			expectedValue: 0.001,
+		},
+		{
+			name: "multiple turns with costs",
+			setupTurns: func(t *TurnTracker) {
+				tracker := t
+				tracker.StartTurn()
+				cost1 := 0.001
+				tracker.EndTurn(`{}`, `{}`, 100, 50, &cost1)
+
+				tracker.StartTurn()
+				cost2 := 0.002
+				tracker.EndTurn(`{}`, `{}`, 150, 80, &cost2)
+
+				tracker.StartTurn()
+				cost3 := 0.0005
+				tracker.EndTurn(`{}`, `{}`, 75, 40, &cost3)
+			},
+			expectedValue: 0.0035,
+		},
+		{
+			name: "mixed turns (some with cost, some without)",
+			setupTurns: func(t *TurnTracker) {
+				tracker := t
+				tracker.StartTurn()
+				tracker.EndTurn(`{}`, `{}`, 100, 50, nil)
+
+				tracker.StartTurn()
+				cost := 0.005
+				tracker.EndTurn(`{}`, `{}`, 150, 80, &cost)
+
+				tracker.StartTurn()
+				tracker.EndTurn(`{}`, `{}`, 75, 40, nil)
+			},
+			expectedValue: 0.005,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tracker := NewTurnTracker()
+			tt.setupTurns(tracker)
+			assert.Equal(t, tt.expectedValue, tracker.TotalCostValue())
+		})
+	}
+}
+
+func TestTurnTracker_FirstRequest_EmptyTracker(t *testing.T) {
+	tracker := NewTurnTracker()
+
+	// FirstRequest should return empty string when no turns were recorded
+	assert.Equal(t, "", tracker.FirstRequest())
+
+	// Build should return nil when no turns
+	assert.Nil(t, tracker.Build())
+}
+
+func TestTurnTracker_LastResponse_EmptyTracker(t *testing.T) {
+	tracker := NewTurnTracker()
+
+	// LastResponse should return empty string when no turns were recorded
+	assert.Equal(t, "", tracker.LastResponse())
+
+	// TurnCount should be 0
+	assert.Equal(t, 0, tracker.TurnCount())
+}
