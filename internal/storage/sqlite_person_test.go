@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -565,4 +566,87 @@ func TestPersonDefaults(t *testing.T) {
 	assert.False(t, person.FirstSeen.IsZero())                 // Should have timestamp
 	assert.False(t, person.LastSeen.IsZero())                  // Should have timestamp
 	assert.True(t, time.Since(person.FirstSeen) < time.Minute) // Should be recent
+}
+
+func TestDeleteAllPeople(t *testing.T) {
+	store, cleanup := setupTestDB(t)
+	defer cleanup()
+	require.NoError(t, store.Init())
+
+	userID := int64(123)
+	otherUserID := int64(456)
+
+	t.Run("delete all people for user", func(t *testing.T) {
+		// Create people for user1
+		for i := 0; i < 3; i++ {
+			_, err := store.AddPerson(Person{
+				UserID:      userID,
+				DisplayName: fmt.Sprintf("Person %d", i),
+			})
+			require.NoError(t, err)
+		}
+
+		// Create person for user2
+		_, err := store.AddPerson(Person{
+			UserID:      otherUserID,
+			DisplayName: "Other Person",
+		})
+		require.NoError(t, err)
+
+		// Verify initial state
+		people1, _ := store.GetPeople(userID)
+		assert.Len(t, people1, 3)
+		people2, _ := store.GetPeople(otherUserID)
+		assert.Len(t, people2, 1)
+
+		// Delete all for user1
+		err = store.DeleteAllPeople(userID)
+		require.NoError(t, err)
+
+		// Verify user1's people are deleted
+		people1, _ = store.GetPeople(userID)
+		assert.Empty(t, people1, "user1's people should be deleted")
+
+		// Verify user2's people are intact
+		people2, _ = store.GetPeople(otherUserID)
+		assert.Len(t, people2, 1, "user2's people should remain")
+	})
+
+	t.Run("delete all when none exist", func(t *testing.T) {
+		// Should not error even if no people exist for the user
+		err := store.DeleteAllPeople(999)
+		require.NoError(t, err)
+	})
+
+	t.Run("delete all removes all circles", func(t *testing.T) {
+		// Create fresh store for this test
+		store2, cleanup2 := setupTestDB(t)
+		defer cleanup2()
+		require.NoError(t, store2.Init())
+
+		userID3 := int64(789)
+
+		// Create people in different circles
+		circles := []string{"Friends", "Work_Inner", "Family", "Other"}
+		for _, circle := range circles {
+			_, err := store2.AddPerson(Person{
+				UserID:      userID3,
+				DisplayName: fmt.Sprintf("%s Person", circle),
+				Circle:      circle,
+			})
+			require.NoError(t, err)
+		}
+
+		// Verify all circles exist
+		all, _ := store2.GetPeople(userID3)
+		assert.Len(t, all, 4)
+
+		// Delete all
+		err := store2.DeleteAllPeople(userID3)
+		require.NoError(t, err)
+
+		// Verify all are gone
+		all, _ = store2.GetPeople(userID3)
+		assert.Empty(t, all)
+	})
 }
