@@ -289,3 +289,51 @@ func MockChatResponseWithTokens(content string, promptTokens, completionTokens i
 	resp.Usage.TotalTokens = promptTokens + completionTokens
 	return resp
 }
+
+// MockChatResponseWithToolCalls creates a mock ChatCompletionResponse with tool calls.
+// Token counts are set to reasonable defaults (150/30/180).
+func MockChatResponseWithToolCalls(content string, toolCalls []openrouter.ToolCall) openrouter.ChatCompletionResponse {
+	var resp openrouter.ChatCompletionResponse
+	resp.Choices = append(resp.Choices, struct {
+		Message struct {
+			Role             string                `json:"role"`
+			Content          string                `json:"content"`
+			ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+			Reasoning        string                `json:"reasoning,omitempty"`
+			ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
+		} `json:"message"`
+		FinishReason string `json:"finish_reason,omitempty"`
+		Index        int    `json:"index"`
+	}{
+		Message: struct {
+			Role             string                `json:"role"`
+			Content          string                `json:"content"`
+			ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
+			Reasoning        string                `json:"reasoning,omitempty"`
+			ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
+		}{
+			Role:      "assistant",
+			Content:   content,
+			ToolCalls: toolCalls,
+		},
+	})
+	resp.Usage.PromptTokens = 150
+	resp.Usage.CompletionTokens = 30
+	resp.Usage.TotalTokens = 180
+	return resp
+}
+
+// MockToolCall creates a mock ToolCall for testing.
+func MockToolCall(id, name, arguments string) openrouter.ToolCall {
+	return openrouter.ToolCall{
+		ID:   id,
+		Type: "function",
+		Function: struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		}{
+			Name:      name,
+			Arguments: arguments,
+		},
+	}
+}
