@@ -12,82 +12,12 @@ import (
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
-// mockArtifactRepo is a simple mock for ArtifactRepository.
-type mockArtifactRepo struct {
-	mock.Mock
-}
-
-func (m *mockArtifactRepo) AddArtifact(artifact storage.Artifact) (int64, error) {
-	args := m.Called(artifact)
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *mockArtifactRepo) GetArtifact(userID, artifactID int64) (*storage.Artifact, error) {
-	args := m.Called(userID, artifactID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*storage.Artifact), args.Error(1)
-}
-
-func (m *mockArtifactRepo) GetByHash(userID int64, contentHash string) (*storage.Artifact, error) {
-	args := m.Called(userID, contentHash)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*storage.Artifact), args.Error(1)
-}
-
-func (m *mockArtifactRepo) GetPendingArtifacts(userID int64, maxRetries int) ([]storage.Artifact, error) {
-	args := m.Called(userID, maxRetries)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]storage.Artifact), args.Error(1)
-}
-
-func (m *mockArtifactRepo) GetArtifacts(filter storage.ArtifactFilter, limit, offset int) ([]storage.Artifact, int64, error) {
-	args := m.Called(filter, limit, offset)
-	if args.Get(0) == nil {
-		return nil, args.Get(1).(int64), args.Error(2)
-	}
-	return args.Get(0).([]storage.Artifact), args.Get(1).(int64), args.Error(2)
-}
-
-func (m *mockArtifactRepo) UpdateArtifact(artifact storage.Artifact) error {
-	args := m.Called(artifact)
-	return args.Error(0)
-}
-
-func (m *mockArtifactRepo) RecoverArtifactStates(threshold time.Duration) error {
-	args := m.Called(threshold)
-	return args.Error(0)
-}
-
-func (m *mockArtifactRepo) GetArtifactsByIDs(userID int64, artifactIDs []int64) ([]storage.Artifact, error) {
-	args := m.Called(userID, artifactIDs)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]storage.Artifact), args.Error(1)
-}
-
-func (m *mockArtifactRepo) IncrementContextLoadCount(userID int64, artifactIDs []int64) error {
-	args := m.Called(userID, artifactIDs)
-	return args.Error(0)
-}
-
-func (m *mockArtifactRepo) UpdateMessageID(userID, artifactID, messageID int64) error {
-	args := m.Called(userID, artifactID, messageID)
-	return args.Error(0)
-}
-
 // setupArtifactTest creates a test Laplace agent with mock artifact repository.
-func setupArtifactTest(t *testing.T) (*config.Config, *i18n.Translator, *Laplace, *mockArtifactRepo, string) {
+// Returns config, translator, agent, mockStorage (for artifact repo assertions), and temp dir.
+func setupArtifactTest(t *testing.T) (*config.Config, *i18n.Translator, *Laplace, *testutil.MockStorage, string) {
 	t.Helper()
 
 	cfg := testutil.TestConfig()
@@ -101,14 +31,14 @@ func setupArtifactTest(t *testing.T) (*config.Config, *i18n.Translator, *Laplace
 
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
-	mockArtifactRepo := new(mockArtifactRepo)
 
 	// Create a temporary directory for artifact files
 	tempDir := t.TempDir()
 
-	agent := New(cfg, mockORClient, nil, mockStore, mockStore, mockArtifactRepo, translator, testutil.TestLogger())
+	// Use mockStore for all storage interfaces including artifact repository
+	agent := New(cfg, mockORClient, nil, mockStore, mockStore, mockStore, translator, testutil.TestLogger())
 
-	return cfg, translator, agent, mockArtifactRepo, tempDir
+	return cfg, translator, agent, mockStore, tempDir
 }
 
 // TestLoadArtifactFullContent_EarlyReturn tests early return conditions.
@@ -161,7 +91,7 @@ func TestLoadArtifactFullContent_EarlyReturn(t *testing.T) {
 
 // TestLoadArtifactFullContent_ArtifactNotReady skips artifacts that aren't ready.
 func TestLoadArtifactFullContent_ArtifactNotReady(t *testing.T) {
-	_, _, agent, mockArtifactRepo, tempDir := setupArtifactTest(t)
+	_, _, agent, mockStore, tempDir := setupArtifactTest(t)
 
 	agent.storagePath = tempDir
 
@@ -174,7 +104,7 @@ func TestLoadArtifactFullContent_ArtifactNotReady(t *testing.T) {
 	require.NoError(t, err)
 
 	// Mock artifact that's not ready
-	mockArtifactRepo.On("GetArtifact", userID, artifactID).Return(&storage.Artifact{
+	mockStore.On("GetArtifact", userID, artifactID).Return(&storage.Artifact{
 		ID:        artifactID,
 		State:     "pending", // Not ready
 		FilePath:  "test.txt",
@@ -186,12 +116,12 @@ func TestLoadArtifactFullContent_ArtifactNotReady(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, parts, "should return nil when no artifacts are ready")
 
-	mockArtifactRepo.AssertExpectations(t)
+	mockStore.AssertExpectations(t)
 }
 
 // TestLoadArtifactFullContent_ArtifactNotFound handles GetArtifact errors gracefully.
 func TestLoadArtifactFullContent_ArtifactNotFound(t *testing.T) {
-	_, _, agent, mockArtifactRepo, tempDir := setupArtifactTest(t)
+	_, _, agent, mockStore, tempDir := setupArtifactTest(t)
 
 	agent.storagePath = tempDir
 
@@ -199,18 +129,18 @@ func TestLoadArtifactFullContent_ArtifactNotFound(t *testing.T) {
 	artifactID := int64(999)
 
 	// Mock artifact not found
-	mockArtifactRepo.On("GetArtifact", userID, artifactID).Return(nil, assert.AnError)
+	mockStore.On("GetArtifact", userID, artifactID).Return(nil, assert.AnError)
 
 	parts, err := agent.loadArtifactFullContent(context.Background(), userID, []int64{artifactID})
 	require.NoError(t, err)
 	assert.Nil(t, parts, "should return nil when artifact not found")
 
-	mockArtifactRepo.AssertExpectations(t)
+	mockStore.AssertExpectations(t)
 }
 
 // TestLoadArtifactFullContent_FileReadError handles file read errors gracefully.
 func TestLoadArtifactFullContent_FileReadError(t *testing.T) {
-	_, _, agent, mockArtifactRepo, tempDir := setupArtifactTest(t)
+	_, _, agent, mockStore, tempDir := setupArtifactTest(t)
 
 	agent.storagePath = tempDir
 
@@ -218,7 +148,7 @@ func TestLoadArtifactFullContent_FileReadError(t *testing.T) {
 	artifactID := int64(1)
 
 	// Mock artifact with file that doesn't exist
-	mockArtifactRepo.On("GetArtifact", userID, artifactID).Return(&storage.Artifact{
+	mockStore.On("GetArtifact", userID, artifactID).Return(&storage.Artifact{
 		ID:        artifactID,
 		State:     "ready",
 		FilePath:  "nonexistent.txt",
@@ -230,12 +160,12 @@ func TestLoadArtifactFullContent_FileReadError(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, parts, "should return nil when file cannot be read")
 
-	mockArtifactRepo.AssertExpectations(t)
+	mockStore.AssertExpectations(t)
 }
 
 // TestLoadArtifactFullContent_CountLimit respects the max artifacts count limit.
 func TestLoadArtifactFullContent_CountLimit(t *testing.T) {
-	cfg, _, agent, mockArtifactRepo, tempDir := setupArtifactTest(t)
+	cfg, _, agent, mockStore, tempDir := setupArtifactTest(t)
 
 	agent.storagePath = tempDir
 	cfg.Agents.Reranker.Artifacts.Max = 2 // Set max to 2
@@ -250,7 +180,7 @@ func TestLoadArtifactFullContent_CountLimit(t *testing.T) {
 	require.NoError(t, err)
 
 	// Mock 2 artifacts (3rd one should NOT be fetched due to count limit)
-	mockArtifactRepo.On("GetArtifact", userID, int64(1)).Return(&storage.Artifact{
+	mockStore.On("GetArtifact", userID, int64(1)).Return(&storage.Artifact{
 		ID:        1,
 		State:     "ready",
 		FileType:  "pdf",
@@ -259,7 +189,7 @@ func TestLoadArtifactFullContent_CountLimit(t *testing.T) {
 		CreatedAt: time.Now(),
 	}, nil).Once()
 
-	mockArtifactRepo.On("GetArtifact", userID, int64(2)).Return(&storage.Artifact{
+	mockStore.On("GetArtifact", userID, int64(2)).Return(&storage.Artifact{
 		ID:        2,
 		State:     "ready",
 		FileType:  "pdf",
@@ -269,7 +199,7 @@ func TestLoadArtifactFullContent_CountLimit(t *testing.T) {
 	}, nil).Once()
 
 	// Expect IncrementContextLoadCount to be called with 2 artifact IDs
-	mockArtifactRepo.On("IncrementContextLoadCount", userID, []int64{int64(1), int64(2)}).Return(nil)
+	mockStore.On("IncrementContextLoadCount", userID, []int64{int64(1), int64(2)}).Return(nil)
 
 	parts, err := agent.loadArtifactFullContent(context.Background(), userID, []int64{1, 2, 3})
 	require.NoError(t, err)
@@ -277,12 +207,12 @@ func TestLoadArtifactFullContent_CountLimit(t *testing.T) {
 	// Should have 2 artifacts (TextPart + FilePart for each = 4 parts)
 	assert.Len(t, parts, 4, "should load max 2 artifacts")
 
-	mockArtifactRepo.AssertExpectations(t)
+	mockStore.AssertExpectations(t)
 }
 
 // TestLoadArtifactFullContent_SizeLimit respects the max bytes limit.
 func TestLoadArtifactFullContent_SizeLimit(t *testing.T) {
-	cfg, _, agent, mockArtifactRepo, tempDir := setupArtifactTest(t)
+	cfg, _, agent, mockStore, tempDir := setupArtifactTest(t)
 
 	agent.storagePath = tempDir
 	cfg.Agents.Reranker.Artifacts.MaxContextBytes = 30 // Set very low limit
@@ -300,7 +230,7 @@ func TestLoadArtifactFullContent_SizeLimit(t *testing.T) {
 	require.NoError(t, err)
 
 	// First artifact is small
-	mockArtifactRepo.On("GetArtifact", userID, int64(1)).Return(&storage.Artifact{
+	mockStore.On("GetArtifact", userID, int64(1)).Return(&storage.Artifact{
 		ID:        1,
 		State:     "ready",
 		FileType:  "pdf",
@@ -310,7 +240,7 @@ func TestLoadArtifactFullContent_SizeLimit(t *testing.T) {
 	}, nil).Once()
 
 	// Second artifact would exceed size limit (10 + 30 = 40 > 30)
-	mockArtifactRepo.On("GetArtifact", userID, int64(2)).Return(&storage.Artifact{
+	mockStore.On("GetArtifact", userID, int64(2)).Return(&storage.Artifact{
 		ID:        2,
 		State:     "ready",
 		FileType:  "pdf",
@@ -319,7 +249,7 @@ func TestLoadArtifactFullContent_SizeLimit(t *testing.T) {
 		CreatedAt: time.Now(),
 	}, nil).Once()
 
-	mockArtifactRepo.On("IncrementContextLoadCount", userID, []int64{int64(1)}).Return(nil)
+	mockStore.On("IncrementContextLoadCount", userID, []int64{int64(1)}).Return(nil)
 
 	parts, err := agent.loadArtifactFullContent(context.Background(), userID, []int64{1, 2})
 	require.NoError(t, err)
@@ -327,12 +257,12 @@ func TestLoadArtifactFullContent_SizeLimit(t *testing.T) {
 	// Should have only the first artifact (TextPart + FilePart = 2 parts)
 	assert.Len(t, parts, 2, "should stop loading when size limit would be exceeded")
 
-	mockArtifactRepo.AssertExpectations(t)
+	mockStore.AssertExpectations(t)
 }
 
 // TestLoadArtifactFullContent_UsageTracking calls IncrementContextLoadCount.
 func TestLoadArtifactFullContent_UsageTracking(t *testing.T) {
-	_, _, agent, mockArtifactRepo, tempDir := setupArtifactTest(t)
+	_, _, agent, mockStore, tempDir := setupArtifactTest(t)
 
 	agent.storagePath = tempDir
 
@@ -343,7 +273,7 @@ func TestLoadArtifactFullContent_UsageTracking(t *testing.T) {
 	err := os.WriteFile(testFile, []byte("content"), 0600)
 	require.NoError(t, err)
 
-	mockArtifactRepo.On("GetArtifact", userID, int64(1)).Return(&storage.Artifact{
+	mockStore.On("GetArtifact", userID, int64(1)).Return(&storage.Artifact{
 		ID:        1,
 		State:     "ready",
 		FileType:  "pdf",
@@ -352,10 +282,10 @@ func TestLoadArtifactFullContent_UsageTracking(t *testing.T) {
 		CreatedAt: time.Now(),
 	}, nil).Once()
 
-	mockArtifactRepo.On("IncrementContextLoadCount", userID, []int64{int64(1)}).Return(nil)
+	mockStore.On("IncrementContextLoadCount", userID, []int64{int64(1)}).Return(nil)
 
 	_, err = agent.loadArtifactFullContent(context.Background(), userID, []int64{1})
 	require.NoError(t, err)
 
-	mockArtifactRepo.AssertExpectations(t)
+	mockStore.AssertExpectations(t)
 }

@@ -7,7 +7,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// mockAgent is a simple Agent implementation for testing.
+// mockAgent is a minimal Agent implementation for testing.
+// LEGITIMATE: Kept inline because this is a simple stub used only for registry tests.
+// Using testutil would be overkill for a 2-method interface.
 type mockAgent struct {
 	agentType AgentType
 }

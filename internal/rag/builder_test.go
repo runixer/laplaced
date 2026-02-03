@@ -316,7 +316,9 @@ func TestServiceBuilder_VectorMapsInitialized(t *testing.T) {
 	assert.Equal(t, int64(0), svc.maxLoadedArtifactID)
 }
 
-// mockAgent is a minimal mock implementation of agent.Agent for testing
+// mockAgent is a minimal mock implementation of agent.Agent for testing.
+// LEGITIMATE: Kept inline because this is a simple stub used only for builder tests.
+// Using testutil would be overkill for a 2-method interface.
 type mockAgent struct{}
 
 func (m *mockAgent) Type() agent.AgentType {
@@ -328,6 +330,8 @@ func (m *mockAgent) Execute(_ context.Context, _ *agent.Request) (*agent.Respons
 }
 
 // mockMemoryService is a minimal mock implementation of MemoryService for testing.
+// LEGITIMATE: Kept inline because this is a simple stub used only for builder tests.
+// Using testutil would be overkill for a 2-method interface.
 type mockMemoryService struct{}
 
 func (m *mockMemoryService) ProcessSession(_ context.Context, _ int64, _ []storage.Message, _ time.Time, _ int64) error {

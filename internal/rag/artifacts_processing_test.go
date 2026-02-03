@@ -25,7 +25,7 @@ func TestProcessSingleArtifact_Success(t *testing.T) {
 
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
-	mockArtifactRepo := new(MockArtifactRepository)
+	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
 	userID := int64(123)
@@ -90,7 +90,7 @@ func TestProcessSingleArtifact_AgentError(t *testing.T) {
 
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
-	mockArtifactRepo := new(MockArtifactRepository)
+	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
 	userID := int64(123)
@@ -139,7 +139,7 @@ func TestProcessSingleArtifact_EmbeddingError(t *testing.T) {
 
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
-	mockArtifactRepo := new(MockArtifactRepository)
+	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
 	userID := int64(123)
@@ -189,7 +189,7 @@ func TestProcessSingleArtifact_RetryLogic(t *testing.T) {
 
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
-	mockArtifactRepo := new(MockArtifactRepository)
+	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
 	userID := int64(123)
@@ -257,7 +257,7 @@ func TestProcessSingleArtifact_ShuttingDown(t *testing.T) {
 
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
-	mockArtifactRepo := new(MockArtifactRepository)
+	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
 	userID := int64(123)
@@ -312,7 +312,7 @@ func TestProcessSingleArtifact_WithSharedContext(t *testing.T) {
 
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
-	mockArtifactRepo := new(MockArtifactRepository)
+	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
 	userID := int64(123)
@@ -379,7 +379,7 @@ func TestProcessArtifactExtraction_RespectsShuttingDown(t *testing.T) {
 
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
-	mockArtifactRepo := new(MockArtifactRepository)
+	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
 	userID := int64(123)
@@ -422,7 +422,7 @@ func TestProcessArtifactExtraction_ProcessesAllPending(t *testing.T) {
 
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
-	mockArtifactRepo := new(MockArtifactRepository)
+	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
 	userID1 := int64(123)

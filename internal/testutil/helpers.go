@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/runixer/laplaced/internal/config"
-	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/openrouter"
 )
@@ -113,13 +112,6 @@ extractor:
 		t.Fatalf("failed to create test translator: %v", err)
 	}
 	return tr
-}
-
-// TestFileProcessor creates a file processor for tests.
-func TestFileProcessor(t *testing.T, downloader *MockFileDownloader, translator *i18n.Translator) *files.Processor {
-	t.Helper()
-	logger := TestLogger()
-	return files.NewProcessor(downloader, translator, "en", logger)
 }
 
 // Ptr returns a pointer to the given value. Useful for optional fields.

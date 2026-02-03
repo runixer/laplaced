@@ -586,7 +586,7 @@ func TestSearchPeopleAndArtifacts(t *testing.T) {
 
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
-	mockArtifactRepo := new(MockArtifactRepository)
+	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
 	userID := int64(123)

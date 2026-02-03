@@ -4,6 +4,7 @@ package testutil
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/runixer/laplaced/internal/openrouter"
@@ -685,6 +686,19 @@ func (m *MockFileDownloader) DownloadFileAsBase64(ctx context.Context, fileID st
 	return args.String(0), args.Error(1)
 }
 
+// MockFileSaver implements files.FileSaver for tests.
+type MockFileSaver struct {
+	mock.Mock
+}
+
+func (m *MockFileSaver) SaveFile(ctx context.Context, userID int64, messageID int64, fileType string, originalName string, mimeType string, reader io.Reader, messageText string) (*int64, error) {
+	args := m.Called(ctx, userID, messageID, fileType, originalName, mimeType, mock.Anything, messageText)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*int64), args.Error(1)
+}
+
 // MockVectorSearcher implements rag.VectorSearcher for tests.
 type MockVectorSearcher struct {
 	mock.Mock
@@ -807,4 +821,43 @@ type MockToolHandler struct {
 func (m *MockToolHandler) ExecuteToolCall(toolName string, arguments string) (string, error) {
 	args := m.Called(toolName, arguments)
 	return args.String(0), args.Error(1)
+}
+
+// MockRetriever is a mock for testing code that needs rag.Retriever.
+// Due to import cycle constraints (rag tests import testutil), this mock
+// cannot directly implement rag.Retriever.
+//
+// For laplace package tests that need rag.Retriever, use this approach:
+//
+//	// In laplace_context_test.go - define a thin wrapper that casts types:
+//	type ragRetrieverAdapter struct {
+//		*testutil.MockRetriever
+//	}
+//
+//	func (a *ragRetrieverAdapter) Retrieve(ctx context.Context, userID int64, query string, opts *rag.RetrievalOptions) (*rag.RetrievalResult, *rag.RetrievalDebugInfo, error) {
+//		result, debugInfo, err := a.MockRetriever.Retrieve(ctx, userID, query, opts)
+//		return result.(*rag.RetrievalResult), debugInfo.(*rag.RetrievalDebugInfo), err
+//	}
+//
+// For now, laplace_context_test.go keeps its inline mockRetriever which directly
+// implements the interface. This is acceptable for a single file.
+type MockRetriever struct {
+	mock.Mock
+}
+
+// GetRecentTopics returns the N most recent topics for a user with message counts.
+func (m *MockRetriever) GetRecentTopics(userID int64, limit int) ([]storage.TopicExtended, error) {
+	args := m.Called(userID, limit)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.TopicExtended), args.Error(1)
+}
+
+// Retrieve performs RAG retrieval for a query.
+// Returns (result interface{}, debugInfo interface{}, error).
+// Caller is responsible for type assertions to *rag.RetrievalResult and *rag.RetrievalDebugInfo.
+func (m *MockRetriever) Retrieve(ctx context.Context, userID int64, query string, opts interface{}) (interface{}, interface{}, error) {
+	args := m.Called(ctx, userID, query, opts)
+	return args.Get(0), args.Get(1), args.Error(2)
 }

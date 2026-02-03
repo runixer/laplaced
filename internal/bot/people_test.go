@@ -2,10 +2,12 @@ package bot
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/runixer/laplaced/internal/bot/tools"
+	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
 	"github.com/runixer/laplaced/internal/testutil"
@@ -13,18 +15,19 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-func TestExtractForwardedPeople_NewPerson(t *testing.T) {
-	// Setup
+// setupBotForPeopleTests creates a test Bot with all required dependencies for people tests.
+// Returns the bot, mock storage, mock OpenRouter client, translator, and logger.
+func setupBotForPeopleTests(t *testing.T) (*Bot, *testutil.MockStorage, *testutil.MockOpenRouterClient, *slog.Logger) {
+	t.Helper()
+
 	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
 	cfg := testutil.TestConfig()
-
 	mockDownloader := new(testutil.MockFileDownloader)
 
-	// Create bot with peopleRepo
 	bot := &Bot{
 		api:             mockAPI,
 		userRepo:        mockStore,
@@ -35,11 +38,18 @@ func TestExtractForwardedPeople_NewPerson(t *testing.T) {
 		peopleRepo:      mockStore,
 		orClient:        mockORClient,
 		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
+		fileProcessor:   files.NewProcessor(mockDownloader, translator, "en", logger),
 		cfg:             cfg,
 		logger:          logger,
 		translator:      translator,
 	}
+
+	return bot, mockStore, mockORClient, logger
+}
+
+func TestExtractForwardedPeople_NewPerson(t *testing.T) {
+	// Setup
+	bot, mockStore, _, logger := setupBotForPeopleTests(t)
 
 	userID := int64(123)
 	now := int(time.Now().Unix())
@@ -93,30 +103,7 @@ func TestExtractForwardedPeople_NewPerson(t *testing.T) {
 }
 
 func TestExtractForwardedPeople_UpdateExistingPerson(t *testing.T) {
-	// Setup
-	translator := testutil.TestTranslator(t)
-	logger := testutil.TestLogger()
-	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
-	cfg := testutil.TestConfig()
-	mockAPI := new(testutil.MockBotAPI)
-	mockDownloader := new(testutil.MockFileDownloader)
-
-	bot := &Bot{
-		api:             mockAPI,
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		peopleRepo:      mockStore,
-		orClient:        mockORClient,
-		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
-		cfg:             cfg,
-		logger:          logger,
-		translator:      translator,
-	}
+	bot, mockStore, _, logger := setupBotForPeopleTests(t)
 
 	userID := int64(123)
 	now := int(time.Now().Unix())
@@ -163,30 +150,7 @@ func TestExtractForwardedPeople_UpdateExistingPerson(t *testing.T) {
 }
 
 func TestExtractForwardedPeople_SkipBots(t *testing.T) {
-	// Setup
-	translator := testutil.TestTranslator(t)
-	logger := testutil.TestLogger()
-	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
-	cfg := testutil.TestConfig()
-	mockAPI := new(testutil.MockBotAPI)
-	mockDownloader := new(testutil.MockFileDownloader)
-
-	bot := &Bot{
-		api:             mockAPI,
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		peopleRepo:      mockStore,
-		orClient:        mockORClient,
-		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
-		cfg:             cfg,
-		logger:          logger,
-		translator:      translator,
-	}
+	bot, mockStore, _, logger := setupBotForPeopleTests(t)
 
 	userID := int64(123)
 	now := int(time.Now().Unix())
@@ -219,30 +183,7 @@ func TestExtractForwardedPeople_SkipBots(t *testing.T) {
 }
 
 func TestExtractForwardedPeople_SkipSelf(t *testing.T) {
-	// Setup
-	translator := testutil.TestTranslator(t)
-	logger := testutil.TestLogger()
-	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
-	cfg := testutil.TestConfig()
-	mockAPI := new(testutil.MockBotAPI)
-	mockDownloader := new(testutil.MockFileDownloader)
-
-	bot := &Bot{
-		api:             mockAPI,
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		peopleRepo:      mockStore,
-		orClient:        mockORClient,
-		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
-		cfg:             cfg,
-		logger:          logger,
-		translator:      translator,
-	}
+	bot, mockStore, _, logger := setupBotForPeopleTests(t)
 
 	userID := int64(123)
 	now := int(time.Now().Unix())
@@ -271,30 +212,7 @@ func TestExtractForwardedPeople_SkipSelf(t *testing.T) {
 }
 
 func TestExtractForwardedPeople_SkipNonUserForwards(t *testing.T) {
-	// Setup
-	translator := testutil.TestTranslator(t)
-	logger := testutil.TestLogger()
-	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
-	cfg := testutil.TestConfig()
-	mockAPI := new(testutil.MockBotAPI)
-	mockDownloader := new(testutil.MockFileDownloader)
-
-	bot := &Bot{
-		api:             mockAPI,
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		peopleRepo:      mockStore,
-		orClient:        mockORClient,
-		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
-		cfg:             cfg,
-		logger:          logger,
-		translator:      translator,
-	}
+	bot, mockStore, _, logger := setupBotForPeopleTests(t)
 
 	userID := int64(123)
 	now := int(time.Now().Unix())
@@ -322,30 +240,7 @@ func TestExtractForwardedPeople_SkipNonUserForwards(t *testing.T) {
 }
 
 func TestExtractForwardedPeople_UpdatePersonByUsername(t *testing.T) {
-	// Setup
-	translator := testutil.TestTranslator(t)
-	logger := testutil.TestLogger()
-	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
-	cfg := testutil.TestConfig()
-	mockAPI := new(testutil.MockBotAPI)
-	mockDownloader := new(testutil.MockFileDownloader)
-
-	bot := &Bot{
-		api:             mockAPI,
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		peopleRepo:      mockStore,
-		orClient:        mockORClient,
-		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
-		cfg:             cfg,
-		logger:          logger,
-		translator:      translator,
-	}
+	bot, mockStore, _, logger := setupBotForPeopleTests(t)
 
 	userID := int64(123)
 	now := int(time.Now().Unix())
@@ -399,30 +294,9 @@ func TestExtractForwardedPeople_UpdatePersonByUsername(t *testing.T) {
 }
 
 func TestExtractForwardedPeople_NilPeopleRepo(t *testing.T) {
-	// Setup
-	translator := testutil.TestTranslator(t)
-	logger := testutil.TestLogger()
-	mockORClient := new(testutil.MockOpenRouterClient)
-	cfg := testutil.TestConfig()
-	mockAPI := new(testutil.MockBotAPI)
-	mockStore := new(testutil.MockStorage)
-	mockDownloader := new(testutil.MockFileDownloader)
-
-	bot := &Bot{
-		api:             mockAPI,
-		userRepo:        mockStore,
-		msgRepo:         mockStore,
-		statsRepo:       mockStore,
-		factRepo:        mockStore,
-		factHistoryRepo: mockStore,
-		peopleRepo:      nil, // nil peopleRepo
-		orClient:        mockORClient,
-		downloader:      mockDownloader,
-		fileProcessor:   testutil.TestFileProcessor(t, mockDownloader, translator),
-		cfg:             cfg,
-		logger:          logger,
-		translator:      translator,
-	}
+	bot, _, _, logger := setupBotForPeopleTests(t)
+	// Override peopleRepo to nil for this test
+	bot.peopleRepo = nil
 
 	userID := int64(123)
 	now := int(time.Now().Unix())

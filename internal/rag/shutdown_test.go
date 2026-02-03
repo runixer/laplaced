@@ -23,7 +23,7 @@ import (
 
 func TestGracefulShutdown(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	cfg := TestRAGConfig(func(cfg *config.Config) {
+	cfg := newTestRAGConfig(func(cfg *config.Config) {
 		cfg.RAG.BackfillInterval = "50ms" // Fast interval
 		cfg.Bot.AllowedUserIDs = []int64{123}
 	})

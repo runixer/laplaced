@@ -537,7 +537,9 @@ func TestResultTopicIDsEmpty(t *testing.T) {
 	assert.Empty(t, ids2)
 }
 
-// MockMessageRepository for testing
+// MockMessageRepository is a minimal mock for testing LoadTopicsContent.
+// LEGITIMATE: Kept inline because it's a simple map-based stub used only for
+// testing topic content loading. Using full MockStorage would be overkill.
 type MockMessageRepository struct {
 	messages map[int64][]storage.Message
 }

@@ -80,7 +80,7 @@ func TestFindSimilarFacts(t *testing.T) {
 
 		mockStore.On("GetAllFacts").Return(facts, nil)
 
-		svc := TestRAGService(t, mockStore, mockClient)
+		svc := newTestRAGService(t, mockStore, mockClient)
 
 		// Query embedding that doesn't match
 		result, err := svc.FindSimilarFacts(context.Background(), userID, []float32{1.0, 0.0, 0.0}, 0.85)
@@ -100,7 +100,7 @@ func TestFindSimilarFacts(t *testing.T) {
 		mockStore.On("GetAllFacts").Return(facts, nil)
 		mockStore.On("GetFactsByIDs", userID, []int64{1}).Return([]storage.Fact{facts[0]}, nil)
 
-		svc := TestRAGService(t, mockStore, mockClient)
+		svc := newTestRAGService(t, mockStore, mockClient)
 
 		result, err := svc.FindSimilarFacts(context.Background(), userID, []float32{1.0, 0.0, 0.0}, 0.85)
 		assert.NoError(t, err)
@@ -123,7 +123,7 @@ func TestLoadNewVectors(t *testing.T) {
 			{ID: 1, UserID: 123, Content: "Fact 1", Embedding: embedding},
 		}, nil)
 
-		svc := TestRAGServiceNoStart(t, mockStore, mockClient)
+		svc := newTestRAGServiceNoStart(t, mockStore, mockClient)
 
 		err := svc.LoadNewVectors()
 
@@ -138,7 +138,7 @@ func TestLoadNewVectors(t *testing.T) {
 		mockStore.On("GetTopicsAfterID", int64(0)).Return([]storage.Topic{}, nil)
 		mockStore.On("GetFactsAfterID", int64(0)).Return([]storage.Fact{}, nil)
 
-		svc := TestRAGServiceNoStart(t, mockStore, mockClient)
+		svc := newTestRAGServiceNoStart(t, mockStore, mockClient)
 
 		err := svc.LoadNewVectors()
 
@@ -152,7 +152,7 @@ func TestLoadNewVectors(t *testing.T) {
 
 		mockStore.On("GetTopicsAfterID", int64(0)).Return([]storage.Topic{}, assert.AnError)
 
-		svc := TestRAGServiceNoStart(t, mockStore, mockClient)
+		svc := newTestRAGServiceNoStart(t, mockStore, mockClient)
 
 		err := svc.LoadNewVectors()
 
@@ -167,7 +167,7 @@ func TestLoadNewVectors(t *testing.T) {
 		mockStore.On("GetTopicsAfterID", int64(0)).Return([]storage.Topic{}, nil)
 		mockStore.On("GetFactsAfterID", int64(0)).Return([]storage.Fact{}, assert.AnError)
 
-		svc := TestRAGServiceNoStart(t, mockStore, mockClient)
+		svc := newTestRAGServiceNoStart(t, mockStore, mockClient)
 
 		err := svc.LoadNewVectors()
 
@@ -186,7 +186,7 @@ func TestLoadNewVectors(t *testing.T) {
 		}, nil)
 		mockStore.On("GetFactsAfterID", int64(0)).Return([]storage.Fact{}, nil)
 
-		svc := TestRAGServiceNoStart(t, mockStore, mockClient)
+		svc := newTestRAGServiceNoStart(t, mockStore, mockClient)
 
 		err := svc.LoadNewVectors()
 

@@ -3,7 +3,6 @@ package files
 import (
 	"context"
 	"errors"
-	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -12,28 +11,11 @@ import (
 
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/telegram"
+	"github.com/runixer/laplaced/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
-
-// MockFileDownloader is a mock implementation of telegram.FileDownloader.
-type MockFileDownloader struct {
-	mock.Mock
-}
-
-func (m *MockFileDownloader) DownloadFile(ctx context.Context, fileID string) ([]byte, error) {
-	args := m.Called(ctx, fileID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]byte), args.Error(1)
-}
-
-func (m *MockFileDownloader) DownloadFileAsBase64(ctx context.Context, fileID string) (string, error) {
-	args := m.Called(ctx, fileID)
-	return args.String(0), args.Error(1)
-}
 
 func createTestTranslator(t *testing.T) *i18n.Translator {
 	localesFS := fstest.MapFS{
@@ -53,7 +35,7 @@ bot:
 
 func TestProcessor_ProcessMessage_Photo(t *testing.T) {
 	ctx := context.Background()
-	mockDownloader := new(MockFileDownloader)
+	mockDownloader := new(testutil.MockFileDownloader)
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
@@ -83,7 +65,7 @@ func TestProcessor_ProcessMessage_Photo(t *testing.T) {
 
 func TestProcessor_ProcessMessage_Voice(t *testing.T) {
 	ctx := context.Background()
-	mockDownloader := new(MockFileDownloader)
+	mockDownloader := new(testutil.MockFileDownloader)
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
@@ -113,7 +95,7 @@ func TestProcessor_ProcessMessage_Voice(t *testing.T) {
 
 func TestProcessor_ProcessMessage_DocumentPDF(t *testing.T) {
 	ctx := context.Background()
-	mockDownloader := new(MockFileDownloader)
+	mockDownloader := new(testutil.MockFileDownloader)
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
@@ -142,7 +124,7 @@ func TestProcessor_ProcessMessage_DocumentPDF(t *testing.T) {
 
 func TestProcessor_ProcessMessage_DocumentImage(t *testing.T) {
 	ctx := context.Background()
-	mockDownloader := new(MockFileDownloader)
+	mockDownloader := new(testutil.MockFileDownloader)
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
@@ -170,7 +152,7 @@ func TestProcessor_ProcessMessage_DocumentImage(t *testing.T) {
 
 func TestProcessor_ProcessMessage_DocumentText(t *testing.T) {
 	ctx := context.Background()
-	mockDownloader := new(MockFileDownloader)
+	mockDownloader := new(testutil.MockFileDownloader)
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
@@ -198,7 +180,7 @@ func TestProcessor_ProcessMessage_DocumentText(t *testing.T) {
 
 func TestProcessor_ProcessMessage_RetryOnFailure(t *testing.T) {
 	ctx := context.Background()
-	mockDownloader := new(MockFileDownloader)
+	mockDownloader := new(testutil.MockFileDownloader)
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
@@ -227,7 +209,7 @@ func TestProcessor_ProcessMessage_RetryOnFailure(t *testing.T) {
 
 func TestProcessor_ProcessMessage_EmptyMessage(t *testing.T) {
 	ctx := context.Background()
-	mockDownloader := new(MockFileDownloader)
+	mockDownloader := new(testutil.MockFileDownloader)
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
@@ -245,12 +227,12 @@ func TestProcessor_ProcessMessage_EmptyMessage(t *testing.T) {
 
 func TestProcessor_VoiceArtifactDurationThreshold(t *testing.T) {
 	ctx := context.Background()
-	mockDownloader := new(MockFileDownloader)
+	mockDownloader := new(testutil.MockFileDownloader)
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	// Mock file saver
-	mockSaver := new(MockFileSaver)
+	mockSaver := new(testutil.MockFileSaver)
 
 	voiceData := []byte("fake-ogg-data")
 	mockDownloader.On("DownloadFile", mock.Anything, mock.Anything).Return(voiceData, nil)
@@ -348,19 +330,6 @@ func TestProcessor_VoiceArtifactDurationThreshold(t *testing.T) {
 	})
 }
 
-// MockFileSaver is a mock implementation of FileSaver.
-type MockFileSaver struct {
-	mock.Mock
-}
-
-func (m *MockFileSaver) SaveFile(ctx context.Context, userID int64, messageID int64, fileType string, originalName string, mimeType string, reader io.Reader, messageText string) (*int64, error) {
-	args := m.Called(ctx, userID, messageID, fileType, originalName, mimeType, mock.Anything, messageText)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*int64), args.Error(1)
-}
-
 func TestIsGeminiSupported(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -447,7 +416,7 @@ func TestMaxFileSize(t *testing.T) {
 
 func TestProcessor_ProcessMessage_UnsupportedFormat(t *testing.T) {
 	ctx := context.Background()
-	mockDownloader := new(MockFileDownloader)
+	mockDownloader := new(testutil.MockFileDownloader)
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
@@ -478,7 +447,7 @@ func TestProcessor_ProcessMessage_UnsupportedFormat(t *testing.T) {
 
 func TestProcessor_ProcessMessage_FileTooLarge(t *testing.T) {
 	ctx := context.Background()
-	mockDownloader := new(MockFileDownloader)
+	mockDownloader := new(testutil.MockFileDownloader)
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
@@ -510,7 +479,7 @@ func TestProcessor_ProcessMessage_FileTooLarge(t *testing.T) {
 
 func TestProcessor_ProcessMessage_Audio(t *testing.T) {
 	ctx := context.Background()
-	mockDownloader := new(MockFileDownloader)
+	mockDownloader := new(testutil.MockFileDownloader)
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
@@ -541,7 +510,7 @@ func TestProcessor_ProcessMessage_Audio(t *testing.T) {
 
 func TestProcessor_ProcessMessage_VideoNote(t *testing.T) {
 	ctx := context.Background()
-	mockDownloader := new(MockFileDownloader)
+	mockDownloader := new(testutil.MockFileDownloader)
 	translator := createTestTranslator(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 

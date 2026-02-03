@@ -35,7 +35,7 @@ func TestFindMergeCandidates(t *testing.T) {
 		mockStore.On("GetMergeCandidates", userID).Return(candidates, nil)
 		mockStore.On("SetTopicConsolidationChecked", userID, int64(1), true).Return(nil)
 
-		svc := TestRAGService(t, mockStore, mockClient, func(cfg *config.Config) {
+		svc := newTestRAGService(t, mockStore, mockClient, func(cfg *config.Config) {
 			cfg.RAG.ConsolidationSimilarityThreshold = 0.75
 		})
 
@@ -58,7 +58,7 @@ func TestFindMergeCandidates(t *testing.T) {
 
 		mockStore.On("GetMergeCandidates", userID).Return(candidates, nil)
 
-		svc := TestRAGService(t, mockStore, mockClient, func(cfg *config.Config) {
+		svc := newTestRAGService(t, mockStore, mockClient, func(cfg *config.Config) {
 			cfg.RAG.ConsolidationSimilarityThreshold = 0.75
 		})
 
@@ -81,7 +81,7 @@ func TestFindMergeCandidates(t *testing.T) {
 
 		mockStore.On("GetMergeCandidates", userID).Return(candidates, nil)
 
-		svc := TestRAGService(t, mockStore, mockClient, func(cfg *config.Config) {
+		svc := newTestRAGService(t, mockStore, mockClient, func(cfg *config.Config) {
 			cfg.RAG.ConsolidationSimilarityThreshold = 0.75
 		})
 
@@ -106,7 +106,7 @@ func TestVerifyMerge(t *testing.T) {
 			},
 		}, nil)
 
-		svc := TestRAGServiceWithSetup(t, mockStore, mockClient, func(svc *Service, memSvc *memory.Service) {
+		svc := newTestRAGServiceWithSetup(t, mockStore, mockClient, func(svc *Service, memSvc *memory.Service) {
 			svc.SetMergerAgent(mockMerger)
 		})
 
@@ -134,7 +134,7 @@ func TestVerifyMerge(t *testing.T) {
 			},
 		}, nil)
 
-		svc := TestRAGServiceWithSetup(t, mockStore, mockClient, func(svc *Service, memSvc *memory.Service) {
+		svc := newTestRAGServiceWithSetup(t, mockStore, mockClient, func(svc *Service, memSvc *memory.Service) {
 			svc.SetMergerAgent(mockMerger)
 		})
 
@@ -157,7 +157,7 @@ func TestVerifyMerge(t *testing.T) {
 		mockMerger.On("Type").Return(string(agent.TypeMerger)).Maybe()
 		mockMerger.On("Execute", mock.Anything, mock.Anything).Return(nil, assert.AnError)
 
-		svc := TestRAGServiceWithSetup(t, mockStore, mockClient, func(svc *Service, memSvc *memory.Service) {
+		svc := newTestRAGServiceWithSetup(t, mockStore, mockClient, func(svc *Service, memSvc *memory.Service) {
 			svc.SetMergerAgent(mockMerger)
 		})
 
@@ -212,7 +212,7 @@ func TestMergeTopics(t *testing.T) {
 		mockStore.On("DeleteTopicCascade", int64(123), int64(1)).Return(nil)
 		mockStore.On("DeleteTopicCascade", int64(123), int64(2)).Return(nil)
 
-		svc := TestRAGService(t, mockStore, mockClient)
+		svc := newTestRAGService(t, mockStore, mockClient)
 
 		candidate := storage.MergeCandidate{
 			Topic1: storage.Topic{ID: 1, UserID: 123, StartMsgID: 1, EndMsgID: 10},
@@ -231,7 +231,7 @@ func TestMergeTopics(t *testing.T) {
 
 		mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return([]storage.Message{}, assert.AnError)
 
-		svc := TestRAGService(t, mockStore, mockClient)
+		svc := newTestRAGService(t, mockStore, mockClient)
 
 		candidate := storage.MergeCandidate{
 			Topic1: storage.Topic{ID: 1, UserID: 123, StartMsgID: 1, EndMsgID: 10},
@@ -255,7 +255,7 @@ func TestMergeTopics(t *testing.T) {
 		}, nil)
 		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{}, assert.AnError)
 
-		svc := TestRAGService(t, mockStore, mockClient)
+		svc := newTestRAGService(t, mockStore, mockClient)
 
 		candidate := storage.MergeCandidate{
 			Topic1: storage.Topic{ID: 1, UserID: 123, StartMsgID: 1, EndMsgID: 10},
@@ -281,7 +281,7 @@ func TestMergeTopics(t *testing.T) {
 			Data: []openrouter.EmbeddingObject{},
 		}, nil)
 
-		svc := TestRAGService(t, mockStore, mockClient)
+		svc := newTestRAGService(t, mockStore, mockClient)
 
 		candidate := storage.MergeCandidate{
 			Topic1: storage.Topic{ID: 1, UserID: 123, StartMsgID: 1, EndMsgID: 10},
@@ -304,7 +304,7 @@ func TestRunConsolidationSync(t *testing.T) {
 		mockStore.On("GetMergeCandidates", int64(123), mock.Anything).Return([]storage.MergeCandidate{}, nil)
 		mockStore.On("SetTopicConsolidationChecked", int64(123), mock.Anything, true).Return(nil).Maybe()
 
-		svc := TestRAGService(t, mockStore, mockClient, func(cfg *config.Config) {
+		svc := newTestRAGService(t, mockStore, mockClient, func(cfg *config.Config) {
 			cfg.RAG.SimilarityThreshold = 0.85
 		})
 
@@ -322,7 +322,7 @@ func TestRunConsolidationSync(t *testing.T) {
 		mockStore.On("GetMergeCandidates", int64(123), mock.Anything).Return([]storage.MergeCandidate{}, assert.AnError)
 		mockStore.On("SetTopicConsolidationChecked", int64(123), mock.Anything, true).Return(nil).Maybe()
 
-		svc := TestRAGService(t, mockStore, mockClient, func(cfg *config.Config) {
+		svc := newTestRAGService(t, mockStore, mockClient, func(cfg *config.Config) {
 			cfg.RAG.SimilarityThreshold = 0.85
 		})
 
@@ -343,7 +343,7 @@ func TestRunConsolidationSync(t *testing.T) {
 		mockStore.On("GetMergeCandidates", int64(123), mock.Anything).Return(candidates, nil)
 		mockStore.On("SetTopicConsolidationChecked", int64(123), mock.Anything, true).Return(nil).Maybe()
 
-		svc := TestRAGService(t, mockStore, mockClient, func(cfg *config.Config) {
+		svc := newTestRAGService(t, mockStore, mockClient, func(cfg *config.Config) {
 			cfg.RAG.SimilarityThreshold = 0.85
 		})
 

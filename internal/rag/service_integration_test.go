@@ -20,79 +20,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// MockArtifactRepository is a mock implementation of storage.ArtifactRepository.
-type MockArtifactRepository struct {
-	mock.Mock
-}
-
-func (m *MockArtifactRepository) AddArtifact(artifact storage.Artifact) (int64, error) {
-	args := m.Called(artifact)
-	if args.Get(0) == nil {
-		return 0, args.Error(1)
-	}
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockArtifactRepository) GetArtifact(userID, artifactID int64) (*storage.Artifact, error) {
-	args := m.Called(userID, artifactID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*storage.Artifact), args.Error(1)
-}
-
-func (m *MockArtifactRepository) GetArtifacts(filter storage.ArtifactFilter, limit, offset int) ([]storage.Artifact, int64, error) {
-	args := m.Called(filter, limit, offset)
-	if args.Get(0) == nil {
-		return nil, args.Get(1).(int64), args.Error(2)
-	}
-	return args.Get(0).([]storage.Artifact), args.Get(1).(int64), args.Error(2)
-}
-
-func (m *MockArtifactRepository) GetArtifactsByIDs(userID int64, artifactIDs []int64) ([]storage.Artifact, error) {
-	args := m.Called(userID, artifactIDs)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]storage.Artifact), args.Error(1)
-}
-
-func (m *MockArtifactRepository) UpdateArtifact(artifact storage.Artifact) error {
-	args := m.Called(artifact)
-	return args.Error(0)
-}
-
-func (m *MockArtifactRepository) GetByHash(userID int64, hash string) (*storage.Artifact, error) {
-	args := m.Called(userID, hash)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*storage.Artifact), args.Error(1)
-}
-
-func (m *MockArtifactRepository) GetPendingArtifacts(userID int64, maxRetries int) ([]storage.Artifact, error) {
-	args := m.Called(userID, maxRetries)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]storage.Artifact), args.Error(1)
-}
-
-func (m *MockArtifactRepository) RecoverArtifactStates(threshold time.Duration) error {
-	args := m.Called(threshold)
-	return args.Error(0)
-}
-
-func (m *MockArtifactRepository) IncrementContextLoadCount(userID int64, artifactIDs []int64) error {
-	args := m.Called(userID, artifactIDs)
-	return args.Error(0)
-}
-
-func (m *MockArtifactRepository) UpdateMessageID(userID, artifactID, messageID int64) error {
-	args := m.Called(userID, artifactID, messageID)
-	return args.Error(0)
-}
-
 // TestServiceStart_RAGDisabled verifies Start returns early when RAG is disabled.
 func TestServiceStart_RAGDisabled(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -161,7 +88,7 @@ func TestServiceStart_ArtifactLoopStarted(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	mockArtifactRepo := new(MockArtifactRepository)
+	mockArtifactRepo := new(testutil.MockStorage)
 
 	// Setup expectations
 	mockStore.On("GetAllTopics").Return([]storage.Topic{}, nil).Once()
@@ -230,7 +157,7 @@ func TestServiceReloadVectors_FullReload(t *testing.T) {
 
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
-	mockArtifactRepo := new(MockArtifactRepository)
+	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
 	userID := int64(123)
@@ -345,7 +272,7 @@ func TestServiceLoadNewVectors_IncrementalLoading(t *testing.T) {
 
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
-	mockArtifactRepo := new(MockArtifactRepository)
+	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
 	userID := int64(123)
@@ -533,7 +460,7 @@ func TestServiceLoadNewArtifactSummaries(t *testing.T) {
 
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
-	mockArtifactRepo := new(MockArtifactRepository)
+	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
 	userID := int64(123)
@@ -595,7 +522,7 @@ func TestServiceLoadNewArtifactSummaries_Incremental(t *testing.T) {
 
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
-	mockArtifactRepo := new(MockArtifactRepository)
+	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
 	userID := int64(123)
@@ -702,7 +629,7 @@ func TestServiceSetArtifactRepository(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
-	mockArtifactRepo := new(MockArtifactRepository)
+	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockClient, translator)

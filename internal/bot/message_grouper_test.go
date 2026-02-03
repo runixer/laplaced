@@ -13,18 +13,32 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestMessageGrouper_SingleMessage(t *testing.T) {
+// setupMessageGrouper creates a test MessageGrouper with a callback that captures the group.
+// Returns the grouper and a function that returns the captured group.
+func setupMessageGrouper(t *testing.T, turnWait time.Duration) (*MessageGrouper, func() *MessageGroup) {
+	t.Helper()
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	var groupProcessed *MessageGroup
-	var wg sync.WaitGroup
-	wg.Add(1)
 
+	var groupProcessed *MessageGroup
+	var mu sync.Mutex
 	onGroupReady := func(ctx context.Context, group *MessageGroup) {
+		mu.Lock()
 		groupProcessed = group
-		wg.Done()
+		mu.Unlock()
 	}
 
-	grouper := NewMessageGrouper(nil, logger, 10*time.Millisecond, onGroupReady)
+	grouper := NewMessageGrouper(nil, logger, turnWait, onGroupReady)
+	getGroup := func() *MessageGroup {
+		mu.Lock()
+		defer mu.Unlock()
+		return groupProcessed
+	}
+
+	return grouper, getGroup
+}
+
+func TestMessageGrouper_SingleMessage(t *testing.T) {
+	grouper, getGroup := setupMessageGrouper(t, 10*time.Millisecond)
 
 	msg := &telegram.Message{
 		MessageID: 1,
@@ -33,25 +47,16 @@ func TestMessageGrouper_SingleMessage(t *testing.T) {
 
 	grouper.AddMessage(msg)
 
-	wg.Wait()
+	time.Sleep(50 * time.Millisecond)
 
+	groupProcessed := getGroup()
 	assert.NotNil(t, groupProcessed)
 	assert.Len(t, groupProcessed.Messages, 1)
 	assert.Equal(t, msg.MessageID, groupProcessed.Messages[0].MessageID)
 }
 
 func TestMessageGrouper_MultipleMessages(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	var groupProcessed *MessageGroup
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	onGroupReady := func(ctx context.Context, group *MessageGroup) {
-		groupProcessed = group
-		wg.Done()
-	}
-
-	grouper := NewMessageGrouper(nil, logger, 50*time.Millisecond, onGroupReady)
+	grouper, getGroup := setupMessageGrouper(t, 50*time.Millisecond)
 
 	msg1 := &telegram.Message{MessageID: 1, From: &telegram.User{ID: 123}}
 	msg2 := &telegram.Message{MessageID: 2, From: &telegram.User{ID: 123}}
@@ -63,8 +68,9 @@ func TestMessageGrouper_MultipleMessages(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	grouper.AddMessage(msg3)
 
-	wg.Wait()
+	time.Sleep(100 * time.Millisecond)
 
+	groupProcessed := getGroup()
 	assert.NotNil(t, groupProcessed)
 	assert.Len(t, groupProcessed.Messages, 3)
 	assert.Equal(t, msg1.MessageID, groupProcessed.Messages[0].MessageID)
@@ -73,17 +79,7 @@ func TestMessageGrouper_MultipleMessages(t *testing.T) {
 }
 
 func TestMessageGrouper_TimerReset(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	var groupProcessed *MessageGroup
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	onGroupReady := func(ctx context.Context, group *MessageGroup) {
-		groupProcessed = group
-		wg.Done()
-	}
-
-	grouper := NewMessageGrouper(nil, logger, 20*time.Millisecond, onGroupReady)
+	grouper, getGroup := setupMessageGrouper(t, 20*time.Millisecond)
 
 	msg1 := &telegram.Message{MessageID: 1, From: &telegram.User{ID: 123}}
 	msg2 := &telegram.Message{MessageID: 2, From: &telegram.User{ID: 123}}
@@ -92,8 +88,9 @@ func TestMessageGrouper_TimerReset(t *testing.T) {
 	time.Sleep(15 * time.Millisecond) // Less than the turnWait duration
 	grouper.AddMessage(msg2)
 
-	wg.Wait()
+	time.Sleep(50 * time.Millisecond)
 
+	groupProcessed := getGroup()
 	assert.NotNil(t, groupProcessed)
 	assert.Len(t, groupProcessed.Messages, 2)
 }

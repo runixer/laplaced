@@ -20,6 +20,9 @@ import (
 )
 
 // mockRetriever implements rag.Retriever for testing.
+// Note: This inline mock is intentional. Using testutil.MockRetriever would require
+// testutil to import rag, but rag tests import testutil, creating an import cycle.
+// Since laplace doesn't have this cycle issue, we define the mock here.
 type mockRetriever struct {
 	mock.Mock
 }
