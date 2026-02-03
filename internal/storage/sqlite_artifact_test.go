@@ -713,3 +713,204 @@ func setArtifactRetryCount(t *testing.T, store *SQLiteStore, artifactID int64, r
 	_, err := store.db.Exec(query, retryCount, artifactID)
 	assert.NoError(t, err, "failed to set retry_count for testing")
 }
+
+// TestArtifactUserIsolation tests comprehensive user isolation for artifacts.
+func TestArtifactUserIsolation(t *testing.T) {
+	store, cleanup := setupTestDB(t)
+	defer cleanup()
+	_ = store.Init()
+
+	user1ID := int64(100)
+	user2ID := int64(200)
+
+	// Create artifacts for user1
+	user1Artifacts := make([]int64, 3)
+	for i := 0; i < 3; i++ {
+		artifact := Artifact{
+			UserID:       user1ID,
+			MessageID:    int64(i + 1),
+			FileType:     "image",
+			FilePath:     fmt.Sprintf("/user1/img%d.jpg", i),
+			FileSize:     1024,
+			MimeType:     "image/jpeg",
+			OriginalName: fmt.Sprintf("img%d.jpg", i),
+			ContentHash:  fmt.Sprintf("hash1_%d", i),
+			State:        "ready",
+		}
+		id, err := store.AddArtifact(artifact)
+		assert.NoError(t, err)
+		user1Artifacts[i] = id
+	}
+
+	// Create artifacts for user2
+	user2Artifacts := make([]int64, 2)
+	for i := 0; i < 2; i++ {
+		artifact := Artifact{
+			UserID:       user2ID,
+			MessageID:    int64(i + 10),
+			FileType:     "pdf",
+			FilePath:     fmt.Sprintf("/user2/doc%d.pdf", i),
+			FileSize:     2048,
+			MimeType:     "application/pdf",
+			OriginalName: fmt.Sprintf("doc%d.pdf", i),
+			ContentHash:  fmt.Sprintf("hash2_%d", i),
+			State:        "ready",
+		}
+		id, err := store.AddArtifact(artifact)
+		assert.NoError(t, err)
+		user2Artifacts[i] = id
+	}
+
+	t.Run("GetArtifact - user cannot get other user's artifact by ID", func(t *testing.T) {
+		// User1 tries to get user2's artifact
+		artifact, err := store.GetArtifact(user1ID, user2Artifacts[0])
+		assert.NoError(t, err, "no error for non-existent artifact")
+		assert.Nil(t, artifact, "user1 should not be able to get user2's artifact")
+
+		// User1 can get their own artifact
+		artifact, err = store.GetArtifact(user1ID, user1Artifacts[0])
+		assert.NoError(t, err)
+		assert.Equal(t, user1ID, artifact.UserID)
+		assert.Equal(t, user1Artifacts[0], artifact.ID)
+	})
+
+	t.Run("GetPendingArtifacts - only returns own artifacts", func(t *testing.T) {
+		// Create a fresh store for this test
+		store2, cleanup2 := setupTestDB(t)
+		defer cleanup2()
+		_ = store2.Init()
+
+		// Create pending artifacts for both users
+		pending1 := Artifact{
+			UserID:    user1ID,
+			MessageID: 1,
+			FileType:  "image",
+			FilePath:  "/u1/pending.jpg",
+			FileSize:  1024,
+			MimeType:  "image/jpeg",
+			State:     "pending",
+		}
+		_, _ = store2.AddArtifact(pending1)
+
+		pending2 := Artifact{
+			UserID:    user2ID,
+			MessageID: 2,
+			FileType:  "pdf",
+			FilePath:  "/u2/pending.pdf",
+			FileSize:  2048,
+			MimeType:  "application/pdf",
+			State:     "pending",
+		}
+		_, _ = store2.AddArtifact(pending2)
+
+		// Get pending for user1
+		pending, err := store2.GetPendingArtifacts(user1ID, 10)
+		assert.NoError(t, err)
+		assert.Len(t, pending, 1, "user1 should only see their own pending artifact")
+		assert.Equal(t, user1ID, pending[0].UserID)
+	})
+
+	t.Run("UpdateArtifact - user cannot update other user's artifact", func(t *testing.T) {
+		summary := "Updated summary"
+		updated := Artifact{
+			ID:      user1Artifacts[0],
+			UserID:  user2ID, // Try to update user1's artifact as user2
+			State:   "ready",
+			Summary: &summary,
+		}
+
+		err := store.UpdateArtifact(updated)
+		assert.Error(t, err, "user2 should not be able to update user1's artifact")
+		assert.Contains(t, err.Error(), "not found")
+
+		// Verify user1's artifact was NOT updated
+		artifact, _ := store.GetArtifact(user1ID, user1Artifacts[0])
+		assert.Nil(t, artifact.Summary, "artifact should not be updated by other user")
+
+		// User1 can update their own artifact
+		updated.UserID = user1ID
+		err = store.UpdateArtifact(updated)
+		assert.NoError(t, err)
+
+		artifact, _ = store.GetArtifact(user1ID, user1Artifacts[0])
+		assert.Equal(t, summary, *artifact.Summary, "artifact should be updated by owner")
+	})
+
+	t.Run("IncrementContextLoadCount - user cannot increment other user's artifact", func(t *testing.T) {
+		// User2 tries to increment user1's artifact counter
+		err := store.IncrementContextLoadCount(user2ID, []int64{user1Artifacts[0]})
+		assert.NoError(t, err) // No error, but SQL won't find the artifact
+
+		// Verify user1's artifact counter was NOT incremented
+		artifact, _ := store.GetArtifact(user1ID, user1Artifacts[0])
+		assert.Equal(t, 0, artifact.ContextLoadCount, "counter should not be incremented by other user")
+
+		// User1 can increment their own artifact
+		err = store.IncrementContextLoadCount(user1ID, []int64{user1Artifacts[0]})
+		assert.NoError(t, err)
+
+		artifact, _ = store.GetArtifact(user1ID, user1Artifacts[0])
+		assert.Equal(t, 1, artifact.ContextLoadCount, "counter should be incremented by owner")
+	})
+
+	t.Run("UpdateMessageID - user cannot update other user's artifact", func(t *testing.T) {
+		// User2 tries to update user1's artifact message_id
+		err := store.UpdateMessageID(user2ID, user1Artifacts[0], 999)
+		assert.Error(t, err, "user2 should not be able to update user1's artifact")
+		assert.Contains(t, err.Error(), "not found")
+
+		// Verify user1's artifact message_id was NOT updated
+		artifact, _ := store.GetArtifact(user1ID, user1Artifacts[0])
+		assert.NotEqual(t, int64(999), artifact.MessageID, "message_id should not be updated by other user")
+
+		// User1 can update their own artifact
+		newMessageID := int64(555)
+		err = store.UpdateMessageID(user1ID, user1Artifacts[0], newMessageID)
+		assert.NoError(t, err)
+
+		artifact, _ = store.GetArtifact(user1ID, user1Artifacts[0])
+		assert.Equal(t, newMessageID, artifact.MessageID, "message_id should be updated by owner")
+	})
+
+	t.Run("RecoverArtifactStates - only affects artifacts in processing state", func(t *testing.T) {
+		// Create fresh store for this test
+		store2, cleanup2 := setupTestDB(t)
+		defer cleanup2()
+		_ = store2.Init()
+
+		// Create old processing artifacts for both users
+		artifact1 := Artifact{
+			UserID:    user1ID,
+			MessageID: 1,
+			FileType:  "image",
+			FilePath:  "/u1/proc.jpg",
+			FileSize:  1024,
+			MimeType:  "image/jpeg",
+			State:     "processing",
+		}
+		id1, _ := store2.AddArtifact(artifact1)
+		setArtifactCreatedAt(t, store2, id1, -15*time.Minute)
+
+		artifact2 := Artifact{
+			UserID:    user2ID,
+			MessageID: 2,
+			FileType:  "pdf",
+			FilePath:  "/u2/proc.pdf",
+			FileSize:  2048,
+			MimeType:  "application/pdf",
+			State:     "processing",
+		}
+		id2, _ := store2.AddArtifact(artifact2)
+		setArtifactCreatedAt(t, store2, id2, -15*time.Minute)
+
+		// Run recovery
+		_ = store2.RecoverArtifactStates(10 * time.Minute)
+
+		// Both artifacts should be recovered (this is cross-user by design for background processing)
+		a1, _ := store2.GetArtifact(user1ID, id1)
+		assert.Equal(t, "pending", a1.State)
+
+		a2, _ := store2.GetArtifact(user2ID, id2)
+		assert.Equal(t, "pending", a2.State)
+	})
+}

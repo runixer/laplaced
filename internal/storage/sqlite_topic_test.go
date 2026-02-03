@@ -522,3 +522,240 @@ func TestGetTopicsAfterID(t *testing.T) {
 		assert.Len(t, topics, 3, "should return all topics across users")
 	})
 }
+
+// TestTopicUserIsolation tests that users cannot access or modify other users' topics.
+func TestTopicUserIsolation(t *testing.T) {
+	store, cleanup := setupTestDB(t)
+	defer cleanup()
+	_ = store.Init()
+
+	user1ID := int64(100)
+	user2ID := int64(200)
+
+	// Create topics for user1
+	user1TopicIDs := make([]int64, 3)
+	for i := 0; i < 3; i++ {
+		id, err := store.AddTopic(Topic{UserID: user1ID, Summary: fmt.Sprintf("User1 Topic %d", i)})
+		assert.NoError(t, err)
+		user1TopicIDs[i] = id
+	}
+
+	// Create topics for user2
+	user2TopicIDs := make([]int64, 2)
+	for i := 0; i < 2; i++ {
+		id, err := store.AddTopic(Topic{UserID: user2ID, Summary: fmt.Sprintf("User2 Topic %d", i)})
+		assert.NoError(t, err)
+		user2TopicIDs[i] = id
+	}
+
+	t.Run("GetTopics - only returns own topics", func(t *testing.T) {
+		user1Topics, err := store.GetTopics(user1ID)
+		assert.NoError(t, err)
+		assert.Len(t, user1Topics, 3, "user1 should only see their 3 topics")
+		for _, topic := range user1Topics {
+			assert.Equal(t, user1ID, topic.UserID, "all topics should belong to user1")
+		}
+
+		user2Topics, err := store.GetTopics(user2ID)
+		assert.NoError(t, err)
+		assert.Len(t, user2Topics, 2, "user2 should only see their 2 topics")
+		for _, topic := range user2Topics {
+			assert.Equal(t, user2ID, topic.UserID, "all topics should belong to user2")
+		}
+	})
+
+	t.Run("GetTopicsByIDs - cannot access other users' topics by ID", func(t *testing.T) {
+		// User1 tries to get user2's topic by ID
+		topics, err := store.GetTopicsByIDs(user1ID, user2TopicIDs)
+		assert.NoError(t, err)
+		assert.Empty(t, topics, "user1 should not be able to get user2's topics by ID")
+
+		// User1 can only get their own topics
+		topics, err = store.GetTopicsByIDs(user1ID, user1TopicIDs)
+		assert.NoError(t, err)
+		assert.Len(t, topics, 3)
+
+		// User1 tries to get mixed IDs - should only get their own
+		mixedIDs := append(user1TopicIDs[:1], user2TopicIDs[0])
+		topics, err = store.GetTopicsByIDs(user1ID, mixedIDs)
+		assert.NoError(t, err)
+		assert.Len(t, topics, 1, "should only return own topic, not other user's")
+		assert.Equal(t, user1ID, topics[0].UserID)
+	})
+
+	t.Run("SetTopicFactsExtracted - cannot modify other users' topics", func(t *testing.T) {
+		// Get user1's first topic
+		user1Topics, _ := store.GetTopics(user1ID)
+		user1TopicID := user1Topics[0].ID
+
+		// User2 tries to set facts extracted on user1's topic
+		err := store.SetTopicFactsExtracted(user2ID, user1TopicID, true)
+		assert.NoError(t, err) // No error, but WHERE clause filters by user_id
+
+		// Verify user1's topic flag was NOT updated
+		user1TopicsAfter, _ := store.GetTopics(user1ID)
+		for _, topic := range user1TopicsAfter {
+			if topic.ID == user1TopicID {
+				assert.False(t, topic.FactsExtracted, "user1's topic flag should not be updated by user2")
+			}
+		}
+
+		// User1 can update their own topic
+		err = store.SetTopicFactsExtracted(user1ID, user1TopicID, true)
+		assert.NoError(t, err)
+
+		user1TopicsAfter, _ = store.GetTopics(user1ID)
+		for _, topic := range user1TopicsAfter {
+			if topic.ID == user1TopicID {
+				assert.True(t, topic.FactsExtracted, "user1's topic flag should be updated by user1")
+			}
+		}
+	})
+
+	t.Run("SetTopicConsolidationChecked - cannot modify other users' topics", func(t *testing.T) {
+		// Get user1's first topic
+		user1Topics, _ := store.GetTopics(user1ID)
+		user1TopicID := user1Topics[0].ID
+
+		// User2 tries to set consolidation checked on user1's topic
+		err := store.SetTopicConsolidationChecked(user2ID, user1TopicID, true)
+		assert.NoError(t, err) // No error, but WHERE clause filters by user_id
+
+		// Verify user1's topic flag was NOT updated
+		user1TopicsAfter, _ := store.GetTopics(user1ID)
+		for _, topic := range user1TopicsAfter {
+			if topic.ID == user1TopicID {
+				assert.False(t, topic.ConsolidationChecked, "user1's topic flag should not be updated by user2")
+			}
+		}
+
+		// User1 can update their own topic
+		err = store.SetTopicConsolidationChecked(user1ID, user1TopicID, true)
+		assert.NoError(t, err)
+
+		user1TopicsAfter, _ = store.GetTopics(user1ID)
+		for _, topic := range user1TopicsAfter {
+			if topic.ID == user1TopicID {
+				assert.True(t, topic.ConsolidationChecked, "user1's topic flag should be updated by user1")
+			}
+		}
+	})
+
+	t.Run("DeleteTopic - cannot delete other users' topics", func(t *testing.T) {
+		// Get initial counts
+		user1TopicsBefore, _ := store.GetTopics(user1ID)
+		user1CountBefore := len(user1TopicsBefore)
+
+		user2TopicsBefore, _ := store.GetTopics(user2ID)
+		user2CountBefore := len(user2TopicsBefore)
+
+		// User2 tries to delete user1's first topic
+		user1Topics, _ := store.GetTopics(user1ID)
+		user1TopicID := user1Topics[0].ID
+
+		err := store.DeleteTopic(user2ID, user1TopicID)
+		assert.NoError(t, err) // No error, but WHERE clause filters by user_id
+
+		// Verify user1's topic was NOT deleted
+		user1TopicsAfter, _ := store.GetTopics(user1ID)
+		assert.Len(t, user1TopicsAfter, user1CountBefore, "user1's topic count should not change")
+
+		// User1 can delete their own topic
+		err = store.DeleteTopic(user1ID, user1TopicID)
+		assert.NoError(t, err)
+
+		user1TopicsAfter, _ = store.GetTopics(user1ID)
+		assert.Len(t, user1TopicsAfter, user1CountBefore-1, "user1's topic should be deleted by user1")
+
+		// Verify user2's topics are intact
+		user2TopicsAfter, _ := store.GetTopics(user2ID)
+		assert.Len(t, user2TopicsAfter, user2CountBefore, "user2's topic count should not change")
+	})
+
+	t.Run("DeleteTopicCascade - only affects own topics", func(t *testing.T) {
+		// Create fresh store for this test
+		store2, cleanup2 := setupTestDB(t)
+		defer cleanup2()
+		_ = store2.Init()
+
+		// Create topics with same IDs but different users
+		topic1, _ := store2.AddTopic(Topic{UserID: user1ID, Summary: "User1 Topic", StartMsgID: 1, EndMsgID: 5})
+		_, _ = store2.AddTopic(Topic{UserID: user2ID, Summary: "User2 Topic", StartMsgID: 6, EndMsgID: 10})
+
+		// Add facts to user1's topic
+		fact := Fact{UserID: user1ID, TopicID: &topic1, Content: "Fact", Relation: "is", Type: "context", Importance: 50}
+		_, _ = store2.AddFact(fact)
+
+		// User2 tries to cascade delete user1's topic
+		err := store2.DeleteTopicCascade(user2ID, topic1)
+		assert.NoError(t, err)
+
+		// Verify user1's topic still exists
+		user1Topics, _ := store2.GetTopics(user1ID)
+		assert.Len(t, user1Topics, 1, "user1's topic should not be deleted by user2")
+
+		// Verify facts still exist
+		facts, _ := store2.GetFacts(user1ID)
+		assert.Greater(t, len(facts), 0, "facts should still exist")
+	})
+
+	t.Run("GetTopicsPendingFacts - only returns own topics", func(t *testing.T) {
+		// Create fresh store for this test
+		store2, cleanup2 := setupTestDB(t)
+		defer cleanup2()
+		_ = store2.Init()
+
+		// Create pending topics for both users
+		_, _ = store2.AddTopic(Topic{UserID: user1ID, Summary: "User1 Pending", FactsExtracted: false})
+		_, _ = store2.AddTopic(Topic{UserID: user2ID, Summary: "User2 Pending", FactsExtracted: false})
+		_, _ = store2.AddTopic(Topic{UserID: user1ID, Summary: "User1 Done", FactsExtracted: true})
+
+		// Get pending for user1
+		pending, err := store2.GetTopicsPendingFacts(user1ID)
+		assert.NoError(t, err)
+		assert.Len(t, pending, 1, "user1 should have 1 pending topic")
+		assert.Equal(t, user1ID, pending[0].UserID)
+		assert.NotContains(t, pending[0].Summary, "User2", "should not contain user2's topic")
+	})
+
+	t.Run("GetMergeCandidates - only returns own topics", func(t *testing.T) {
+		// Create fresh store for this test
+		store2, cleanup2 := setupTestDB(t)
+		defer cleanup2()
+		_ = store2.Init()
+
+		// Create adjacent topics for user1
+		_, _ = store2.AddTopic(Topic{UserID: user1ID, StartMsgID: 1, EndMsgID: 10})
+		_, _ = store2.AddTopic(Topic{UserID: user1ID, StartMsgID: 11, EndMsgID: 20})
+
+		// Create adjacent topics for user2
+		_, _ = store2.AddTopic(Topic{UserID: user2ID, StartMsgID: 21, EndMsgID: 30})
+		_, _ = store2.AddTopic(Topic{UserID: user2ID, StartMsgID: 31, EndMsgID: 40})
+
+		// Get candidates for user1
+		candidates, err := store2.GetMergeCandidates(user1ID)
+		assert.NoError(t, err)
+		// All candidates should only involve user1's topics
+		for _, c := range candidates {
+			assert.Equal(t, user1ID, c.Topic1.UserID, "candidate topic1 should belong to user1")
+			assert.Equal(t, user1ID, c.Topic2.UserID, "candidate topic2 should belong to user1")
+		}
+	})
+
+	t.Run("GetLastTopicEndMessageID - only returns own max", func(t *testing.T) {
+		// Create fresh store for this test
+		store2, cleanup2 := setupTestDB(t)
+		defer cleanup2()
+		_ = store2.Init()
+
+		// User1's topic ends at message 10
+		_, _ = store2.AddTopic(Topic{UserID: user1ID, EndMsgID: 10})
+		// User2's topic ends at message 100
+		_, _ = store2.AddTopic(Topic{UserID: user2ID, EndMsgID: 100})
+
+		// Get last end message ID for user1
+		maxID, err := store2.GetLastTopicEndMessageID(user1ID)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(10), maxID, "user1 should only see their own max end message ID")
+	})
+}

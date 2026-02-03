@@ -260,6 +260,105 @@ func TestProcess_InvalidInput_ReturnsError(t *testing.T) {}
 
 ---
 
+## User Data Isolation Tests
+
+**CRITICAL:** This is a multi-user bot. Every storage method MUST have tests proving users cannot access or modify each other's data.
+
+### Why This Matters
+
+- **Message IDs are GLOBAL** — auto-increment across all users
+- **ID range queries** (`WHERE id BETWEEN ? AND ?`) MUST include `user_id` filter
+- **Without tests**, a missing `user_id` check won't be caught until production incident
+
+### Required Tests
+
+For each storage package (`*_test.go`), add a comprehensive `Test*UserIsolation` function:
+
+```go
+func TestEntityUserIsolation(t *testing.T) {
+    store, cleanup := setupTestDB(t)
+    defer cleanup()
+    _ = store.Init()
+
+    user1ID := int64(100)
+    user2ID := int64(200)
+
+    // Create entities for both users
+    id1, _ := store.AddEntity(Entity{UserID: user1ID, ...})
+    id2, _ := store.AddEntity(Entity{UserID: user2ID, ...})
+
+    t.Run("Get - only returns own entities", func(t *testing.T) {
+        entities1, _ := store.GetEntities(user1ID)
+        for _, e := range entities1 {
+            assert.Equal(t, user1ID, e.UserID)
+        }
+    })
+
+    t.Run("GetByIDs - cannot access other users' entities", func(t *testing.T) {
+        entities, _ := store.GetEntitiesByIDs(user1ID, []int64{id2})
+        assert.Empty(t, entities, "user1 should not get user2's entity by ID")
+    })
+
+    t.Run("Update - cannot modify other users' entities", func(t *testing.T) {
+        entity := Entity{ID: id1, UserID: user2ID, ...} // Spoof!
+        _ = store.UpdateEntity(entity)
+
+        // Verify NOT modified
+        fetched, _ := store.GetEntity(user1ID, id1)
+        assert.NotEqual(t, "modified_value", fetched.Field)
+    })
+
+    t.Run("Delete - cannot delete other users' entities", func(t *testing.T) {
+        _ = store.DeleteEntity(user2ID, id1)
+
+        // Verify NOT deleted
+        entities, _ := store.GetEntities(user1ID)
+        assert.NotEmpty(t, entities)
+    })
+}
+```
+
+### Checklist for New Storage Methods
+
+When adding a new storage method, ask:
+
+- [ ] Does it take `userID` parameter?
+- [ ] Does SQL query include `WHERE user_id = ?` (or `user_id = ? AND ...`)?
+- [ ] Did I add a user isolation test?
+- [ ] If using ID ranges, does WHERE clause filter BOTH `id` AND `user_id`?
+
+### Existing Isolation Test Suites
+
+| Test File | Coverage |
+|-----------|----------|
+| `sqlite_fact_test.go` | `TestFactUserIsolation` |
+| `sqlite_message_test.go` | `TestMessageUserIsolation` |
+| `sqlite_topic_test.go` | `TestTopicUserIsolation` |
+| `sqlite_artifact_test.go` | `TestArtifactUserIsolation` |
+| `sqlite_person_test.go` | `TestPersonUserIsolation` |
+
+### Cross-User Methods (Exceptions)
+
+Some methods are intentionally cross-user for background processing:
+
+| Method | Purpose | Must Document |
+|--------|---------|---------------|
+| `GetAllFacts()` | Vector index loading | `// WARNING: Cross-user` |
+| `GetFactsAfterID()` | Incremental vector updates | `// WARNING: Cross-user` |
+| `GetAllTopics()` | Vector index loading | `// WARNING: Cross-user` |
+| `GetTopicsAfterID()` | Incremental vector updates | `// WARNING: Cross-user` |
+| `GetAllPeople()` | Vector index loading | `// WARNING: Cross-user` |
+| `GetPeopleAfterID()` | Incremental vector updates | `// WARNING: Cross-user` |
+| `GetAllArtifacts()` | Vector index loading | `// WARNING: Cross-user` |
+| `GetArtifactsAfterID()` | Incremental vector updates | `// WARNING: Cross-user` |
+
+**Rule:** If a method is cross-user, it MUST:
+1. Have `// WARNING: Cross-user` comment explaining why
+2. Only be used for background/internal operations (not user-facing API)
+3. Have tests documenting cross-user behavior
+
+---
+
 ## References
 
 - [Audit Report](./plans/AUDIT_REPORT_PHASE_2.md)

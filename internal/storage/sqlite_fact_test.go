@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -402,5 +403,192 @@ func TestGetFactsByTopicID(t *testing.T) {
 		facts, err := store.GetFactsByTopicID(otherUserID, topic1ID)
 		assert.NoError(t, err)
 		assert.Empty(t, facts, "different user should not get facts")
+	})
+}
+
+// TestFactUserIsolation tests that users cannot access or modify other users' facts.
+// This is CRITICAL for data security - prevents cross-user data leakage.
+func TestFactUserIsolation(t *testing.T) {
+	store, cleanup := setupTestDB(t)
+	defer cleanup()
+	_ = store.Init()
+
+	user1ID := int64(100)
+	user2ID := int64(200)
+
+	// Create fact for user1
+	user1Fact := Fact{
+		UserID:     user1ID,
+		Relation:   "is",
+		Content:    "User1's secret fact",
+		Category:   "private",
+		Type:       "identity",
+		Importance: 100,
+	}
+	user1FactID, err := store.AddFact(user1Fact)
+	assert.NoError(t, err)
+
+	// Create fact for user2
+	user2Fact := Fact{
+		UserID:     user2ID,
+		Relation:   "is",
+		Content:    "User2's secret fact",
+		Category:   "private",
+		Type:       "identity",
+		Importance: 100,
+	}
+	user2FactID, err := store.AddFact(user2Fact)
+	assert.NoError(t, err)
+
+	t.Run("GetFacts - only returns own facts", func(t *testing.T) {
+		user1Facts, err := store.GetFacts(user1ID)
+		assert.NoError(t, err)
+		assert.Len(t, user1Facts, 1, "user1 should only see their own facts")
+		assert.Equal(t, "User1's secret fact", user1Facts[0].Content)
+
+		user2Facts, err := store.GetFacts(user2ID)
+		assert.NoError(t, err)
+		assert.Len(t, user2Facts, 1, "user2 should only see their own facts")
+		assert.Equal(t, "User2's secret fact", user2Facts[0].Content)
+	})
+
+	t.Run("GetFactsByIDs - cannot access other users' facts by ID", func(t *testing.T) {
+		// User1 tries to get user2's fact by ID
+		facts, err := store.GetFactsByIDs(user1ID, []int64{user2FactID})
+		assert.NoError(t, err)
+		assert.Empty(t, facts, "user1 should not be able to get user2's fact by ID")
+
+		// User1 can only get their own fact
+		facts, err = store.GetFactsByIDs(user1ID, []int64{user1FactID})
+		assert.NoError(t, err)
+		assert.Len(t, facts, 1)
+		assert.Equal(t, user1FactID, facts[0].ID)
+
+		// User1 tries to get both IDs
+		facts, err = store.GetFactsByIDs(user1ID, []int64{user1FactID, user2FactID})
+		assert.NoError(t, err)
+		assert.Len(t, facts, 1, "should only return own fact, not other user's")
+		assert.Equal(t, user1FactID, facts[0].ID)
+	})
+
+	t.Run("UpdateFact - cannot modify other users' facts", func(t *testing.T) {
+		// Get user1's fact
+		user1Facts, _ := store.GetFacts(user1ID)
+		originalContent := user1Facts[0].Content
+
+		// Try to update with spoofed userID (user2 pretending to own user1's fact)
+		spoofedFact := user1Facts[0]
+		spoofedFact.UserID = user2ID // Spoof!
+		spoofedFact.Content = "Hacked by user2"
+
+		err := store.UpdateFact(spoofedFact)
+		assert.NoError(t, err) // Update succeeds but WHERE clause filters by user_id
+
+		// Verify user1's fact was NOT modified
+		user1FactsAfter, _ := store.GetFacts(user1ID)
+		assert.Len(t, user1FactsAfter, 1)
+		assert.Equal(t, originalContent, user1FactsAfter[0].Content,
+			"user1's fact should not be modified by user2")
+
+		// Verify the update didn't affect anything
+		allFacts, _ := store.GetAllFacts()
+		for _, f := range allFacts {
+			assert.NotEqual(t, "Hacked by user2", f.Content,
+				"spoofed content should not appear in any fact")
+		}
+	})
+
+	t.Run("DeleteFact - cannot delete other users' facts", func(t *testing.T) {
+		// User2 tries to delete user1's fact
+		err := store.DeleteFact(user2ID, user1FactID)
+		assert.NoError(t, err) // No error, but WHERE clause filters by user_id
+
+		// Verify user1's fact still exists
+		user1Facts, _ := store.GetFacts(user1ID)
+		assert.Len(t, user1Facts, 1, "user1's fact should not be deleted by user2")
+
+		// Verify user1 can delete their own fact
+		err = store.DeleteFact(user1ID, user1FactID)
+		assert.NoError(t, err)
+
+		user1Facts, _ = store.GetFacts(user1ID)
+		assert.Empty(t, user1Facts, "user1's fact should be deleted by user1")
+
+		// Verify user2's fact still exists
+		user2Facts, _ := store.GetFacts(user2ID)
+		assert.Len(t, user2Facts, 1, "user2's fact should still exist")
+	})
+
+	t.Run("UpdateFactsTopic - only affects specified user", func(t *testing.T) {
+		// Create fresh facts for this test
+		topic1 := int64(10)
+		topic2 := int64(20)
+
+		fact1 := Fact{UserID: user1ID, Relation: "is", Content: "Fact1", Type: "identity", Importance: 100, TopicID: &topic1}
+		fact2 := Fact{UserID: user2ID, Relation: "is", Content: "Fact2", Type: "identity", Importance: 100, TopicID: &topic1}
+
+		id1, _ := store.AddFact(fact1)
+		id2, _ := store.AddFact(fact2)
+
+		// Update topic for user1 only
+		err := store.UpdateFactsTopic(user1ID, topic1, topic2)
+		assert.NoError(t, err)
+
+		// Verify user1's fact was updated
+		user1Facts, _ := store.GetFacts(user1ID)
+		for _, f := range user1Facts {
+			if f.ID == id1 {
+				assert.Equal(t, topic2, *f.TopicID, "user1's fact topic should be updated")
+			}
+		}
+
+		// Verify user2's fact was NOT updated
+		user2Facts, _ := store.GetFacts(user2ID)
+		for _, f := range user2Facts {
+			if f.ID == id2 {
+				assert.Equal(t, topic1, *f.TopicID, "user2's fact topic should NOT be updated")
+			}
+		}
+	})
+
+	t.Run("DeleteAllFacts - only affects specified user", func(t *testing.T) {
+		// Create multiple facts for each user
+		for i := 0; i < 3; i++ {
+			_, _ = store.AddFact(Fact{UserID: user1ID, Relation: "is", Content: fmt.Sprintf("U1-%d", i), Type: "context", Importance: 50})
+			_, _ = store.AddFact(Fact{UserID: user2ID, Relation: "is", Content: fmt.Sprintf("U2-%d", i), Type: "context", Importance: 50})
+		}
+
+		// Delete user1's facts only
+		err := store.DeleteAllFacts(user1ID)
+		assert.NoError(t, err)
+
+		// Verify user1's facts are gone
+		user1Facts, _ := store.GetFacts(user1ID)
+		assert.Empty(t, user1Facts, "user1's facts should be deleted")
+
+		// Verify user2's facts are intact
+		user2Facts, _ := store.GetFacts(user2ID)
+		assert.NotEmpty(t, user2Facts, "user2's facts should still exist")
+	})
+
+	t.Run("GetFactsByTopicID - only returns own facts", func(t *testing.T) {
+		topic1 := int64(100)
+
+		// Both users have facts with same topic_id
+		_, _ = store.AddFact(Fact{UserID: user1ID, Relation: "is", Content: "U1 topic fact", Type: "identity", Importance: 100, TopicID: &topic1})
+		_, _ = store.AddFact(Fact{UserID: user2ID, Relation: "is", Content: "U2 topic fact", Type: "identity", Importance: 100, TopicID: &topic1})
+
+		// Each user should only see their own facts
+		user1Facts, _ := store.GetFactsByTopicID(user1ID, topic1)
+		for _, f := range user1Facts {
+			assert.Equal(t, user1ID, f.UserID, "user1 should only see their own facts")
+			assert.NotEqual(t, "U2 topic fact", f.Content, "user1 should not see user2's fact")
+		}
+
+		user2Facts, _ := store.GetFactsByTopicID(user2ID, topic1)
+		for _, f := range user2Facts {
+			assert.Equal(t, user2ID, f.UserID, "user2 should only see their own facts")
+			assert.NotEqual(t, "U1 topic fact", f.Content, "user2 should not see user1's fact")
+		}
 	})
 }
