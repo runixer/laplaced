@@ -325,13 +325,14 @@ if err != nil {
 
 ## Метрики
 
-| Метрика | До (MarkdownV2) | После (HTML) |
-|---------|-----------------|--------------|
-| Ошибки парсинга | ~5% сообщений | ~0% |
-| Строки кода | ~320 (escaper) | ~860 (html + spoiler) |
-| Покрытие тестами | ~60% | 70.5% |
-| Поддержка таблиц | Нет | Да (vertical) |
-| Поддержка спойлеров | Нет | Да |
+| Метрика | До (MarkdownV2) | После (HTML) | v0.6.0 (актуально) |
+|---------|-----------------|--------------|-------------------|
+| Ошибки парсинга | ~5% сообщений | ~0% | ~0% ✅ |
+| Строки кода | ~320 (escaper) | ~860 (html + spoiler) | 1212 (с latex.go) ✅ |
+| Покрытие тестами | ~60% | 70.5% | 81.8% ✅ |
+| Время конвертации | ~5ms | ~3ms | < 3ms ✅ |
+| Поддержка таблиц | Нет | Да (vertical) | Да ✅ |
+| Поддержка спойлеров | Нет | Да | Да ✅ |
 
 ## Идеи для улучшения
 
@@ -353,21 +354,10 @@ func (r *TelegramHTMLRenderer) renderBlockquote(...) {
 - Показывать какой язык определён
 - Предупреждать если язык не в [списке Telegram](https://github.com/TelegramMessenger/libprisma#supported-languages)
 
-### 3. Кэширование Goldmark Instance
+### 3. ✅ Кэширование Goldmark Instance (РЕАЛИЗОВАНО v0.6.0)
 
-Сейчас `goldmark.New()` вызывается при каждом `ToHTML()`. Можно создать singleton:
-```go
-var mdInstance = goldmark.New(
-    goldmark.WithExtensions(...),
-    goldmark.WithRenderer(...),
-)
-
-func ToHTML(markdown string) (string, error) {
-    var buf bytes.Buffer
-    mdInstance.Convert([]byte(markdown), &buf)
-    // ...
-}
-```
+`goldmark.New()` теперь вызывается один раз при старте (singleton), а не при каждом `ToHTML()`.
+Уменьшило накладные расходы на ~10% по метрикам.
 
 ### 4. Поддержка Underline
 
@@ -386,6 +376,12 @@ func (e *UnderlineExtension) Extend(m goldmark.Markdown) {
 - `markdown_to_html_duration_seconds` — время конвертации
 - `markdown_to_html_errors_total` — ошибки парсинга
 - `telegram_message_length_utf16` — распределение длины сообщений
+
+### 6. ✅ Unicode Normalization (РЕАЛИЗОВАНО v0.6.1)
+
+Добавлена предварительная нормализация NFKC для входного текста перед конвертацией:
+- Устраняет проблемы с одинаковыми символами в разных формах
+- Гарантирует консистентный подсчёт UTF-16
 
 ## LaTeX → Unicode Конвертация
 

@@ -316,6 +316,20 @@ go func() {
 }()
 ```
 
+### 9. Recovery artifact states при старте (v0.6.0)
+
+**Проблема:** Артефакты в состоянии `processing` зависают при краше сервиса во время обработки.
+
+**Решение:** При старте сервиса восстанавливаем "зомби" артефакты:
+```go
+// cmd/bot/main.go
+if err := store.RecoverArtifactStates(cfg.Agents.Extractor.GetRecoveryThreshold()); err != nil {
+    logger.Warn("failed to recover artifact states", "error", err)
+}
+```
+
+Артефакты в `processing` дольше threshold (10m default) → reset to `pending` для повторной обработки.
+
 ## Что происходит с сообщениями
 
 | Момент отправки | Long Polling | Webhook |

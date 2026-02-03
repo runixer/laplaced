@@ -189,7 +189,7 @@ input := fmt.Sprintf("%s %s %s %s",
 ```
 
 **API:** OpenRouter с `google/gemini-embedding-001`
-- Размерность: 3072
+- Размерность: 768
 - Нормализация: L2 normalized
 
 ### Дедупликация
@@ -266,15 +266,23 @@ func (s *Service) SearchPeople(
 ```yaml
 agents:
   archivist:
-    model: "google/gemini-2-flash-thinking"
-    temperature: 0.0
-    max_tokens: 4096
+    name: "Archivist"
+    model: "google/gemini-3-flash-preview"
+    thinking_level: "high"      # High reasoning for better fact/people extraction
+    timeout: "120s"             # Longer timeout for multi-turn
+    max_tool_calls: 2           # Usually 0-1, max 2 for complex sessions
 
   reranker:
     enabled: true
     model: "google/gemini-3-flash-preview"
     max_people: 10
     timeout: "60s"
+    thinking_level: "minimal"
+
+    # Per-type limits (v0.6.0)
+    people:
+      candidates_limit: 20      # Сколько людей показать из vector search
+      max: 10                   # Финальный выбор
 ```
 
 ### Настройки RAG
@@ -282,7 +290,7 @@ agents:
 ```yaml
 rag:
   retrieval:
-    people_threshold: 0.65      # Минимальное сходство для людей
+    people_threshold: 0.3       # Минимальное сходство для людей (релаксировано для recall)
     retrieved_people_count: 10  # Максимум людей из vector search
 ```
 
@@ -379,6 +387,7 @@ func (r *SQLitePersonRepository) MergePeople(ctx context.Context, sourceID, targ
 
 ## История изменений
 
+- **v0.6.0** — обновление модели на gemini-3-flash-preview, размерность embeddings 768
 - **v0.5.1** — начальная реализация People Graph
   - Архитектура social graph
   - Категоризация по кругам

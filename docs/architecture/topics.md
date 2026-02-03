@@ -191,7 +191,7 @@ input := fmt.Sprintf("Topic Summary: %s\n\nConversation Log:\n%s",
 ```
 
 **API:** OpenRouter с `google/gemini-embedding-001`
-- Размерность: 3072
+- Размерность: 768
 - Нормализация: L2 normalized
 
 ### Сохранение топиков
@@ -348,7 +348,7 @@ func (s *Service) SearchTopics(
 **Flash Reranker** (агентская фильтрация):
 - Видит 50 summaries (~3K tokens)
 - Tool call `get_topics_content([ids])` для загрузки
-- Выбирает 0-15 релевантных топиков
+- Выбирает 0-5 релевантных топиков (v0.6.0)
 - Возвращает reason + excerpt для больших топиков
 
 **Детали:** см. [Flash Reranker](./flash-reranker.md)
@@ -385,7 +385,7 @@ rag:
 
 ```yaml
 rag:
-  consolidation_similarity_threshold: 0.85  # Порог для merge candidates
+  consolidation_similarity_threshold: 0.8   # Порог для merge candidates
   max_merged_size_chars: 50000             # Максимум после merge
   consolidation_batch_size: 10              # Сколько проверять за раз
 ```
@@ -396,7 +396,7 @@ rag:
 rag:
   retrieval:
     topics_threshold: 0.60       # Минимальное сходство
-    retrieved_topics_count: 50   # Для reranker
+    retrieved_topics_count: 5    # Без reranker; с reranker используется topics.candidates_limit: 50
 ```
 
 ## Ключевые решения
@@ -488,10 +488,32 @@ rag:
 | Ситуация | Поведение |
 |----------|-----------|
 | Пустой summary | Error (summary обязателен) |
-| Uncovered messages | Создаём "General conversation" |
+| Uncovered messages | Error — требуется ручная обработка |
 | Overlapping topics | Split по времени (earlier wins) |
 | Too large topic | Split на под-топики |
 | Merge > max_size | Не merge, создаём новый |
+
+## Интеграция с другими системами (v0.5+)
+
+### People Graph (v0.5.1)
+
+Топики связаны с людьми через социальный граф:
+- Archivist извлекает упоминания людей из сообщений топика
+- Люди categorised по кругам (Family, Work_Inner, Friends, etc.)
+- Inner Circle людей всегда включается в system prompt
+- Relevant People выбираются reranker'ом вместе с топиками
+
+**Пример:** Топик "Обсуждение проекта с Петровым" связан с Person:Петров (Work_Inner).
+
+### Artifacts (v0.6.0)
+
+Топики могут содержать артефакты (файлы):
+- Файлы из сообщений сохраняются как артефакты
+- Extractor agent создаёт summary для каждого файла
+- Артефакты индексируются для RAG retrieval
+- Reranker выбирает релевантные артефакты вместе с топиками
+
+**Пример:** Топик "API документация" связан с Artifact:api-docs.pdf.
 
 ## Связанные документы
 

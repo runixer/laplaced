@@ -149,6 +149,11 @@ type Artifact struct {
     RAGHints  *string   `json:"rag_hints"`  // JSON array: ["what questions?"]
     Embedding []float32 `json:"embedding"`  // Summary embedding for vector search
 
+    // Usage tracking (v0.6.0)
+    ContextLoadCount int        `json:"context_load_count"` // Сколько раз загружался в контекст
+    LastLoadedAt     *time.Time `json:"last_loaded_at"`     // Когда последний раз загружался
+    UserContext      *string    `json:"user_context"`       // XML-контекст пользователя для персонализации
+
     CreatedAt   time.Time  `json:"created_at"`
     ProcessedAt *time.Time `json:"processed_at"`
 }
@@ -166,8 +171,15 @@ type Artifact struct {
 | `video` | Video | `video/*` | FilePart |
 | `document` | Document | `text/*` | TextPart + Compact marker* |
 
-\* **Compact History Markers (v0.6.0):** Для текстовых документов в `history.content` сохраняется компактный маркер вместо полного содержимого, чтобы избежать раздувания topics при архивации:
+\* **Compact History Markers (v0.6.0):** Для текстовых документов в `history.content` сохраняется компактный маркер вместо полного содержимого, чтобы избежать раздувания topics при архивации.
 
+**Реализация:**
+```go
+// internal/bot/process_group.go
+marker := fmt.Sprintf("📄 %s (artifact:%d)", f.FileName, *f.ArtifactID)
+```
+
+**Как это работает:**
 ```
 # В history.content (сохраняется в БД):
 [User ...]
@@ -178,9 +190,9 @@ type Artifact struct {
 ```
 
 Это обеспечивает:
-- **Компактные topics** — при архивации не bloating с summary
+- **Компактные topics** — при архивации нет bloating с полным содержимым файлов
 - **Полный контент для LLM** — через `LLMParts` в текущем запросе
-- **RAG retrieval** — enricher/reranker видят содержимое через `rawQuery`
+- **RAG retrieval** — enricher/reranker видят содержимое через `rawQuery` (файл загружается по artifact ID)
 
 ### Состояния артефакта
 
@@ -383,6 +395,25 @@ WHERE state = 'pending'
 store.RecoverArtifactStates(cfg.Agents.Extractor.GetRecoveryThreshold()) // 10m default
 ```
 
+## Usage Tracking (v0.6.0)
+
+Артефакты отслеживаются по использованию для анализа популярности файлов:
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `ContextLoadCount` | int | Сколько раз артефакт загружался в контекст |
+| `LastLoadedAt` | time.Time | Когда последний раз загружался в контекст |
+| `UserContext` | string | XML-контекст пользователя для персонализации |
+
+**Метод:**
+```go
+func (s *SQLiteArtifactRepository) IncrementContextLoadCount(
+    ctx context.Context, userID, artifactID int64,
+) error
+```
+
+Используется при загрузке артефакта в контекст LLM для статистики и последующего анализа.
+
 ## Graceful Shutdown
 
 ### Механизм
@@ -486,11 +517,15 @@ agents:
 |----------|-------------|
 | `LAPLACED_ARTIFACTS_ENABLED` | Enable/disable system |
 | `LAPLACED_ARTIFACTS_STORAGE_PATH` | Path for file storage |
+| `LAPLACED_ARTIFACTS_ALLOWED_TYPES` | Comma-separated file types to process |
+| `LAPLACED_ARTIFACTS_MIN_VOICE_DURATION_SECONDS` | Minimum voice duration (0=all, -1=disable) |
 | `LAPLACED_EXTRACTOR_MAX_FILE_SIZE_MB` | Max file size |
 | `LAPLACED_EXTRACTOR_POLLING_INTERVAL` | Background polling interval |
 | `LAPLACED_EXTRACTOR_TIMEOUT` | Single file timeout |
 | `LAPLACED_EXTRACTOR_MAX_RETRIES` | Retry attempts |
 | `LAPLACED_EXTRACTOR_MAX_CONCURRENT` | Parallel processing limit |
+| `LAPLACED_EXTRACTOR_RECOVERY_THRESHOLD` | Recovery zombie states threshold |
+| `LAPLACED_EXTRACTOR_RECENT_MESSAGE_COUNT` | Recent session messages for artifact context |
 
 ## User Data Isolation
 
