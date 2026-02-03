@@ -1,4 +1,3 @@
-//nolint:staticcheck // Tests use deprecated NewService for backward compatibility testing
 package bot
 
 import (
@@ -189,7 +188,21 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService, err := rag.NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockORClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(&mockMemoryService{}).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	mockDownloader := new(testutil.MockFileDownloader)
 	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
@@ -329,7 +342,21 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService, err := rag.NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockORClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(&mockMemoryService{}).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	mockDownloader := new(testutil.MockFileDownloader)
 	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
@@ -471,7 +498,21 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 	cfg.RAG.Enabled = false
 	cfg.OpenRouter.PDFParserEngine = "native"
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService, err := rag.NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockORClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(&mockMemoryService{}).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	mockDownloader := new(testutil.MockFileDownloader)
 	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
@@ -617,7 +658,21 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService, err := rag.NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockORClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(&mockMemoryService{}).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	mockDownloader := new(testutil.MockFileDownloader)
 	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
@@ -767,7 +822,21 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService, err := rag.NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockORClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(&mockMemoryService{}).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
 	bot := &Bot{
@@ -1060,7 +1129,21 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService, err := rag.NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockORClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(&mockMemoryService{}).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
 	bot := &Bot{
@@ -1358,7 +1441,21 @@ func TestSendTestMessage_Success(t *testing.T) {
 	cfg.RAG.Enabled = false // Disable RAG for testing
 
 	// Create a minimal RAG service with RAG disabled
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService, err := rag.NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockORClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(&mockMemoryService{}).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
 	bot := &Bot{
@@ -1449,7 +1546,21 @@ func TestSendTestMessage_SaveToHistoryFalse(t *testing.T) {
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService, err := rag.NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockORClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(&mockMemoryService{}).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
 	bot := &Bot{
@@ -1529,7 +1640,21 @@ func TestSendTestMessage_OpenRouterError(t *testing.T) {
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService, err := rag.NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockORClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(&mockMemoryService{}).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
 	bot := &Bot{
@@ -1789,7 +1914,21 @@ func TestSendTestMessage_SaveToHistoryError_ReturnsError(t *testing.T) {
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService, err := rag.NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockORClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(&mockMemoryService{}).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
 	bot := &Bot{
@@ -1813,7 +1952,7 @@ func TestSendTestMessage_SaveToHistoryError_ReturnsError(t *testing.T) {
 	// AddMessageToHistory fails
 	mockStore.On("AddMessageToHistory", userID, mock.Anything).Return(fmt.Errorf("database error"))
 
-	_, err := bot.SendTestMessage(context.Background(), userID, testMessage, true)
+	_, err = bot.SendTestMessage(context.Background(), userID, testMessage, true)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to save message")

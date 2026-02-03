@@ -54,7 +54,21 @@ func TestExecuteReranker_Success(t *testing.T) {
 		Build(), nil)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	svc.SetRerankerAgent(mockReranker)
 
 	// Build reranker input
@@ -99,12 +113,26 @@ func TestExecuteReranker_AgentNotConfigured(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	// Don't set reranker agent
 
 	input := rerankerInput{}
 
-	_, err := svc.executeReranker(context.Background(), 123, input)
+	_, err = svc.executeReranker(context.Background(), 123, input)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "reranker agent not configured")
@@ -131,7 +159,21 @@ func TestExecuteReranker_AgentError(t *testing.T) {
 		Return(nil, errors.New("LLM API timeout"))
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	svc.SetRerankerAgent(mockReranker)
 
 	candidates := []topicCandidate{{topicID: 1, score: 0.9}}
@@ -146,7 +188,7 @@ func TestExecuteReranker_AgentError(t *testing.T) {
 		recentTopics:        "",
 	}
 
-	_, err := svc.executeReranker(context.Background(), userID, input)
+	_, err = svc.executeReranker(context.Background(), userID, input)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "LLM API timeout")
@@ -185,7 +227,21 @@ func TestExecuteReranker_InvalidTopicID(t *testing.T) {
 			Build(), nil)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	svc.SetRerankerAgent(mockReranker)
 
 	candidates := []topicCandidate{{topicID: 1, score: 0.9}}
@@ -242,7 +298,21 @@ func TestExecuteReranker_WithPeople(t *testing.T) {
 			Build(), nil)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	svc.SetRerankerAgent(mockReranker)
 	svc.SetPeopleRepository(mockStore)
 
@@ -298,7 +368,21 @@ func TestRerankViaAgent_Success(t *testing.T) {
 		Build(), nil)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	svc.SetRerankerAgent(mockReranker)
 
 	candidates := []reranker.Candidate{
@@ -361,7 +445,21 @@ func TestRerankViaAgent_SharedContext(t *testing.T) {
 		Build(), nil)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	svc.SetRerankerAgent(mockReranker)
 
 	candidates := []reranker.Candidate{
@@ -407,14 +505,28 @@ func TestRerankViaAgent_UnexpectedType(t *testing.T) {
 			Build(), nil)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	svc.SetRerankerAgent(mockReranker)
 
 	candidates := []reranker.Candidate{
 		{TopicID: 1, Score: 0.9, Topic: storage.Topic{ID: 1, Summary: "Topic 1"}},
 	}
 
-	_, err := svc.rerankViaAgent(
+	_, err = svc.rerankViaAgent(
 		context.Background(),
 		userID,
 		candidates,
@@ -458,7 +570,21 @@ func TestRerankViaAgent_WithArtifacts(t *testing.T) {
 		Build(), nil)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	svc.SetRerankerAgent(mockReranker)
 
 	candidates := []reranker.Candidate{

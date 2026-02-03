@@ -137,9 +137,23 @@ func TestProcessChunk(t *testing.T) {
 		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
 
-		err := svc.processChunk(context.Background(), 123, []storage.Message{})
+		err = svc.processChunk(context.Background(), 123, []storage.Message{})
 
 		assert.NoError(t, err)
 	})
@@ -157,7 +171,21 @@ func TestProcessChunkWithStats(t *testing.T) {
 		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
 
 		stats := &ProcessingStats{}
 		topicIDs, err := svc.processChunkWithStats(context.Background(), 123, []storage.Message{}, stats)
@@ -183,14 +211,28 @@ func TestProcessChunkWithStats(t *testing.T) {
 		mockSplitter.On("Execute", mock.Anything, mock.Anything).Return(nil, assert.AnError)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
 		svc.SetSplitterAgent(mockSplitter)
 
 		chunk := []storage.Message{
 			{ID: 1, Role: "user", Content: "Hello", CreatedAt: time.Now()},
 		}
 		stats := &ProcessingStats{}
-		_, err := svc.processChunkWithStats(context.Background(), 123, chunk, stats)
+		_, err = svc.processChunkWithStats(context.Background(), 123, chunk, stats)
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "extract topics")
@@ -249,7 +291,21 @@ func TestProcessChunkWithStats(t *testing.T) {
 		mockStore.On("GetFactsAfterID", mock.Anything).Return([]storage.Fact{}, nil).Maybe()
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
 		svc.SetSplitterAgent(mockSplitter)
 
 		stats := &ProcessingStats{}
@@ -298,11 +354,25 @@ func TestProcessChunkWithStats(t *testing.T) {
 		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{}, assert.AnError)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
 		svc.SetSplitterAgent(mockSplitter)
 
 		stats := &ProcessingStats{}
-		_, err := svc.processChunkWithStats(context.Background(), 123, chunk, stats)
+		_, err = svc.processChunkWithStats(context.Background(), 123, chunk, stats)
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "create embeddings")
@@ -324,7 +394,21 @@ func TestProcessTopicChunking(t *testing.T) {
 		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
 
 		svc.processTopicChunking(context.Background(), 123)
 
@@ -345,7 +429,21 @@ func TestProcessTopicChunking(t *testing.T) {
 		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
 
 		svc.processTopicChunking(context.Background(), 123)
 
@@ -369,7 +467,21 @@ func TestProcessTopicChunking(t *testing.T) {
 		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
 
 		// Should not panic with invalid duration
 		svc.processTopicChunking(context.Background(), 123)
@@ -392,7 +504,21 @@ func TestProcessFactExtraction(t *testing.T) {
 		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
 
 		// Create cancelled context
 		ctx, cancel := context.WithCancel(context.Background())
@@ -419,7 +545,21 @@ func TestProcessFactExtraction(t *testing.T) {
 		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
 
 		svc.processFactExtraction(context.Background())
 
@@ -444,7 +584,21 @@ func TestProcessFactExtraction(t *testing.T) {
 		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
 
 		svc.processFactExtraction(context.Background())
 
@@ -471,7 +625,21 @@ func TestProcessFactExtraction(t *testing.T) {
 		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
 
 		svc.processFactExtraction(context.Background())
 
@@ -493,7 +661,21 @@ func TestProcessConsolidation(t *testing.T) {
 		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
 
 		// Create cancelled context
 		ctx, cancel := context.WithCancel(context.Background())
@@ -521,7 +703,21 @@ func TestProcessConsolidation(t *testing.T) {
 		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
 
 		svc.processConsolidation(context.Background())
 
@@ -546,7 +742,21 @@ func TestProcessConsolidation(t *testing.T) {
 		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
 
 		svc.processConsolidation(context.Background())
 
@@ -568,7 +778,21 @@ func TestProcessAllUsers(t *testing.T) {
 		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -593,7 +817,21 @@ func TestProcessAllUsers(t *testing.T) {
 		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-		svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
 
 		svc.processAllUsers(context.Background())
 

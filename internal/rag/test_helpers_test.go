@@ -42,12 +42,26 @@ func newTestRAGService(t *testing.T, store *testutil.MockStorage, client *testut
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, store, store, store, client, translator)
-	svc := NewService(logger, cfg, store, store, store, store, store, client, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(client).
+		WithTopicRepository(store).
+		WithFactRepository(store).
+		WithFactHistoryRepository(store).
+		WithMessageRepository(store).
+		WithMaintenanceRepository(store).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	// Setup common mocks before starting to avoid unexpected method calls
 	SetupCommonRAGMocks(store)
 
-	err := svc.Start(context.Background())
+	err = svc.Start(context.Background())
 	if err != nil {
 		t.Fatalf("failed to start RAG service: %v", err)
 	}
@@ -65,7 +79,21 @@ func newTestRAGServiceNoStart(t *testing.T, store *testutil.MockStorage, client 
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, store, store, store, client, translator)
-	svc := NewService(logger, cfg, store, store, store, store, store, client, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(client).
+		WithTopicRepository(store).
+		WithFactRepository(store).
+		WithFactHistoryRepository(store).
+		WithMessageRepository(store).
+		WithMaintenanceRepository(store).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	return svc
 }
@@ -86,7 +114,21 @@ func newTestRAGServiceWithSetup(
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, store, store, store, client, translator)
-	svc := NewService(logger, cfg, store, store, store, store, store, client, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(client).
+		WithTopicRepository(store).
+		WithFactRepository(store).
+		WithFactHistoryRepository(store).
+		WithMessageRepository(store).
+		WithMaintenanceRepository(store).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	// Setup common mocks before starting to avoid unexpected method calls
 	SetupCommonRAGMocks(store)
@@ -95,7 +137,7 @@ func newTestRAGServiceWithSetup(
 		setup(svc, memSvc)
 	}
 
-	err := svc.Start(context.Background())
+	err = svc.Start(context.Background())
 	if err != nil {
 		t.Fatalf("failed to start RAG service: %v", err)
 	}

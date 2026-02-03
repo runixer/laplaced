@@ -12,7 +12,6 @@ import (
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
-	"github.com/runixer/laplaced/internal/memory"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -162,32 +161,6 @@ type Service struct {
 	// Shutdown coordination (v0.6.0 - CRIT-2)
 	shuttingDown      atomic.Bool // Signal to stop accepting new work
 	inFlightArtifacts sync.Map    // artifactID -> time.Time for visibility during shutdown
-}
-
-// NewService creates a new RAG service with required dependencies.
-// Optional dependencies (agents, repos) must be set via setter methods.
-//
-// Deprecated: Use NewServiceBuilder().Build() for better validation and fluent API.
-// This method is kept for backward compatibility.
-func NewService(logger *slog.Logger, cfg *config.Config, topicRepo storage.TopicRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, msgRepo storage.MessageRepository, maintenanceRepo storage.MaintenanceRepository, client openrouter.Client, memoryService *memory.Service, translator *i18n.Translator) *Service {
-	return &Service{
-		logger:               logger.With("component", "rag"),
-		cfg:                  cfg,
-		topicRepo:            topicRepo,
-		factRepo:             factRepo,
-		factHistoryRepo:      factHistoryRepo,
-		msgRepo:              msgRepo,
-		maintenanceRepo:      maintenanceRepo,
-		client:               client,
-		memoryService:        memoryService,
-		translator:           translator,
-		topicVectors:         make(map[int64][]TopicVectorItem),
-		factVectors:          make(map[int64][]FactVectorItem),
-		peopleVectors:        make(map[int64][]PersonVectorItem),
-		artifactVectors:      make(map[int64][]ArtifactVectorItem),
-		stopChan:             make(chan struct{}),
-		consolidationTrigger: make(chan struct{}, 1),
-	}
 }
 
 // SetAgentLogger sets the agent logger for debugging LLM calls.

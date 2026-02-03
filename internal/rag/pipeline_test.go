@@ -25,7 +25,21 @@ func TestSearchTopicCandidates(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	userID := int64(123)
 
@@ -61,7 +75,21 @@ func TestPrepareRerankerContext_SharedContext(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	svc.SetPeopleRepository(mockStore)
 
 	userID := int64(123)
@@ -111,7 +139,21 @@ func TestPrepareRerankerContext_Fallback(t *testing.T) {
 
 	// Create service without SharedContext
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	svc.SetPeopleRepository(mockStore)
 
 	ctx := context.Background()
@@ -133,7 +175,21 @@ func TestFormatSessionMessages(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	history := []storage.Message{
 		{Role: "user", Content: "First message"},
@@ -158,7 +214,21 @@ func TestFormatSessionMessages_EmptyHistory(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	formatted := svc.formatSessionMessages([]storage.Message{})
 
@@ -175,7 +245,21 @@ func TestFormatSessionMessages_Truncation(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	// Create a message with >500 chars
 	longContent := strings.Repeat("This is a long message. ", 30) // ~540 chars
@@ -263,7 +347,21 @@ func TestLoadTopicMap(t *testing.T) {
 	mockStore.On("GetTopicsByIDs", userID, []int64{1, 2}).Return(topics, nil).Once()
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	matches := []topicCandidate{
 		{topicID: 1},
@@ -450,13 +548,27 @@ func TestExecuteReranker_AgentNil(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	// Don't set reranker agent
 
 	ctx := context.Background()
 	input := rerankerInput{}
 
-	_, err := svc.executeReranker(ctx, 123, input)
+	_, err = svc.executeReranker(ctx, 123, input)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "reranker agent not configured")
@@ -487,7 +599,21 @@ func TestBuildRetrievalResult(t *testing.T) {
 	mockStore.On("GetMessagesByTopicID", mock.Anything, int64(2)).Return(messages, nil).Once()
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	topicMatches := []topicCandidate{
 		{topicID: 1, score: 0.8, reason: "Direct match"},
@@ -552,7 +678,21 @@ func TestBuildRetrievalResult_WithoutReranker(t *testing.T) {
 	mockStore.On("GetMessagesByTopicID", mock.Anything, int64(3)).Return(messages3, nil).Once()
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	topicMatches := []topicCandidate{
 		{topicID: 1, score: 0.8},
@@ -604,7 +744,21 @@ func TestSearchPeopleAndArtifacts(t *testing.T) {
 	mockArtifactRepo.On("GetArtifactsByIDs", userID, []int64{5}).Return(artifacts, nil).Once()
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	svc.SetPeopleRepository(mockStore)
 	svc.SetArtifactRepository(mockArtifactRepo)
 
@@ -653,7 +807,21 @@ func TestSearchPeopleAndArtifacts_Disabled(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	embedding := []float32{0.1, 0.2}
 
@@ -679,7 +847,21 @@ func TestFormatSessionMessages_Omission(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	// Create 12 messages
 	history := make([]storage.Message, 12)

@@ -111,12 +111,26 @@ func TestGracefulShutdown(t *testing.T) {
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 	memSvc.SetArchivistAgent(mockArchivist)
 
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	svc.SetSplitterAgent(mockSplitter)
 
 	// Start with cancellable context
 	ctx, cancel := context.WithCancel(context.Background())
-	err := svc.Start(ctx)
+	err = svc.Start(ctx)
 	assert.NoError(t, err)
 
 	// Wait a bit for the background loop to pick up the task and start "sleeping" in the mock

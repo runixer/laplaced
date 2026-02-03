@@ -31,10 +31,24 @@ func TestServiceStart_RAGDisabled(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	// Start should succeed without errors when RAG is disabled
-	err := svc.Start(context.Background())
+	err = svc.Start(context.Background())
 	assert.NoError(t, err)
 
 	// No background loops should be running
@@ -64,9 +78,23 @@ func TestServiceStart_BackgroundLoopsStarted(t *testing.T) {
 	mockStore.On("GetAllUsers").Return([]storage.User{}, nil).Maybe()
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
-	err := svc.Start(context.Background())
+	err = svc.Start(context.Background())
 	assert.NoError(t, err)
 
 	// Give goroutines a moment to start
@@ -101,10 +129,24 @@ func TestServiceStart_ArtifactLoopStarted(t *testing.T) {
 	mockArtifactRepo.On("GetPendingArtifacts", mock.Anything).Return([]storage.Artifact{}, nil).Maybe()
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	svc.SetArtifactRepository(mockArtifactRepo)
 
-	err := svc.Start(context.Background())
+	err = svc.Start(context.Background())
 	assert.NoError(t, err)
 
 	// Give artifact loop a moment to start
@@ -133,9 +175,23 @@ func TestServiceStop_GracefulShutdown(t *testing.T) {
 	mockStore.On("GetAllUsers").Return([]storage.User{}, nil).Maybe()
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
-	err := svc.Start(context.Background())
+	err = svc.Start(context.Background())
 	require.NoError(t, err)
 
 	// Note: inFlightArtifacts stores artifactID as key (int64) and startTime as value (time.Time)
@@ -182,11 +238,25 @@ func TestServiceReloadVectors_FullReload(t *testing.T) {
 	mockArtifactRepo.On("GetArtifacts", artifactsFilter, 1000, 0).Return([]storage.Artifact{}, int64(0), nil).Maybe()
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	svc.SetArtifactRepository(mockArtifactRepo)
 	svc.SetPeopleRepository(mockStore) // Set people repo so people vectors load
 
-	err := svc.ReloadVectors()
+	err = svc.ReloadVectors()
 	assert.NoError(t, err)
 
 	// Verify vectors were loaded
@@ -225,9 +295,23 @@ func TestServiceReloadVectors_EmptyEmbeddingsSkipped(t *testing.T) {
 	mockStore.On("GetAllPeople").Return(nil, nil).Once()
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
-	err := svc.ReloadVectors()
+	err = svc.ReloadVectors()
 	assert.NoError(t, err)
 
 	svc.mu.RLock()
@@ -252,10 +336,24 @@ func TestServiceReloadVectors_PeopleRepoNil(t *testing.T) {
 	// No people repo set, so GetAllPeople won't be called
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	// Don't set peopleRepo
 
-	err := svc.ReloadVectors()
+	err = svc.ReloadVectors()
 	assert.NoError(t, err)
 
 	svc.mu.RLock()
@@ -287,7 +385,21 @@ func TestServiceLoadNewVectors_IncrementalLoading(t *testing.T) {
 	}
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	svc.SetArtifactRepository(mockArtifactRepo)
 	svc.SetPeopleRepository(mockStore) // Set people repo
 
@@ -308,7 +420,7 @@ func TestServiceLoadNewVectors_IncrementalLoading(t *testing.T) {
 	// Artifact expectations
 	mockArtifactRepo.On("GetArtifacts", mock.Anything, 1000, 0).Return([]storage.Artifact{}, int64(0), nil).Maybe()
 
-	err := svc.LoadNewVectors()
+	err = svc.LoadNewVectors()
 	assert.NoError(t, err)
 
 	svc.mu.RLock()
@@ -338,11 +450,25 @@ func TestServiceLoadNewVectors_NothingNew(t *testing.T) {
 	mockStore.On("GetPeopleAfterID", int64(0)).Return([]storage.Person{}, nil).Once()
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	svc.SetPeopleRepository(mockStore)
 
 	// Empty call - nothing new to load (empty results from all calls)
-	err := svc.LoadNewVectors()
+	err = svc.LoadNewVectors()
 	assert.NoError(t, err)
 
 	// Verify methods were called
@@ -365,7 +491,21 @@ func TestServiceLoadNewVectors_DuplicateDetection(t *testing.T) {
 	}
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	svc.SetPeopleRepository(mockStore)
 
 	// Simulate another goroutine already loaded newer data (ID 30 > topic with ID 10)
@@ -385,7 +525,7 @@ func TestServiceLoadNewVectors_DuplicateDetection(t *testing.T) {
 	mockStore.On("GetPeopleAfterID", int64(0)).Return([]storage.Person{}, nil).Once()
 
 	// Load should load normally since 20 == 20 (not less)
-	err := svc.LoadNewVectors()
+	err = svc.LoadNewVectors()
 	assert.NoError(t, err)
 
 	svc.mu.RLock()
@@ -417,7 +557,21 @@ func TestServiceGetRecentTopics(t *testing.T) {
 	mockStore.On("GetTopicsExtended", filter, 5, 0, "created_at", "DESC").Return(result, nil).Once()
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	got, err := svc.GetRecentTopics(userID, 5)
 	assert.NoError(t, err)
@@ -436,7 +590,21 @@ func TestServiceGetRecentTopics_LimitZero(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	// Zero limit
 	result, err := svc.GetRecentTopics(123, 0)
@@ -478,10 +646,24 @@ func TestServiceLoadNewArtifactSummaries(t *testing.T) {
 	mockArtifactRepo.On("GetArtifacts", filter456, 1000, 0).Return([]storage.Artifact{}, int64(0), nil).Once()
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	svc.SetArtifactRepository(mockArtifactRepo)
 
-	err := svc.LoadNewArtifactSummaries()
+	err = svc.LoadNewArtifactSummaries()
 	assert.NoError(t, err)
 
 	svc.mu.RLock()
@@ -503,10 +685,24 @@ func TestServiceLoadNewArtifactSummaries_NoRepo(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	// Don't set artifactRepo
 
-	err := svc.LoadNewArtifactSummaries()
+	err = svc.LoadNewArtifactSummaries()
 	assert.NoError(t, err)
 
 	svc.mu.RLock()
@@ -528,7 +724,21 @@ func TestServiceLoadNewArtifactSummaries_Incremental(t *testing.T) {
 	userID := int64(123)
 
 	memSvc := memory.NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(testutil.TestLogger()).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	svc.SetArtifactRepository(mockArtifactRepo)
 
 	// Some artifacts already loaded
@@ -546,7 +756,7 @@ func TestServiceLoadNewArtifactSummaries_Incremental(t *testing.T) {
 	filter := storage.ArtifactFilter{UserID: userID, State: "ready"}
 	mockArtifactRepo.On("GetArtifacts", filter, 1000, 0).Return(newArtifacts, int64(2), nil).Once()
 
-	err := svc.LoadNewArtifactSummaries()
+	err = svc.LoadNewArtifactSummaries()
 	assert.NoError(t, err)
 
 	svc.mu.RLock()
@@ -565,7 +775,21 @@ func TestServiceSetAgentLogger(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(testutil.TestLogger()).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	agentLogger := &agentlog.Logger{}
 	svc.SetAgentLogger(agentLogger)
@@ -583,7 +807,21 @@ func TestServiceSetEnricherAgent(t *testing.T) {
 	mockAgent := new(agenttesting.MockAgent)
 
 	memSvc := memory.NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(testutil.TestLogger()).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	svc.SetEnricherAgent(mockAgent)
 
@@ -600,7 +838,21 @@ func TestServiceSetRerankerAgent(t *testing.T) {
 	mockAgent := new(agenttesting.MockAgent)
 
 	memSvc := memory.NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(testutil.TestLogger()).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	svc.SetRerankerAgent(mockAgent)
 
@@ -617,7 +869,21 @@ func TestServiceSetExtractorAgent(t *testing.T) {
 	mockAgent := new(agenttesting.MockAgent)
 
 	memSvc := memory.NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(testutil.TestLogger()).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	svc.SetExtractorAgent(mockAgent)
 
@@ -633,7 +899,21 @@ func TestServiceSetArtifactRepository(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(testutil.TestLogger()).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	svc.SetArtifactRepository(mockArtifactRepo)
 
@@ -648,7 +928,21 @@ func TestServiceSetPeopleRepository(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(testutil.TestLogger()).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	svc.SetPeopleRepository(mockStore)
 
@@ -663,7 +957,21 @@ func TestServiceSetContextService(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(testutil.TestLogger()).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	contextService := &agent.ContextService{}
 	svc.SetContextService(contextService)
@@ -679,7 +987,21 @@ func TestServiceTriggerConsolidation(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(testutil.TestLogger()).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	// Trigger twice - second should not block
 	svc.TriggerConsolidation()
@@ -735,10 +1057,24 @@ func TestServiceReloadVectors_ErrorHandling(t *testing.T) {
 			tt.setup(mockStore)
 
 			memSvc := memory.NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockClient, translator)
-			svc := NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+			svc, err := NewServiceBuilder().
+				WithLogger(testutil.TestLogger()).
+				WithConfig(cfg).
+				WithOpenRouterClient(mockClient).
+				WithTopicRepository(mockStore).
+				WithFactRepository(mockStore).
+				WithFactHistoryRepository(mockStore).
+				WithMessageRepository(mockStore).
+				WithMaintenanceRepository(mockStore).
+				WithMemoryService(memSvc).
+				WithTranslator(translator).
+				Build()
+			if err != nil {
+				t.Fatalf("failed to build RAG service: %v", err)
+			}
 			svc.SetPeopleRepository(mockStore)
 
-			err := svc.ReloadVectors()
+			err = svc.ReloadVectors()
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
@@ -758,7 +1094,21 @@ func TestServiceProcessingFlags(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(testutil.TestLogger()).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	t.Run("tryStartProcessingTopic returns true first time", func(t *testing.T) {
 		topicID := int64(1)
@@ -831,7 +1181,21 @@ func TestServiceSetSplitterAgent(t *testing.T) {
 	mockAgent := new(agenttesting.MockAgent)
 
 	memSvc := memory.NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(testutil.TestLogger()).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	svc.SetSplitterAgent(mockAgent)
 
@@ -848,7 +1212,21 @@ func TestServiceSetMergerAgent(t *testing.T) {
 	mockAgent := new(agenttesting.MockAgent)
 
 	memSvc := memory.NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockClient, translator)
-	svc := NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, memSvc, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(testutil.TestLogger()).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 
 	svc.SetMergerAgent(mockAgent)
 

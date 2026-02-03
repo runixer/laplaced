@@ -1,4 +1,3 @@
-//nolint:staticcheck // Tests use deprecated NewService for backward compatibility testing
 package bot
 
 import (
@@ -35,7 +34,21 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 		},
 	}
 
-	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+	ragService, err := rag.NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockORClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(&mockMemoryService{}).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	laplaceAgent := laplace.New(cfg, mockORClient, ragService, mockStore, mockStore, nil, translator, logger)
 
 	bot := &Bot{

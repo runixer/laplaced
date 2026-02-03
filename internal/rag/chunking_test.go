@@ -11,6 +11,7 @@ import (
 	"github.com/runixer/laplaced/internal/agent/splitter"
 	agenttesting "github.com/runixer/laplaced/internal/agent/testing"
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/memory"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
@@ -31,6 +32,8 @@ func TestProcessChunk_HallucinatedIDs(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
+
+	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 
 	userID := int64(123)
 	messages := []storage.Message{
@@ -60,10 +63,24 @@ func TestProcessChunk_HallucinatedIDs(t *testing.T) {
 	mockStore.On("GetFactsAfterID", mock.Anything).Return([]storage.Fact{}, nil).Maybe()
 
 	// Run
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, nil, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	svc.SetSplitterAgent(mockSplitter)
 
-	_, err := svc.ForceProcessUser(context.Background(), userID)
+	_, err = svc.ForceProcessUser(context.Background(), userID)
 
 	// Now we expect an error because of incomplete coverage
 	assert.Error(t, err)
@@ -88,6 +105,8 @@ func TestProcessChunk_ValidIDs(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
+
+	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 
 	userID := int64(123)
 	messages := []storage.Message{
@@ -130,10 +149,24 @@ func TestProcessChunk_ValidIDs(t *testing.T) {
 	mockStore.On("GetFactsAfterID", mock.Anything).Return([]storage.Fact{}, nil).Maybe()
 
 	// Run
-	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockClient, nil, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
 	svc.SetSplitterAgent(mockSplitter)
 
-	_, err := svc.ForceProcessUser(context.Background(), userID)
+	_, err = svc.ForceProcessUser(context.Background(), userID)
 	assert.NoError(t, err)
 
 	// Wait a bit for goroutines
