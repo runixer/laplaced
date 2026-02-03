@@ -457,3 +457,282 @@ func TestAdditionalMarkdownElements(t *testing.T) {
 		})
 	}
 }
+
+func TestThematicBreak(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Three dashes",
+			input:    "Text before\n---\nText after",
+			expected: "<b>Text before</b>\n\nText after", // --- is treated as heading
+		},
+		{
+			name:     "Three asterisks",
+			input:    "Text before\n***\nText after",
+			expected: "Text before\n\n\nText after", // thematic break adds newlines
+		},
+		{
+			name:     "Three underscores",
+			input:    "Text before\n___\nText after",
+			expected: "Text before\n\n\nText after",
+		},
+		{
+			name:     "Multiple thematic breaks",
+			input:    "First\n---\nMiddle\n---\nLast",
+			expected: "<b>First</b>\n\n<b>Middle</b>\n\nLast",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ToHTML(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestImageRendering(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Basic image",
+			input:    "![alt text](http://example.com/image.png)",
+			expected: "", // Images are skipped in Telegram
+		},
+		{
+			name:     "Image with title",
+			input:    "![alt](url \"title\")",
+			expected: "", // Images are skipped
+		},
+		{
+			name:     "Text before and after image",
+			input:    "Before ![img](url) after",
+			expected: "Before  after",
+		},
+		{
+			name:     "Image with markdown in alt",
+			input:    "![**bold** alt](url)",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ToHTML(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestRawHTML(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Inline HTML tag",
+			input:    "Text with <span>HTML</span> inside",
+			expected: "Text with HTML inside", // Raw HTML is skipped but text content remains
+		},
+		{
+			name:     "Multiple inline tags",
+			input:    "<b>bold</b> and <i>italic</i>",
+			expected: "bold and italic", // Tags removed, text preserved
+		},
+		{
+			name:     "HTML block",
+			input:    "Text before\n<div>block</div>\nText after",
+			expected: "Text before", // Block-level HTML is skipped entirely
+		},
+		{
+			name:     "Self-closing tag",
+			input:    "Text <br/> more",
+			expected: "Text  more",
+		},
+		{
+			name:     "HTML comment",
+			input:    "Text <!-- comment --> more",
+			expected: "Text  more",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ToHTML(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestHTMLBlock(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Div block",
+			input:    "Before\n\n<div>\n  content\n</div>\n\nAfter",
+			expected: "Before\n\nAfter", // HTML blocks are skipped
+		},
+		{
+			name:     "Script tag (security skip)",
+			input:    "Before\n<script>alert(1)</script>\nAfter",
+			expected: "Before\n\nAfter",
+		},
+		{
+			name:     "Style block",
+			input:    "Text\n<style>body { color: red; }</style>\nMore",
+			expected: "Text\n\nMore",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ToHTML(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestEdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Only spaces",
+			input:    "   ",
+			expected: "", // Trailing spaces trimmed
+		},
+		{
+			name:     "Newlines only",
+			input:    "\n\n\n",
+			expected: "",
+		},
+		{
+			name:     "Mixed newlines and spaces",
+			input:    "Text \n \n More",
+			expected: "Text\n\nMore", // Trailing whitespace trimmed per line
+		},
+		{
+			name:     "Link with underscore",
+			input:    "[text](http://example.com/path_with_underscore)",
+			expected: "<a href=\"http://example.com/path_with_underscore\">text</a>",
+		},
+		{
+			name:     "Multiple consecutive links",
+			input:    "[a](url1) [b](url2) [c](url3)",
+			expected: "<a href=\"url1\">a</a> <a href=\"url2\">b</a> <a href=\"url3\">c</a>",
+		},
+		{
+			name:     "Nested emphasis inside link",
+			input:    "[**bold** link](url)",
+			expected: "<a href=\"url\"><b>bold</b> link</a>",
+		},
+		{
+			name:     "Code in link text",
+			input:    "[`code` link](url)",
+			expected: "<a href=\"url\"><code>code</code> link</a>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ToHTML(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestNestedListFormatting(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "List item with bold",
+			input:    "- **Bold** item",
+			expected: "• <b>Bold</b> item",
+		},
+		{
+			name:     "List item with code",
+			input:    "- Item with `code`",
+			expected: "• Item with <code>code</code>",
+		},
+		{
+			name:     "List item with link",
+			input:    "- [link](url) item",
+			expected: "• <a href=\"url\">link</a> item",
+		},
+		{
+			name:     "Ordered list with formatting",
+			input:    "1. **Bold** and *italic*",
+			expected: "1. <b>Bold</b> and <i>italic</i>",
+		},
+		{
+			name:     "List with spoiler",
+			input:    "- Item with ||spoiler||",
+			expected: "• Item with <tg-spoiler>spoiler</tg-spoiler>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ToHTML(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestBlockquoteVariations(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Multi-line quote",
+			input:    "> Line 1\n> Line 2",
+			expected: "<blockquote>Line 1\nLine 2</blockquote>",
+		},
+		{
+			name:     "Quote with nested code",
+			input:    "> Quote with `code`",
+			expected: "<blockquote>Quote with <code>code</code></blockquote>",
+		},
+		{
+			name:     "Quote with bold",
+			input:    "> **Important** quote",
+			expected: "<blockquote><b>Important</b> quote</blockquote>",
+		},
+		{
+			name:     "Multiple consecutive quotes",
+			input:    "> First quote\n\n> Second quote",
+			expected: "<blockquote>First quote</blockquote>\n\n<blockquote>Second quote</blockquote>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ToHTML(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

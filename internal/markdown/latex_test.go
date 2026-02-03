@@ -1563,3 +1563,163 @@ func TestEscapedDollarInFormula(t *testing.T) {
 		})
 	}
 }
+
+func TestMatchCodeBlock(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantRaw string
+		wantEnd int
+	}{
+		{
+			name:    "no code block",
+			input:   "no backticks",
+			wantRaw: "",
+			wantEnd: 0,
+		},
+		{
+			name:    "simple code block",
+			input:   "```code```",
+			wantRaw: "```code```",
+			wantEnd: 10,
+		},
+		{
+			name:    "code block with content",
+			input:   "```\nhello\n```",
+			wantRaw: "```\nhello\n```",
+			wantEnd: 13, // rune count, not byte count
+		},
+		{
+			name:    "incomplete code block",
+			input:   "```hello",
+			wantRaw: "",
+			wantEnd: 0,
+		},
+		{
+			name:    "code block ending at end of string",
+			input:   "```hello```",
+			wantRaw: "```hello```",
+			wantEnd: 11, // rune count
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runes := []rune(tt.input)
+			raw, end := matchCodeBlock(runes, 0)
+			assert.Equal(t, tt.wantRaw, raw)
+			assert.Equal(t, tt.wantEnd, end)
+		})
+	}
+}
+
+func TestMatchInlineCode(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantRaw string
+		wantEnd int
+	}{
+		{
+			name:    "no backtick",
+			input:   "no code",
+			wantRaw: "",
+			wantEnd: 0,
+		},
+		{
+			name:    "simple inline code",
+			input:   "`code`",
+			wantRaw: "`code`",
+			wantEnd: 6,
+		},
+		{
+			name:    "inline code with space",
+			input:   "`hello world`",
+			wantRaw: "`hello world`",
+			wantEnd: 13, // rune count
+		},
+		{
+			name:    "unclosed inline code",
+			input:   "`hello",
+			wantRaw: "",
+			wantEnd: 0,
+		},
+		{
+			name:    "inline code with newline - not valid",
+			input:   "`hello\nworld`",
+			wantRaw: "",
+			wantEnd: 0,
+		},
+		{
+			name:    "not inline code - triple backtick",
+			input:   "```code```",
+			wantRaw: "",
+			wantEnd: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runes := []rune(tt.input)
+			raw, end := matchInlineCode(runes, 0)
+			assert.Equal(t, tt.wantRaw, raw)
+			assert.Equal(t, tt.wantEnd, end)
+		})
+	}
+}
+
+func TestMatchDisplayMathFormats(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		wantContent string
+		wantRaw     string
+		wantEnd     int
+	}{
+		{
+			name:        "no display math",
+			input:       "no math here",
+			wantContent: "",
+			wantRaw:     "",
+			wantEnd:     0,
+		},
+		{
+			name:        "double dollar simple",
+			input:       "$$x^2$$",
+			wantContent: "x^2",
+			wantRaw:     "$$x^2$$",
+			wantEnd:     7,
+		},
+		{
+			name:        "double dollar with content",
+			input:       "$$\nsum x\n$$",
+			wantContent: "\nsum x\n",
+			wantRaw:     "$$\nsum x\n$$",
+			wantEnd:     11, // rune count
+		},
+		{
+			name:        "bracket format",
+			input:       "\\[x^2\\]",
+			wantContent: "x^2",
+			wantRaw:     "\\[x^2\\]",
+			wantEnd:     7, // rune count
+		},
+		{
+			name:        "bracket with newline",
+			input:       "\\[a+b\\]",
+			wantContent: "a+b",
+			wantRaw:     "\\[a+b\\]",
+			wantEnd:     7, // rune count
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runes := []rune(tt.input)
+			content, raw, end := matchDisplayMath(runes, 0)
+			assert.Equal(t, tt.wantContent, content)
+			assert.Equal(t, tt.wantRaw, raw)
+			assert.Equal(t, tt.wantEnd, end)
+		})
+	}
+}

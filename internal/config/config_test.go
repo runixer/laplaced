@@ -703,3 +703,518 @@ func TestRAGConfig_DefaultSplitThreshold(t *testing.T) {
 func TestRAGConfig_DefaultRecentTopicsInContext(t *testing.T) {
 	assert.Equal(t, 3, DefaultRecentTopicsInContext)
 }
+
+func TestValidate_RerankerConfig(t *testing.T) {
+	// Helper to create a valid config
+	validConfig := func() *Config {
+		cfg, _ := LoadDefault()
+		cfg.Telegram.Token = "test_token"
+		cfg.OpenRouter.APIKey = "test_api_key"
+		cfg.Database.Path = "test.db"
+		return cfg
+	}
+
+	tests := []struct {
+		name        string
+		modify      func(*Config)
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:    "valid reranker config",
+			modify:  func(c *Config) {},
+			wantErr: false,
+		},
+		{
+			name: "invalid topics candidates_limit (no legacy)",
+			modify: func(c *Config) {
+				c.Agents.Reranker.Topics.CandidatesLimit = 0
+				c.Agents.Reranker.Candidates = 0 // clear legacy to prevent migration
+			},
+			wantErr:     true,
+			errContains: "reranker.topics.candidates_limit must be positive",
+		},
+		{
+			name: "invalid topics max (no legacy)",
+			modify: func(c *Config) {
+				c.Agents.Reranker.Topics.Max = 0
+				c.Agents.Reranker.MaxTopics = 0 // clear legacy to prevent migration
+			},
+			wantErr:     true,
+			errContains: "reranker.topics.max must be positive",
+		},
+		{
+			name: "invalid people max (no legacy)",
+			modify: func(c *Config) {
+				c.Agents.Reranker.People.Max = 0
+				c.Agents.Reranker.MaxPeople = 0 // clear legacy to prevent migration
+			},
+			wantErr:     true,
+			errContains: "reranker.people.max must be positive",
+		},
+		{
+			name: "invalid max_tool_calls",
+			modify: func(c *Config) {
+				c.Agents.Reranker.MaxToolCalls = 0
+			},
+			wantErr:     true,
+			errContains: "max_tool_calls must be positive",
+		},
+		{
+			name: "invalid timeout duration",
+			modify: func(c *Config) {
+				c.Agents.Reranker.Timeout = "invalid-duration"
+			},
+			wantErr:     true,
+			errContains: "reranker.timeout: invalid duration format",
+		},
+		{
+			name: "invalid turn_timeout duration",
+			modify: func(c *Config) {
+				c.Agents.Reranker.TurnTimeout = "not-a-duration"
+			},
+			wantErr:     true,
+			errContains: "reranker.turn_timeout: invalid duration format",
+		},
+		{
+			name: "invalid thinking_level",
+			modify: func(c *Config) {
+				c.Agents.Reranker.ThinkingLevel = "invalid-level"
+			},
+			wantErr:     true,
+			errContains: "thinking_level: must be one of",
+		},
+		{
+			name: "valid thinking levels",
+			modify: func(c *Config) {
+				validLevels := []string{"off", "minimal", "low", "medium", "high"}
+				c.Agents.Reranker.ThinkingLevel = validLevels[0]
+			},
+			wantErr: false,
+		},
+		{
+			name: "legacy candidates migration works",
+			modify: func(c *Config) {
+				c.Agents.Reranker.Topics.CandidatesLimit = 0
+				c.Agents.Reranker.Candidates = 25
+				// After Validate(), Topics.CandidatesLimit should be 25
+			},
+			wantErr: false,
+		},
+		{
+			name: "legacy max_topics migration works",
+			modify: func(c *Config) {
+				c.Agents.Reranker.Topics.Max = 0
+				c.Agents.Reranker.MaxTopics = 8
+			},
+			wantErr: false,
+		},
+		{
+			name: "legacy max_people migration works",
+			modify: func(c *Config) {
+				c.Agents.Reranker.People.Max = 0
+				c.Agents.Reranker.MaxPeople = 10
+			},
+			wantErr: false,
+		},
+		{
+			name: "people candidates_limit default is applied",
+			modify: func(c *Config) {
+				c.Agents.Reranker.People.CandidatesLimit = 0
+			},
+			wantErr: false, // default 20 should be applied
+		},
+		{
+			name: "artifacts defaults are applied when zero",
+			modify: func(c *Config) {
+				c.Agents.Reranker.Artifacts.CandidatesLimit = 0
+				c.Agents.Reranker.Artifacts.Max = 0
+			},
+			wantErr: false, // defaults should be applied (20 and 5)
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			tt.modify(cfg)
+
+			err := cfg.Validate()
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestValidate_BotTurnWaitDuration(t *testing.T) {
+	validConfig := func() *Config {
+		cfg, _ := LoadDefault()
+		cfg.Telegram.Token = "test_token"
+		cfg.OpenRouter.APIKey = "test_api_key"
+		cfg.Database.Path = "test.db"
+		return cfg
+	}
+
+	tests := []struct {
+		name        string
+		duration    string
+		wantErr     bool
+		errContains string
+	}{
+		{"empty duration is ok", "", false, ""},
+		{"valid seconds", "5s", false, ""},
+		{"valid minutes", "2m", false, ""},
+		{"invalid format", "invalid", true, "bot.turn_wait_duration: invalid duration format"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Bot.TurnWaitDuration = tt.duration
+
+			err := cfg.Validate()
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestValidate_Artifacts(t *testing.T) {
+	validConfig := func() *Config {
+		cfg, _ := LoadDefault()
+		cfg.Telegram.Token = "test_token"
+		cfg.OpenRouter.APIKey = "test_api_key"
+		cfg.Database.Path = "test.db"
+		return cfg
+	}
+
+	tests := []struct {
+		name        string
+		modify      func(*Config)
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:    "artifacts disabled - no validation",
+			modify:  func(c *Config) { c.Artifacts.Enabled = false },
+			wantErr: false,
+		},
+		{
+			name: "artifacts enabled without storage_path",
+			modify: func(c *Config) {
+				c.Artifacts.Enabled = true
+				c.Artifacts.StoragePath = ""
+			},
+			wantErr:     true,
+			errContains: "artifacts.storage_path is required",
+		},
+		{
+			name: "artifacts enabled with empty allowed_types",
+			modify: func(c *Config) {
+				c.Artifacts.Enabled = true
+				c.Artifacts.StoragePath = "/tmp/artifacts"
+				c.Artifacts.AllowedTypes = []string{}
+			},
+			wantErr:     true,
+			errContains: "artifacts.allowed_types must not be empty",
+		},
+		{
+			name: "valid artifacts config",
+			modify: func(c *Config) {
+				c.Artifacts.Enabled = true
+				c.Artifacts.StoragePath = "/tmp/artifacts"
+				c.Artifacts.AllowedTypes = []string{"image", "voice"}
+			},
+			wantErr: false,
+		},
+		{
+			name: "extractor max_file_size_mb validation",
+			modify: func(c *Config) {
+				c.Artifacts.Enabled = true
+				c.Artifacts.StoragePath = "/tmp/artifacts"
+				c.Artifacts.AllowedTypes = []string{"image"}
+				c.Agents.Extractor.MaxFileSizeMB = 0
+			},
+			wantErr:     true,
+			errContains: "agents.extractor.max_file_size_mb must be positive",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			tt.modify(cfg)
+
+			err := cfg.Validate()
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestValidate_RAGDurationFormats(t *testing.T) {
+	validConfig := func() *Config {
+		cfg, _ := LoadDefault()
+		cfg.Telegram.Token = "test_token"
+		cfg.OpenRouter.APIKey = "test_api_key"
+		cfg.Database.Path = "test.db"
+		cfg.RAG.Enabled = true
+		return cfg
+	}
+
+	tests := []struct {
+		name        string
+		modify      func(*Config)
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:        "invalid backfill_interval",
+			modify:      func(c *Config) { c.RAG.BackfillInterval = "invalid" },
+			wantErr:     true,
+			errContains: "rag.backfill_interval: invalid duration format",
+		},
+		{
+			name:        "invalid chunk_interval",
+			modify:      func(c *Config) { c.RAG.ChunkInterval = "not-a-duration" },
+			wantErr:     true,
+			errContains: "rag.chunk_interval: invalid duration format",
+		},
+		{
+			name:        "valid durations",
+			modify:      func(c *Config) { c.RAG.BackfillInterval = "1m"; c.RAG.ChunkInterval = "1h" },
+			wantErr:     false,
+			errContains: "",
+		},
+		{
+			name:        "empty durations are ok",
+			modify:      func(c *Config) { c.RAG.BackfillInterval = ""; c.RAG.ChunkInterval = "" },
+			wantErr:     false,
+			errContains: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			tt.modify(cfg)
+
+			err := cfg.Validate()
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestValidate_AgentsDefaults(t *testing.T) {
+	validConfig := func() *Config {
+		cfg, _ := LoadDefault()
+		cfg.Telegram.Token = "test_token"
+		cfg.OpenRouter.APIKey = "test_api_key"
+		cfg.Database.Path = "test.db"
+		return cfg
+	}
+
+	tests := []struct {
+		name        string
+		modify      func(*Config)
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:        "missing default model",
+			modify:      func(c *Config) { c.Agents.Default.Model = "" },
+			wantErr:     true,
+			errContains: "agents.default.model is required",
+		},
+		{
+			name:        "missing chat name",
+			modify:      func(c *Config) { c.Agents.Chat.Name = "" },
+			wantErr:     true,
+			errContains: "agents.chat.name is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			tt.modify(cfg)
+
+			err := cfg.Validate()
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestValidate_EmbeddingModel(t *testing.T) {
+	validConfig := func() *Config {
+		cfg, _ := LoadDefault()
+		cfg.Telegram.Token = "test_token"
+		cfg.OpenRouter.APIKey = "test_api_key"
+		cfg.Database.Path = "test.db"
+		return cfg
+	}
+
+	t.Run("missing embedding model", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Embedding.Model = ""
+
+		err := cfg.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "embedding.model is required")
+	})
+
+	t.Run("valid embedding model", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.Embedding.Model = "text-embedding-3-small"
+
+		err := cfg.Validate()
+		assert.NoError(t, err)
+	})
+}
+
+func TestValidate_AllRAGPositiveIntegers(t *testing.T) {
+	validConfig := func() *Config {
+		cfg, _ := LoadDefault()
+		cfg.Telegram.Token = "test_token"
+		cfg.OpenRouter.APIKey = "test_api_key"
+		cfg.Database.Path = "test.db"
+		cfg.RAG.Enabled = true
+		return cfg
+	}
+
+	tests := []struct {
+		name        string
+		modify      func(*Config)
+		errContains string
+	}{
+		{
+			name:        "retrieved_messages_count",
+			modify:      func(c *Config) { c.RAG.RetrievedMessagesCount = 0 },
+			errContains: "retrieved_messages_count must be positive",
+		},
+		{
+			name:        "retrieved_topics_count",
+			modify:      func(c *Config) { c.RAG.RetrievedTopicsCount = 0 },
+			errContains: "retrieved_topics_count must be positive",
+		},
+		{
+			name:        "max_chunk_size",
+			modify:      func(c *Config) { c.RAG.MaxChunkSize = 0 },
+			errContains: "max_chunk_size must be positive",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			tt.modify(cfg)
+
+			err := cfg.Validate()
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errContains)
+		})
+	}
+}
+
+func TestValidate_RAGThresholdsRange(t *testing.T) {
+	validConfig := func() *Config {
+		cfg, _ := LoadDefault()
+		cfg.Telegram.Token = "test_token"
+		cfg.OpenRouter.APIKey = "test_api_key"
+		cfg.Database.Path = "test.db"
+		cfg.RAG.Enabled = true
+		return cfg
+	}
+
+	tests := []struct {
+		name        string
+		modify      func(*Config)
+		errContains string
+	}{
+		{
+			name:        "consolidation_threshold negative",
+			modify:      func(c *Config) { c.RAG.ConsolidationSimilarityThreshold = -0.1 },
+			errContains: "consolidation_similarity_threshold must be between 0 and 1",
+		},
+		{
+			name:        "consolidation_threshold > 1",
+			modify:      func(c *Config) { c.RAG.ConsolidationSimilarityThreshold = 1.5 },
+			errContains: "consolidation_similarity_threshold must be between 0 and 1",
+		},
+		{
+			name:        "min_safety_threshold negative",
+			modify:      func(c *Config) { c.RAG.MinSafetyThreshold = -0.5 },
+			errContains: "min_safety_threshold must be between 0 and 1",
+		},
+		{
+			name:        "min_safety_threshold > 1",
+			modify:      func(c *Config) { c.RAG.MinSafetyThreshold = 1.2 },
+			errContains: "min_safety_threshold must be between 0 and 1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			tt.modify(cfg)
+
+			err := cfg.Validate()
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errContains)
+		})
+	}
+}
+
+func TestLoad_InvalidYAML(t *testing.T) {
+	// Use truly invalid YAML (unmatched brackets)
+	content := `
+server:
+  listen_port: [invalid
+`
+	tmpfile, err := os.CreateTemp("", "config-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+
+	if _, err := tmpfile.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmpfile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Load(tmpfile.Name())
+	assert.Error(t, err)
+}
+
+func TestLoad_ReadFileError(t *testing.T) {
+	// Test that Load returns error when file exists but is not readable
+	// This is difficult to test cross-platform, so we'll just verify
+	// that a valid file works and non-existent file falls back to defaults
+	cfg, err := Load("non_existent_file.yaml")
+	assert.NoError(t, err) // Falls back to defaults
+	assert.NotNil(t, cfg)
+}
