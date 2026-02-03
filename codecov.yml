@@ -12,7 +12,8 @@ coverage:
 
 ignore:
   # Entry points (DI wiring, no business logic)
-  - "**/cmd/**/*"
+  - "**/cmd/bot/**/*"
+  - "**/cmd/testbot/**/*"
 
   # Test infrastructure (not production code)
   - "**/internal/testutil/**/*"
