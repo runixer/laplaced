@@ -535,3 +535,363 @@ func TestProcessor_ProcessMessage_VideoNote(t *testing.T) {
 	assert.Equal(t, "video/mp4", files[0].MimeType)
 	mockDownloader.AssertExpectations(t)
 }
+
+func TestProcessor_ProcessMessage_DocumentVideo(t *testing.T) {
+	ctx := context.Background()
+	mockDownloader := new(testutil.MockFileDownloader)
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	processor := NewProcessor(mockDownloader, translator, "en", logger)
+
+	videoData := []byte("fake-mp4-data")
+	mockDownloader.On("DownloadFile", mock.Anything, "video-456").Return(videoData, nil)
+
+	msg := &telegram.Message{
+		Document: &telegram.Document{
+			FileID:   "video-456",
+			FileName: "movie.mp4",
+			MimeType: "video/mp4",
+		},
+	}
+
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	assert.Equal(t, FileTypeVideo, files[0].FileType)
+	assert.Equal(t, "video-456", files[0].FileID)
+	assert.Equal(t, "movie.mp4", files[0].FileName)
+	assert.Equal(t, "video/mp4", files[0].MimeType)
+	mockDownloader.AssertExpectations(t)
+}
+
+func TestProcessor_ProcessMessage_AllRetriesFailed(t *testing.T) {
+	ctx := context.Background()
+	mockDownloader := new(testutil.MockFileDownloader)
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	processor := NewProcessor(mockDownloader, translator, "en", logger)
+	processor.retryDelay = 0 // instant retry for tests
+
+	// All retries fail
+	mockDownloader.On("DownloadFile", mock.Anything, "fail-file").
+		Return(nil, errors.New("persistent error")).Times(3)
+
+	msg := &telegram.Message{
+		Voice: &telegram.Voice{
+			FileID: "fail-file",
+		},
+	}
+
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+
+	// Should return nil, nil (error logged but not propagated)
+	assert.NoError(t, err)
+	assert.Nil(t, files)
+	mockDownloader.AssertExpectations(t)
+}
+
+func TestProcessor_ProcessMessage_AudioWithMetadata(t *testing.T) {
+	ctx := context.Background()
+	mockDownloader := new(testutil.MockFileDownloader)
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	processor := NewProcessor(mockDownloader, translator, "en", logger)
+
+	audioData := []byte("fake-mp3-data")
+	mockDownloader.On("DownloadFile", mock.Anything, "audio-meta").Return(audioData, nil)
+
+	msg := &telegram.Message{
+		Audio: &telegram.Audio{
+			FileID:     "audio-meta",
+			Duration:   180,
+			MimeType:   "audio/mpeg",
+			FileName:   "",
+			Title:      "Test Song",
+			Performers: "Test Artist",
+		},
+	}
+
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	assert.Equal(t, FileTypeAudio, files[0].FileType)
+	assert.Equal(t, "audio-meta", files[0].FileID)
+	assert.Equal(t, "Test Artist - Test Song.mp3", files[0].FileName)
+	assert.Equal(t, "audio/mpeg", files[0].MimeType)
+	mockDownloader.AssertExpectations(t)
+}
+
+func TestProcessor_ProcessMessage_WithTitleOnly(t *testing.T) {
+	ctx := context.Background()
+	mockDownloader := new(testutil.MockFileDownloader)
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	processor := NewProcessor(mockDownloader, translator, "en", logger)
+
+	audioData := []byte("fake-mp3-data")
+	mockDownloader.On("DownloadFile", mock.Anything, "audio-title").Return(audioData, nil)
+
+	msg := &telegram.Message{
+		Audio: &telegram.Audio{
+			FileID:     "audio-title",
+			Duration:   120,
+			MimeType:   "audio/mpeg",
+			Title:      "Solo Track",
+			Performers: "",
+		},
+	}
+
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	assert.Equal(t, FileTypeAudio, files[0].FileType)
+	assert.Equal(t, "Solo Track.mp3", files[0].FileName)
+	mockDownloader.AssertExpectations(t)
+}
+
+func TestProcessor_ProcessMessage_VoiceFileTooLarge(t *testing.T) {
+	ctx := context.Background()
+	mockDownloader := new(testutil.MockFileDownloader)
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	processor := NewProcessor(mockDownloader, translator, "en", logger)
+
+	// Voice larger than 20MB
+	msg := &telegram.Message{
+		Voice: &telegram.Voice{
+			FileID:   "voice-large",
+			Duration: 600,
+			FileSize: 25 * 1024 * 1024, // 25 MB
+		},
+	}
+
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+
+	// Should return FileTooLargeError
+	assert.Error(t, err)
+	assert.Nil(t, files)
+	var tooLargeErr *FileTooLargeError
+	assert.ErrorAs(t, err, &tooLargeErr)
+	assert.Equal(t, int64(25*1024*1024), tooLargeErr.Size)
+
+	// Verify no download was attempted
+	mockDownloader.AssertNotCalled(t, "DownloadFile", mock.Anything, mock.Anything)
+}
+
+func TestProcessor_ProcessMessage_AudioFileTooLarge(t *testing.T) {
+	ctx := context.Background()
+	mockDownloader := new(testutil.MockFileDownloader)
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	processor := NewProcessor(mockDownloader, translator, "en", logger)
+
+	// Audio larger than 20MB
+	msg := &telegram.Message{
+		Audio: &telegram.Audio{
+			FileID:   "audio-large",
+			FileSize: 30 * 1024 * 1024, // 30 MB
+		},
+	}
+
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+
+	// Should return FileTooLargeError
+	assert.Error(t, err)
+	assert.Nil(t, files)
+	var tooLargeErr *FileTooLargeError
+	assert.ErrorAs(t, err, &tooLargeErr)
+	assert.Equal(t, int64(30*1024*1024), tooLargeErr.Size)
+
+	// Verify no download was attempted
+	mockDownloader.AssertNotCalled(t, "DownloadFile", mock.Anything, mock.Anything)
+}
+
+func TestProcessor_ProcessMessage_VideoNoteFileTooLarge(t *testing.T) {
+	ctx := context.Background()
+	mockDownloader := new(testutil.MockFileDownloader)
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	processor := NewProcessor(mockDownloader, translator, "en", logger)
+
+	// Video note larger than 20MB
+	msg := &telegram.Message{
+		VideoNote: &telegram.VideoNote{
+			FileID:   "vn-large",
+			FileSize: 22 * 1024 * 1024, // 22 MB
+		},
+	}
+
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+
+	// Should return FileTooLargeError
+	assert.Error(t, err)
+	assert.Nil(t, files)
+	var tooLargeErr *FileTooLargeError
+	assert.ErrorAs(t, err, &tooLargeErr)
+	assert.Equal(t, int64(22*1024*1024), tooLargeErr.Size)
+
+	// Verify no download was attempted
+	mockDownloader.AssertNotCalled(t, "DownloadFile", mock.Anything, mock.Anything)
+}
+
+func TestProcessor_ProcessMessage_WithFileHandler(t *testing.T) {
+	ctx := context.Background()
+	mockDownloader := new(testutil.MockFileDownloader)
+	mockSaver := new(testutil.MockFileSaver)
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	processor := NewProcessor(mockDownloader, translator, "en", logger)
+	processor.SetFileHandler(mockSaver)
+
+	photoData := []byte("fake-jpeg-data")
+	mockDownloader.On("DownloadFile", mock.Anything, "photo-999").Return(photoData, nil)
+
+	artifactID := int64(42)
+	mockSaver.On("SaveFile", mock.Anything, int64(12345), int64(0), "image", "photo.jpg", "image/jpeg", mock.Anything, "").
+		Return(&artifactID, nil)
+
+	msg := &telegram.Message{
+		Photo: []telegram.PhotoSize{
+			{FileID: "photo-999", Width: 1920, Height: 1080},
+		},
+	}
+
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	assert.Equal(t, FileTypePhoto, files[0].FileType)
+	require.NotNil(t, files[0].ArtifactID)
+	assert.Equal(t, int64(42), *files[0].ArtifactID)
+	mockDownloader.AssertExpectations(t)
+	mockSaver.AssertExpectations(t)
+}
+
+func TestProcessor_ProcessMessage_WithFileHandlerError(t *testing.T) {
+	ctx := context.Background()
+	mockDownloader := new(testutil.MockFileDownloader)
+	mockSaver := new(testutil.MockFileSaver)
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	processor := NewProcessor(mockDownloader, translator, "en", logger)
+	processor.SetFileHandler(mockSaver)
+
+	photoData := []byte("fake-jpeg-data")
+	mockDownloader.On("DownloadFile", mock.Anything, "photo-err").Return(photoData, nil)
+
+	mockSaver.On("SaveFile", mock.Anything, int64(12345), int64(0), "image", "photo.jpg", "image/jpeg", mock.Anything, "").
+		Return(nil, errors.New("database error"))
+
+	msg := &telegram.Message{
+		Photo: []telegram.PhotoSize{
+			{FileID: "photo-err", Width: 1920, Height: 1080},
+		},
+	}
+
+	// Should still succeed despite artifact save failure
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	assert.Nil(t, files[0].ArtifactID, "artifact ID should be nil on save error")
+	mockDownloader.AssertExpectations(t)
+	mockSaver.AssertExpectations(t)
+}
+
+func TestProcessor_ProcessMessage_VideoNoteWithUniqueID(t *testing.T) {
+	ctx := context.Background()
+	mockDownloader := new(testutil.MockFileDownloader)
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	processor := NewProcessor(mockDownloader, translator, "en", logger)
+
+	videoNoteData := []byte("fake-mp4-data")
+	mockDownloader.On("DownloadFile", mock.Anything, "vn-unique").Return(videoNoteData, nil)
+
+	msg := &telegram.Message{
+		VideoNote: &telegram.VideoNote{
+			FileID:       "vn-unique",
+			FileUniqueID: "unique123abc",
+			Length:       300,
+			Duration:     30,
+		},
+	}
+
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	assert.Equal(t, FileTypeVideoNote, files[0].FileType)
+	assert.Equal(t, "video_note_unique123abc.mp4", files[0].FileName)
+	assert.Equal(t, "video/mp4", files[0].MimeType)
+	mockDownloader.AssertExpectations(t)
+}
+
+func TestProcessor_ProcessMessage_AudioDefaultMimeType(t *testing.T) {
+	ctx := context.Background()
+	mockDownloader := new(testutil.MockFileDownloader)
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	processor := NewProcessor(mockDownloader, translator, "en", logger)
+
+	audioData := []byte("fake-audio-data")
+	mockDownloader.On("DownloadFile", mock.Anything, "audio-nomime").Return(audioData, nil)
+
+	msg := &telegram.Message{
+		Audio: &telegram.Audio{
+			FileID:   "audio-nomime",
+			Duration: 60,
+			MimeType: "", // Empty mime type
+		},
+	}
+
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	assert.Equal(t, FileTypeAudio, files[0].FileType)
+	assert.Equal(t, "audio/mpeg", files[0].MimeType, "should default to audio/mpeg")
+	mockDownloader.AssertExpectations(t)
+}
+
+func TestProcessor_ProcessMessage_VoiceDefaultMimeType(t *testing.T) {
+	ctx := context.Background()
+	mockDownloader := new(testutil.MockFileDownloader)
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	processor := NewProcessor(mockDownloader, translator, "en", logger)
+
+	voiceData := []byte("fake-voice-data")
+	mockDownloader.On("DownloadFile", mock.Anything, "voice-nomime").Return(voiceData, nil)
+
+	msg := &telegram.Message{
+		Voice: &telegram.Voice{
+			FileID:   "voice-nomime",
+			Duration: 15,
+			MimeType: "", // Empty mime type
+		},
+	}
+
+	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	assert.Equal(t, FileTypeVoice, files[0].FileType)
+	assert.Equal(t, "audio/ogg", files[0].MimeType, "should default to audio/ogg")
+	mockDownloader.AssertExpectations(t)
+}
