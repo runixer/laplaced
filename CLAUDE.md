@@ -208,191 +208,26 @@ Before implementing significant changes (especially when modifying function cont
 
 ## Testing
 
-### Running Tests
+**Testing standards, patterns, and helpers:** See @docs/TESTING.md for complete guide on:
+- Test style and patterns (table-driven, mocks, helpers)
+- Available test helpers in `internal/testutil/`
+- User data isolation tests
+- Coverage targets and exclusions
 
+**Quick commands:**
 ```bash
 go test ./...                    # All tests
 go test ./internal/bot/... -v    # Specific package with verbose output
+go test ./internal/bot/... -cover # With coverage
 ```
 
-### Test Style
-
-- **Framework**: `testify/assert` for assertions, `testify/mock` for mocks
-- **Pattern**: Table-driven tests with subtests (`t.Run`)
-- **Location**: `*_test.go` files alongside source code
-
-### Available Test Helpers (`internal/testutil/`)
-
-All test mocks are centralized in `internal/testutil/` package:
-
-**Mocks (`mocks.go`):**
-- `MockBotAPI` — mock for Telegram API
-- `MockStorage` — mock for all storage repositories (implements all repo interfaces)
-- `MockOpenRouterClient` — mock for LLM client
-- `MockFileDownloader` — mock for file downloads
-- `MockVectorSearcher` — mock for vector search interface
-- `MockArtifactRepository` — mock for artifact storage
-- `MockFileStorage` — mock for file storage operations
-
-**Fixtures (`fixtures.go`):**
-- `TestUser()`, `TestUsers()` — sample users
-- `TestFacts()` — sample facts
-- `TestTopic()`, `TestTopics()` — sample topics
-- `TestMessages()` — sample conversation messages
-- `TestArtifact()`, `TestArtifacts()` — sample artifacts (files)
-
-**Helpers (`helpers.go`):**
-- `TestLogger()` — discarding logger for tests
-- `TestConfig()` — default test configuration
-- `TestTranslator(t)` — translator with test locale files
-- `Ptr[T](v)` — generic helper to create pointer from value
-
-### Writing Tests for New Functions
-
-1. For pure functions (no dependencies): test directly with table-driven tests
-2. For methods with dependencies: use mocks from `internal/testutil/`
-3. Add translations to test locale files if function uses `translator.Get()`
-
-Example structure:
-```go
-func TestMyFunction(t *testing.T) {
-    tests := []struct {
-        name     string
-        input    InputType
-        expected OutputType
-    }{
-        {"case 1", input1, expected1},
-        {"case 2", input2, expected2},
-    }
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            result := myFunction(tt.input)
-            assert.Equal(t, tt.expected, result)
-        })
-    }
-}
-```
-
-### Manual Testing with Testbot
-
-For interactive testing and debugging without running the full Telegram bot, use the testbot CLI tool:
-
+**Manual testing with testbot:**
 ```bash
-go run ./cmd/testbot [command] [args]
-```
-
-**IMPORTANT: Always use `go run`, not compiled binaries**
-
-When testing changes to the bot code, always use `go run ./cmd/testbot` instead of compiling with `go build`. This ensures you're testing the **actual current code**, not a stale binary. During development, you'll frequently modify files in `internal/`, and a compiled binary won't reflect those changes.
-
-```bash
-# GOOD - tests current code
-go run ./cmd/testbot send "test"
-
-# BAD - tests old compiled code
-go build -o testbot ./cmd/testbot && ./testbot send "test"
-```
-
-**NOTE:** Never grep testbot output — it's already minimized and `--verbose` is for full error logging. Use `--db ""` for clean testing with temporary database.
-
-**Features:**
-- Full LLM integration (OpenRouter/Gemini)
-- Direct database access
-- No Telegram required
-- JSON output for automated checks
-- Quiet by default (use `--verbose` for full debug logs)
-
-**Configuration:**
-- Optional: `--config path/to/config.yaml`
-- Defaults: Uses embedded `configs/default.yaml`
-- Environment: Reads `LAPLACED_*` env vars (API keys, user IDs)
-- User ID: Auto-detected from `LAPLACED_ALLOWED_USER_IDS` (first ID)
-
-**Testing with Production Database Copy:**
-
-The `data/prod/laplaced.db` is a copy of the production database. To test on it:
-
-```bash
-# Run testbot on production database copy
-go run ./cmd/testbot --db data/prod/laplaced.db send "test message"
-
-# Check the results
-go run ./cmd/testbot --db data/prod/laplaced.db check-facts
-```
-
-**Note:** `data/prod/laplaced.db` is already a copy and safe to use for testing. Changes here don't affect the production database.
-
-**Database Locations:**
-
-- **`data/laplaced.db`** (default) - Test database for quick testing with RAG/facts
-- **`data/prod/laplaced.db`** - Copy of production database for testing on real data
-- **`--db ""`** (empty) - Temporary database in `/tmp` for clean testing without data
-
-**Common Commands:**
-
-```bash
-# Send a message to the bot
-go run ./cmd/testbot send "What is 2+2?"
-
-# Check facts (text or JSON)
+# Interactive testing without Telegram
+go run ./cmd/testbot send "test message"
 go run ./cmd/testbot check-facts
-go run ./cmd/testbot check-facts --format json
-
-# Check topics, people, messages
-go run ./cmd/testbot check-topics
-go run ./cmd/testbot check-people --format json
-go run ./cmd/testbot check-messages
-
-# Process active session into topic (facts extracted automatically)
-# Note: This can take 10-30 seconds - calls LLM to create topic and extract facts
 go run ./cmd/testbot process-session
-
-# Clear data
-go run ./cmd/testbot clear-facts
-go run ./cmd/testbot clear-topics
-go run ./cmd/testbot clear-people
 ```
-
-**Workflow Example:**
-
-```bash
-# 1. Send a message
-go run ./cmd/testbot send "My name is Alice and I love photography"
-
-# 2. Check that facts don't exist yet
-go run ./cmd/testbot check-facts
-# → Facts for user 123: 0
-
-# 3. Process session (creates topic and extracts facts automatically)
-# Note: Can take 10-30 seconds - calls LLM for topic creation and fact extraction
-go run ./cmd/testbot process-session
-# → Processed session: topic 1 created from messages 1-1
-# → Extracted facts: 1 added, 0 updated, 0 removed
-
-# 4. Check extracted facts
-go run ./cmd/testbot check-facts
-# → Facts for user 123: 1
-#   1. [identity] My name is Alice and I love photography
-```
-
-**Global Flags:**
-- `--config path` - Config file path (default: auto-detect or use embedded)
-- `--user ID` - User ID for operations (default: first from `LAPLACED_ALLOWED_USER_IDS`)
-- `--db path` - Database path (default: `data/laplaced.db`, use `data/prod/laplaced.db` for production copy, use `--db ""` for temp DB)
-- `--verbose` - Verbose debug output (shows all logs)
-
-**Send Command Flags:**
-- `--max-wait duration` - Maximum wait time for LLM response (default: 2m)
-- `--output format` - Output format: text, json (default: text)
-- `--check-response substring` - Verify response contains substring
-
-**Use Cases:**
-1. **Debug prompt changes**: Send messages directly to LLM without Telegram
-2. **Test fact extraction**: Chat, then `process-session`, then `check-facts`
-3. **Verify RAG retrieval**: Check topics/facts before and after queries
-4. **Profile performance**: Test LLM latency, token usage
-5. **Database inspection**: Quick checks without SQL queries
-6. **Test on production data copy**: Use `--db data/prod/laplaced.db` to test with real data safely
 
 ## Refactoring & Cyclomatic Complexity
 
@@ -629,6 +464,7 @@ gh run watch <run_id> --exit-status
 
 ## Related Documentation
 
+- @docs/TESTING.md — Testing standards, patterns, and helpers
 - @.claude/deploy.md — Production deployment via Gitea
 - @docs/architecture/artifacts-system.md — Artifacts system architecture (files storage and RAG integration)
 - @docs/architecture/flash-reranker.md — Flash reranker for intelligent RAG filtering

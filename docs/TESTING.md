@@ -356,10 +356,3 @@ Some methods are intentionally cross-user for background processing:
 1. Have `// WARNING: Cross-user` comment explaining why
 2. Only be used for background/internal operations (not user-facing API)
 3. Have tests documenting cross-user behavior
-
----
-
-## References
-
-- [Audit Report](./plans/AUDIT_REPORT_PHASE_2.md)
-- [Coverage Roadmap](./plans/test-coverage-roadmap-v3.md)
