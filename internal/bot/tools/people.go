@@ -14,17 +14,17 @@ import (
 // performManagePeople handles batch people management operations.
 func (e *ToolExecutor) performManagePeople(ctx context.Context, userID int64, args map[string]interface{}) (string, error) {
 	if e.peopleRepo == nil {
-		return "People management is not available", nil
+		return "", fmt.Errorf("people management is not available")
 	}
 
 	query, ok := args["query"].(string)
 	if !ok {
-		return "Error: query argument is missing", nil
+		return "", fmt.Errorf("query argument is missing")
 	}
 
 	var params map[string]interface{}
 	if err := json.Unmarshal([]byte(query), &params); err != nil {
-		return fmt.Sprintf("Error parsing query JSON: %v", err), nil
+		return "", fmt.Errorf("parsing query JSON: %w", err)
 	}
 
 	operation, _ := params["operation"].(string)
@@ -33,19 +33,19 @@ func (e *ToolExecutor) performManagePeople(ctx context.Context, userID int64, ar
 	switch operation {
 	case "create":
 		if name == "" {
-			return "Error: name is required for create operation", nil
+			return "", fmt.Errorf("name is required for create operation")
 		}
 		return e.performCreatePerson(ctx, userID, name, params)
 	case "update":
 		// person_id is preferred, name is fallback
 		if _, hasPersonID := params["person_id"]; !hasPersonID && name == "" {
-			return "Error: person_id or name is required for update operation", nil
+			return "", fmt.Errorf("person_id or name is required for update operation")
 		}
 		return e.performUpdatePerson(ctx, userID, name, params)
 	case "delete":
 		// person_id is preferred, name is fallback
 		if _, hasPersonID := params["person_id"]; !hasPersonID && name == "" {
-			return "Error: person_id or name is required for delete operation", nil
+			return "", fmt.Errorf("person_id or name is required for delete operation")
 		}
 		return e.performDeletePerson(ctx, userID, name, params)
 	case "merge":
@@ -55,14 +55,14 @@ func (e *ToolExecutor) performManagePeople(ctx context.Context, userID int64, ar
 		target, _ := params["target"].(string)
 		source, _ := params["source"].(string)
 		if !hasTargetID && target == "" {
-			return "Error: target_id or target is required for merge operation", nil
+			return "", fmt.Errorf("target_id or target is required for merge operation")
 		}
 		if !hasSourceID && source == "" {
-			return "Error: source_id or source is required for merge operation", nil
+			return "", fmt.Errorf("source_id or source is required for merge operation")
 		}
 		return e.performMergePeople(ctx, userID, target, source, targetID, sourceID, params)
 	default:
-		return fmt.Sprintf("Error: unknown operation '%s'. Valid operations: create, update, delete, merge", operation), nil
+		return "", fmt.Errorf("unknown operation '%s'. Valid operations: create, update, delete, merge", operation)
 	}
 }
 
@@ -71,19 +71,19 @@ func (e *ToolExecutor) performCreatePerson(ctx context.Context, userID int64, na
 	// Check if person already exists
 	existing, err := e.peopleRepo.FindPersonByName(userID, name)
 	if err != nil {
-		return fmt.Sprintf("Error checking existing person: %v", err), nil
+		return "", fmt.Errorf("checking existing person: %w", err)
 	}
 	if existing != nil {
-		return fmt.Sprintf("Person '%s' already exists (ID: %d). Use 'update' operation to modify.", name, existing.ID), nil
+		return "", fmt.Errorf("person '%s' already exists (ID: %d). Use 'update' operation to modify", name, existing.ID)
 	}
 
 	// Also check aliases
 	aliasMatches, err := e.peopleRepo.FindPersonByAlias(userID, name)
 	if err != nil {
-		return fmt.Sprintf("Error checking aliases: %v", err), nil
+		return "", fmt.Errorf("checking aliases: %w", err)
 	}
 	if len(aliasMatches) > 0 {
-		return fmt.Sprintf("Person with alias '%s' already exists: %s (ID: %d). Use 'update' operation to modify.", name, aliasMatches[0].DisplayName, aliasMatches[0].ID), nil
+		return "", fmt.Errorf("person with alias '%s' already exists: %s (ID: %d). Use 'update' operation to modify", name, aliasMatches[0].DisplayName, aliasMatches[0].ID)
 	}
 
 	// Build the person
@@ -137,7 +137,7 @@ func (e *ToolExecutor) performCreatePerson(ctx context.Context, userID int64, na
 	// Create the person
 	personID, err := e.peopleRepo.AddPerson(person)
 	if err != nil {
-		return fmt.Sprintf("Error creating person: %v", err), nil
+		return "", fmt.Errorf("creating person: %w", err)
 	}
 
 	e.logger.Info("Person created via manage_people tool",
@@ -167,7 +167,7 @@ func (e *ToolExecutor) performUpdatePerson(ctx context.Context, userID int64, na
 			}
 			person, err = e.peopleRepo.GetPerson(userID, personID)
 			if err != nil {
-				return fmt.Sprintf("Error finding person by ID %d: %v", personID, err), nil
+				return "", fmt.Errorf("finding person by ID %d: %w", personID, err)
 			}
 		}
 	}
@@ -176,25 +176,25 @@ func (e *ToolExecutor) performUpdatePerson(ctx context.Context, userID int64, na
 	if person == nil && name != "" {
 		person, err = e.peopleRepo.FindPersonByName(userID, name)
 		if err != nil {
-			return fmt.Sprintf("Error finding person: %v", err), nil
+			return "", fmt.Errorf("finding person: %w", err)
 		}
 		if person == nil {
 			// Try alias search
 			aliasPeople, err := e.peopleRepo.FindPersonByAlias(userID, name)
 			if err != nil || len(aliasPeople) == 0 {
-				return fmt.Sprintf("Person '%s' not found", name), nil
+				return "", fmt.Errorf("person '%s' not found", name)
 			}
 			person = &aliasPeople[0]
 		}
 	}
 
 	if person == nil {
-		return "Person not found (no ID or name provided)", nil
+		return "", fmt.Errorf("person not found (no ID or name provided)")
 	}
 
 	updates, _ := params["updates"].(map[string]interface{})
 	if updates == nil {
-		return "Error: updates object is required", nil
+		return "", fmt.Errorf("updates object is required")
 	}
 
 	// Track if embedding-relevant fields changed
@@ -243,7 +243,7 @@ func (e *ToolExecutor) performUpdatePerson(ctx context.Context, userID int64, na
 
 	// Update the person
 	if err := e.peopleRepo.UpdatePerson(*person); err != nil {
-		return fmt.Sprintf("Error updating person: %v", err), nil
+		return "", fmt.Errorf("updating person: %w", err)
 	}
 
 	e.logger.Info("Person updated via manage_people tool",
@@ -273,7 +273,7 @@ func (e *ToolExecutor) performDeletePerson(ctx context.Context, userID int64, na
 			}
 			person, err = e.peopleRepo.GetPerson(userID, personID)
 			if err != nil {
-				return fmt.Sprintf("Error finding person by ID %d: %v", personID, err), nil
+				return "", fmt.Errorf("finding person by ID %d: %w", personID, err)
 			}
 		}
 	}
@@ -282,27 +282,27 @@ func (e *ToolExecutor) performDeletePerson(ctx context.Context, userID int64, na
 	if person == nil && name != "" {
 		person, err = e.peopleRepo.FindPersonByName(userID, name)
 		if err != nil {
-			return fmt.Sprintf("Error finding person: %v", err), nil
+			return "", fmt.Errorf("finding person: %w", err)
 		}
 		if person == nil {
 			// Try alias search
 			aliasPeople, err := e.peopleRepo.FindPersonByAlias(userID, name)
 			if err != nil || len(aliasPeople) == 0 {
-				return fmt.Sprintf("Person '%s' not found", name), nil
+				return "", fmt.Errorf("person '%s' not found", name)
 			}
 			person = &aliasPeople[0]
 		}
 	}
 
 	if person == nil {
-		return "Person not found (no ID or name provided)", nil
+		return "", fmt.Errorf("person not found (no ID or name provided)")
 	}
 
 	reason, _ := params["reason"].(string)
 
 	// Delete the person
 	if err := e.peopleRepo.DeletePerson(userID, person.ID); err != nil {
-		return fmt.Sprintf("Error deleting person: %v", err), nil
+		return "", fmt.Errorf("deleting person: %w", err)
 	}
 
 	e.logger.Info("Person deleted via manage_people tool",
@@ -337,7 +337,7 @@ func (e *ToolExecutor) performMergePeople(ctx context.Context, userID int64, tar
 			}
 			target, err = e.peopleRepo.GetPerson(userID, personID)
 			if err != nil {
-				return fmt.Sprintf("Error finding target person by ID %d: %v", personID, err), nil
+				return "", fmt.Errorf("finding target person by ID %d: %w", personID, err)
 			}
 		}
 	}
@@ -345,13 +345,13 @@ func (e *ToolExecutor) performMergePeople(ctx context.Context, userID int64, tar
 	if target == nil && targetName != "" {
 		target, err = e.peopleRepo.FindPersonByName(userID, targetName)
 		if err != nil {
-			return fmt.Sprintf("Error finding target person: %v", err), nil
+			return "", fmt.Errorf("finding target person: %w", err)
 		}
 		if target == nil {
 			// Try alias search
 			aliasPeople, err := e.peopleRepo.FindPersonByAlias(userID, targetName)
 			if err != nil {
-				return fmt.Sprintf("Error finding target person: %v", err), nil
+				return "", fmt.Errorf("finding target person: %w", err)
 			}
 			if len(aliasPeople) > 0 {
 				target = &aliasPeople[0]
@@ -359,7 +359,7 @@ func (e *ToolExecutor) performMergePeople(ctx context.Context, userID int64, tar
 		}
 	}
 	if target == nil {
-		return "Target person not found (no ID or name provided)", nil
+		return "", fmt.Errorf("target person not found (no ID or name provided)")
 	}
 
 	// Try source_id first (Person:123 format or numeric)
@@ -372,7 +372,7 @@ func (e *ToolExecutor) performMergePeople(ctx context.Context, userID int64, tar
 			}
 			source, err = e.peopleRepo.GetPerson(userID, personID)
 			if err != nil {
-				return fmt.Sprintf("Error finding source person by ID %d: %v", personID, err), nil
+				return "", fmt.Errorf("finding source person by ID %d: %w", personID, err)
 			}
 		}
 	}
@@ -380,13 +380,13 @@ func (e *ToolExecutor) performMergePeople(ctx context.Context, userID int64, tar
 	if source == nil && sourceName != "" {
 		source, err = e.peopleRepo.FindPersonByName(userID, sourceName)
 		if err != nil {
-			return fmt.Sprintf("Error finding source person: %v", err), nil
+			return "", fmt.Errorf("finding source person: %w", err)
 		}
 		if source == nil {
 			// Try alias search
 			aliasPeople, err := e.peopleRepo.FindPersonByAlias(userID, sourceName)
 			if err != nil {
-				return fmt.Sprintf("Error finding source person: %v", err), nil
+				return "", fmt.Errorf("finding source person: %w", err)
 			}
 			if len(aliasPeople) > 0 {
 				source = &aliasPeople[0]
@@ -394,12 +394,12 @@ func (e *ToolExecutor) performMergePeople(ctx context.Context, userID int64, tar
 		}
 	}
 	if source == nil {
-		return "Source person not found (no ID or name provided)", nil
+		return "", fmt.Errorf("source person not found (no ID or name provided)")
 	}
 
 	// Prevent self-merge
 	if target.ID == source.ID {
-		return fmt.Sprintf("Cannot merge person with itself (ID: %d)", target.ID), nil
+		return "", fmt.Errorf("cannot merge person with itself (ID: %d)", target.ID)
 	}
 
 	reason, _ := params["reason"].(string)
@@ -448,7 +448,7 @@ func (e *ToolExecutor) performMergePeople(ctx context.Context, userID int64, tar
 
 	// Merge source into target
 	if err := e.peopleRepo.MergePeople(userID, target.ID, source.ID, newBio, newAliases, newUsername, newTelegramID); err != nil {
-		return fmt.Sprintf("Error merging people: %v", err), nil
+		return "", fmt.Errorf("merging people: %w", err)
 	}
 
 	e.logger.Info("People merged via manage_people tool",

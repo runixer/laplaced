@@ -23,8 +23,9 @@ func TestPerformManagePeople_MissingQuery(t *testing.T) {
 	ctx := context.Background()
 	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{})
 
-	assert.NoError(t, err)
-	assert.Contains(t, result, "Error: query argument is missing")
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "query argument is missing")
 }
 
 // TestPerformManagePeople_InvalidJSON tests error when JSON is invalid.
@@ -40,8 +41,9 @@ func TestPerformManagePeople_InvalidJSON(t *testing.T) {
 		"query": "{invalid json",
 	})
 
-	assert.NoError(t, err)
-	assert.Contains(t, result, "Error parsing query JSON")
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "parsing query JSON")
 }
 
 // TestPerformManagePeople_UnknownOperation tests error on unknown operation.
@@ -57,8 +59,9 @@ func TestPerformManagePeople_UnknownOperation(t *testing.T) {
 		"query": `{"operation":"unknown"}`,
 	})
 
-	assert.NoError(t, err)
-	assert.Contains(t, result, "Error: unknown operation 'unknown'")
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "unknown operation")
 }
 
 // TestPerformManagePeople_CreateSuccess tests successful person creation.
@@ -147,9 +150,9 @@ func TestPerformManagePeople_CreateAlreadyExists(t *testing.T) {
 		"query": `{"operation":"create","name":"Alice"}`,
 	})
 
-	assert.NoError(t, err)
-	assert.Contains(t, result, "already exists")
-	assert.Contains(t, result, "ID: 42")
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "already exists")
 
 	mockStore.AssertExpectations(t)
 }
@@ -167,8 +170,9 @@ func TestPerformManagePeople_CreateMissingName(t *testing.T) {
 		"query": `{"operation":"create","circle":"Friends"}`,
 	})
 
-	assert.NoError(t, err)
-	assert.Contains(t, result, "Error: name is required for create operation")
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "name is required for create operation")
 }
 
 // TestPerformManagePeople_UpdateByID tests successful update by person ID.
@@ -295,8 +299,9 @@ func TestPerformManagePeople_UpdateMissingUpdates(t *testing.T) {
 		"query": `{"operation":"update","person_id":"Person:42"}`,
 	})
 
-	assert.NoError(t, err)
-	assert.Contains(t, result, "Error: updates object is required")
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "updates object is required")
 
 	mockStore.AssertExpectations(t)
 }
@@ -402,8 +407,9 @@ func TestPerformManagePeople_MergeSelfMerge(t *testing.T) {
 		"query": `{"operation":"merge","target_id":"Person:1","source_id":"Person:1"}`,
 	})
 
-	assert.NoError(t, err)
-	assert.Contains(t, result, "Cannot merge person with itself")
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "cannot merge person with itself")
 
 	mockStore.AssertExpectations(t)
 }
@@ -421,8 +427,9 @@ func TestPerformManagePeople_UpdateRequiresPersonIDOrName(t *testing.T) {
 		"query": `{"operation":"update"}`,
 	})
 
-	assert.NoError(t, err)
-	assert.Contains(t, result, "Error: person_id or name is required for update operation")
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "person_id or name is required for update operation")
 }
 
 // TestPerformManagePeople_DeleteRequiresPersonIDOrName tests error when neither provided.
@@ -438,8 +445,9 @@ func TestPerformManagePeople_DeleteRequiresPersonIDOrName(t *testing.T) {
 		"query": `{"operation":"delete"}`,
 	})
 
-	assert.NoError(t, err)
-	assert.Contains(t, result, "Error: person_id or name is required for delete operation")
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "person_id or name is required for delete operation")
 }
 
 // TestPerformManagePeople_MergeRequiresTargetAndSource tests error when target or source missing.
@@ -456,8 +464,9 @@ func TestPerformManagePeople_MergeRequiresTargetAndSource(t *testing.T) {
 			"query": `{"operation":"merge","source_id":"Person:1"}`,
 		})
 
-		assert.NoError(t, err)
-		assert.Contains(t, result, "Error: target_id or target is required")
+		assert.Error(t, err)
+		assert.Empty(t, result)
+		assert.Contains(t, err.Error(), "target_id or target is required")
 	})
 
 	t.Run("missing source", func(t *testing.T) {
@@ -466,8 +475,9 @@ func TestPerformManagePeople_MergeRequiresTargetAndSource(t *testing.T) {
 			"query": `{"operation":"merge","target_id":"Person:1"}`,
 		})
 
-		assert.NoError(t, err)
-		assert.Contains(t, result, "Error: source_id or source is required")
+		assert.Error(t, err)
+		assert.Empty(t, result)
+		assert.Contains(t, err.Error(), "source_id or source is required")
 	})
 }
 

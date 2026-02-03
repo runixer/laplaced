@@ -121,8 +121,9 @@ func TestPerformManageMemory_InvalidJSON(t *testing.T) {
 
 	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_memory", `{"query":"{invalid json"}`)
 
-	assert.NoError(t, err) // It returns error string, not error object
-	assert.Contains(t, result, "Error parsing query JSON")
+	assert.Error(t, err)
+	assert.Empty(t, result) // error returned, no result string
+	assert.Contains(t, err.Error(), "parsing query JSON")
 }
 
 func TestPerformManageMemory_MissingQuery(t *testing.T) {
@@ -133,6 +134,7 @@ func TestPerformManageMemory_MissingQuery(t *testing.T) {
 
 	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_memory", `{}`)
 
-	assert.NoError(t, err)
-	assert.Contains(t, result, "Error: query argument is missing")
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "query argument is missing")
 }

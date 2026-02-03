@@ -13,15 +13,18 @@ import (
 // performAddFact adds a new fact to memory.
 func (e *ToolExecutor) performAddFact(ctx context.Context, userID int64, p MemoryOpParams) (string, error) {
 	if p.Content == "" {
-		return "Error: Content is required for adding a fact.", fmt.Errorf("missing content")
+		return "", fmt.Errorf("content is required for adding a fact")
 	}
 
 	resp, err := e.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
 		Model: e.cfg.Embedding.Model,
 		Input: []string{p.Content},
 	})
-	if err != nil || len(resp.Data) == 0 {
-		return "Error generating embedding.", err
+	if err != nil {
+		return "", fmt.Errorf("generating embedding: %w", err)
+	}
+	if len(resp.Data) == 0 {
+		return "", fmt.Errorf("empty embedding response")
 	}
 
 	// Apply defaults
@@ -51,7 +54,7 @@ func (e *ToolExecutor) performAddFact(ctx context.Context, userID int64, p Memor
 
 	id, err := e.factRepo.AddFact(fact)
 	if err != nil {
-		return "Error adding fact.", err
+		return "", fmt.Errorf("adding fact: %w", err)
 	}
 
 	if err := e.factHistoryRepo.AddFactHistory(storage.FactHistory{
@@ -74,7 +77,7 @@ func (e *ToolExecutor) performAddFact(ctx context.Context, userID int64, p Memor
 // performDeleteFact deletes a fact from memory.
 func (e *ToolExecutor) performDeleteFact(ctx context.Context, userID int64, p MemoryOpParams) (string, error) {
 	if p.FactID == 0 {
-		return "Error: Fact ID is required for deletion.", fmt.Errorf("missing fact_id")
+		return "", fmt.Errorf("fact ID is required for deletion")
 	}
 
 	// Fetch old fact for history
@@ -92,7 +95,7 @@ func (e *ToolExecutor) performDeleteFact(ctx context.Context, userID int64, p Me
 	}
 
 	if err := e.factRepo.DeleteFact(userID, p.FactID); err != nil {
-		return "Error deleting fact.", err
+		return "", fmt.Errorf("deleting fact: %w", err)
 	}
 
 	if err := e.factHistoryRepo.AddFactHistory(storage.FactHistory{
@@ -115,15 +118,18 @@ func (e *ToolExecutor) performDeleteFact(ctx context.Context, userID int64, p Me
 // performUpdateFact updates an existing fact in memory.
 func (e *ToolExecutor) performUpdateFact(ctx context.Context, userID int64, p MemoryOpParams) (string, error) {
 	if p.FactID == 0 {
-		return "Error: Fact ID is required for update.", fmt.Errorf("missing fact_id")
+		return "", fmt.Errorf("fact ID is required for update")
 	}
 
 	resp, err := e.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
 		Model: e.cfg.Embedding.Model,
 		Input: []string{p.Content},
 	})
-	if err != nil || len(resp.Data) == 0 {
-		return "Error generating embedding.", err
+	if err != nil {
+		return "", fmt.Errorf("generating embedding: %w", err)
+	}
+	if len(resp.Data) == 0 {
+		return "", fmt.Errorf("empty embedding response")
 	}
 
 	// Apply defaults
@@ -158,7 +164,7 @@ func (e *ToolExecutor) performUpdateFact(ctx context.Context, userID int64, p Me
 	}
 
 	if err := e.factRepo.UpdateFact(fact); err != nil {
-		return "Error updating fact.", err
+		return "", fmt.Errorf("updating fact: %w", err)
 	}
 
 	if err := e.factHistoryRepo.AddFactHistory(storage.FactHistory{
@@ -184,12 +190,12 @@ func (e *ToolExecutor) performManageMemory(ctx context.Context, userID int64, ar
 	// The tool receives a JSON string inside the `query` argument
 	query, ok := args["query"].(string)
 	if !ok {
-		return "Error: query argument is missing", nil
+		return "", fmt.Errorf("query argument is missing")
 	}
 
 	var root map[string]interface{}
 	if err := json.Unmarshal([]byte(query), &root); err != nil {
-		return fmt.Sprintf("Error parsing query JSON: %v", err), nil
+		return "", fmt.Errorf("parsing query JSON: %w", err)
 	}
 
 	var operations []map[string]interface{}
@@ -250,7 +256,7 @@ func (e *ToolExecutor) performManageMemory(ctx context.Context, userID int64, ar
 
 	finalResult := strings.Join(results, "\n")
 	if errorCount > 0 {
-		return fmt.Sprintf("Completed with %d errors:\n%s", errorCount, finalResult), nil
+		return "", fmt.Errorf("completed with %d errors:\n%s", errorCount, finalResult)
 	}
 	return fmt.Sprintf("Successfully processed %d operations:\n%s", len(operations), finalResult), nil
 }

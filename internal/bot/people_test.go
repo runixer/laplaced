@@ -492,8 +492,9 @@ func TestPerformUpdatePerson_PersonNotFound(t *testing.T) {
 		`{"query":"{\"operation\":\"update\",\"name\":\"Unknown\",\"updates\":{\"circle\":\"Friends\"}}"}`)
 
 	// Verify
-	assert.NoError(t, err)
-	assert.Contains(t, result, "Person 'Unknown' not found")
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "person 'Unknown' not found")
 	mockStore.AssertExpectations(t)
 }
 
@@ -584,8 +585,9 @@ func TestPerformMergePeople_SelfMerge(t *testing.T) {
 		`{"query":"{\"operation\":\"merge\",\"target\":\"John Doe\",\"source\":\"John Doe\"}"}`)
 
 	// Verify
-	assert.NoError(t, err)
-	assert.Contains(t, result, "Cannot merge person with itself")
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "cannot merge person with itself")
 	mockStore.AssertNotCalled(t, "MergePeople", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 
@@ -619,8 +621,9 @@ func TestPerformMergePeople_SourceNotFound(t *testing.T) {
 		`{"query":"{\"operation\":\"merge\",\"target\":\"John Doe\",\"source\":\"Unknown\"}"}`)
 
 	// Verify
-	assert.NoError(t, err)
-	assert.Contains(t, result, "Source person not found")
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "source person not found")
 	mockStore.AssertNotCalled(t, "MergePeople", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 
@@ -691,10 +694,9 @@ func TestPerformCreatePerson_AlreadyExists(t *testing.T) {
 		`{"query":"{\"operation\":\"create\",\"name\":\"John Doe\"}"}`)
 
 	// Verify
-	assert.NoError(t, err)
-	assert.Contains(t, result, "already exists")
-	assert.Contains(t, result, "ID: 1")
-	assert.Contains(t, result, "Use 'update' operation")
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "already exists")
 	mockStore.AssertExpectations(t)
 	mockORClient.AssertNotCalled(t, "CreateEmbeddings", mock.Anything, mock.Anything)
 }
@@ -729,10 +731,9 @@ func TestPerformCreatePerson_AliasAlreadyExists(t *testing.T) {
 		`{"query":"{\"operation\":\"create\",\"name\":\"Johnny\"}"}`)
 
 	// Verify
-	assert.NoError(t, err)
-	assert.Contains(t, result, "alias 'Johnny' already exists")
-	assert.Contains(t, result, "John Smith")
-	assert.Contains(t, result, "ID: 1")
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "already exists")
 	mockStore.AssertExpectations(t)
 	mockORClient.AssertNotCalled(t, "CreateEmbeddings", mock.Anything, mock.Anything)
 }
@@ -862,7 +863,8 @@ func TestPerformDeletePerson_NotFound(t *testing.T) {
 		`{"query":"{\"operation\":\"delete\",\"name\":\"Unknown\"}"}`)
 
 	// Verify
-	assert.NoError(t, err)
-	assert.Contains(t, result, "Person 'Unknown' not found")
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "person 'Unknown' not found")
 	mockStore.AssertNotCalled(t, "DeletePerson", mock.Anything, mock.Anything)
 }

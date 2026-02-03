@@ -132,11 +132,10 @@ func TestPerformManageMemory_BatchOperations_PartialFailure(t *testing.T) {
 	arguments, _ := json.Marshal(map[string]string{"query": queryJSON})
 	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_memory", string(arguments))
 
-	// Assert
-	assert.NoError(t, err) // The function itself shouldn't return error, but report it in string
-	assert.Contains(t, result, "Completed with 1 errors")
-	assert.Contains(t, result, "Op 1 (add): Success")
-	assert.Contains(t, result, "Op 2 (delete): Failed")
+	// Assert - any error in batch returns error
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "completed with 1 errors")
 
 	mockStore.AssertExpectations(t)
 }

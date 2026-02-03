@@ -106,8 +106,8 @@ func TestPerformAddFact_EmptyContent(t *testing.T) {
 	result, err := exec.performAddFact(ctx, 123, params)
 
 	assert.Error(t, err)
-	assert.Contains(t, result, "Content is required")
-	assert.Contains(t, err.Error(), "missing content")
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "content is required")
 }
 
 // TestPerformAddFact_EmbeddingAPIError tests error when embedding API call fails.
@@ -129,7 +129,8 @@ func TestPerformAddFact_EmbeddingAPIError(t *testing.T) {
 	result, err := exec.performAddFact(ctx, 123, params)
 
 	assert.Error(t, err)
-	assert.Contains(t, result, "Error generating embedding")
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "generating embedding")
 }
 
 // TestPerformAddFact_EmbeddingError tests error when embedding generation returns empty data.
@@ -151,7 +152,8 @@ func TestPerformAddFact_EmbeddingError(t *testing.T) {
 	result, err := exec.performAddFact(ctx, 123, params)
 
 	assert.Error(t, err)
-	assert.Contains(t, result, "Error generating embedding")
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "empty embedding")
 }
 
 // TestPerformAddFact_StorageError tests error when fact storage fails.
@@ -177,7 +179,8 @@ func TestPerformAddFact_StorageError(t *testing.T) {
 	result, err := exec.performAddFact(ctx, 123, params)
 
 	assert.Error(t, err)
-	assert.Contains(t, result, "Error adding fact")
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "adding fact")
 }
 
 // TestPerformDeleteFact_Success tests successful fact deletion.
@@ -231,7 +234,8 @@ func TestPerformDeleteFact_MissingFactID(t *testing.T) {
 	result, err := exec.performDeleteFact(ctx, 123, params)
 
 	assert.Error(t, err)
-	assert.Contains(t, result, "Fact ID is required")
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "fact ID is required")
 }
 
 // TestPerformDeleteFact_StorageError tests error when deletion fails.
@@ -252,7 +256,8 @@ func TestPerformDeleteFact_StorageError(t *testing.T) {
 	result, err := exec.performDeleteFact(ctx, 123, params)
 
 	assert.Error(t, err)
-	assert.Contains(t, result, "Error deleting fact")
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "deleting fact")
 }
 
 // TestPerformUpdateFact_Success tests successful fact update.
@@ -350,7 +355,8 @@ func TestPerformUpdateFact_MissingFactID(t *testing.T) {
 	result, err := exec.performUpdateFact(ctx, 123, params)
 
 	assert.Error(t, err)
-	assert.Contains(t, result, "Fact ID is required")
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "fact ID is required")
 }
 
 // TestPerformUpdateFact_EmbeddingError tests error when embedding generation fails.
@@ -373,7 +379,8 @@ func TestPerformUpdateFact_EmbeddingError(t *testing.T) {
 	result, err := exec.performUpdateFact(ctx, 123, params)
 
 	assert.Error(t, err)
-	assert.Contains(t, result, "Error generating embedding")
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "generating embedding")
 }
 
 // TestPerformManageMemory_SingleOperation tests single memory operation.
@@ -451,8 +458,9 @@ func TestPerformManageMemory_InvalidJSON(t *testing.T) {
 
 	result, err := exec.performManageMemory(ctx, 123, args)
 
-	assert.NoError(t, err) // manage_memory returns nil error for invalid JSON
-	assert.Contains(t, result, "Error parsing query JSON")
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "parsing query JSON")
 }
 
 // TestPerformManageMemory_MissingQuery tests error when query is missing.
@@ -467,8 +475,9 @@ func TestPerformManageMemory_MissingQuery(t *testing.T) {
 
 	result, err := exec.performManageMemory(ctx, 123, args)
 
-	assert.NoError(t, err)
-	assert.Contains(t, result, "Error: query argument is missing")
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "query argument is missing")
 }
 
 // TestPerformManageMemory_DeleteOperation tests delete operation in batch.
@@ -539,9 +548,10 @@ func TestPerformManageMemory_UnknownAction(t *testing.T) {
 
 	result, err := exec.performManageMemory(ctx, 123, args)
 
-	assert.NoError(t, err)
-	assert.Contains(t, result, "Completed with 1 errors")
-	assert.Contains(t, result, "Unknown action")
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "completed with 1 errors")
+	assert.Contains(t, err.Error(), "Unknown action")
 }
 
 // TestPerformManageMemory_MixedSuccessFailure tests batch with some failures.
@@ -571,10 +581,9 @@ func TestPerformManageMemory_MixedSuccessFailure(t *testing.T) {
 
 	result, err := exec.performManageMemory(ctx, 123, args)
 
-	assert.NoError(t, err)
-	assert.Contains(t, result, "Completed with 1 errors")
-	assert.Contains(t, result, "Op 1 (add): Success")
-	assert.Contains(t, result, "Op 2 (delete): Failed")
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "completed with 1 errors")
 }
 
 // TestPerformManageMemory_NumericFactID tests backward compatibility with numeric fact_id.
