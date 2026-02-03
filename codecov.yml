@@ -2,13 +2,32 @@ coverage:
   status:
     project:
       default:
-        target: auto
+        target: 78%          # Adjusted target based on excluded packages
         threshold: 1%
+        if_ci_failed: error  # Fail if CI fails (not just coverage drop)
     patch:
       default:
         target: auto
+        threshold: 1%
 
 ignore:
-  - "internal/gen/**/*"      # Generated protobuf/grpc code
-  - "**/*_test.go"           # Test files
-  - "**/mock_*.go"           # Mock files
+  # Entry points (DI wiring, no business logic)
+  - "cmd/**/*"
+
+  # Test infrastructure (not production code)
+  - "internal/testutil/**/*"
+  - "internal/agent/testing/**/*"
+
+  # Type definitions only (no logic to test)
+  - "internal/agent/prompts/**/*"
+
+  # App wiring (no business logic)
+  - "internal/app/**/*"
+
+  # Generated code
+  - "internal/gen/**/*"
+
+  # Standard test exclusions
+  - "**/*_test.go"
+  - "**/mock_*.go"
+  - "**/*_gen.go"

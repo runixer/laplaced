@@ -1,657 +1,266 @@
-# Testing Guide v2 for Laplaced
+# Testing Standards
 
-**Version:** 2.0 (v0.6.1+)
-**Supersedes:** [TESTING.md](./TESTING.md)
-
-This document is the authoritative guide for writing tests in laplaced. Follow these patterns for all new tests and when refactoring legacy tests.
+**Version:** 3.0 | **Target:** 80% coverage on core packages
 
 ---
 
-## Table of Contents
+## Core Rules
 
-1. [Philosophy](#1-philosophy)
-2. [Test Architecture](#2-test-architecture)
-3. [testutil Deep Dive](#3-testutil-deep-dive)
-4. [Agent Testing Strategy](#4-agent-testing-strategy)
-5. [The Right Way vs Wrong Way](#5-the-right-way-vs-wrong-way)
-6. [Migration Guide](#6-migration-guide)
-7. [Running Tests](#7-running-tests)
+1. **Test behavior, not implementation** - Assert outcomes, not internal state
+2. **One source of truth** - All mocks in `internal/testutil/`
+3. **Table-driven by default** - `[]struct{}` + `t.Run()`
+4. **Always `t.Helper()`** - In every test helper function
+5. **Always `AssertExpectations(t)`** - At end of every mock test
 
 ---
 
-## 1. Philosophy
+## Quick Reference
 
-### Core Principles
-
-1. **Test behavior, not implementation** - Assert observable outcomes, not internal state
-2. **One source of truth for mocks** - All mocks live in `internal/testutil/`
-3. **Table-driven by default** - Use `[]struct` + `t.Run` for multiple cases
-4. **Fast feedback** - Mock external dependencies, avoid real I/O
-5. **User data isolation** - Always filter by `user_id` in storage tests
-
-### Test Pyramid
-
-```
-        /\
-       /  \  E2E (rare, via testbot)
-      /----\
-     /      \ Integration (component boundaries)
-    /--------\
-   /          \ Unit (pure functions, single components)
-  /------------\
-```
-
-| Level | When | Example |
-|-------|------|---------|
-| **Unit** | Pure functions, isolated logic | `TestSanitizeLLMResponse` |
-| **Integration** | Multiple components together | `TestRetrieve_WithRAG` |
-| **E2E** | Full flow via testbot | Manual testing |
-
----
-
-## 2. Test Architecture
-
-### Directory Structure
-
-```
-internal/testutil/
-├── mocks.go          # ALL mock definitions (MockStorage, MockRetriever, etc.)
-├── fixtures.go       # Test data factories (TestUser, TestFacts, etc.)
-├── helpers.go        # Setup helpers (TestLogger, TestConfig, etc.)
-├── assertions.go     # Custom assertions (AssertFactExists, etc.)
-├── builders.go       # Fluent builders (AgentRequestBuilder, etc.)
-├── log_capture.go    # Log testing utilities
-├── metrics.go        # Prometheus testing utilities
-├── http.go           # HTTP handler testing utilities
-└── bot_test.go       # Integration test wrapper (build tag: test)
-```
-
-### Golden Rules
-
-1. **Centralize mocks in testutil** — Check `internal/testutil/mocks.go` first
-2. **Check for import cycles before adding to testutil** — Use `package/mocks_test.go` if cycle exists
-3. **ALWAYS use builders for complex objects** — `NewAgentRequestBuilder()` not manual struct construction
-4. **ALWAYS extract repeated setup** — Create `setup*Test(t)` helpers when setup > 5 lines
-5. **ALWAYS include `t.Helper()`** — In all test helper functions
-
-**Exceptions** (legitimate inline mocks):
-- Import cycle avoidance (e.g., `mockMemoryService` in `bot/mocks_test.go`)
-- Package-specific stubs used in single test file
-- Map-based stubs for simple interfaces (e.g., `reranker_test.go`)
-
----
-
-## 3. testutil Deep Dive
-
-### Mock Selection Guide
-
-| Need to mock... | Use This Mock |
-|-----------------|---------------|
-| Any storage operation | `testutil.MockStorage` |
-| LLM calls (chat, embeddings) | `testutil.MockOpenRouterClient` |
-| Telegram API | `testutil.MockBotAPI` |
-| Vector similarity search | `testutil.MockVectorSearcher` |
-| File downloads | `testutil.MockFileDownloader` |
-| Agent logging | `testutil.MockAgentLogger` |
-| Tool execution | `testutil.MockToolHandler` |
-| RAG retrieval | `testutil.MockRetriever` |
-
-### Fixture Functions
+### Mock Selection
 
 ```go
-// User fixtures
-testutil.TestUserID       // const int64 = 123
-testutil.TestUser()       // Single user with ID 123
-testutil.TestUsers()      // Multiple users for multi-user tests
+// Storage (all repos)
+mockStore := new(testutil.MockStorage)
 
-// Data fixtures
-testutil.TestFacts()         // Sample facts (5 items)
-testutil.TestProfileFacts()  // Profile-level facts
-testutil.TestTopic()         // Single topic
-testutil.TestTopics()        // Multiple topics (3 items)
-testutil.TestMessage()       // Single message
-testutil.TestMessages()      // Conversation history (4 items)
-testutil.TestPeople()        // Sample people
-testutil.TestArtifact()      // Single artifact
-testutil.TestArtifacts()     // Multiple artifacts
+// LLM client
+mockOR := new(testutil.MockOpenRouterClient)
 
-// LLM response fixtures
-testutil.MockChatResponse("Hello")           // Simple response
-testutil.MockChatResponseWithTokens("Hi", 10, 5)  // With token counts
-testutil.MockEmbeddingResponse()             // Embedding vector
+// Telegram
+mockAPI := new(testutil.MockBotAPI)
 
-// Embedding fixture
-testutil.TestEmbedding()  // 1536-dim float32 vector
+// Files
+mockDownloader := new(testutil.MockFileDownloader)
+mockSaver := new(testutil.MockFileSaver)
+
+// RAG
+mockRetriever := new(testutil.MockRetriever)
 ```
 
-### Helper Functions
+### Fixtures
 
 ```go
-// Logging
-logger := testutil.TestLogger()  // Discards all output
+// Entities
+testutil.TestUserID           // 123
+testutil.TestUser()           // Single user
+testutil.TestFacts()          // Sample facts
+testutil.TestTopic()          // Single topic
+testutil.TestMessages()       // 4-message history
+testutil.TestPeople()         // 3 people
 
-// Configuration
-cfg := testutil.TestConfig()              // Full config with all agents
-cfg := testutil.TestConfigWithRAGDisabled()  // RAG disabled
-
-// Translation
-translator := testutil.TestTranslator(t)  // Loads test locales
-
-// Pointer helper
-ptr := testutil.Ptr(42)  // Returns *int with value 42
-
-// Background loop safety
-testutil.SetupDefaultMocks(mockStore)  // Sets .Maybe() for background queries
+// LLM responses
+testutil.MockChatResponse("content")
+testutil.MockEmbeddingResponse()
+testutil.TestEmbedding()      // 1536-dim vector
 ```
 
-### Fluent Builders
+### Helpers
 
 ```go
-// Agent request builder
-req := testutil.NewAgentRequestBuilder().
-    WithUserID(123).
-    WithRawQuery("test query").
-    WithMessages(testutil.TestMessages()).
-    WithSharedContext(
-        testutil.NewSharedContextBuilder().
-            WithProfile(testutil.TestProfileFacts()).
-            WithRecentTopics(testutil.TestTopics()).
-            Build(),
-    ).
-    Build()
-
-// Agent response builder
-resp := testutil.NewAgentResponseBuilder().
-    WithContent("response text").
-    WithTokensUsed(100, 50).
-    Build()
-
-// Reranker result builder
-result := testutil.NewRerankerResultBuilder().
-    WithTopicIDs([]int64{1, 2, 3}).
-    WithPeopleIDs([]int64{10}).
-    Build()
-```
-
-### Custom Assertions
-
-```go
-// Fact assertions
-testutil.AssertFactExists(t, store, userID, "expected content")
-testutil.AssertFactCount(t, store, userID, 5)
-testutil.AssertFactContains(t, store, userID, "partial")
-
-// Topic assertions
-testutil.AssertTopicExists(t, store, userID, topicID)
-testutil.AssertTopicCount(t, store, userID, 3)
-
-// Message assertions
-testutil.AssertMessageExists(t, store, userID, "content")
-testutil.AssertMessageCount(t, store, userID, 10)
-
-// Person assertions
-testutil.AssertPersonExists(t, store, userID, "Alice")
-testutil.AssertPersonCount(t, store, userID, 2)
-testutil.AssertPersonHasAlias(t, store, userID, personID, "nickname")
-
-// Log assertions
-capture := testutil.NewLogCapture()
-// ... run code that logs ...
-testutil.AssertLogContains(t, capture, "expected message")
-testutil.AssertLogHasField(t, capture, "key", "value")
-testutil.AssertNoErrorLogs(t, capture)
-```
-
-### HTTP & SSE Testing
-
-```go
-// HTTP request helpers
-req := testutil.NewTestRequest(t, "GET", "/api/stats?user_id=123", nil)
-req := testutil.NewTestRequest(t, "POST", "/api/webhook", map[string]any{"key": "value"})
-
-// Execute request
-rr := testutil.ExecuteRequest(t, handler, req)
-
-// Response assertions
-testutil.AssertStatusCode(t, rr, http.StatusOK)
-testutil.AssertJSONResponse(t, rr, http.StatusOK, &response)
-testutil.AssertContentType(t, rr, "application/json")
-testutil.AssertErrorResponse(t, rr, http.StatusBadRequest, "invalid user")
-
-// SSE (Server-Sent Events) testing
-sseRecorder := testutil.NewSSERecorder()
-handler(sseRecorder, req)
-
-testutil.AssertSSEHeaders(t, sseRecorder)  // Content-Type, Cache-Control, Connection
-assert.Equal(t, http.StatusOK, sseRecorder.Code)
-assert.GreaterOrEqual(t, sseRecorder.FlushCount(), 1)  // Flush was called
-
-// Parse SSE events
-events := testutil.ParseSSEEvents(t, sseRecorder.Body.String())
-assert.GreaterOrEqual(t, len(events), 1)
-
-// Count SSE events without parsing
-count := testutil.CountSSEEvents(sseRecorder.Body.String())
+testutil.TestLogger()         // Discarding logger
+testutil.TestConfig()         // Full config
+testutil.TestTranslator(t)    // i18n with test locales
+testutil.SetupDefaultMocks(s) // Safe background ops
+testutil.Ptr(42)              // *int with value 42
 ```
 
 ---
 
-## 4. Agent Testing Strategy
+## Test Patterns
 
-### Test Levels for Agents
-
-| Level | Mock | Test Focus |
-|-------|------|------------|
-| **Unit** | LLM + Storage | Pure agent logic (parsing, validation) |
-| **Component** | Storage only | Agent + real LLM simulation |
-| **Integration** | None | Full agent orchestration |
-
-### Agent Unit Test Template
+### Table-Driven Test
 
 ```go
-func TestEnricherAgent_Execute(t *testing.T) {
+func TestFunction(t *testing.T) {
     tests := []struct {
-        name           string
-        query          string
-        llmResponse    string
-        expectedQuery  string
-        expectError    bool
+        name    string
+        input   string
+        want    string
+        wantErr bool
     }{
-        {
-            name:          "simple query expansion",
-            query:         "test",
-            llmResponse:   "expanded test query",
-            expectedQuery: "expanded test query",
-        },
-        {
-            name:        "LLM error",
-            query:       "test",
-            llmResponse: "",
-            expectError: true,
-        },
+        {"success", "valid", "result", false},
+        {"error", "invalid", "", true},
     }
-
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            // 1. Setup mocks
-            mockClient := new(testutil.MockOpenRouterClient)
-
-            // 2. Configure expectations
-            if tt.expectError {
-                mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-                    Return(openrouter.ChatCompletionResponse{}, errors.New("LLM error"))
-            } else {
-                mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-                    Return(testutil.MockChatResponse(tt.llmResponse), nil)
-            }
-
-            // 3. Create agent
-            agent := enricher.New(testutil.TestLogger(), mockClient, testutil.TestConfig())
-
-            // 4. Build request with builder
-            req := testutil.NewAgentRequestBuilder().
-                WithRawQuery(tt.query).
-                Build()
-
-            // 5. Execute
-            resp, err := agent.Execute(context.Background(), req)
-
-            // 6. Assert
-            if tt.expectError {
+            got, err := Function(tt.input)
+            if tt.wantErr {
                 assert.Error(t, err)
                 return
             }
             assert.NoError(t, err)
-            assert.Equal(t, tt.expectedQuery, resp.EnrichedQuery)
-            mockClient.AssertExpectations(t)
+            assert.Equal(t, tt.want, got)
         })
     }
 }
 ```
 
-### Testing Tool Calls
+### Mock Setup
 
 ```go
-func TestLaplaceAgent_ToolLoop(t *testing.T) {
-    mockClient := new(testutil.MockOpenRouterClient)
+func TestWithMocks(t *testing.T) {
+    mockStore := new(testutil.MockStorage)
+    mockOR := new(testutil.MockOpenRouterClient)
+
+    // Setup expectations
+    mockStore.On("GetFacts", int64(123)).Return(testutil.TestFacts(), nil)
+    mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).
+        Return(testutil.MockChatResponse("response"), nil)
+
+    // Execute
+    svc := NewService(testutil.TestLogger(), mockStore, mockOR)
+    result, err := svc.Process(context.Background(), 123)
+
+    // Assert
+    assert.NoError(t, err)
+    assert.Equal(t, expected, result)
+    mockStore.AssertExpectations(t)
+    mockOR.AssertExpectations(t)
+}
+```
+
+### Setup Helper
+
+```go
+func setupServiceTest(t *testing.T) (*Service, *testutil.MockStorage) {
+    t.Helper()
     mockStore := new(testutil.MockStorage)
     testutil.SetupDefaultMocks(mockStore)
+    svc := NewService(testutil.TestLogger(), mockStore, testutil.TestConfig())
+    return svc, mockStore
+}
 
-    // First call returns tool call
-    mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req openrouter.ChatCompletionRequest) bool {
-        return len(req.Messages) == 2  // system + user
-    })).Return(openrouter.ChatCompletionResponse{
-        Choices: []openrouter.Choice{{
-            Message: openrouter.Message{
-                ToolCalls: []openrouter.ToolCall{{
-                    ID:   "call_1",
-                    Type: "function",
-                    Function: openrouter.FunctionCall{
-                        Name:      "search_history",
-                        Arguments: `{"query": "test"}`,
-                    },
-                }},
-            },
-        }},
-    }, nil).Once()
-
-    // Second call returns final response
-    mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req openrouter.ChatCompletionRequest) bool {
-        return len(req.Messages) == 4  // system + user + assistant + tool_result
-    })).Return(testutil.MockChatResponse("Final answer"), nil).Once()
-
-    // ... setup agent and execute ...
+func TestFeature(t *testing.T) {
+    svc, mockStore := setupServiceTest(t)
+    mockStore.On("GetFacts", mock.Anything).Return(testutil.TestFacts(), nil)
+    // ... test logic
 }
 ```
 
 ---
 
-## 5. The Right Way vs Wrong Way
-
-### Mock Definition
+## HTTP Testing
 
 ```go
-// WRONG: Inline mock in test file
-type mockRetriever struct {
-    topics []storage.Topic
-}
-func (m *mockRetriever) Retrieve(...) (*rag.RetrievalResult, error) {
-    return &rag.RetrievalResult{Topics: m.topics}, nil
-}
+// Create request
+req := testutil.NewTestRequest(t, "GET", "/api/stats?user_id=123", nil)
+req := testutil.NewTestRequest(t, "POST", "/api/data", map[string]any{"key": "value"})
 
-// RIGHT: Use centralized testutil mock
-mockRetriever := new(testutil.MockRetriever)
-mockRetriever.On("Retrieve", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-    Return(&rag.RetrievalResult{Topics: testutil.TestTopics()}, &rag.RetrievalDebugInfo{}, nil)
+// Execute
+rr := testutil.ExecuteRequest(t, handler, req)
+
+// Assert
+testutil.AssertStatusCode(t, rr, http.StatusOK)
+testutil.AssertJSONResponse(t, rr, http.StatusOK, &response)
+testutil.AssertErrorResponse(t, rr, http.StatusBadRequest, "invalid")
 ```
 
-### Test Setup
+### SSE Testing
 
 ```go
-// WRONG: Copy-paste setup
-func TestFeatureA(t *testing.T) {
-    logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-    cfg := &config.Config{Bot: config.BotConfig{...}, RAG: config.RAGConfig{...}}
-    store := new(testutil.MockStorage)
-    client := new(testutil.MockOpenRouterClient)
-    store.On("GetFacts", mock.Anything).Return([]storage.Fact{}, nil)
-    // ... 15 more lines of identical setup
-}
+rec := testutil.NewSSERecorder()
+handler(rec, req)
 
-func TestFeatureB(t *testing.T) {
-    logger := slog.New(slog.NewJSONHandler(io.Discard, nil))  // Same
-    cfg := &config.Config{Bot: config.BotConfig{...}, RAG: config.RAGConfig{...}}  // Same
-    // ... copy-paste continues
-}
-
-// RIGHT: Extract helper
-func setupBotTest(t *testing.T) (*Bot, *testutil.MockStorage, *testutil.MockOpenRouterClient) {
-    t.Helper()
-    store := new(testutil.MockStorage)
-    client := new(testutil.MockOpenRouterClient)
-    testutil.SetupDefaultMocks(store)
-    bot := NewBot(testutil.TestLogger(), nil, client, store, testutil.TestConfig(), nil)
-    return bot, store, client
-}
-
-func TestFeatureA(t *testing.T) {
-    bot, store, client := setupBotTest(t)
-    // ... test-specific setup only
-}
-
-func TestFeatureB(t *testing.T) {
-    bot, store, client := setupBotTest(t)
-    // ... test-specific setup only
-}
+testutil.AssertSSEHeaders(t, rec)
+events := testutil.ParseSSEEvents(t, rec.Body.String())
+assert.GreaterOrEqual(t, len(events), 1)
 ```
 
-### Naming Convention
+---
+
+## Naming Convention
 
 ```go
-// WRONG: Unclear names
+// Pattern: Test<Function>_<Scenario>
+func TestRetrieve_EmptyQuery_ReturnsError(t *testing.T) {}
+func TestRetrieve_WithTopics_ReturnsGrouped(t *testing.T) {}
+func TestRetrieve_StorageError_Propagates(t *testing.T) {}
+```
+
+---
+
+## Import Cycle Handling
+
+If adding mock to testutil creates import cycle:
+
+1. Create `package/mocks_test.go` for package-local mocks
+2. Document reason: `// mockFoo - local mock, avoids import cycle with testutil`
+
+**Existing legitimate local mocks:**
+- `bot/mocks_test.go` - `mockMemoryService` (bot → memory)
+- `laplace_context_test.go` - `mockRetriever` (laplace → rag)
+- `server_test.go` - `MockBotInterface` (web → bot)
+
+---
+
+## Commands
+
+```bash
+# Run all tests
+go test ./...
+
+# Coverage report (same as CI - excludes cmd/*)
+go test ./... -coverprofile=coverage.out -coverpkg=./internal/...
+go tool cover -func=coverage.out | grep total
+
+# Package coverage
+go test ./internal/bot/... -cover
+
+# Quality checks (required before merge)
+go test -race ./...
+go test -shuffle=on ./...
+```
+
+---
+
+## Coverage Exclusions
+
+These packages are excluded from 80% target (see `codecov.yml`):
+
+| Package | Reason |
+|---------|--------|
+| `cmd/*` | Entry point wiring |
+| `internal/testutil` | Test utilities |
+| `internal/agent/testing` | Test mocks |
+| `internal/agent/prompts` | Type definitions |
+| `internal/app` | App wiring |
+| `internal/gen/**/*` | Generated code |
+
+**Target:** 78% overall coverage (excludes above packages)
+
+---
+
+## Anti-Patterns
+
+**DON'T:**
+```go
+// Inline mock (use testutil instead)
+type mockStore struct{}
+
+// Direct internal access
+svc.internalField = "test"
+
+// Unclear names
 func TestFoo(t *testing.T) {}
 func TestFoo2(t *testing.T) {}
-func TestFooWithError(t *testing.T) {}
-func TestFooNew(t *testing.T) {}
-
-// RIGHT: Behavior-focused pattern: Test<Function>_<Scenario>_<Expected>
-func TestRetrieve_EmptyQuery_ReturnsError(t *testing.T) {}
-func TestRetrieve_WithMatchingTopics_ReturnsGroupedResults(t *testing.T) {}
-func TestRetrieve_StorageError_PropagatesError(t *testing.T) {}
-func TestRetrieve_RateLimited_RetriesWithBackoff(t *testing.T) {}
 ```
 
-### Struct Construction
-
+**DO:**
 ```go
-// WRONG: Manual struct with many fields
-req := &agent.Request{
-    UserID:   123,
-    RawQuery: "test",
-    Messages: []storage.Message{
-        {ID: 1, UserID: 123, Role: "user", Content: "hello"},
-        {ID: 2, UserID: 123, Role: "assistant", Content: "hi"},
-    },
-    SharedContext: &agent.SharedContext{
-        Profile: []storage.Fact{{ID: 1, UserID: 123, Content: "fact1"}},
-        RecentTopics: []storage.TopicExtended{{Topic: storage.Topic{ID: 1}}},
-    },
-}
+// Centralized mock
+mockStore := new(testutil.MockStorage)
 
-// RIGHT: Fluent builder
-req := testutil.NewAgentRequestBuilder().
-    WithUserID(123).
-    WithRawQuery("test").
-    WithMessages(testutil.TestMessages()).
-    WithSharedContext(
-        testutil.NewSharedContextBuilder().
-            WithProfile(testutil.TestProfileFacts()).
-            WithRecentTopics(testutil.TestTopics()).
-            Build(),
-    ).
-    Build()
-```
+// Configure via public API
+cfg := testutil.TestConfig()
+cfg.Feature.Enabled = true
+svc := NewService(cfg)
 
-### Testing Internal State
-
-```go
-// WRONG: Manipulating internal fields
-func TestArtifactLoading_MissingPath(t *testing.T) {
-    agent := NewLaplace(...)
-    agent.storagePath = ""  // Directly accessing internal field
-    result, err := agent.loadArtifact(...)
-    assert.Error(t, err)
-}
-
-// RIGHT: Test via public API with proper configuration
-func TestArtifactLoading_MissingPath(t *testing.T) {
-    cfg := testutil.TestConfig()
-    cfg.Artifacts.StoragePath = ""  // Configure via public config
-    agent := NewLaplace(..., cfg)
-    result, err := agent.Execute(ctx, reqWithArtifact)
-    assert.Error(t, err)
-    assert.Contains(t, err.Error(), "storage path not configured")
-}
-```
-
----
-
-## 6. Migration Guide
-
-### When to Refactor vs Keep
-
-| Condition | Action |
-|-----------|--------|
-| Inline mock used once, test passes | Add `// TODO: migrate to testutil` comment |
-| Inline mock duplicated in 2+ files | **Extract to package/mocks_test.go** |
-| Inline mock duplicated in 2+ packages | **Extract to testutil** (check for import cycle first) |
-| Test manipulates internal state | **Refactor** to test via public API |
-| Test has >50 lines of setup | **Extract** setup helper |
-| Test name unclear | **Rename** to `Test<Func>_<Scenario>_<Expected>` |
-| Test is flaky (timing-dependent) | Mark with `// Flaky: timing` + create issue |
-
-### Migration Checklist
-
-For each legacy test file:
-
-- [ ] Replace inline mocks with testutil equivalents
-- [ ] Use builders for complex struct construction
-- [ ] Extract repeated setup into `setup*Test(t)` helper
-- [ ] Add `t.Helper()` to all helper functions
-- [ ] Rename tests to behavior-focused names
-- [ ] Verify test passes with `-race` flag
-- [ ] Verify test passes with `-shuffle=on`
-- [ ] Remove any direct internal state access
-
-### Adding New Mocks to testutil
-
-When you need a mock that doesn't exist:
-
-1. **Check for import cycle first:**
-   ```bash
-   # Does the target package import testutil?
-   grep -r "internal/testutil" internal/targetpackage/*_test.go
-
-   # If YES: adding mock to testutil creates cycle → use package-local mocks_test.go instead
-   # If NO: safe to add to testutil
-   ```
-
-2. Check if `MockStorage` already covers the interface
-
-3. If no cycle and not covered, add to `internal/testutil/mocks.go`:
-
-```go
-// MockNewInterface implements package.Interface for tests.
-type MockNewInterface struct {
-    mock.Mock
-}
-
-func (m *MockNewInterface) Method1(arg1 Type1) (ReturnType, error) {
-    args := m.Called(arg1)
-    if args.Get(0) == nil {
-        return nil, args.Error(1)
-    }
-    return args.Get(0).(ReturnType), args.Error(1)
-}
-```
-
-4. Add usage example in this document
-5. Update TEST_SYSTEM_AUDIT.md inventory
-
-### Package-Local Mocks (`mocks_test.go`)
-
-Some mocks **cannot** be centralized in testutil due to import cycles:
-
-```
-testutil → packageX (needs interface for mock)
-   ↑
-   | (in tests)
-packageX → testutil  ← CYCLE!
-```
-
-**Solution:** Create `<package>/mocks_test.go` for package-local mocks:
-
-```go
-// Package bot contains test mocks shared across test files in this package.
-// Not moved to testutil due to import cycle: testutil → rag → testutil (in tests).
-package bot
-
-type mockMemoryService struct{}
-
-func (m *mockMemoryService) ProcessSession(...) error { return nil }
-```
-
-**When to use `mocks_test.go`:**
-
-| Situation | Location |
-|-----------|----------|
-| Mock used by 2+ test files in same package | `package/mocks_test.go` |
-| Mock used by only 1 test file | Keep in test file |
-| No import cycle with testutil | `internal/testutil/mocks.go` |
-| Import cycle exists | `package/mocks_test.go` |
-
----
-
-## 7. Running Tests
-
-### Basic Commands
-
-```bash
-# All tests
-go test ./...
-
-# Specific package
-go test ./internal/bot/...
-
-# Specific test function
-go test ./internal/bot/... -run TestProcessMessage
-
-# With coverage
-go test ./... -coverprofile=coverage.out
-go tool cover -html=coverage.out  # Open in browser
-go tool cover -func=coverage.out  # Summary in terminal
-```
-
-### Quality Checks
-
-```bash
-# Race detector (REQUIRED before merge)
-go test -race ./...
-
-# Shuffle tests (detect order dependencies)
-go test -shuffle=on ./...
-
-# Verbose output
-go test ./internal/agent/laplace/... -v
-
-# Short mode (skip slow tests)
-go test -short ./...
-```
-
-### Coverage Analysis
-
-```bash
-# Per-package coverage
-go test ./internal/bot/... -cover
-go test ./internal/rag/... -cover
-go test ./internal/storage/... -cover
-
-# Overall coverage summary
-go test ./... -coverprofile=coverage.out && \
-  go tool cover -func=coverage.out | grep total
-
-# Find untested code
-go tool cover -html=coverage.out
-# Red = not covered, Green = covered
-```
-
-### Verification After Refactoring
-
-```bash
-# Verify no inline mocks remain (except legitimate package-local ones)
-grep -r "type mock" --include="*_test.go" internal/ | grep -v testutil
-# Review each result — legitimate if in mocks_test.go or single-use
-
-# Check for import cycle before adding mock to testutil
-go test ./internal/targetpackage/... -c 2>&1 | grep "import cycle"
-
-# Verify all tests pass
-go test ./...
-
-# Verify race-safe
-go test -race ./...
-
-# Verify order-independent
-go test -shuffle=on ./...
+// Descriptive names
+func TestProcess_InvalidInput_ReturnsError(t *testing.T) {}
 ```
 
 ---
 
 ## References
 
-- [Test Coverage Roadmap v2](./plans/test-coverage-roadmap-v2.md)
-- [Test System Audit](./plans/TEST_SYSTEM_AUDIT.md)
-- [Go Testing Best Practices](https://go.dev/doc/tutorial/add-a-test)
-- [testify/assert](https://github.com/stretchr/testify/blob/master/assert/assertions.go)
-- [testify/mock](https://github.com/stretchr/testify/blob/master/mock/mock.go)
-- [Table-Driven Tests](https://dave.cheney.net/2019/05/07/prefer-table-driven-tests)
+- [Audit Report](./plans/AUDIT_REPORT_PHASE_2.md)
+- [Coverage Roadmap](./plans/test-coverage-roadmap-v3.md)
