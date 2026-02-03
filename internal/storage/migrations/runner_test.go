@@ -9,12 +9,11 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// testLogger returns a discard logger for testing
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-func TestMigrationRunner(t *testing.T) {
+func TestRunner(t *testing.T) {
 	t.Run("fresh database runs all migrations", func(t *testing.T) {
 		db, err := sql.Open("sqlite", ":memory:")
 		if err != nil {
@@ -39,9 +38,51 @@ func TestMigrationRunner(t *testing.T) {
 			t.Errorf("Expected version >= 8, got %d", version)
 		}
 
-		// Re-run should be idempotent
+		// Verify key tables exist
+		tables := []string{
+			"users", "history", "stats", "topics", "structured_facts",
+			"fact_history", "reranker_logs", "agent_logs", "people", "artifacts",
+			"schema_version",
+		}
+		for _, table := range tables {
+			var count int
+			err = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&count)
+			if err != nil {
+				t.Errorf("Failed to check table %s: %v", table, err)
+			}
+			if count == 0 {
+				t.Errorf("Table %s does not exist", table)
+			}
+		}
+	})
+
+	t.Run("re-run is idempotent", func(t *testing.T) {
+		db, err := sql.Open("sqlite", ":memory:")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+
+		runner := NewRunner(db, testLogger())
+
+		// First run
 		if err := runner.Run(); err != nil {
-			t.Fatalf("Re-run failed: %v", err)
+			t.Fatalf("First Run() failed: %v", err)
+		}
+
+		// Second run should not fail
+		if err := runner.Run(); err != nil {
+			t.Fatalf("Second Run() failed: %v", err)
+		}
+
+		// Version should be the same
+		var version int
+		err = db.QueryRow("SELECT MAX(version) FROM schema_version").Scan(&version)
+		if err != nil {
+			t.Fatalf("Failed to query version: %v", err)
+		}
+		if version < 8 {
+			t.Errorf("Expected version >= 8, got %d", version)
 		}
 	})
 
@@ -98,83 +139,101 @@ func TestMigrationRunner(t *testing.T) {
 			t.Errorf("Expected >= 8 migrations applied, got %d", count)
 		}
 	})
-
-	t.Run("verify tables exist", func(t *testing.T) {
-		db, err := sql.Open("sqlite", ":memory:")
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer db.Close()
-
-		runner := NewRunner(db, testLogger())
-		if err := runner.Run(); err != nil {
-			t.Fatalf("Run() failed: %v", err)
-		}
-
-		// Verify key tables exist
-		tables := []string{
-			"users", "history", "stats", "topics", "structured_facts",
-			"fact_history", "reranker_logs", "agent_logs", "people", "artifacts",
-			"schema_version",
-		}
-
-		for _, table := range tables {
-			var count int
-			err = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&count)
-			if err != nil {
-				t.Errorf("Failed to check table %s: %v", table, err)
-			}
-			if count == 0 {
-				t.Errorf("Table %s does not exist", table)
-			}
-		}
-	})
 }
 
-func TestHelpers(t *testing.T) {
+// TestMigration004_Backfill tests the backfill logic in size_tracking migration.
+// This is the only migration with non-trivial business logic (calculating size from messages).
+func TestMigration004_Backfill(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
 
+	// Setup: create initial schema without size_chars column
+	_, err = db.Exec(`
+		CREATE TABLE users (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			telegram_id INTEGER NOT NULL UNIQUE,
+			username TEXT,
+			first_name TEXT,
+			last_name TEXT,
+			language_code TEXT,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			role TEXT NOT NULL,
+			content TEXT NOT NULL,
+			topic_id INTEGER,
+			timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		)
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE topics (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			start_msg_id INTEGER NOT NULL,
+			end_msg_id INTEGER NOT NULL,
+			summary TEXT,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id),
+			FOREIGN KEY (start_msg_id) REFERENCES history(id),
+			FOREIGN KEY (end_msg_id) REFERENCES history(id)
+		)
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a topic and some messages
+	var topicID int64
+	err = db.QueryRow("INSERT INTO topics (user_id, start_msg_id, end_msg_id) VALUES (1, 1, 1) RETURNING id").Scan(&topicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Exec("INSERT INTO history (user_id, role, content, topic_id) VALUES (1, 'user', 'hello world', ?)", topicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec("INSERT INTO history (user_id, role, content, topic_id) VALUES (1, 'assistant', 'hi there', ?)", topicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Run migration
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatal(err)
 	}
-	//nolint:errcheck // Test cleanup, rollback is safe
-	defer tx.Rollback()
-
-	// Create test table
-	_, err = tx.Exec("CREATE TABLE test_table (id INTEGER, name TEXT)")
-	if err != nil {
+	if err := migrateSizeTracking(tx); err != nil {
+		t.Fatalf("migrateSizeTracking failed: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
 
-	t.Run("columnExists returns true for existing column", func(t *testing.T) {
-		if !columnExists(tx, "test_table", "id") {
-			t.Error("Expected column 'id' to exist")
-		}
-		if !columnExists(tx, "test_table", "name") {
-			t.Error("Expected column 'name' to exist")
-		}
-	})
-
-	t.Run("columnExists returns false for non-existing column", func(t *testing.T) {
-		if columnExists(tx, "test_table", "nonexistent") {
-			t.Error("Expected column 'nonexistent' to not exist")
-		}
-	})
-
-	t.Run("tableExists returns true for existing table", func(t *testing.T) {
-		if !tableExists(tx, "test_table") {
-			t.Error("Expected table to exist")
-		}
-	})
-
-	t.Run("tableExists returns false for non-existing table", func(t *testing.T) {
-		if tableExists(tx, "nonexistent_table") {
-			t.Error("Expected table to not exist")
-		}
-	})
+	// Check backfill happened (should have calculated size from messages)
+	var sizeChars int
+	err = db.QueryRow("SELECT size_chars FROM topics WHERE id = ?", topicID).Scan(&sizeChars)
+	if err != nil {
+		t.Fatalf("Failed to query size_chars: %v", err)
+	}
+	// "hello world" (11) + "hi there" (8) = 19
+	if sizeChars != 19 {
+		t.Errorf("Expected size_chars = 19, got %d", sizeChars)
+	}
 }
