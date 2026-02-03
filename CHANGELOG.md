@@ -7,8 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-02-04
+
 ### Fixed
+- **Tool error handling** — `manage_memory` and `manage_people` tools now return proper Go errors instead of masking failures in result strings. Previously, errors were returned as "Error..." text with nil error, causing no error logs in laplace.go and incorrect tool results sent to LLM. All 21 affected tests updated to check for errors correctly.
 - **Reranker fact ID hallucination** — Flash confused `[Fact:N]` format with `[Person:N]`/`[Topic:N]` and returned Fact IDs as Person/Topic IDs. Fixed by using compact format for reranker (facts without `[Fact:N]` prefix) while preserving full format for Archivist which needs IDs for update/delete operations.
+- **Codecov configuration** — fixed ignore patterns to use full path matching instead of substring, properly excluded test packages from coverage calculations.
+
+### Internal
+- **Test coverage improvements** — significantly improved coverage across all packages: agent (45.3% → 95.5%), markdown (76.6% → 81.8%), telegram (71.1% → 93.2%), files (59.8% → 88.4%), bot (80.3% → 87.5%), web (67.6% → 81.9%), RAG (82.8%), agentlog (40%+ added).
+- **User data isolation tests** — added comprehensive `Test*UserIsolation` test suites across all storage packages to prove users cannot access or modify each other's data.
+- **Agent refactoring** — extracted `agent/context` package for SharedContext, added agent builders for easier testing, refactored reranker into focused modules (candidates, filtering, parsing, fallbacks, tool_executor).
+- **Bot test split** — split monolithic `bot_test.go` into focused files (bot_handlers_test.go, bot_errors_test.go, bot_forwarded_people_test.go, bot_rpc_test.go) for better maintainability.
+- **RAG testability** — extracted `rag.MaintenanceService` interface, removed deprecated `rag.NewService` in favor of builder pattern, added SSE testing helpers.
+- **Testing guide** — added `docs/TESTING.md` with comprehensive testing standards, patterns, and available helpers.
+- **Config tests** — added 400+ lines of config tests for coverage improvement.
+- **Migration tests** — refactored for clarity and added backfill test.
 
 ## [0.6.0] - 2026-02-02
 
@@ -445,7 +459,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-language support (en, ru)
 - Docker deployment
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/runixer/laplaced/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/runixer/laplaced/compare/v0.5.4...v0.6.0
 [0.5.4]: https://github.com/runixer/laplaced/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/runixer/laplaced/compare/v0.5.2...v0.5.3
