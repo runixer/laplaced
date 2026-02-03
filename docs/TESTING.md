@@ -202,6 +202,38 @@ testutil.AssertLogHasField(t, capture, "key", "value")
 testutil.AssertNoErrorLogs(t, capture)
 ```
 
+### HTTP & SSE Testing
+
+```go
+// HTTP request helpers
+req := testutil.NewTestRequest(t, "GET", "/api/stats?user_id=123", nil)
+req := testutil.NewTestRequest(t, "POST", "/api/webhook", map[string]any{"key": "value"})
+
+// Execute request
+rr := testutil.ExecuteRequest(t, handler, req)
+
+// Response assertions
+testutil.AssertStatusCode(t, rr, http.StatusOK)
+testutil.AssertJSONResponse(t, rr, http.StatusOK, &response)
+testutil.AssertContentType(t, rr, "application/json")
+testutil.AssertErrorResponse(t, rr, http.StatusBadRequest, "invalid user")
+
+// SSE (Server-Sent Events) testing
+sseRecorder := testutil.NewSSERecorder()
+handler(sseRecorder, req)
+
+testutil.AssertSSEHeaders(t, sseRecorder)  // Content-Type, Cache-Control, Connection
+assert.Equal(t, http.StatusOK, sseRecorder.Code)
+assert.GreaterOrEqual(t, sseRecorder.FlushCount(), 1)  // Flush was called
+
+// Parse SSE events
+events := testutil.ParseSSEEvents(t, sseRecorder.Body.String())
+assert.GreaterOrEqual(t, len(events), 1)
+
+// Count SSE events without parsing
+count := testutil.CountSSEEvents(sseRecorder.Body.String())
+```
+
 ---
 
 ## 4. Agent Testing Strategy

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -149,4 +150,123 @@ func ResponseBodyEqual(t *testing.T, rr *httptest.ResponseRecorder, expected str
 	t.Helper()
 	body := rr.Body.String()
 	assert.Equal(t, expected, body)
+}
+
+// SSERecorder is a test response recorder that supports Server-Sent Events (SSE)
+// by implementing the http.Flusher interface. Use this for testing handlers that
+// stream responses via SSE.
+//
+// Example usage:
+//
+//	mockBot.On("ForceCloseSessionWithProgress", ...).Run(func(args mock.Arguments) {
+//	    onProgress := args.Get(2).(rag.ProgressCallback)
+//	    onProgress(rag.ProgressEvent{Stage: "processing", Complete: false})
+//	    onProgress(rag.ProgressEvent{Stage: "done", Complete: true})
+//	}).Return(&rag.ProcessingStats{}, nil)
+//
+//	req := testutil.NewTestRequest(t, "GET", "/ui/debug/sessions/process?user_id=123", nil)
+//	sseRecorder := testutil.NewSSERecorder()
+//	handler(sseRecorder, req)
+//
+//	assert.Equal(t, http.StatusOK, sseRecorder.Code)
+//	events := testutil.ParseSSEEvents(t, sseRecorder.Body.String())
+//	assert.Len(t, events, 2)
+type SSERecorder struct {
+	*httptest.ResponseRecorder
+	flushCount int
+}
+
+// NewSSERecorder creates a new SSE-capable response recorder.
+func NewSSERecorder() *SSERecorder {
+	return &SSERecorder{
+		ResponseRecorder: httptest.NewRecorder(),
+	}
+}
+
+// Flush implements http.Flusher for SSE support.
+func (r *SSERecorder) Flush() {
+	r.flushCount++
+}
+
+// FlushCount returns the number of times Flush was called.
+func (r *SSERecorder) FlushCount() int {
+	return r.flushCount
+}
+
+// SSEEvent represents a single Server-Sent Event.
+type SSEEvent struct {
+	Data string
+}
+
+// ParseSSEEvents parses SSE formatted response body into individual events.
+// Each SSE event has the format "data: <json>\n\n".
+func ParseSSEEvents(t *testing.T, body string) []SSEEvent {
+	t.Helper()
+	var events []SSEEvent
+
+	// Split by double newline to get individual events
+	parts := splitSSEParts(body)
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		// Extract data after "data: " prefix
+		if strings.HasPrefix(part, "data: ") {
+			data := strings.TrimPrefix(part, "data: ")
+			events = append(events, SSEEvent{Data: data})
+		}
+	}
+
+	return events
+}
+
+// splitSSEParts splits SSE body by double newline while preserving order.
+func splitSSEParts(s string) []string {
+	var parts []string
+	var current strings.Builder
+
+	for _, line := range strings.Split(s, "\n") {
+		if line == "" && current.Len() > 0 {
+			parts = append(parts, current.String())
+			current.Reset()
+		} else {
+			current.WriteString(line)
+			current.WriteString("\n")
+		}
+	}
+	if current.Len() > 0 {
+		parts = append(parts, current.String())
+	}
+	return parts
+}
+
+// SSEHeadersGetter is an interface for getting HTTP headers.
+type SSEHeadersGetter interface {
+	Header() http.Header
+}
+
+// AssertSSEHeaders asserts that the response has proper SSE headers.
+// Accepts both *httptest.ResponseRecorder and *SSERecorder.
+func AssertSSEHeaders(t *testing.T, h SSEHeadersGetter) {
+	t.Helper()
+	assert.Equal(t, "text/event-stream", h.Header().Get("Content-Type"))
+	assert.Equal(t, "no-cache", h.Header().Get("Cache-Control"))
+	assert.Equal(t, "keep-alive", h.Header().Get("Connection"))
+}
+
+// CountSSEEvents counts the number of SSE events in the response body.
+func CountSSEEvents(body string) int {
+	count := 0
+	dataIdx := 0
+	for {
+		idx := strings.Index(body[dataIdx:], "data: ")
+		if idx == -1 {
+			break
+		}
+		count++
+		dataIdx += idx + 6 // Move past "data: "
+	}
+	return count
 }

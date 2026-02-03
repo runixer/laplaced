@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -518,18 +519,20 @@ func TestSendTypingActionLoop_SendsPeriodicActions(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	actionCount := 0
+	var actionCount atomic.Int64
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil).
-		Run(func(mock.Arguments) { actionCount++ })
+		Run(func(mock.Arguments) { actionCount.Add(1) })
 
 	// Start loop
 	go bot.sendTypingActionLoop(ctx, 123, 0)
 
 	// Wait for multiple actions (initial + at least one periodic)
+	// Initial action is sent immediately, then ticker every 4 seconds
+	// We should get at least 2 actions in 5 seconds
 	time.Sleep(5 * time.Second)
 
 	cancel()
 
 	// Should have sent at least 2 actions (initial + 1+ periodic)
-	assert.GreaterOrEqual(t, actionCount, 2)
+	assert.GreaterOrEqual(t, int(actionCount.Load()), 2)
 }
