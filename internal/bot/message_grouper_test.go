@@ -354,3 +354,156 @@ func TestMessageGrouper_Stop_WaitsForActiveProcessing(t *testing.T) {
 		t.Fatal("Stop() didn't return after processing completed")
 	}
 }
+
+// TestMessageGrouper_GetActiveSessions_ReturnsActiveGroups tests GetActiveSessions.
+func TestMessageGrouper_GetActiveSessions_ReturnsActiveGroups(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	onGroupReady := func(ctx context.Context, group *MessageGroup) {}
+
+	grouper := NewMessageGrouper(nil, logger, 1*time.Second, onGroupReady)
+
+	// Add messages for two users
+	msg1 := &telegram.Message{
+		MessageID: 1,
+		From:      &telegram.User{ID: 123},
+		Date:      1704067200, // 2024-01-01 00:00:00 UTC
+	}
+	msg2 := &telegram.Message{
+		MessageID: 2,
+		From:      &telegram.User{ID: 123},
+		Date:      1704067260, // 2024-01-01 00:01:00 UTC
+	}
+	msg3 := &telegram.Message{
+		MessageID: 3,
+		From:      &telegram.User{ID: 456},
+		Date:      1704067320, // 2024-01-01 00:02:00 UTC
+	}
+
+	grouper.AddMessage(msg1)
+	grouper.AddMessage(msg2)
+	grouper.AddMessage(msg3)
+
+	sessions := grouper.GetActiveSessions()
+
+	assert.Len(t, sessions, 2, "Should have 2 active sessions")
+
+	// Find session for user 123
+	var user123Session *SessionInfo
+	for _, s := range sessions {
+		if s.UserID == 123 {
+			user123Session = &s
+			break
+		}
+	}
+	assert.NotNil(t, user123Session, "User 123 should have an active session")
+	assert.Equal(t, 2, user123Session.MessageCount, "User 123 should have 2 messages")
+
+	// Find session for user 456
+	var user456Session *SessionInfo
+	for _, s := range sessions {
+		if s.UserID == 456 {
+			user456Session = &s
+			break
+		}
+	}
+	assert.NotNil(t, user456Session, "User 456 should have an active session")
+	assert.Equal(t, 1, user456Session.MessageCount, "User 456 should have 1 message")
+
+	grouper.Stop()
+}
+
+// TestMessageGrouper_GetActiveSessions_EmptyWhenNoGroups tests GetActiveSessions with no active groups.
+func TestMessageGrouper_GetActiveSessions_EmptyWhenNoGroups(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	onGroupReady := func(ctx context.Context, group *MessageGroup) {}
+
+	grouper := NewMessageGrouper(nil, logger, 1*time.Second, onGroupReady)
+
+	sessions := grouper.GetActiveSessions()
+	assert.Empty(t, sessions, "Should have no active sessions")
+
+	grouper.Stop()
+}
+
+// TestMessageGrouper_ForceCloseSession_ClosesActiveSession tests ForceCloseSession.
+func TestMessageGrouper_ForceCloseSession_ClosesActiveSession(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+
+	groupClosed := make(chan *MessageGroup, 1)
+	onGroupReady := func(ctx context.Context, group *MessageGroup) {
+		groupClosed <- group
+	}
+
+	grouper := NewMessageGrouper(nil, logger, 1*time.Second, onGroupReady)
+
+	msg1 := &telegram.Message{MessageID: 1, From: &telegram.User{ID: 123}}
+	msg2 := &telegram.Message{MessageID: 2, From: &telegram.User{ID: 456}}
+
+	grouper.AddMessage(msg1)
+	grouper.AddMessage(msg2)
+
+	// Force close session for user 123
+	closed := grouper.ForceCloseSession(123)
+	assert.True(t, closed, "Should close session for user 123")
+
+	// Verify the group was processed
+	select {
+	case group := <-groupClosed:
+		assert.Equal(t, int64(123), group.UserID)
+		assert.Len(t, group.Messages, 1)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Group should have been closed and processed")
+	}
+
+	// Force close same session again - should return false
+	closed = grouper.ForceCloseSession(123)
+	assert.False(t, closed, "Should not close session again (already closed)")
+
+	// Force close session for user 456
+	closed = grouper.ForceCloseSession(456)
+	assert.True(t, closed, "Should close session for user 456")
+
+	select {
+	case group := <-groupClosed:
+		assert.Equal(t, int64(456), group.UserID)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Group should have been closed and processed")
+	}
+
+	// Force close non-existent session
+	closed = grouper.ForceCloseSession(999)
+	assert.False(t, closed, "Should not close non-existent session")
+
+	grouper.Stop()
+}
+
+// TestMessageGrouper_ForceCloseSession_WithRunningTimer tests ForceCloseSession with active timer.
+func TestMessageGrouper_ForceCloseSession_WithRunningTimer(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+
+	groupClosed := make(chan *MessageGroup, 1)
+	onGroupReady := func(ctx context.Context, group *MessageGroup) {
+		groupClosed <- group
+	}
+
+	grouper := NewMessageGrouper(nil, logger, 1*time.Second, onGroupReady)
+
+	msg := &telegram.Message{MessageID: 1, From: &telegram.User{ID: 123}}
+	grouper.AddMessage(msg)
+
+	// Wait a bit to ensure timer is scheduled
+	time.Sleep(50 * time.Millisecond)
+
+	// Force close should stop the timer and process the group
+	closed := grouper.ForceCloseSession(123)
+	assert.True(t, closed, "Should close session with running timer")
+
+	select {
+	case <-groupClosed:
+		// Group was processed
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Group should have been closed and processed")
+	}
+
+	grouper.Stop()
+}

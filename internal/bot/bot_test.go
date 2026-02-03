@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/laplace"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
@@ -1956,4 +1957,104 @@ func TestSendTestMessage_SaveToHistoryError_ReturnsError(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to save message")
+}
+
+// TestNewBot_Success verifies that NewBot creates a fully configured bot.
+func TestNewBot_Success(t *testing.T) {
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
+	cfg := testutil.TestConfig()
+
+	// Set required config fields that TestConfig() doesn't provide
+	cfg.Bot.TurnWaitDuration = "100ms"
+	cfg.Telegram.Token = "test-token"
+
+	// Mock SetMyCommands call made by NewBot
+	mockAPI.On("SetMyCommands", mock.Anything, mock.Anything).Return(nil)
+
+	// Create RAG service
+	ragService, err := rag.NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockORClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(&mockMemoryService{}).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
+
+	// Create context service
+	contextService := agent.NewContextService(mockStore, mockStore, cfg, logger)
+
+	bot, err := NewBot(
+		logger,
+		mockAPI,
+		cfg,
+		mockStore, // userRepo
+		mockStore, // msgRepo
+		mockStore, // statsRepo
+		mockStore, // factRepo
+		mockStore, // factHistoryRepo
+		mockStore, // peopleRepo
+		mockORClient,
+		ragService,
+		contextService,
+		translator,
+	)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, bot)
+	assert.NotNil(t, bot.messageGrouper)
+	assert.NotNil(t, bot.toolExecutor)
+	assert.NotNil(t, bot.downloader)
+	assert.NotNil(t, bot.fileProcessor)
+	assert.NotNil(t, bot.logger)
+	assert.NotNil(t, bot.translator)
+	assert.Equal(t, mockAPI, bot.API())
+	mockAPI.AssertExpectations(t)
+}
+
+// TestFileProcessingError_Error verifies the Error method.
+func TestFileProcessingError_Error(t *testing.T) {
+	originalErr := fmt.Errorf("file not found")
+	fpe := &fileProcessingError{
+		err:          originalErr,
+		messageIndex: 2,
+	}
+
+	assert.Equal(t, "file not found", fpe.Error())
+}
+
+// TestFileProcessingError_Unwrap verifies the Unwrap method.
+func TestFileProcessingError_Unwrap(t *testing.T) {
+	originalErr := fmt.Errorf("download failed")
+	fpe := &fileProcessingError{
+		err:          originalErr,
+		messageIndex: 1,
+	}
+
+	unwrapped := fpe.Unwrap()
+	assert.Equal(t, originalErr, unwrapped)
+}
+
+// TestFileProcessingError_ErrorChain verifies errors.Is/As work correctly.
+func TestFileProcessingError_ErrorChain(t *testing.T) {
+	originalErr := errors.New("original error")
+	fpe := &fileProcessingError{
+		err:          originalErr,
+		messageIndex: 0,
+	}
+
+	// errors.Is should find the original error
+	assert.True(t, errors.Is(fpe, originalErr))
+	assert.False(t, errors.Is(fpe, errors.New("different error")))
 }

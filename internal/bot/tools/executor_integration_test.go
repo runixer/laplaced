@@ -221,17 +221,26 @@ func TestExecuteToolCall_ModelTool(t *testing.T) {
 
 // TestSetAgentLogger tests setting agent logger.
 func TestSetAgentLogger(t *testing.T) {
-	// Create a real agentlog.Logger for testing (it's a simple struct)
-	// We can't easily mock it, so we just test the setter works
 	exec := NewToolExecutor(nil, nil, nil, testutil.TestConfig(), testutil.TestLogger())
 
 	// agentLogger is optional, nil is valid
 	assert.Nil(t, exec.agentLogger)
 
-	// We can't easily create a real agentlog.Logger without dependencies
-	// Just verify the field exists and is settable
-	exec.agentLogger = nil
+	// Call the setter method with nil (valid state)
+	exec.SetAgentLogger(nil)
 	assert.Nil(t, exec.agentLogger)
+}
+
+// TestToolExecutor_SetRAGService tests setting RAG service.
+func TestToolExecutor_SetRAGService(t *testing.T) {
+	exec := NewToolExecutor(nil, nil, nil, testutil.TestConfig(), testutil.TestLogger())
+
+	// ragService is optional, nil is valid
+	assert.Nil(t, exec.ragService)
+
+	// Call the setter method with nil (valid state)
+	exec.SetRAGService(nil)
+	assert.Nil(t, exec.ragService)
 }
 
 // TestNewToolExecutor verifies ToolExecutor initialization.
