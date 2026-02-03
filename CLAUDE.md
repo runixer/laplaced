@@ -152,8 +152,12 @@ This bot processes real conversations. When analyzing logs, debugging, writing e
 **Gitignored directories (real data OK here):**
 - `logs/` — runtime logs with real conversations
 - `data/` — SQLite databases with user data
-- `docs/plans/` — internal planning documents
+- `docs/plans/` — internal planning documents (draft roadmaps, issues)
+- `docs/bugs/` — bug analysis notes ( drafts)
+- `docs/external/` — external research and references
 - `.claude/` — Claude Code working files
+
+**Note:** Files in these directories are NOT tracked by git. Do NOT commit them.
 
 **Tracked files (depersonalize!):**
 - `*_test.go` — use `@testuser`, `John Doe`, generic topics
