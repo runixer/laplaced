@@ -12,6 +12,7 @@ import (
 	"github.com/runixer/laplaced/internal/agent/extractor"
 	agenttesting "github.com/runixer/laplaced/internal/agent/testing"
 	"github.com/runixer/laplaced/internal/memory"
+	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 	"github.com/stretchr/testify/mock"
@@ -576,5 +577,168 @@ func TestProcessArtifactExtraction_ProcessesAllPending(t *testing.T) {
 
 	// Both artifacts should be processed
 	mockExtractor.AssertExpectations(t)
+	mockArtifactRepo.AssertExpectations(t)
+}
+
+// TestProcessArtifactExtraction_EmptyUserIDs tests that extraction skips when no users are allowed.
+func TestProcessArtifactExtraction_EmptyUserIDs(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	cfg := testutil.TestConfig()
+	cfg.Artifacts.Enabled = true
+	cfg.Bot.AllowedUserIDs = []int64{} // Empty user IDs
+
+	mockStore := new(testutil.MockStorage)
+	mockClient := new(testutil.MockOpenRouterClient)
+	mockArtifactRepo := new(testutil.MockStorage)
+	translator := testutil.TestTranslator(t)
+
+	mockExtractor := new(agenttesting.MockAgent)
+
+	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
+	svc.SetExtractorAgent(mockExtractor)
+	svc.SetArtifactRepository(mockArtifactRepo)
+
+	// processArtifactExtraction should skip processing when no users allowed
+	svc.processArtifactExtraction(context.Background())
+
+	// Extractor should not have been called
+	mockExtractor.AssertNotCalled(t, "Execute", mock.Anything, mock.Anything)
+	// No GetPendingArtifacts calls expected
+	mockArtifactRepo.AssertNotCalled(t, "GetPendingArtifacts", mock.Anything, mock.Anything)
+}
+
+// TestProcessArtifactExtraction_DefaultMaxRetries tests that default max retries is used when config is 0.
+func TestProcessArtifactExtraction_DefaultMaxRetries(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	cfg := testutil.TestConfig()
+	cfg.Artifacts.Enabled = true
+	cfg.Bot.AllowedUserIDs = []int64{123}
+	cfg.Agents.Extractor.MaxRetries = 0 // Should use default 3
+
+	mockStore := new(testutil.MockStorage)
+	mockClient := new(testutil.MockOpenRouterClient)
+	mockArtifactRepo := new(testutil.MockStorage)
+	translator := testutil.TestTranslator(t)
+
+	userID := int64(123)
+	artifacts := []storage.Artifact{
+		{ID: 1, UserID: userID, FileType: "image", State: "pending"},
+	}
+
+	// Should be called with maxRetries=3 (default)
+	mockArtifactRepo.On("GetPendingArtifacts", userID, 3).Return(artifacts, nil).Maybe()
+	mockArtifactRepo.On("UpdateArtifact", mock.AnythingOfType("*storage.Artifact")).Return(nil).Maybe()
+	mockArtifactRepo.On("GetArtifact", userID, int64(1)).Return(
+		&storage.Artifact{ID: 1, UserID: userID, FilePath: "/tmp/test.jpg"}, nil).Maybe()
+	mockArtifactRepo.On("GetArtifacts", mock.Anything, mock.Anything, mock.Anything).Return([]storage.Artifact{}, int64(0), nil).Maybe()
+	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(
+		openrouter.EmbeddingResponse{Data: []openrouter.EmbeddingObject{{Embedding: []float32{0.1, 0.2}}}}, nil).Maybe()
+
+	mockExtractor := new(agenttesting.MockAgent)
+	mockExtractor.On("Type").Return(agent.TypeExtractor).Maybe()
+	mockExtractor.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
+		Structured: extractor.NewProcessResultBuilder().
+			WithSummary("test").
+			WithKeywords("[]").
+			WithEntities("[]").
+			Build(),
+	}, nil).Maybe()
+
+	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
+	svc.SetExtractorAgent(mockExtractor)
+	svc.SetArtifactRepository(mockArtifactRepo)
+
+	svc.processArtifactExtraction(context.Background())
+
+	mockArtifactRepo.AssertExpectations(t)
+}
+
+// TestProcessArtifactExtraction_DefaultMaxConcurrent tests that default max concurrent is used when config is 0.
+func TestProcessArtifactExtraction_DefaultMaxConcurrent(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	cfg := testutil.TestConfig()
+	cfg.Artifacts.Enabled = true
+	cfg.Bot.AllowedUserIDs = []int64{123}
+	cfg.Agents.Extractor.MaxConcurrent = 0 // Should use default 3
+
+	mockStore := new(testutil.MockStorage)
+	mockClient := new(testutil.MockOpenRouterClient)
+	mockArtifactRepo := new(testutil.MockStorage)
+	translator := testutil.TestTranslator(t)
+
+	userID := int64(123)
+	artifacts := []storage.Artifact{
+		{ID: 1, UserID: userID, FileType: "image", State: "pending"},
+	}
+
+	mockArtifactRepo.On("GetPendingArtifacts", userID, 3).Return(artifacts, nil).Maybe()
+	mockArtifactRepo.On("UpdateArtifact", mock.AnythingOfType("*storage.Artifact")).Return(nil).Maybe()
+	mockArtifactRepo.On("GetArtifact", userID, int64(1)).Return(
+		&storage.Artifact{ID: 1, UserID: userID, FilePath: "/tmp/test.jpg"}, nil).Maybe()
+	mockArtifactRepo.On("GetArtifacts", mock.Anything, mock.Anything, mock.Anything).Return([]storage.Artifact{}, int64(0), nil).Maybe()
+	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(
+		openrouter.EmbeddingResponse{Data: []openrouter.EmbeddingObject{{Embedding: []float32{0.1, 0.2}}}}, nil).Maybe()
+
+	mockExtractor := new(agenttesting.MockAgent)
+	mockExtractor.On("Type").Return(agent.TypeExtractor).Maybe()
+	mockExtractor.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
+		Structured: extractor.NewProcessResultBuilder().
+			WithSummary("test").
+			WithKeywords("[]").
+			WithEntities("[]").
+			Build(),
+	}, nil).Maybe()
+
+	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
+	svc.SetExtractorAgent(mockExtractor)
+	svc.SetArtifactRepository(mockArtifactRepo)
+
+	svc.processArtifactExtraction(context.Background())
+
 	mockArtifactRepo.AssertExpectations(t)
 }

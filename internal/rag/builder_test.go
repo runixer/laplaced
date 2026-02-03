@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/runixer/laplaced/internal/agent"
+	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/memory"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
@@ -59,6 +60,205 @@ func TestServiceBuilder_RequiredDeps(t *testing.T) {
 			},
 			wantErr:     true,
 			errContains: "config required",
+		},
+		{
+			name: "nil openrouter client parameter",
+			setup: func(b *ServiceBuilder) {
+				b.WithLogger(testutil.TestLogger())
+				b.WithConfig(testutil.TestConfig())
+				b.WithOpenRouterClient(nil)
+			},
+			wantErr:     true,
+			errContains: "openrouter client required",
+		},
+		{
+			name: "nil topic repository parameter",
+			setup: func(b *ServiceBuilder) {
+				b.WithLogger(testutil.TestLogger())
+				b.WithConfig(testutil.TestConfig())
+				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithTopicRepository(nil)
+			},
+			wantErr:     true,
+			errContains: "topic repository required",
+		},
+		{
+			name: "nil fact repository parameter",
+			setup: func(b *ServiceBuilder) {
+				b.WithLogger(testutil.TestLogger())
+				b.WithConfig(testutil.TestConfig())
+				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithTopicRepository(&testutil.MockStorage{})
+				b.WithFactRepository(nil)
+			},
+			wantErr:     true,
+			errContains: "fact repository required",
+		},
+		{
+			name: "nil fact history repository parameter",
+			setup: func(b *ServiceBuilder) {
+				b.WithLogger(testutil.TestLogger())
+				b.WithConfig(testutil.TestConfig())
+				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithTopicRepository(&testutil.MockStorage{})
+				b.WithFactRepository(&testutil.MockStorage{})
+				b.WithFactHistoryRepository(nil)
+			},
+			wantErr:     true,
+			errContains: "fact history repository required",
+		},
+		{
+			name: "nil message repository parameter",
+			setup: func(b *ServiceBuilder) {
+				b.WithLogger(testutil.TestLogger())
+				b.WithConfig(testutil.TestConfig())
+				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithTopicRepository(&testutil.MockStorage{})
+				b.WithFactRepository(&testutil.MockStorage{})
+				b.WithFactHistoryRepository(&testutil.MockStorage{})
+				b.WithMessageRepository(nil)
+			},
+			wantErr:     true,
+			errContains: "message repository required",
+		},
+		{
+			name: "nil maintenance repository parameter",
+			setup: func(b *ServiceBuilder) {
+				b.WithLogger(testutil.TestLogger())
+				b.WithConfig(testutil.TestConfig())
+				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithTopicRepository(&testutil.MockStorage{})
+				b.WithFactRepository(&testutil.MockStorage{})
+				b.WithFactHistoryRepository(&testutil.MockStorage{})
+				b.WithMessageRepository(&testutil.MockStorage{})
+				b.WithMaintenanceRepository(nil)
+			},
+			wantErr:     true,
+			errContains: "maintenance repository required",
+		},
+		{
+			name: "nil memory service parameter",
+			setup: func(b *ServiceBuilder) {
+				b.WithLogger(testutil.TestLogger())
+				b.WithConfig(testutil.TestConfig())
+				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithTopicRepository(&testutil.MockStorage{})
+				b.WithFactRepository(&testutil.MockStorage{})
+				b.WithFactHistoryRepository(&testutil.MockStorage{})
+				b.WithMessageRepository(&testutil.MockStorage{})
+				b.WithMaintenanceRepository(&testutil.MockStorage{})
+				b.WithMemoryService(nil)
+			},
+			wantErr:     true,
+			errContains: "memory service required",
+		},
+		{
+			name: "nil translator parameter",
+			setup: func(b *ServiceBuilder) {
+				b.WithLogger(testutil.TestLogger())
+				b.WithConfig(testutil.TestConfig())
+				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithTopicRepository(&testutil.MockStorage{})
+				b.WithFactRepository(&testutil.MockStorage{})
+				b.WithFactHistoryRepository(&testutil.MockStorage{})
+				b.WithMessageRepository(&testutil.MockStorage{})
+				b.WithMaintenanceRepository(&testutil.MockStorage{})
+				b.WithMemoryService(&mockMemoryService{})
+				b.WithTranslator(nil)
+			},
+			wantErr:     true,
+			errContains: "translator required",
+		},
+		{
+			name: "missing topic repository",
+			setup: func(b *ServiceBuilder) {
+				b.WithLogger(testutil.TestLogger())
+				b.WithConfig(testutil.TestConfig())
+				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+			},
+			wantErr:     true,
+			errContains: "topic repository not set",
+		},
+		{
+			name: "missing fact repository",
+			setup: func(b *ServiceBuilder) {
+				b.WithLogger(testutil.TestLogger())
+				b.WithConfig(testutil.TestConfig())
+				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithTopicRepository(&testutil.MockStorage{})
+			},
+			wantErr:     true,
+			errContains: "fact repository not set",
+		},
+		{
+			name: "missing fact history repository",
+			setup: func(b *ServiceBuilder) {
+				b.WithLogger(testutil.TestLogger())
+				b.WithConfig(testutil.TestConfig())
+				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithTopicRepository(&testutil.MockStorage{})
+				b.WithFactRepository(&testutil.MockStorage{})
+			},
+			wantErr:     true,
+			errContains: "fact history repository not set",
+		},
+		{
+			name: "missing message repository",
+			setup: func(b *ServiceBuilder) {
+				b.WithLogger(testutil.TestLogger())
+				b.WithConfig(testutil.TestConfig())
+				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithTopicRepository(&testutil.MockStorage{})
+				b.WithFactRepository(&testutil.MockStorage{})
+				b.WithFactHistoryRepository(&testutil.MockStorage{})
+			},
+			wantErr:     true,
+			errContains: "message repository not set",
+		},
+		{
+			name: "missing maintenance repository",
+			setup: func(b *ServiceBuilder) {
+				b.WithLogger(testutil.TestLogger())
+				b.WithConfig(testutil.TestConfig())
+				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithTopicRepository(&testutil.MockStorage{})
+				b.WithFactRepository(&testutil.MockStorage{})
+				b.WithFactHistoryRepository(&testutil.MockStorage{})
+				b.WithMessageRepository(&testutil.MockStorage{})
+			},
+			wantErr:     true,
+			errContains: "maintenance repository not set",
+		},
+		{
+			name: "missing memory service",
+			setup: func(b *ServiceBuilder) {
+				b.WithLogger(testutil.TestLogger())
+				b.WithConfig(testutil.TestConfig())
+				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithTopicRepository(&testutil.MockStorage{})
+				b.WithFactRepository(&testutil.MockStorage{})
+				b.WithFactHistoryRepository(&testutil.MockStorage{})
+				b.WithMessageRepository(&testutil.MockStorage{})
+				b.WithMaintenanceRepository(&testutil.MockStorage{})
+			},
+			wantErr:     true,
+			errContains: "memory service not set",
+		},
+		{
+			name: "missing translator",
+			setup: func(b *ServiceBuilder) {
+				b.WithLogger(testutil.TestLogger())
+				b.WithConfig(testutil.TestConfig())
+				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithTopicRepository(&testutil.MockStorage{})
+				b.WithFactRepository(&testutil.MockStorage{})
+				b.WithFactHistoryRepository(&testutil.MockStorage{})
+				b.WithMessageRepository(&testutil.MockStorage{})
+				b.WithMaintenanceRepository(&testutil.MockStorage{})
+				b.WithMemoryService(&mockMemoryService{})
+			},
+			wantErr:     true,
+			errContains: "translator not set",
 		},
 	}
 
@@ -272,6 +472,158 @@ func TestServiceBuilder_FluentChaining(t *testing.T) {
 	svc, err := builder.Build()
 	require.NoError(t, err)
 	assert.NotNil(t, svc)
+}
+
+func TestServiceBuilder_WithAgentLogger(t *testing.T) {
+	logger := testutil.TestLogger()
+	cfg := testutil.TestConfig()
+	mockClient := &testutil.MockOpenRouterClient{}
+	mockStore := &testutil.MockStorage{}
+	mockMemory := &mockMemoryService{}
+	translator := testutil.TestTranslator(t)
+
+	// Create real agent logger (disabled for testing)
+	agentLogger := agentlog.NewLogger(nil, logger, false)
+
+	t.Run("agent logger is set via builder", func(t *testing.T) {
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(mockMemory).
+			WithTranslator(translator).
+			WithAgentLogger(agentLogger).
+			Build()
+
+		require.NoError(t, err)
+		assert.NotNil(t, svc)
+		assert.Same(t, agentLogger, svc.agentLogger)
+	})
+
+	t.Run("service works without agent logger", func(t *testing.T) {
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(mockMemory).
+			WithTranslator(translator).
+			Build()
+
+		require.NoError(t, err)
+		assert.NotNil(t, svc)
+		assert.Nil(t, svc.agentLogger)
+	})
+}
+
+func TestServiceBuilder_WithContextService(t *testing.T) {
+	logger := testutil.TestLogger()
+	cfg := testutil.TestConfig()
+	mockClient := &testutil.MockOpenRouterClient{}
+	mockStore := &testutil.MockStorage{}
+	mockMemory := &mockMemoryService{}
+	translator := testutil.TestTranslator(t)
+
+	// Create real context service
+	contextService := agent.NewContextService(mockStore, mockStore, cfg, logger)
+
+	t.Run("context service is set via builder", func(t *testing.T) {
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(mockMemory).
+			WithTranslator(translator).
+			WithContextService(contextService).
+			Build()
+
+		require.NoError(t, err)
+		assert.NotNil(t, svc)
+		assert.Same(t, contextService, svc.contextService)
+	})
+
+	t.Run("service works without context service", func(t *testing.T) {
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(mockMemory).
+			WithTranslator(translator).
+			Build()
+
+		require.NoError(t, err)
+		assert.NotNil(t, svc)
+		assert.Nil(t, svc.contextService)
+	})
+}
+
+func TestServiceBuilder_AllOptionalDeps(t *testing.T) {
+	logger := testutil.TestLogger()
+	cfg := testutil.TestConfig()
+	mockClient := &testutil.MockOpenRouterClient{}
+	mockStore := &testutil.MockStorage{}
+	mockMemory := &mockMemoryService{}
+	translator := testutil.TestTranslator(t)
+	mockAgent := &mockAgent{}
+	agentLogger := agentlog.NewLogger(nil, logger, false)
+	contextService := agent.NewContextService(mockStore, mockStore, cfg, logger)
+
+	t.Run("all optional deps can be set together", func(t *testing.T) {
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(mockMemory).
+			WithTranslator(translator).
+			WithEnricher(mockAgent).
+			WithSplitter(mockAgent).
+			WithMerger(mockAgent).
+			WithReranker(mockAgent).
+			WithExtractor(mockAgent).
+			WithPeopleRepository(mockStore).
+			WithArtifactRepository(mockStore).
+			WithAgentLogger(agentLogger).
+			WithContextService(contextService).
+			Build()
+
+		require.NoError(t, err)
+		assert.NotNil(t, svc)
+
+		// Verify all optional deps are set
+		assert.Same(t, mockAgent, svc.enricherAgent)
+		assert.Same(t, mockAgent, svc.splitterAgent)
+		assert.Same(t, mockAgent, svc.mergerAgent)
+		assert.Same(t, mockAgent, svc.rerankerAgent)
+		assert.Same(t, mockAgent, svc.extractorAgent)
+		assert.Same(t, mockStore, svc.peopleRepo)
+		assert.Same(t, mockStore, svc.artifactRepo)
+		assert.Same(t, agentLogger, svc.agentLogger)
+		assert.Same(t, contextService, svc.contextService)
+	})
 }
 
 func TestServiceBuilder_VectorMapsInitialized(t *testing.T) {

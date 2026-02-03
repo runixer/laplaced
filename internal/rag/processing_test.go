@@ -488,6 +488,149 @@ func TestProcessTopicChunking(t *testing.T) {
 
 		mockStore.AssertExpectations(t)
 	})
+
+	t.Run("handles processChunk error", func(t *testing.T) {
+		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+		cfg := &config.Config{
+			RAG: config.RAGConfig{
+				Enabled:       true,
+				ChunkInterval: "1h", // Large gap
+				MaxChunkSize:  400,  // Large size
+			},
+		}
+
+		mockStore := new(testutil.MockStorage)
+		mockClient := new(testutil.MockOpenRouterClient)
+
+		// Messages with time gap > 1h
+		baseTime := time.Now().Add(-2 * time.Hour)
+		messages := []storage.Message{
+			{ID: 1, UserID: 123, CreatedAt: baseTime},
+			{ID: 2, UserID: 123, CreatedAt: baseTime.Add(30 * time.Minute)},
+			{ID: 3, UserID: 123, CreatedAt: time.Now().Add(-30 * time.Minute)}, // Gap > 1h
+		}
+
+		mockStore.On("GetUnprocessedMessages", int64(123)).Return(messages, nil)
+
+		translator := testutil.TestTranslator(t)
+
+		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
+
+		// Process should handle error gracefully and return early
+		svc.processTopicChunking(context.Background(), 123)
+
+		mockStore.AssertExpectations(t)
+	})
+
+	t.Run("processes messages up to max chunk size", func(t *testing.T) {
+		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+		cfg := &config.Config{
+			RAG: config.RAGConfig{
+				Enabled:       true,
+				ChunkInterval: "24h", // Large time gap
+				MaxChunkSize:  2,     // Small size limit
+			},
+		}
+
+		mockStore := new(testutil.MockStorage)
+		mockClient := new(testutil.MockOpenRouterClient)
+
+		// Messages close in time but exceeding max chunk size
+		baseTime := time.Now().Add(-1 * time.Hour)
+		messages := []storage.Message{
+			{ID: 1, UserID: 123, CreatedAt: baseTime},
+			{ID: 2, UserID: 123, CreatedAt: baseTime.Add(1 * time.Minute)},
+			{ID: 3, UserID: 123, CreatedAt: baseTime.Add(2 * time.Minute)}, // Should trigger chunk at size 2
+		}
+
+		mockStore.On("GetUnprocessedMessages", int64(123)).Return(messages, nil)
+
+		translator := testutil.TestTranslator(t)
+
+		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
+
+		// Should process chunk when size limit reached
+		svc.processTopicChunking(context.Background(), 123)
+
+		mockStore.AssertExpectations(t)
+	})
+
+	t.Run("processes final chunk when enough time passed", func(t *testing.T) {
+		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+		cfg := &config.Config{
+			RAG: config.RAGConfig{
+				Enabled:       true,
+				ChunkInterval: "1m", // Short interval
+				MaxChunkSize:  400,  // Large size
+			},
+		}
+
+		mockStore := new(testutil.MockStorage)
+		mockClient := new(testutil.MockOpenRouterClient)
+
+		// Old messages (more than 1 minute ago)
+		oldTime := time.Now().Add(-2 * time.Minute)
+		messages := []storage.Message{
+			{ID: 1, UserID: 123, CreatedAt: oldTime},
+			{ID: 2, UserID: 123, CreatedAt: oldTime.Add(10 * time.Second)},
+		}
+
+		mockStore.On("GetUnprocessedMessages", int64(123)).Return(messages, nil)
+
+		translator := testutil.TestTranslator(t)
+
+		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
+
+		// Should process final chunk when enough time passed
+		svc.processTopicChunking(context.Background(), 123)
+
+		mockStore.AssertExpectations(t)
+	})
 }
 
 func TestProcessFactExtraction(t *testing.T) {
@@ -641,6 +784,46 @@ func TestProcessFactExtraction(t *testing.T) {
 			t.Fatalf("failed to build RAG service: %v", err)
 		}
 
+		svc.processFactExtraction(context.Background())
+
+		mockStore.AssertExpectations(t)
+	})
+
+	t.Run("handles GetMessagesByTopicID error", func(t *testing.T) {
+		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+		cfg := &config.Config{
+			RAG: config.RAGConfig{Enabled: true},
+			Bot: config.BotConfig{AllowedUserIDs: []int64{123}},
+		}
+
+		mockStore := new(testutil.MockStorage)
+		mockClient := new(testutil.MockOpenRouterClient)
+
+		mockStore.On("GetTopicsPendingFacts", int64(123)).Return([]storage.Topic{
+			{ID: 1, UserID: 123, ConsolidationChecked: true, StartMsgID: 1, EndMsgID: 10},
+		}, nil)
+		mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return([]storage.Message{}, assert.AnError)
+
+		translator := testutil.TestTranslator(t)
+
+		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
+
+		// Should handle error gracefully and continue
 		svc.processFactExtraction(context.Background())
 
 		mockStore.AssertExpectations(t)

@@ -194,3 +194,80 @@ func TestFilterProfileFacts(t *testing.T) {
 	assert.NotContains(t, ids, int64(3))
 	assert.NotContains(t, ids, int64(6))
 }
+
+func TestFormatUserProfileCompact(t *testing.T) {
+	tests := []struct {
+		name     string
+		facts    []storage.Fact
+		contains []string
+		notEmpty bool
+	}{
+		{
+			name:     "empty facts",
+			facts:    []storage.Fact{},
+			contains: []string{"<user_profile>", "</user_profile>"},
+			notEmpty: false,
+		},
+		{
+			name: "single fact",
+			facts: []storage.Fact{
+				{
+					ID:          1,
+					Category:    "identity",
+					Type:        "name",
+					Content:     "John Doe",
+					LastUpdated: time.Date(2025, 1, 9, 0, 0, 0, 0, time.UTC),
+				},
+			},
+			contains: []string{
+				"<user_profile>",
+				"[identity/name]",
+				"John Doe",
+				"</user_profile>",
+			},
+			notEmpty: true,
+		},
+		{
+			name: "multiple facts",
+			facts: []storage.Fact{
+				{
+					ID:          1,
+					Category:    "identity",
+					Type:        "name",
+					Content:     "John Doe",
+					LastUpdated: time.Date(2025, 1, 9, 0, 0, 0, 0, time.UTC),
+				},
+				{
+					ID:          2,
+					Category:    "preference",
+					Type:        "language",
+					Content:     "English",
+					LastUpdated: time.Date(2025, 1, 10, 0, 0, 0, 0, time.UTC),
+				},
+			},
+			contains: []string{
+				"<user_profile>",
+				"[identity/name]",
+				"John Doe",
+				"[preference/language]",
+				"English",
+				"</user_profile>",
+			},
+			notEmpty: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FormatUserProfileCompact(tt.facts)
+
+			for _, s := range tt.contains {
+				assert.Contains(t, result, s)
+			}
+
+			if tt.notEmpty {
+				assert.NotEmpty(t, result)
+			}
+		})
+	}
+}

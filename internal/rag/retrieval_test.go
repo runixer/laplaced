@@ -567,4 +567,149 @@ func TestEnrichQuery(t *testing.T) {
 		assert.Equal(t, "enriched search terms", result)
 		assert.Equal(t, 15, tokens)
 	})
+
+	t.Run("enriches query with media parts", func(t *testing.T) {
+		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+		cfg := &config.Config{
+			RAG: config.RAGConfig{Enabled: true},
+			Agents: config.AgentsConfig{
+				Enricher: config.AgentConfig{Model: "test-model"},
+				Default:  config.AgentConfig{Model: "test-model"},
+			},
+		}
+
+		mockStore := new(testutil.MockStorage)
+		mockClient := new(testutil.MockOpenRouterClient)
+		translator := testutil.TestTranslator(t)
+
+		// Mock enricher agent that returns enriched query
+		mockEnricher := new(agenttesting.MockAgent)
+		mockEnricher.On("Type").Return(string(agent.TypeEnricher)).Maybe()
+		mockEnricher.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
+			Content: "enriched with media",
+			Tokens: agent.TokenUsage{
+				Prompt:     10,
+				Completion: 8,
+				Total:      18,
+			},
+			Metadata: map[string]any{"system_prompt": "test prompt"},
+		}, nil)
+
+		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
+		svc.SetEnricherAgent(mockEnricher)
+
+		mediaParts := []interface{}{"image_data"}
+
+		result, prompt, tokens, err := svc.enrichQuery(context.Background(), int64(123), "test query", nil, mediaParts)
+
+		assert.NoError(t, err)
+		assert.Equal(t, "enriched with media", result)
+		assert.Equal(t, "test prompt", prompt)
+		assert.Equal(t, 18, tokens)
+	})
+
+	t.Run("returns original query when model is empty", func(t *testing.T) {
+		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+		cfg := &config.Config{
+			RAG: config.RAGConfig{Enabled: true},
+			Agents: config.AgentsConfig{
+				Enricher: config.AgentConfig{Model: ""}, // Empty model
+				Default:  config.AgentConfig{Model: ""}, // Empty default too (no fallback)
+			},
+		}
+
+		mockStore := new(testutil.MockStorage)
+		mockClient := new(testutil.MockOpenRouterClient)
+		translator := testutil.TestTranslator(t)
+
+		// Even though we set an enricher agent, it should be skipped when model is empty
+		mockEnricher := new(agenttesting.MockAgent)
+		mockEnricher.On("Type").Return(string(agent.TypeEnricher)).Maybe()
+
+		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
+		svc.SetEnricherAgent(mockEnricher)
+
+		result, prompt, tokens, err := svc.enrichQuery(context.Background(), int64(123), "test query", nil, nil)
+
+		assert.NoError(t, err)
+		assert.Equal(t, "test query", result) // Returns original when model is empty
+		assert.Empty(t, prompt)
+		assert.Equal(t, 0, tokens)
+	})
+
+	t.Run("trims whitespace from enriched query", func(t *testing.T) {
+		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+		cfg := &config.Config{
+			RAG: config.RAGConfig{Enabled: true},
+			Agents: config.AgentsConfig{
+				Enricher: config.AgentConfig{Model: "test-model"},
+				Default:  config.AgentConfig{Model: "test-model"},
+			},
+		}
+
+		mockStore := new(testutil.MockStorage)
+		mockClient := new(testutil.MockOpenRouterClient)
+		translator := testutil.TestTranslator(t)
+
+		// Mock enricher agent that returns enriched query with extra whitespace
+		mockEnricher := new(agenttesting.MockAgent)
+		mockEnricher.On("Type").Return(string(agent.TypeEnricher)).Maybe()
+		mockEnricher.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
+			Content: "   \tenriched query\t\n   ", // Extra whitespace
+			Tokens:  agent.TokenUsage{Prompt: 10, Completion: 5, Total: 15},
+		}, nil)
+
+		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithOpenRouterClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
+		svc.SetEnricherAgent(mockEnricher)
+
+		result, _, _, err := svc.enrichQuery(context.Background(), int64(123), "test query", nil, nil)
+
+		assert.NoError(t, err)
+		assert.Equal(t, "enriched query", result) // Whitespace trimmed
+	})
 }

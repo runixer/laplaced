@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/runixer/laplaced/internal/agent"
+	"github.com/runixer/laplaced/internal/agent/reranker"
 	"github.com/runixer/laplaced/internal/memory"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
@@ -901,6 +902,240 @@ func TestVectorItemMethods(t *testing.T) {
 	assert.Equal(t, []float32{0.7, 0.8}, artifactItem.GetEmbedding())
 }
 
+// TestBuildRetrievalResult_WithArtifacts tests building result with artifact candidates.
+func TestBuildRetrievalResult_WithArtifacts(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	cfg := testutil.TestConfig()
+	cfg.Artifacts.Enabled = true
+	cfg.RAG.Enabled = true
+	cfg.Agents.Reranker.Enabled = true
+	cfg.Agents.Reranker.Artifacts.Max = 5
+
+	mockStore := new(testutil.MockStorage)
+	mockClient := new(testutil.MockOpenRouterClient)
+	translator := testutil.TestTranslator(t)
+
+	userID := int64(123)
+
+	topicMap := map[int64]storage.Topic{
+		1: {ID: 1, UserID: userID, Summary: "Test Topic"},
+	}
+
+	messages := []storage.Message{
+		{ID: 10, Role: "user", Content: "Hello"},
+	}
+
+	mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return(messages, nil).Once()
+
+	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
+
+	// Setup artifact candidates
+	artifactCandidates := []reranker.ArtifactCandidate{
+		{
+			ArtifactID:   5,
+			Score:        0.85,
+			FileType:     "pdf",
+			OriginalName: "api-docs.pdf",
+			Summary:      "API documentation for authentication",
+			Keywords:     []string{"api", "auth", "oauth"},
+			Entities:     []string{"OAuth2", "JWT"},
+			RAGHints:     []string{"How to authenticate?", "Token format"},
+		},
+		{
+			ArtifactID:   7,
+			Score:        0.72,
+			FileType:     "image",
+			OriginalName: "diagram.png",
+			Summary:      "Meeting notes about project planning",
+			Keywords:     []string{"architecture", "diagram"},
+			Entities:     []string{"Service A", "Service B"},
+			RAGHints:     []string{"System architecture"},
+		},
+	}
+
+	topicMatches := []topicCandidate{
+		{topicID: 1, score: 0.8},
+	}
+
+	// Test with reranker selecting artifacts
+	rerankerOut := &rerankerOutput{
+		selectedTopicIDs:    []int64{1},
+		selectedArtifactIDs: []int64{5}, // Only first artifact
+	}
+
+	result, err := svc.buildRetrievalResult(
+		context.Background(),
+		userID,
+		topicMatches,
+		topicMap,
+		rerankerOut,
+		artifactCandidates,
+		true, // useReranker
+	)
+
+	assert.NoError(t, err)
+	assert.Len(t, result.Topics, 1)
+	assert.Len(t, result.Artifacts, 1)
+	assert.Equal(t, int64(5), result.Artifacts[0].ArtifactID)
+	assert.Equal(t, "pdf", result.Artifacts[0].FileType)
+	assert.Equal(t, "api-docs.pdf", result.Artifacts[0].OriginalName)
+	assert.Equal(t, "API documentation for authentication", result.Artifacts[0].Summary)
+	assert.Equal(t, []int64{5}, result.SelectedArtifactIDs)
+
+	mockStore.AssertExpectations(t)
+}
+
+// TestBuildRetrievalResult_ArtifactsNoReranker tests artifact selection without reranker.
+func TestBuildRetrievalResult_ArtifactsNoReranker(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	cfg := testutil.TestConfig()
+	cfg.Artifacts.Enabled = true
+	cfg.RAG.Enabled = true
+	cfg.Agents.Reranker.Artifacts.Max = 2
+
+	mockStore := new(testutil.MockStorage)
+	mockClient := new(testutil.MockOpenRouterClient)
+	translator := testutil.TestTranslator(t)
+
+	userID := int64(123)
+
+	topicMap := map[int64]storage.Topic{
+		1: {ID: 1, UserID: userID, Summary: "Test Topic"},
+	}
+
+	messages := []storage.Message{
+		{ID: 10, Role: "user", Content: "Hello"},
+	}
+
+	mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return(messages, nil).Once()
+
+	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
+
+	// Setup artifact candidates
+	artifactCandidates := []reranker.ArtifactCandidate{
+		{ArtifactID: 1, Score: 0.9, FileType: "pdf", OriginalName: "a.pdf", Summary: "Document A"},
+		{ArtifactID: 2, Score: 0.8, FileType: "pdf", OriginalName: "b.pdf", Summary: "Document B"},
+		{ArtifactID: 3, Score: 0.7, FileType: "image", OriginalName: "c.png", Summary: "Document C"},
+	}
+
+	topicMatches := []topicCandidate{
+		{topicID: 1, score: 0.8},
+	}
+
+	// Test without reranker - should take top N by vector score
+	result, err := svc.buildRetrievalResult(
+		context.Background(),
+		userID,
+		topicMatches,
+		topicMap,
+		nil, // No reranker output
+		artifactCandidates,
+		false, // useReranker=false
+	)
+
+	assert.NoError(t, err)
+	assert.Len(t, result.Topics, 1)
+	// Max artifacts is 2, so should get first 2
+	assert.Len(t, result.Artifacts, 2)
+	assert.Equal(t, int64(1), result.Artifacts[0].ArtifactID)
+	assert.Equal(t, int64(2), result.Artifacts[1].ArtifactID)
+	assert.Equal(t, []int64{1, 2}, result.SelectedArtifactIDs)
+
+	mockStore.AssertExpectations(t)
+}
+
+// TestBuildRetrievalResult_MissingTopicInMap tests handling when topic is not in map.
+func TestBuildRetrievalResult_MissingTopicInMap(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	cfg := testutil.TestConfig()
+
+	mockStore := new(testutil.MockStorage)
+	mockClient := new(testutil.MockOpenRouterClient)
+	translator := testutil.TestTranslator(t)
+
+	userID := int64(123)
+
+	topicMap := map[int64]storage.Topic{
+		1: {ID: 1, UserID: userID, Summary: "Test Topic"},
+		// Topic 2 is missing from map
+	}
+
+	// Setup mock for topic 1 (only one that should be called)
+	messages := []storage.Message{
+		{ID: 10, Role: "user", Content: "Hello"},
+	}
+	mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return(messages, nil).Once()
+
+	topicMatches := []topicCandidate{
+		{topicID: 1, score: 0.8},
+		{topicID: 2, score: 0.7}, // This topic doesn't exist in map
+	}
+
+	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
+
+	result, err := svc.buildRetrievalResult(
+		context.Background(),
+		userID,
+		topicMatches,
+		topicMap,
+		nil,   // No reranker output
+		nil,   // No artifact candidates
+		false, // useReranker=false
+	)
+
+	assert.NoError(t, err)
+	// Only topic 1 should be in results (topic 2 is skipped)
+	assert.Len(t, result.Topics, 1)
+	assert.Equal(t, int64(1), result.Topics[0].Topic.ID)
+
+	mockStore.AssertExpectations(t)
+}
+
 // TestFormatUserProfileFormats tests profile formatting functions.
 func TestFormatUserProfileFormats(t *testing.T) {
 	facts := []storage.Fact{
@@ -909,19 +1144,14 @@ func TestFormatUserProfileFormats(t *testing.T) {
 		{ID: 3, Content: "Likes coffee", Relation: "preference", Importance: 50},
 	}
 
-	// Test FormatUserProfile (wraps storage function)
-	result := FormatUserProfile(facts)
-	assert.NotEmpty(t, result)
-	assert.Contains(t, result, "developer")
-
 	// Test FormatUserProfileCompact (wraps storage function)
-	compactResult := FormatUserProfileCompact(facts)
+	compactResult := storage.FormatUserProfileCompact(facts)
 	assert.NotEmpty(t, compactResult)
 	// Compact format should not contain fact IDs
 	// The exact format depends on storage.FormatUserProfileCompact implementation
 
 	// Test FilterProfileFacts (wraps storage function)
-	profileFacts := FilterProfileFacts(facts)
+	profileFacts := storage.FilterProfileFacts(facts)
 	assert.NotEmpty(t, profileFacts)
 	// Should include identity and high-importance facts
 	hasIdentity := false

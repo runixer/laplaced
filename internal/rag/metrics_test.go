@@ -408,6 +408,15 @@ func TestRecordRerankerFallback(t *testing.T) {
 }
 
 func TestRerankerMetricsRegistration(t *testing.T) {
+	// Trigger metric registration by calling the functions
+	RecordRerankerDuration(123, 1.0)
+	RecordRerankerToolCalls(123, 1)
+	RecordRerankerCandidatesInput(123, 10)
+	RecordRerankerCandidatesOutput(123, 5)
+	RecordRerankerCost(123, 0.01)
+	RecordRerankerFallback(123, "timeout")
+	RecordRerankerHallucination(123, 1)
+
 	// Verify all reranker metrics are registered
 	metrics := []string{
 		"laplaced_reranker_duration_seconds",
@@ -416,6 +425,7 @@ func TestRerankerMetricsRegistration(t *testing.T) {
 		"laplaced_reranker_candidates_output",
 		"laplaced_reranker_cost_usd_total",
 		"laplaced_reranker_fallback_total",
+		"laplaced_reranker_hallucination_total",
 	}
 
 	mfs, err := prometheus.DefaultGatherer.Gather()
@@ -429,4 +439,30 @@ func TestRerankerMetricsRegistration(t *testing.T) {
 	for _, name := range metrics {
 		assert.True(t, registeredNames[name], "metric %s should be registered", name)
 	}
+}
+
+func TestRecordRerankerHallucination(t *testing.T) {
+	userID := int64(99999)
+	uid := formatUserID(userID)
+
+	// Record some hallucinations
+	RecordRerankerHallucination(userID, 3)
+
+	// Verify counter incremented
+	count := testutil.ToFloat64(rerankerHallucinationTotal.WithLabelValues(uid))
+	assert.GreaterOrEqual(t, count, float64(3))
+
+	// Record more
+	RecordRerankerHallucination(userID, 2)
+	count = testutil.ToFloat64(rerankerHallucinationTotal.WithLabelValues(uid))
+	assert.GreaterOrEqual(t, count, float64(5))
+}
+
+func TestRecordRerankerHallucination_ZeroCount(t *testing.T) {
+	userID := int64(88888)
+
+	// Should not panic with zero count
+	assert.NotPanics(t, func() {
+		RecordRerankerHallucination(userID, 0)
+	})
 }
