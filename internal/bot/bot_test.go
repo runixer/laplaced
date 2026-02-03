@@ -1282,6 +1282,71 @@ func TestSendResponses_OtherError_SendGenericError(t *testing.T) {
 	mockAPI.AssertExpectations(t)
 }
 
+func TestSendResponses_EmptyResponse_Skipped(t *testing.T) {
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
+	cfg := &config.Config{
+		Bot: config.BotConfig{Language: "en"},
+	}
+
+	bot := &Bot{
+		api:        mockAPI,
+		cfg:        cfg,
+		logger:     logger,
+		translator: translator,
+	}
+
+	chatID := int64(123)
+	responses := []telegram.SendMessageRequest{
+		{ChatID: chatID, Text: "   ", ParseMode: ""}, // Whitespace only
+		{ChatID: chatID, Text: "", ParseMode: ""},    // Empty
+	}
+
+	// No SendMessage calls should be made
+	bot.sendResponses(context.Background(), chatID, responses, logger)
+
+	// Assert no API calls were made (expectations list is empty)
+	mockAPI.AssertExpectations(t)
+}
+
+func TestSendResponses_ParseError_RetryAlsoFails(t *testing.T) {
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
+	cfg := &config.Config{
+		Bot: config.BotConfig{Language: "en"},
+	}
+
+	bot := &Bot{
+		api:        mockAPI,
+		cfg:        cfg,
+		logger:     logger,
+		translator: translator,
+	}
+
+	chatID := int64(123)
+	responses := []telegram.SendMessageRequest{
+		{ChatID: chatID, Text: "Hello *broken* markdown", ParseMode: "MarkdownV2"},
+	}
+
+	// First call fails with parse error
+	mockAPI.On("SendMessage", mock.Anything, responses[0]).Return(nil, fmt.Errorf("can't parse entities")).Once()
+
+	// Retry without ParseMode also fails
+	retryReq := telegram.SendMessageRequest{ChatID: chatID, Text: "Hello *broken* markdown", ParseMode: ""}
+	mockAPI.On("SendMessage", mock.Anything, retryReq).Return(nil, fmt.Errorf("network error")).Once()
+
+	// Generic error message is sent
+	mockAPI.On("SendMessage", mock.Anything, mock.MatchedBy(func(req telegram.SendMessageRequest) bool {
+		return req.ChatID == chatID && req.Text == translator.Get("en", "bot.generic_error")
+	})).Return(&telegram.Message{}, nil).Once()
+
+	bot.sendResponses(context.Background(), chatID, responses, logger)
+
+	mockAPI.AssertExpectations(t)
+}
+
 func TestSendTestMessage_Success(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
@@ -1693,4 +1758,63 @@ func TestPrepareUserMessage_FileTooLarge(t *testing.T) {
 	assert.ErrorAs(t, err, &tooLarge)
 	assert.Equal(t, int64(25*1024*1024), tooLarge.Size)
 	assert.Equal(t, "large.pdf", tooLarge.FileName)
+}
+
+func TestSendTestMessage_NilAgent_ReturnsError(t *testing.T) {
+	logger := testutil.TestLogger()
+	cfg := testutil.TestConfig()
+
+	bot := &Bot{
+		cfg:    cfg,
+		logger: logger,
+		// laplaceAgent is nil
+	}
+
+	userID := int64(123)
+	testMessage := "Hello, bot!"
+
+	_, err := bot.SendTestMessage(context.Background(), userID, testMessage, false)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "laplace agent not configured")
+}
+
+func TestSendTestMessage_SaveToHistoryError_ReturnsError(t *testing.T) {
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
+
+	cfg := testutil.TestConfig()
+	cfg.RAG.Enabled = false
+
+	ragService := rag.NewService(logger, cfg, mockStore, mockStore, mockStore, mockStore, mockStore, mockORClient, nil, translator)
+
+	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
+	bot := &Bot{
+		api:             mockAPI,
+		userRepo:        mockStore,
+		msgRepo:         mockStore,
+		statsRepo:       mockStore,
+		factRepo:        mockStore,
+		factHistoryRepo: mockStore,
+		orClient:        mockORClient,
+		ragService:      ragService,
+		cfg:             cfg,
+		logger:          logger,
+		translator:      translator,
+		laplaceAgent:    laplaceAgent,
+	}
+
+	userID := int64(123)
+	testMessage := "Hello, bot!"
+
+	// AddMessageToHistory fails
+	mockStore.On("AddMessageToHistory", userID, mock.Anything).Return(fmt.Errorf("database error"))
+
+	_, err := bot.SendTestMessage(context.Background(), userID, testMessage, true)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to save message")
 }

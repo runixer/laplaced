@@ -68,10 +68,16 @@ internal/testutil/
 
 ### Golden Rules
 
-1. **NEVER define mocks outside testutil/** - Use existing mocks or add new ones to testutil
-2. **ALWAYS use builders for complex objects** - `NewAgentRequestBuilder()` not manual struct construction
-3. **ALWAYS extract repeated setup** - Create `setup*Test(t)` helpers when setup > 5 lines
-4. **ALWAYS include `t.Helper()`** - In all test helper functions
+1. **Centralize mocks in testutil** — Check `internal/testutil/mocks.go` first
+2. **Check for import cycles before adding to testutil** — Use `package/mocks_test.go` if cycle exists
+3. **ALWAYS use builders for complex objects** — `NewAgentRequestBuilder()` not manual struct construction
+4. **ALWAYS extract repeated setup** — Create `setup*Test(t)` helpers when setup > 5 lines
+5. **ALWAYS include `t.Helper()`** — In all test helper functions
+
+**Exceptions** (legitimate inline mocks):
+- Import cycle avoidance (e.g., `mockMemoryService` in `bot/mocks_test.go`)
+- Package-specific stubs used in single test file
+- Map-based stubs for simple interfaces (e.g., `reranker_test.go`)
 
 ---
 
@@ -445,7 +451,8 @@ func TestArtifactLoading_MissingPath(t *testing.T) {
 | Condition | Action |
 |-----------|--------|
 | Inline mock used once, test passes | Add `// TODO: migrate to testutil` comment |
-| Inline mock duplicated in 2+ files | **Refactor NOW** |
+| Inline mock duplicated in 2+ files | **Extract to package/mocks_test.go** |
+| Inline mock duplicated in 2+ packages | **Extract to testutil** (check for import cycle first) |
 | Test manipulates internal state | **Refactor** to test via public API |
 | Test has >50 lines of setup | **Extract** setup helper |
 | Test name unclear | **Rename** to `Test<Func>_<Scenario>_<Expected>` |
@@ -468,8 +475,18 @@ For each legacy test file:
 
 When you need a mock that doesn't exist:
 
-1. Check if `MockStorage` already covers the interface
-2. If not, add to `internal/testutil/mocks.go`:
+1. **Check for import cycle first:**
+   ```bash
+   # Does the target package import testutil?
+   grep -r "internal/testutil" internal/targetpackage/*_test.go
+
+   # If YES: adding mock to testutil creates cycle → use package-local mocks_test.go instead
+   # If NO: safe to add to testutil
+   ```
+
+2. Check if `MockStorage` already covers the interface
+
+3. If no cycle and not covered, add to `internal/testutil/mocks.go`:
 
 ```go
 // MockNewInterface implements package.Interface for tests.
@@ -486,8 +503,40 @@ func (m *MockNewInterface) Method1(arg1 Type1) (ReturnType, error) {
 }
 ```
 
-3. Add usage example in this document
-4. Update TEST_SYSTEM_AUDIT.md inventory
+4. Add usage example in this document
+5. Update TEST_SYSTEM_AUDIT.md inventory
+
+### Package-Local Mocks (`mocks_test.go`)
+
+Some mocks **cannot** be centralized in testutil due to import cycles:
+
+```
+testutil → packageX (needs interface for mock)
+   ↑
+   | (in tests)
+packageX → testutil  ← CYCLE!
+```
+
+**Solution:** Create `<package>/mocks_test.go` for package-local mocks:
+
+```go
+// Package bot contains test mocks shared across test files in this package.
+// Not moved to testutil due to import cycle: testutil → rag → testutil (in tests).
+package bot
+
+type mockMemoryService struct{}
+
+func (m *mockMemoryService) ProcessSession(...) error { return nil }
+```
+
+**When to use `mocks_test.go`:**
+
+| Situation | Location |
+|-----------|----------|
+| Mock used by 2+ test files in same package | `package/mocks_test.go` |
+| Mock used by only 1 test file | Keep in test file |
+| No import cycle with testutil | `internal/testutil/mocks.go` |
+| Import cycle exists | `package/mocks_test.go` |
 
 ---
 
@@ -547,9 +596,12 @@ go tool cover -html=coverage.out
 ### Verification After Refactoring
 
 ```bash
-# Verify no inline mocks remain
+# Verify no inline mocks remain (except legitimate package-local ones)
 grep -r "type mock" --include="*_test.go" internal/ | grep -v testutil
-# Should return 0 lines
+# Review each result — legitimate if in mocks_test.go or single-use
+
+# Check for import cycle before adding mock to testutil
+go test ./internal/targetpackage/... -c 2>&1 | grep "import cycle"
 
 # Verify all tests pass
 go test ./...
