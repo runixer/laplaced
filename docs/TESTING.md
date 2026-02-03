@@ -198,8 +198,8 @@ If adding mock to testutil creates import cycle:
 # Run all tests
 go test ./...
 
-# Coverage report (same as CI - excludes cmd/*)
-go test ./... -coverprofile=coverage.out -coverpkg=./internal/...
+# Coverage report (exclusions handled in codecov.yml)
+go test ./... -coverprofile=coverage.out
 go tool cover -func=coverage.out | grep total
 
 # Package coverage

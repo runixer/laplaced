@@ -12,20 +12,20 @@ coverage:
 
 ignore:
   # Entry points (DI wiring, no business logic)
-  - "cmd/**/*"
+  - "**/cmd/**/*"
 
   # Test infrastructure (not production code)
-  - "internal/testutil/**/*"
-  - "internal/agent/testing/**/*"
+  - "**/internal/testutil/**/*"
+  - "**/internal/agent/testing/**/*"
 
   # Type definitions only (no logic to test)
-  - "internal/agent/prompts/**/*"
+  - "**/internal/agent/prompts/**/*"
 
   # App wiring (no business logic)
-  - "internal/app/**/*"
+  - "**/internal/app/**/*"
 
   # Generated code
-  - "internal/gen/**/*"
+  - "**/internal/gen/**/*"
 
   # Standard test exclusions
   - "**/*_test.go"

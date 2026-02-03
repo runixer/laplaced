@@ -36,10 +36,7 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
       - name: Test
-        run: |
-          # Coverage only for internal/ packages (exclude testutil/testing/gen/prompts/app)
-          PACKAGES=$(go list ./internal/... | grep -v -E "(testutil|testing|gen|prompts|app)" | tr '\n' ',' | sed 's/,$//')
-          go test -v -race -coverprofile=coverage.out -coverpkg="$PACKAGES" ./...
+        run: go test -v -race -coverprofile=coverage.out ./...
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         if: github.event_name != 'pull_request'
