@@ -3,7 +3,6 @@ package memory
 import (
 	"io"
 	"log/slog"
-	"os"
 	"testing"
 
 	agenttesting "github.com/runixer/laplaced/internal/agent/testing"
@@ -24,17 +23,14 @@ type testServices struct {
 }
 
 // setupTestServices creates a fully configured memory service with mocks.
-func setupTestServices(tb testing.TB) *testServices {
-	tb.Helper()
+func setupTestServices(t *testing.T) *testServices {
+	t.Helper()
 
 	store := new(testutil.MockStorage)
 	orClient := new(testutil.MockOpenRouterClient)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := testutil.TestConfig()
-	translator, err := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
-	if err != nil {
-		tb.Fatalf("failed to create translator: %v", err)
-	}
+	translator := testutil.TestTranslator(t)
 
 	svc := NewService(logger, cfg, store, store, store, orClient, translator)
 	svc.SetPeopleRepository(store)

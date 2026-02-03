@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"os"
 	"testing"
 	"time"
 
@@ -12,7 +11,6 @@ import (
 	"github.com/runixer/laplaced/internal/agent/archivist"
 	agenttesting "github.com/runixer/laplaced/internal/agent/testing"
 	"github.com/runixer/laplaced/internal/config"
-	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
@@ -58,7 +56,7 @@ func TestAddFactWithHistory(t *testing.T) {
 			logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 			cfg := &config.Config{}
 			cfg.Server.DebugMode = tt.debugMode
-			translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+			translator := testutil.TestTranslator(t)
 
 			svc := NewService(logger, cfg, mockStore, mockStore, mockStore, nil, translator)
 
@@ -99,10 +97,7 @@ func TestProcessSession_AddFact_RecordsHistory(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
 	cfg.Server.DebugMode = true
-	translator, err := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
-	if err != nil {
-		t.Fatalf("failed to create translator: %v", err)
-	}
+	translator := testutil.TestTranslator(t)
 
 	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
 
@@ -150,7 +145,7 @@ func TestProcessSession_AddFact_RecordsHistory(t *testing.T) {
 	})).Return(nil)
 
 	// Act
-	err = svc.ProcessSession(context.Background(), userID, messages, refDate, 0)
+	err := svc.ProcessSession(context.Background(), userID, messages, refDate, 0)
 
 	// Assert
 	assert.NoError(t, err)
@@ -165,10 +160,7 @@ func TestProcessSession_UpdateFact_RecordsHistory(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
 	cfg.Server.DebugMode = true
-	translator, err := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
-	if err != nil {
-		t.Fatalf("failed to create translator: %v", err)
-	}
+	translator := testutil.TestTranslator(t)
 
 	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
 
@@ -222,7 +214,7 @@ func TestProcessSession_UpdateFact_RecordsHistory(t *testing.T) {
 	})).Return(nil)
 
 	// Act
-	err = svc.ProcessSession(context.Background(), userID, messages, refDate, 0)
+	err := svc.ProcessSession(context.Background(), userID, messages, refDate, 0)
 
 	// Assert
 	assert.NoError(t, err)
@@ -237,10 +229,7 @@ func TestProcessSession_RemoveFact_RecordsHistory(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
 	cfg.Server.DebugMode = true
-	translator, err := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
-	if err != nil {
-		t.Fatalf("failed to create translator: %v", err)
-	}
+	translator := testutil.TestTranslator(t)
 
 	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
 
@@ -285,7 +274,7 @@ func TestProcessSession_RemoveFact_RecordsHistory(t *testing.T) {
 	})).Return(nil)
 
 	// Act
-	err = svc.ProcessSession(context.Background(), userID, messages, refDate, 0)
+	err := svc.ProcessSession(context.Background(), userID, messages, refDate, 0)
 
 	// Assert
 	assert.NoError(t, err)
@@ -296,7 +285,7 @@ func TestProcessSession_RemoveFact_RecordsHistory(t *testing.T) {
 func TestSetVectorSearcher(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
-	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+	translator := testutil.TestTranslator(t)
 	svc := NewService(logger, cfg, nil, nil, nil, nil, translator)
 
 	assert.Nil(t, svc.vectorSearcher)
@@ -313,7 +302,7 @@ func TestGetEmbedding(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
 	cfg.Embedding.Model = "test-model"
-	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+	translator := testutil.TestTranslator(t)
 
 	svc := NewService(logger, cfg, nil, nil, nil, mockOR, translator)
 
@@ -334,7 +323,7 @@ func TestGetEmbedding_EmptyResponse(t *testing.T) {
 	mockOR := new(testutil.MockOpenRouterClient)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
-	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+	translator := testutil.TestTranslator(t)
 
 	svc := NewService(logger, cfg, nil, nil, nil, mockOR, translator)
 
@@ -351,7 +340,7 @@ func TestGetEmbedding_Error(t *testing.T) {
 	mockOR := new(testutil.MockOpenRouterClient)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
-	translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+	translator := testutil.TestTranslator(t)
 
 	svc := NewService(logger, cfg, nil, nil, nil, mockOR, translator)
 
@@ -573,7 +562,7 @@ func TestApplyUpdateWithStats(t *testing.T) {
 			logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 			cfg := &config.Config{}
 			cfg.Server.DebugMode = false // Disable history for simpler tests
-			translator, _ := i18n.NewTranslatorFromFS(os.DirFS("testdata/locales"), "en")
+			translator := testutil.TestTranslator(t)
 
 			svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
 

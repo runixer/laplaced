@@ -14,6 +14,7 @@ import (
 
 // setupTestDB creates an in-memory SQLite database with test data
 func setupTestDB(t *testing.T) (*storage.SQLiteStore, func()) {
+	t.Helper()
 	store, err := storage.NewSQLiteStore(testutil.TestLogger(), ":memory:")
 	require.NoError(t, err)
 	require.NoError(t, store.Init())
@@ -27,6 +28,7 @@ func setupTestDB(t *testing.T) (*storage.SQLiteStore, func()) {
 
 // setupTestBotWithData creates a testBot with populated test data
 func setupTestBotWithData(t *testing.T) (*testBot, func()) {
+	t.Helper()
 	store, cleanupStore := setupTestDB(t)
 
 	// Create testbot with minimal setup

@@ -98,6 +98,7 @@ rag:
 memory:
   system_prompt: "Archivist {{.Date}} limit={{.UserFactsLimit}} user={{.UserFactsCount}}"
   user_prompt: "User: {{.UserFacts}}\n{{.KnownPeople}}\nConversation: {{.Conversation}}"
+  consolidation_prompt: "Consolidation Prompt"
 extractor:
   system_prompt: "Extractor System {{.BotName}} {{.Profile}} {{.RecentTopics}} {{.InnerCircle}}"
   user_prompt: "File: {{.OriginalName}} Type: {{.FileType}} MimeType: {{.MimeType}} Size: {{.FileSize}}{{.UserContext}}"

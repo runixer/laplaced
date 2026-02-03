@@ -9,6 +9,7 @@ import (
 )
 
 func setupTestDB(t *testing.T) (*SQLiteStore, func()) {
+	t.Helper()
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	// Use in-memory SQLite database for testing
 	store, err := NewSQLiteStore(logger, ":memory:")
