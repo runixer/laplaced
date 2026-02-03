@@ -66,6 +66,52 @@ func (m *MockBotInterface) SendTestMessage(ctx context.Context, userID int64, te
 	return args.Get(0).(*rag.TestMessageResult), args.Error(1)
 }
 
+// MockMaintenanceService implements rag.MaintenanceService for tests.
+// This mock is kept in web package to avoid import cycles (rag <-> testutil).
+type MockMaintenanceService struct {
+	mock.Mock
+}
+
+func (m *MockMaintenanceService) GetDatabaseHealth(ctx context.Context, userID int64, largeThreshold int) (*rag.DatabaseHealth, error) {
+	args := m.Called(ctx, userID, largeThreshold)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*rag.DatabaseHealth), args.Error(1)
+}
+
+func (m *MockMaintenanceService) RepairDatabase(ctx context.Context, userID int64, dryRun bool) (*rag.RepairStats, error) {
+	args := m.Called(ctx, userID, dryRun)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*rag.RepairStats), args.Error(1)
+}
+
+func (m *MockMaintenanceService) GetContaminationInfo(ctx context.Context, userID int64) (*rag.ContaminationInfo, error) {
+	args := m.Called(ctx, userID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*rag.ContaminationInfo), args.Error(1)
+}
+
+func (m *MockMaintenanceService) FixContamination(ctx context.Context, userID int64, dryRun bool) (*rag.ContaminationFixStats, error) {
+	args := m.Called(ctx, userID, dryRun)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*rag.ContaminationFixStats), args.Error(1)
+}
+
+func (m *MockMaintenanceService) SplitLargeTopics(ctx context.Context, userID int64, thresholdChars int) (*rag.SplitStats, error) {
+	args := m.Called(ctx, userID, thresholdChars)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*rag.SplitStats), args.Error(1)
+}
+
 func TestStatsHandler(t *testing.T) {
 	// Arrange
 	mockStorage := new(testutil.MockStorage)

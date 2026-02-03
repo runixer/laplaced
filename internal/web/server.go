@@ -155,7 +155,7 @@ type Server struct {
 	peopleRepo      storage.PeopleRepository
 	artifactRepo    storage.ArtifactRepository
 	bot             BotInterface
-	rag             *rag.Service
+	rag             rag.MaintenanceService
 	logger          *slog.Logger
 	renderer        *ui.Renderer
 	ctx             context.Context // Server's parent context for webhook processing
@@ -163,7 +163,7 @@ type Server struct {
 	wg              sync.WaitGroup
 }
 
-func NewServer(ctx context.Context, logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, statsRepo storage.StatsRepository, topicRepo storage.TopicRepository, msgRepo storage.MessageRepository, factHistoryRepo storage.FactHistoryRepository, maintenanceRepo storage.MaintenanceRepository, artifactRepo storage.ArtifactRepository, bot BotInterface, rag *rag.Service) (*Server, error) {
+func NewServer(ctx context.Context, logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, statsRepo storage.StatsRepository, topicRepo storage.TopicRepository, msgRepo storage.MessageRepository, factHistoryRepo storage.FactHistoryRepository, maintenanceRepo storage.MaintenanceRepository, artifactRepo storage.ArtifactRepository, bot BotInterface, rag rag.MaintenanceService) (*Server, error) {
 	renderer, err := ui.NewRenderer()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize renderer: %w", err)
