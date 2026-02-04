@@ -16,17 +16,18 @@ ignore:
   - "cmd/testbot/*.go"
 
   # Test infrastructure (not production code)
+  - "internal/testutil/*.go"
   - "internal/testutil/**/*.go"
+  - "internal/agent/testing/*.go"
   - "internal/agent/testing/**/*.go"
 
   # Type definitions only (no logic to test)
+  - "internal/agent/prompts/*.go"
   - "internal/agent/prompts/**/*.go"
 
   # App wiring (no business logic)
+  - "internal/app/*.go"
   - "internal/app/**/*.go"
-
-  # Generated code
-  - "internal/gen/**/*.go"
 
   # Standard test exclusions
   - "**/*_test.go"

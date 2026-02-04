@@ -223,7 +223,6 @@ These packages are excluded from 80% target (see `codecov.yml`):
 | `internal/agent/testing` | Test mocks |
 | `internal/agent/prompts` | Type definitions |
 | `internal/app` | App wiring |
-| `internal/gen/**/*` | Generated code |
 
 **Target:** 78% overall coverage (excludes above packages)
 
