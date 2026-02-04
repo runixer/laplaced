@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Text MIME type normalization** — Gemini API rejects `text/x-web-markdown` with 400 error. Unsupported text types (markdown, etc.) are now normalized to `text/plain` when sending to LLM, allowing `.md` files to be processed correctly.
+
 ## [0.6.1] - 2026-02-04
 
 ### Fixed

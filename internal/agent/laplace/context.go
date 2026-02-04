@@ -353,6 +353,8 @@ func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID int64, art
 					mimeType = "application/octet-stream"
 				}
 			}
+			// Normalize MIME type for Gemini (e.g., text/x-web-markdown -> text/plain)
+			mimeType = files.NormalizeMimeForGemini(mimeType)
 			contentParts = append(contentParts, openrouter.FilePart{
 				Type: "file",
 				File: openrouter.File{
@@ -370,6 +372,8 @@ func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID int64, art
 			if fileName == "" {
 				fileName = fmt.Sprintf("image_%d", artifact.ID)
 			}
+			// Normalize MIME type for Gemini
+			mimeType = files.NormalizeMimeForGemini(mimeType)
 			contentParts = append(contentParts, openrouter.FilePart{
 				Type: "file",
 				File: openrouter.File{
@@ -403,6 +407,8 @@ func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID int64, art
 			if mimeType == "" {
 				mimeType = "audio/ogg"
 			}
+			// Normalize MIME type for Gemini
+			mimeType = files.NormalizeMimeForGemini(mimeType)
 			contentParts = append(contentParts, openrouter.FilePart{
 				Type: "file",
 				File: openrouter.File{

@@ -71,6 +71,14 @@ var geminiSupportedMimeTypes = map[string]bool{
 	"image/heif": true,
 	// PDF
 	"application/pdf": true,
+	// Text types (specific list from Gemini docs)
+	"text/plain":      true,
+	"text/html":       true,
+	"text/css":        true,
+	"text/xml":        true,
+	"text/csv":        true,
+	"text/rtf":        true,
+	"text/javascript": true,
 	// Videos
 	"video/mp4":       true,
 	"video/mpeg":      true,
@@ -102,6 +110,32 @@ func IsGeminiSupported(mimeType string) bool {
 		return true
 	}
 	return false
+}
+
+// NormalizeMimeForGemini normalizes a MIME type for Gemini API consumption.
+// For text types not explicitly supported by Gemini, returns text/plain.
+// For other types, returns the original MIME type unchanged.
+func NormalizeMimeForGemini(mimeType string) string {
+	if mimeType == "" {
+		return mimeType
+	}
+	// If explicitly supported, return as-is
+	if geminiSupportedMimeTypes[mimeType] {
+		return mimeType
+	}
+	// All audio is supported
+	if strings.HasPrefix(mimeType, "audio/") {
+		return mimeType
+	}
+	// JSON is supported
+	if mimeType == "application/json" {
+		return mimeType
+	}
+	// For other text types (like text/x-web-markdown), normalize to text/plain
+	if strings.HasPrefix(mimeType, "text/") {
+		return "text/plain"
+	}
+	return mimeType
 }
 
 // IsFileSizeAllowed checks if a file size is within Telegram Bot API limits.

@@ -185,3 +185,39 @@ func TestProcessedFile_Structure(t *testing.T) {
 		assert.Equal(t, int64(123), *pf.ArtifactID)
 	})
 }
+
+func TestNormalizeMimeForGemini(t *testing.T) {
+	tests := []struct {
+		name     string
+		mimeType string
+		want     string
+	}{
+		// Empty string
+		{"Empty string", "", ""},
+		// Supported types - unchanged
+		{"JPEG", "image/jpeg", "image/jpeg"},
+		{"PNG", "image/png", "image/png"},
+		{"PDF", "application/pdf", "application/pdf"},
+		{"MP4", "video/mp4", "video/mp4"},
+		{"Audio OGG", "audio/ogg", "audio/ogg"},
+		{"Audio MP3", "audio/mpeg", "audio/mpeg"},
+		{"JSON", "application/json", "application/json"},
+		// Supported text types - unchanged
+		{"Plain text", "text/plain", "text/plain"},
+		{"HTML", "text/html", "text/html"},
+		{"CSV", "text/csv", "text/csv"},
+		// Unsupported text types - normalized to text/plain
+		{"Web markdown", "text/x-web-markdown", "text/plain"},
+		{"Markdown", "text/markdown", "text/plain"},
+		{"Unknown text", "text/unknown", "text/plain"},
+		// Non-text unsupported types - unchanged
+		{"ZIP", "application/zip", "application/zip"},
+		{"Word", "application/msword", "application/msword"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, NormalizeMimeForGemini(tt.mimeType))
+		})
+	}
+}
