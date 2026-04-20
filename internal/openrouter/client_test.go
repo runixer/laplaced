@@ -502,6 +502,52 @@ func TestCreateEmbeddings(t *testing.T) {
 	assert.Equal(t, []float32{0.4, 0.5, 0.6}, resp.Data[1].Embedding)
 }
 
+func TestCreateEmbeddingsDimensionsSerialization(t *testing.T) {
+	tests := []struct {
+		name        string
+		dimensions  int
+		expectField bool
+		expectValue float64
+	}{
+		{"omitted when zero", 0, false, 0},
+		{"sent when 768", 768, true, 768},
+		{"sent when 1536", 1536, true, 1536},
+		{"sent when 3072", 3072, true, 3072},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var captured map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&captured)
+				w.Header().Set("Content-Type", "application/json")
+				resp := EmbeddingResponse{
+					Data: []EmbeddingObject{{Embedding: []float32{0.1}, Index: 0}},
+				}
+				_ = json.NewEncoder(w).Encode(resp)
+			}))
+			defer server.Close()
+
+			client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "k", "", server.URL+"/api/v1")
+			assert.NoError(t, err)
+
+			_, err = client.CreateEmbeddings(context.Background(), EmbeddingRequest{
+				Model:      "m",
+				Input:      []string{"x"},
+				Dimensions: tt.dimensions,
+			})
+			assert.NoError(t, err)
+
+			_, ok := captured["dimensions"]
+			if tt.expectField {
+				assert.True(t, ok, "dimensions field should be serialized")
+				assert.Equal(t, tt.expectValue, captured["dimensions"])
+			} else {
+				assert.False(t, ok, "dimensions field should be omitted when zero")
+			}
+		})
+	}
+}
+
 func TestCreateEmbeddingsRetry(t *testing.T) {
 	attempts := 0
 

@@ -217,7 +217,8 @@ type OpenRouterConfig struct {
 
 // EmbeddingConfig defines embedding model settings.
 type EmbeddingConfig struct {
-	Model string `yaml:"model" env:"LAPLACED_EMBEDDING_MODEL"`
+	Model      string `yaml:"model" env:"LAPLACED_EMBEDDING_MODEL"`
+	Dimensions int    `yaml:"dimensions" env:"LAPLACED_EMBEDDING_DIMENSIONS"`
 }
 
 type RAGConfig struct {

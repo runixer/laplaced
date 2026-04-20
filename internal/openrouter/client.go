@@ -296,9 +296,10 @@ type ChatCompletionResponse struct {
 }
 
 type EmbeddingRequest struct {
-	Model   string                 `json:"model"`
-	Input   []string               `json:"input"`
-	LogMeta map[string]interface{} `json:"-"`
+	Model      string                 `json:"model"`
+	Input      []string               `json:"input"`
+	Dimensions int                    `json:"dimensions,omitempty"`
+	LogMeta    map[string]interface{} `json:"-"`
 }
 
 type EmbeddingObject struct {
@@ -547,14 +548,17 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		}
 	}
 
-	c.logger.Info("OpenRouter response parsed successfully",
+	logAttrs := []any{
 		"model", chatResp.Model,
 		"choices", len(chatResp.Choices),
 		"prompt_tokens", chatResp.Usage.PromptTokens,
 		"completion_tokens", chatResp.Usage.CompletionTokens,
 		"total_tokens", chatResp.Usage.TotalTokens,
-		"cost", chatResp.Usage.Cost,
-	)
+	}
+	if chatResp.Usage.Cost != nil {
+		logAttrs = append(logAttrs, "cost_usd", *chatResp.Usage.Cost)
+	}
+	c.logger.Info("OpenRouter response parsed successfully", logAttrs...)
 
 	// Record success metrics
 	duration := time.Since(startTime).Seconds()
@@ -665,11 +669,16 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 	if len(embeddingResp.Data) == 0 {
 		c.logger.Warn("OpenRouter embeddings received NO DATA", "body", string(responseBody))
 	} else {
-		c.logger.Debug("OpenRouter embeddings received",
+		attrs := []any{
 			"object", embeddingResp.Object,
 			"count", len(embeddingResp.Data),
-			"usage", embeddingResp.Usage,
-		)
+			"prompt_tokens", embeddingResp.Usage.PromptTokens,
+			"total_tokens", embeddingResp.Usage.TotalTokens,
+		}
+		if embeddingResp.Usage.Cost != nil {
+			attrs = append(attrs, "cost_usd", *embeddingResp.Usage.Cost)
+		}
+		c.logger.Debug("OpenRouter embeddings received", attrs...)
 	}
 
 	return embeddingResp, nil
