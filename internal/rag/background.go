@@ -78,15 +78,8 @@ func (s *Service) processTopicChunking(ctx context.Context, userID int64) {
 				return
 			}
 
-			// Mark as background job for metrics (topic extraction is maintenance)
-			runCtx := jobtype.WithJobType(context.Background(), jobtype.Background)
-			runCtx, cancel := context.WithTimeout(runCtx, config.DefaultChunkProcessingTimeout)
-			err := s.processChunk(runCtx, userID, currentChunk)
-			cancel()
-
-			if err != nil {
-				s.logger.Error("failed to process chunk", "error", err)
-				// If failed, we return to retry later.
+			if !s.runChunkWithBreaker(ctx, userID, currentChunk, "chunk") {
+				// Persistently failing or cooldown active — stop this user's run.
 				return
 			}
 			currentChunk = []storage.Message{curr}
@@ -102,18 +95,40 @@ func (s *Service) processTopicChunking(ctx context.Context, userID int64) {
 			if ctx.Err() != nil {
 				return
 			}
-
-			// Mark as background job for metrics (topic extraction is maintenance)
-			runCtx := jobtype.WithJobType(context.Background(), jobtype.Background)
-			runCtx, cancel := context.WithTimeout(runCtx, config.DefaultChunkProcessingTimeout)
-			err := s.processChunk(runCtx, userID, currentChunk)
-			cancel()
-
-			if err != nil {
-				s.logger.Error("failed to process final chunk", "error", err)
-			}
+			_ = s.runChunkWithBreaker(ctx, userID, currentChunk, "final chunk")
 		}
 	}
+}
+
+// runChunkWithBreaker wraps processChunk with the circuit breaker. Returns true
+// on success (caller may proceed to the next chunk), false if the chunk was
+// skipped due to cooldown or processing failed.
+func (s *Service) runChunkWithBreaker(_ context.Context, userID int64, chunk []storage.Message, kind string) bool {
+	if len(chunk) == 0 {
+		return true
+	}
+	startID := chunk[0].ID
+
+	if remaining := s.chunkBreaker.cooldownRemaining(userID, startID); remaining > 0 {
+		s.logger.Warn("chunk in circuit-breaker cooldown, skipping",
+			"kind", kind, "user_id", userID, "start_msg_id", startID, "cooldown_remaining", remaining)
+		return false
+	}
+
+	runCtx := jobtype.WithJobType(context.Background(), jobtype.Background)
+	runCtx, cancel := context.WithTimeout(runCtx, config.DefaultChunkProcessingTimeout)
+	err := s.processChunk(runCtx, userID, chunk)
+	cancel()
+
+	if err != nil {
+		cooldown := s.chunkBreaker.recordFailure(userID, startID)
+		s.logger.Error("failed to process chunk, circuit breaker engaged",
+			"kind", kind, "user_id", userID, "start_msg_id", startID, "cooldown", cooldown, "error", err)
+		return false
+	}
+
+	s.chunkBreaker.recordSuccess(userID, startID)
+	return true
 }
 
 func (s *Service) factExtractionLoop(ctx context.Context) {

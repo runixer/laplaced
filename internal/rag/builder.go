@@ -276,6 +276,7 @@ func (b *ServiceBuilder) Build() (*Service, error) {
 		maxLoadedArtifactID:  0,
 		stopChan:             make(chan struct{}),
 		consolidationTrigger: make(chan struct{}, 1),
+		chunkBreaker:         newChunkCircuitBreaker(),
 	}
 
 	return svc, nil

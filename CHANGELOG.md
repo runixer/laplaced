@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 - **OpenRouter 200-with-body-error silent success** — the client treated HTTP 200 responses that contained a JSON `error` payload (e.g. `{"error":{"code":404}}` when the upstream provider is unavailable) as successful empty responses. Combined with the RAG chunking loop, this could drive unbounded retry storms costing hundreds of dollars in wasted splitter/LLM tokens during an upstream outage. The client now detects body-level errors and retries them like any other transient failure, returning a hard error after `maxRetries` instead of a silent empty response.
+- **RAG chunking circuit breaker** — the background topic-chunking loop called the paid splitter LLM before embeddings, then discarded the splitter result if embeddings failed, leaving messages unprocessed so the next tick would re-run splitter on the same chunk. During an embeddings-provider outage this drained tokens continuously. Persistently-failing chunks now enter an exponential-backoff cooldown (5m → 10m → 20m, capped at 6h) so the same chunk is not reattempted dozens of times per minute.
 
 ### Fixed
 - **Text MIME type normalization** — Gemini API rejects `text/x-web-markdown` with 400 error. Unsupported text types (markdown, etc.) are now normalized to `text/plain` when sending to LLM, allowing `.md` files to be processed correctly.
