@@ -82,6 +82,10 @@ type TopicRepository interface {
 	GetTopicsPendingFacts(userID int64) ([]Topic, error)
 	GetTopicsExtended(filter TopicFilter, limit, offset int, sortBy, sortDir string) (TopicResult, error)
 	GetMergeCandidates(userID int64) ([]MergeCandidate, error)
+
+	// v0.7.0: embedding migration
+	GetTopicsNeedingReembed(expectedVersion string, limit int) ([]ReembedCandidate, error)
+	UpdateTopicEmbeddingVersion(id int64, emb []float32, version string) error
 }
 
 // FactRepository handles fact operations.
@@ -107,6 +111,10 @@ type FactRepository interface {
 	UpdateFact(fact Fact) error
 	UpdateFactsTopic(userID int64, oldTopicID, newTopicID int64) error
 	DeleteFact(userID, id int64) error
+
+	// v0.7.0: embedding migration
+	GetFactsNeedingReembed(expectedVersion string, limit int) ([]ReembedCandidate, error)
+	UpdateFactEmbeddingVersion(id int64, emb []float32, version string) error
 }
 
 // FactHistoryRepository handles fact history operations.
@@ -194,6 +202,10 @@ type PeopleRepository interface {
 	// Maintenance
 	CountPeopleWithoutEmbedding(userID int64) (int, error)
 	GetPeopleWithoutEmbedding(userID int64) ([]Person, error)
+
+	// v0.7.0: embedding migration
+	GetPeopleNeedingReembed(expectedVersion string, limit int) ([]ReembedCandidate, error)
+	UpdatePersonEmbeddingVersion(id int64, emb []float32, version string) error
 }
 
 // ArtifactFilter defines filtering options for artifact queries.
@@ -221,4 +233,8 @@ type ArtifactRepository interface {
 	// UpdateMessageID links artifact to history message (called after message is saved)
 	// Requires userID for proper data isolation.
 	UpdateMessageID(userID, artifactID, messageID int64) error
+
+	// v0.7.0: embedding migration
+	GetArtifactsNeedingReembed(expectedVersion string, limit int) ([]ReembedCandidate, error)
+	UpdateArtifactEmbeddingVersion(id int64, emb []float32, version string) error
 }

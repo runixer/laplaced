@@ -34,8 +34,8 @@ func TestRunner(t *testing.T) {
 		}
 
 		// Should be at least version 8 (latest migration)
-		if version < 8 {
-			t.Errorf("Expected version >= 8, got %d", version)
+		if version < 9 {
+			t.Errorf("Expected version >= 9, got %d", version)
 		}
 
 		// Verify key tables exist
@@ -81,8 +81,8 @@ func TestRunner(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to query version: %v", err)
 		}
-		if version < 8 {
-			t.Errorf("Expected version >= 8, got %d", version)
+		if version < 9 {
+			t.Errorf("Expected version >= 9, got %d", version)
 		}
 	})
 
@@ -134,11 +134,53 @@ func TestRunner(t *testing.T) {
 			t.Fatalf("Failed to count migrations: %v", err)
 		}
 
-		// Bootstrap should have inserted all versions 1-8
-		if count < 8 {
-			t.Errorf("Expected >= 8 migrations applied, got %d", count)
+		// Bootstrap should have inserted all versions 1-9
+		if count < 9 {
+			t.Errorf("Expected >= 9 migrations applied, got %d", count)
 		}
 	})
+}
+
+func TestMigration009_EmbeddingVersion(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	runner := NewRunner(db, testLogger())
+	if err := runner.Run(); err != nil {
+		t.Fatalf("Run() failed: %v", err)
+	}
+
+	// Every embedded-table must have embedding_version column after migration 9.
+	for _, table := range []string{"topics", "structured_facts", "people", "artifacts"} {
+		var count int
+		err = db.QueryRow(
+			"SELECT COUNT(*) FROM pragma_table_info(?) WHERE name='embedding_version'",
+			table,
+		).Scan(&count)
+		if err != nil {
+			t.Fatalf("pragma_table_info(%s): %v", table, err)
+		}
+		if count != 1 {
+			t.Errorf("%s: expected embedding_version column, got %d", table, count)
+		}
+	}
+
+	// Idempotency: re-running the migration logic on top of its own result
+	// must not fail (the runner won't call it again, but the column-exists
+	// guard protects against manual replays).
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateEmbeddingVersion(tx); err != nil {
+		t.Fatalf("second run of migrateEmbeddingVersion: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestMigration004_Backfill tests the backfill logic in size_tracking migration.

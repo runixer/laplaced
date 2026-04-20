@@ -147,6 +147,9 @@ func newTestRAGServiceWithSetup(
 
 // SetupCommonRAGMocks sets up the most common mock expectations for RAG tests.
 // Call this before creating the RAG service to avoid "Unexpected method call" errors.
+//
+// Note: reembed (v0.7.0) default expectations are auto-installed by the mock
+// itself on first call — see testutil.MockStorage.installReembedDefaults.
 func SetupCommonRAGMocks(store *testutil.MockStorage) {
 	// These methods are called during RAG service operations
 	store.On("GetAllTopics", mock.Anything).Return([]storage.Topic{}, nil).Maybe()

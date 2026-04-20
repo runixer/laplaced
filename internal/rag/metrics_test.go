@@ -162,7 +162,7 @@ func TestRecordRAGLatency(t *testing.T) {
 }
 
 func TestUpdateVectorIndexMetrics(t *testing.T) {
-	UpdateVectorIndexMetrics(1000, 500, 0)
+	UpdateVectorIndexMetrics(1000, 500, 0, 1536)
 
 	// Verify topics gauge
 	topicsSize := testutil.ToFloat64(vectorIndexSize.WithLabelValues(searchTypeTopics))
@@ -172,16 +172,17 @@ func TestUpdateVectorIndexMetrics(t *testing.T) {
 	factsSize := testutil.ToFloat64(vectorIndexSize.WithLabelValues(searchTypeFacts))
 	assert.Equal(t, float64(500), factsSize)
 
-	// Verify memory calculation (size × 3072 × 4 bytes)
+	// Verify memory calculation (size × 1536 × 4 bytes)
+	perVec := embeddingMemoryBytes(1536)
 	topicsMemory := testutil.ToFloat64(vectorIndexMemoryBytes.WithLabelValues(searchTypeTopics))
-	assert.Equal(t, float64(1000*embeddingMemoryBytes), topicsMemory)
+	assert.Equal(t, float64(1000*perVec), topicsMemory)
 
 	factsMemory := testutil.ToFloat64(vectorIndexMemoryBytes.WithLabelValues(searchTypeFacts))
-	assert.Equal(t, float64(500*embeddingMemoryBytes), factsMemory)
+	assert.Equal(t, float64(500*perVec), factsMemory)
 }
 
 func TestUpdateVectorIndexMetricsWithPeople(t *testing.T) {
-	UpdateVectorIndexMetrics(1000, 500, 150)
+	UpdateVectorIndexMetrics(1000, 500, 150, 1536)
 
 	// Verify topics gauge
 	topicsSize := testutil.ToFloat64(vectorIndexSize.WithLabelValues(searchTypeTopics))
@@ -197,11 +198,11 @@ func TestUpdateVectorIndexMetricsWithPeople(t *testing.T) {
 
 	// Verify memory calculation for people
 	peopleMemory := testutil.ToFloat64(vectorIndexMemoryBytes.WithLabelValues(searchTypePeople))
-	assert.Equal(t, float64(150*embeddingMemoryBytes), peopleMemory)
+	assert.Equal(t, float64(150*embeddingMemoryBytes(1536)), peopleMemory)
 }
 
 func TestUpdateVectorIndexMetrics_Zero(t *testing.T) {
-	UpdateVectorIndexMetrics(0, 0, 0)
+	UpdateVectorIndexMetrics(0, 0, 0, 1536)
 
 	topicsSize := testutil.ToFloat64(vectorIndexSize.WithLabelValues(searchTypeTopics))
 	assert.Equal(t, float64(0), topicsSize)
@@ -263,7 +264,10 @@ func TestConstants(t *testing.T) {
 	assert.Equal(t, "facts", searchTypeFacts)
 	assert.Equal(t, "hit", resultHit)
 	assert.Equal(t, "miss", resultMiss)
-	assert.Equal(t, 3072*4, embeddingMemoryBytes)
+	// embeddingMemoryBytes is now a function: defaultEmbeddingDim × 4 bytes.
+	assert.Equal(t, 3072, defaultEmbeddingDim)
+	assert.Equal(t, 3072*4, embeddingMemoryBytes(0))    // fallback when dim=0
+	assert.Equal(t, 1536*4, embeddingMemoryBytes(1536)) // configured
 }
 
 func TestFormatUserID(t *testing.T) {

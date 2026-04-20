@@ -5,6 +5,7 @@ package testutil
 import (
 	"context"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/runixer/laplaced/internal/openrouter"
@@ -740,6 +741,7 @@ func SetupDefaultMocks(s *MockStorage) {
 	s.On("GetUnprocessedMessages", mock.Anything).Return([]storage.Message{}, nil).Maybe()
 	s.On("GetRecentHistory", mock.Anything, mock.Anything).Return([]storage.Message{}, nil).Maybe()
 	s.On("GetRecentSessionMessages", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]storage.Message{}, nil).Maybe()
+	// v0.7.0 re-embed defaults are auto-installed by MockStorage itself on first call.
 }
 
 // ArtifactRepository methods
@@ -860,4 +862,76 @@ func (m *MockRetriever) GetRecentTopics(userID int64, limit int) ([]storage.Topi
 func (m *MockRetriever) Retrieve(ctx context.Context, userID int64, query string, opts interface{}) (interface{}, interface{}, error) {
 	args := m.Called(ctx, userID, query, opts)
 	return args.Get(0), args.Get(1), args.Error(2)
+}
+
+// --- v0.7.0 embedding migration (re-embed) ---
+//
+// These methods are called unconditionally by rag.Service.Start(). Most
+// tests don't care about the migration, so we auto-install ".Maybe()"
+// defaults returning "nothing to re-embed". Tests that DO care can still
+// override with stricter expectations; testify matches specific-args
+// expectations before the fall-through Maybe() default.
+
+var reembedDefaultsInstalled sync.Map // *MockStorage -> struct{}
+
+func (m *MockStorage) installReembedDefaults() {
+	if _, loaded := reembedDefaultsInstalled.LoadOrStore(m, struct{}{}); loaded {
+		return
+	}
+	m.On("GetTopicsNeedingReembed", mock.Anything, mock.Anything).Return([]storage.ReembedCandidate{}, nil).Maybe()
+	m.On("GetFactsNeedingReembed", mock.Anything, mock.Anything).Return([]storage.ReembedCandidate{}, nil).Maybe()
+	m.On("GetPeopleNeedingReembed", mock.Anything, mock.Anything).Return([]storage.ReembedCandidate{}, nil).Maybe()
+	m.On("GetArtifactsNeedingReembed", mock.Anything, mock.Anything).Return([]storage.ReembedCandidate{}, nil).Maybe()
+}
+
+func (m *MockStorage) GetTopicsNeedingReembed(expectedVersion string, limit int) ([]storage.ReembedCandidate, error) {
+	m.installReembedDefaults()
+	args := m.Called(expectedVersion, limit)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.ReembedCandidate), args.Error(1)
+}
+
+func (m *MockStorage) UpdateTopicEmbeddingVersion(id int64, emb []float32, version string) error {
+	return m.Called(id, emb, version).Error(0)
+}
+
+func (m *MockStorage) GetFactsNeedingReembed(expectedVersion string, limit int) ([]storage.ReembedCandidate, error) {
+	m.installReembedDefaults()
+	args := m.Called(expectedVersion, limit)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.ReembedCandidate), args.Error(1)
+}
+
+func (m *MockStorage) UpdateFactEmbeddingVersion(id int64, emb []float32, version string) error {
+	return m.Called(id, emb, version).Error(0)
+}
+
+func (m *MockStorage) GetPeopleNeedingReembed(expectedVersion string, limit int) ([]storage.ReembedCandidate, error) {
+	m.installReembedDefaults()
+	args := m.Called(expectedVersion, limit)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.ReembedCandidate), args.Error(1)
+}
+
+func (m *MockStorage) UpdatePersonEmbeddingVersion(id int64, emb []float32, version string) error {
+	return m.Called(id, emb, version).Error(0)
+}
+
+func (m *MockStorage) GetArtifactsNeedingReembed(expectedVersion string, limit int) ([]storage.ReembedCandidate, error) {
+	m.installReembedDefaults()
+	args := m.Called(expectedVersion, limit)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.ReembedCandidate), args.Error(1)
+}
+
+func (m *MockStorage) UpdateArtifactEmbeddingVersion(id int64, emb []float32, version string) error {
+	return m.Called(id, emb, version).Error(0)
 }

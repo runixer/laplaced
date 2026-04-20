@@ -306,8 +306,12 @@ func setupTestBot(cfg *config.Config, logger *slog.Logger, dbPath string, dbChan
 	tb.bot.SetAgentLogger(services.AgentLogger)
 	tb.bot.SetLaplaceAgent(services.LaplaceAgent)
 
-	// Load vectors for RAG, but don't start background loops
-	// Background loops interfere with explicit ForceProcessUser calls
+	// v0.7.0: run embedding migration in the same order as production
+	// (before vectors are loaded), but skip background loops — they
+	// interfere with explicit ForceProcessUser calls in tests.
+	if err := services.RAGService.ReembedIfNeeded(context.Background()); err != nil {
+		return nil, fmt.Errorf("failed to migrate embeddings: %w", err)
+	}
 	if err := services.RAGService.ReloadVectors(); err != nil {
 		return nil, fmt.Errorf("failed to load RAG vectors: %w", err)
 	}

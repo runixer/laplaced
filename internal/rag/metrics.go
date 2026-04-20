@@ -230,8 +230,19 @@ const (
 	resultMiss = "miss"
 )
 
-// Размер embedding в байтах (3072 dimensions × 4 bytes per float32)
-const embeddingMemoryBytes = 3072 * 4
+// defaultEmbeddingDim is the fallback dim when EmbeddingConfig.Dimensions
+// isn't set — matches the provider default for Gemini embedding models.
+const defaultEmbeddingDim = 3072
+
+// embeddingMemoryBytes returns the approximate in-memory size per embedding
+// vector, derived from the configured dimension. Used only for the
+// vector_index_memory_bytes metric.
+func embeddingMemoryBytes(dim int) int {
+	if dim <= 0 {
+		dim = defaultEmbeddingDim
+	}
+	return dim * 4 // float32 = 4 bytes
+}
 
 // formatUserID converts user ID to string for metric labels.
 func formatUserID(userID int64) string {
@@ -267,15 +278,17 @@ func RecordVectorSearch(userID int64, searchType string, durationSeconds float64
 }
 
 // UpdateVectorIndexMetrics обновляет метрики размера индекса.
-func UpdateVectorIndexMetrics(topicsCount, factsCount, peopleCount int) {
+// dim should be the configured embedding dimension; used to derive a
+// ballpark RAM estimate for the vector_index_memory_bytes metric.
+func UpdateVectorIndexMetrics(topicsCount, factsCount, peopleCount, dim int) {
 	vectorIndexSize.WithLabelValues(searchTypeTopics).Set(float64(topicsCount))
 	vectorIndexSize.WithLabelValues(searchTypeFacts).Set(float64(factsCount))
 	vectorIndexSize.WithLabelValues(searchTypePeople).Set(float64(peopleCount))
 
-	// Приблизительный размер в памяти
-	vectorIndexMemoryBytes.WithLabelValues(searchTypeTopics).Set(float64(topicsCount * embeddingMemoryBytes))
-	vectorIndexMemoryBytes.WithLabelValues(searchTypeFacts).Set(float64(factsCount * embeddingMemoryBytes))
-	vectorIndexMemoryBytes.WithLabelValues(searchTypePeople).Set(float64(peopleCount * embeddingMemoryBytes))
+	perVec := embeddingMemoryBytes(dim)
+	vectorIndexMemoryBytes.WithLabelValues(searchTypeTopics).Set(float64(topicsCount * perVec))
+	vectorIndexMemoryBytes.WithLabelValues(searchTypeFacts).Set(float64(factsCount * perVec))
+	vectorIndexMemoryBytes.WithLabelValues(searchTypePeople).Set(float64(peopleCount * perVec))
 }
 
 // RecordRAGRetrieval записывает результат RAG retrieval.

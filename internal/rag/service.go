@@ -255,6 +255,17 @@ func (s *Service) Start(ctx context.Context) error {
 
 	s.logger.Info("Starting RAG service...")
 
+	// 0. Re-embed any rows produced under a different model/dim. Blocks
+	//    startup (webhook/TG updates come later in main.go) — the full
+	//    prod DB re-embeds in ~45 seconds at parallelism=8, see
+	//    docs/architecture/embedding-storage.md.
+	if err := s.ReembedIfNeeded(ctx); err != nil {
+		s.logger.Error("embedding migration failed", "error", err)
+		// Continue: bot still works with mixed-version vectors, but
+		// cross-version cosine comparisons will return meaningless scores.
+		// Operator should investigate before the next restart.
+	}
+
 	// 1. Load existing vectors (topics + facts + people)
 	if err := s.ReloadVectors(); err != nil {
 		s.logger.Error("failed to load vectors", "error", err)
@@ -430,7 +441,7 @@ func (s *Service) ReloadVectors() error {
 	}
 
 	s.logger.Info("Loaded vectors (full)", "topics", tCount, "facts", fCount, "people", pCount, "artifacts", artifactCount)
-	UpdateVectorIndexMetrics(tCount, fCount, pCount)
+	UpdateVectorIndexMetrics(tCount, fCount, pCount, s.cfg.Embedding.Dimensions)
 
 	return nil
 }
@@ -537,7 +548,7 @@ func (s *Service) LoadNewVectors() error {
 		for _, vectors := range s.peopleVectors {
 			totalPeople += len(vectors)
 		}
-		UpdateVectorIndexMetrics(totalTopics, totalFacts, totalPeople)
+		UpdateVectorIndexMetrics(totalTopics, totalFacts, totalPeople, s.cfg.Embedding.Dimensions)
 	}
 
 	// v0.6.0: Load new artifact summaries (incremental)
