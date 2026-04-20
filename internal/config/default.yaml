@@ -122,7 +122,7 @@ rag:
   min_safety_threshold: 0.3
   max_chunk_size: 400
   backfill_batch_size: 20
-  backfill_interval: "1s"
+  backfill_interval: "1m"
   chunk_interval: "1h"
   split_threshold_chars: 25000
   recent_topics_in_context: 3
