@@ -567,6 +567,124 @@ func TestCreateEmbeddingsEmptyResponse(t *testing.T) {
 	assert.Contains(t, logBuf.String(), "NO DATA")
 }
 
+func TestCreateEmbeddingsHTTP200WithBodyErrorRetries(t *testing.T) {
+	attempts := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts <= 2 {
+			// Real prod failure mode: 200 OK with error payload.
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"error":{"message":"No successful provider responses.","code":404}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		resp := EmbeddingResponse{
+			Object: "list",
+			Data: []EmbeddingObject{
+				{Object: "embedding", Embedding: []float32{0.1, 0.2}, Index: 0},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	assert.NoError(t, err)
+
+	resp, err := client.CreateEmbeddings(context.Background(), EmbeddingRequest{
+		Model: "text-embedding-model",
+		Input: []string{"test"},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, 3, attempts, "should retry body errors just like 503s")
+	assert.Len(t, resp.Data, 1)
+}
+
+func TestCreateEmbeddingsHTTP200WithBodyErrorExhaustsRetries(t *testing.T) {
+	attempts := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"error":{"message":"No successful provider responses.","code":404}}`))
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	assert.NoError(t, err)
+
+	_, err = client.CreateEmbeddings(context.Background(), EmbeddingRequest{
+		Model: "text-embedding-model",
+		Input: []string{"test"},
+	})
+	assert.Error(t, err, "must return error, not silent empty success")
+	assert.Equal(t, maxRetries+1, attempts, "should make maxRetries+1 attempts")
+
+	var bodyErr *openRouterBodyError
+	assert.True(t, errors.As(err, &bodyErr), "error should be *openRouterBodyError")
+	assert.Equal(t, 404, bodyErr.Code)
+	assert.Contains(t, bodyErr.Message, "No successful provider responses")
+}
+
+func TestCreateChatCompletionHTTP200WithBodyErrorRetries(t *testing.T) {
+	attempts := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts <= 2 {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"error":{"message":"upstream down","code":503}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop","index":0}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	assert.NoError(t, err)
+
+	resp, err := client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
+		Model:    "test_model",
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, 3, attempts)
+	assert.Equal(t, "ok", resp.Choices[0].Message.Content)
+}
+
+func TestDetectOpenRouterBodyError(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantNil  bool
+		wantMsg  string
+		wantCode int
+	}{
+		{"no error field", `{"data":[{"embedding":[0.1]}]}`, true, "", 0},
+		{"error with numeric code", `{"error":{"message":"x","code":404}}`, false, "x", 404},
+		{"error with string code", `{"error":{"message":"y","code":"503"}}`, false, "y", 503},
+		{"error without code", `{"error":{"message":"z"}}`, false, "z", 0},
+		{"invalid json", `not json`, true, "", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := detectOpenRouterBodyError([]byte(tt.body))
+			if tt.wantNil {
+				assert.Nil(t, got)
+				return
+			}
+			assert.NotNil(t, got)
+			assert.Equal(t, tt.wantMsg, got.Message)
+			assert.Equal(t, tt.wantCode, got.Code)
+		})
+	}
+}
+
 func TestCreateEmbeddingsNonRetryableError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)

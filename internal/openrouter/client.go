@@ -79,6 +79,47 @@ type clientImpl struct {
 	logger      *slog.Logger
 }
 
+// openRouterBodyError represents an error reported inside an HTTP 200 response
+// body. OpenRouter returns 200 with {"error":{"message":...,"code":...}} when
+// the upstream provider is unavailable; this must be treated as retryable,
+// not as a silent success.
+type openRouterBodyError struct {
+	Message string
+	Code    int
+}
+
+func (e *openRouterBodyError) Error() string {
+	if e.Code != 0 {
+		return fmt.Sprintf("openrouter body error: %s (code %d)", e.Message, e.Code)
+	}
+	return fmt.Sprintf("openrouter body error: %s", e.Message)
+}
+
+// detectOpenRouterBodyError inspects a raw response body for a top-level "error"
+// field. Returns non-nil if the body reports an error despite HTTP 200 status.
+func detectOpenRouterBodyError(body []byte) *openRouterBodyError {
+	var probe struct {
+		Error *struct {
+			Message string          `json:"message"`
+			Code    json.RawMessage `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil || probe.Error == nil {
+		return nil
+	}
+	bodyErr := &openRouterBodyError{Message: probe.Error.Message}
+	if len(probe.Error.Code) > 0 {
+		// Code can be number or string — try number first, then quoted string.
+		if err := json.Unmarshal(probe.Error.Code, &bodyErr.Code); err != nil {
+			var s string
+			if err := json.Unmarshal(probe.Error.Code, &s); err == nil {
+				_, _ = fmt.Sscanf(s, "%d", &bodyErr.Code)
+			}
+		}
+	}
+	return bodyErr
+}
+
 // isRetryableStatusCode returns true if the HTTP status code indicates a retryable error.
 func isRetryableStatusCode(statusCode int) bool {
 	switch statusCode {
@@ -447,6 +488,18 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		c.logger.Debug("OpenRouter response received", "status", resp.Status, "attempt", attempt)
 
 		if resp.StatusCode == http.StatusOK {
+			// OpenRouter sometimes returns 200 with an error payload in body when
+			// the upstream provider fails. Treat as retryable.
+			if bodyErr := detectOpenRouterBodyError(responseBody); bodyErr != nil {
+				c.logger.Warn("OpenRouter returned HTTP 200 with error body",
+					"error", bodyErr, "body", string(responseBody), "attempt", attempt)
+				if attempt < maxRetries {
+					lastErr = bodyErr
+					continue
+				}
+				RecordLLMRequest(req.UserID, req.Model, time.Since(startTime).Seconds(), false, 0, 0, nil, jt)
+				return ChatCompletionResponse{}, bodyErr
+			}
 			break // Success
 		}
 
@@ -576,6 +629,19 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 		}
 
 		if resp.StatusCode == http.StatusOK {
+			// OpenRouter returns 200 with an error payload when the upstream
+			// provider is unavailable (e.g. {"error":{"code":404}}). Treat as
+			// retryable so we don't silently return an empty Data array and
+			// cause callers to waste tokens on the next attempt.
+			if bodyErr := detectOpenRouterBodyError(responseBody); bodyErr != nil {
+				c.logger.Warn("OpenRouter embeddings returned HTTP 200 with error body",
+					"error", bodyErr, "body", string(responseBody), "attempt", attempt)
+				if attempt < maxRetries {
+					lastErr = bodyErr
+					continue
+				}
+				return EmbeddingResponse{}, bodyErr
+			}
 			break // Success
 		}
 
