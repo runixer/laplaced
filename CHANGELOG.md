@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-04-21
+
+**Model upgrade release: Gemini 3.1 family + Embedding 2 Preview.**
+
+### Changed
+- **Embedding model → `google/gemini-embedding-2-preview` @ 1536 dimensions.** First full re-embed of all existing vectors (topics, facts, people, artifacts) on startup — ~45 seconds one-time downtime, ~$0.04 in tokens on a prod-sized DB. Chosen after a benchmark on real `reranker_logs` data that showed **+60% relative Recall@5** over `gemini-embedding-001`, with 1536 specifically beating 768 / 3072 on Recall@20. See [docs/architecture/embedding-storage.md](docs/architecture/embedding-storage.md) for methodology and results. Task prefixes (`task: search result | query: …`) from the Gemini docs were tested and **measurably hurt** retrieval on our enricher-generated queries — not used.
+- **Chat agent → `google/gemini-3.1-pro-preview-customtools`.** Drop-in API-compatible variant tuned to prefer registered custom functions over the built-in general tool. Same pricing and 1M context.
+- **Default agent (splitter / enricher / merger / archivist base) → `google/gemini-3.1-flash-lite-preview`**, same for reranker and extractor. Smaller, faster, cheaper — sufficient for the classification-style tasks these agents perform.
+- **Migration is forward-only.** Vector spaces of v1 and v2 are incompatible, so rolling back requires restoring a pre-migration DB snapshot, which loses any messages written in the v0.7.0 window.
+
+### Added
+- `embedding.dimensions` config option (YAML + `LAPLACED_EMBEDDING_DIMENSIONS` env) — forwarded to OpenRouter as the `dimensions` parameter.
+- `embedding_version` column on topics, structured_facts, people, artifacts (migration 009). On startup the bot re-embeds any rows whose stored version differs from the configured one.
+- `cmd/embed-benchmark` — reproducible retrieval-quality benchmark harness.
+
+### Fixed
+- Cost fields in OpenRouter debug/info logs now print the USD value (`cost_usd=0.0123`) instead of the raw Go pointer address.
+
 ## [0.6.2] - 2026-04-21
 
 ### Security
@@ -469,7 +487,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-language support (en, ru)
 - Docker deployment
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/runixer/laplaced/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/runixer/laplaced/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/runixer/laplaced/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/runixer/laplaced/compare/v0.5.4...v0.6.0
