@@ -444,3 +444,31 @@ func TestParseMemoryOpParams(t *testing.T) {
 		})
 	}
 }
+
+// TestStripHandleSuffix covers the composite "Name (@handle)" rendering the LLM
+// sometimes copies verbatim out of <relevant_people> context into manage_people.
+func TestStripHandleSuffix(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"composite cyrillic", "Иван Петров (@ivanpetrov)", "Иван Петров"},
+		{"composite ascii", "Alice Smith (@alice_bot)", "Alice Smith"},
+		{"composite with dot in handle", "Bob (@bob.dev)", "Bob"},
+		{"extra trailing space", "Carol (@carol123)  ", "Carol"},
+		{"plain name returns empty", "Alice", ""},
+		{"no @ in parens returns empty", "Alice (Smith)", ""},
+		{"empty parens returns empty", "Alice ()", ""},
+		{"no space before parens returns empty", "Alice(@alice)", ""},
+		{"empty string returns empty", "", ""},
+		{"only handle in parens returns empty", "(@alice)", ""},
+		{"multi-word name with handle", "Иван Петрович Сидоров (@ivan_p)", "Иван Петрович Сидоров"},
+		{"handle with digits", "Dave (@dave2025)", "Dave"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, StripHandleSuffix(tt.input))
+		})
+	}
+}

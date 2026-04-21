@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 // MemoryOpParams holds parsed parameters for a memory operation.
@@ -111,4 +112,21 @@ func ParseMemoryOpParams(params map[string]interface{}) (MemoryOpParams, error) 
 		p.FactID = id
 	}
 	return p, nil
+}
+
+// handleSuffixPattern matches a trailing " (@handle)" on a person name, mirroring
+// how people are rendered in <relevant_people> context: "John Doe (@johndoe)".
+// The LLM sometimes copies that composite verbatim into manage_people, which then
+// fails an exact-match display_name lookup.
+var handleSuffixPattern = regexp.MustCompile(`^(.+?)\s+\(@[A-Za-z0-9_.]+\)\s*$`)
+
+// StripHandleSuffix removes a trailing " (@handle)" from a person name and
+// returns the stripped name. Returns "" when nothing was stripped, so callers
+// can tell whether a retry with the new value is worth making.
+func StripHandleSuffix(name string) string {
+	m := handleSuffixPattern.FindStringSubmatch(name)
+	if m == nil {
+		return ""
+	}
+	return strings.TrimSpace(m[1])
 }

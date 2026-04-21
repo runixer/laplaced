@@ -509,3 +509,107 @@ func TestPerformCreatePerson_WithEmbeddingFailure(t *testing.T) {
 
 	mockStore.AssertExpectations(t)
 }
+
+// TestPerformManagePeople_UpdateByCompositeName verifies that when the LLM passes
+// a "Name (@handle)" composite string (as rendered in <relevant_people>), the
+// tool strips the handle suffix and retries FindPersonByName. See:
+// docs/bugs/2026-04-21-manage-people-composite-name/
+func TestPerformManagePeople_UpdateByCompositeName(t *testing.T) {
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
+
+	existingPerson := storage.Person{
+		ID:          22,
+		UserID:      123,
+		DisplayName: "John Doe",
+		Circle:      "Work_Inner",
+	}
+
+	// First FindPersonByName gets the raw composite and returns nil (no match).
+	mockStore.On("FindPersonByName", int64(123), "John Doe (@johndoe)").
+		Return((*storage.Person)(nil), nil)
+	// Alias search also misses — no alias contains the whole composite.
+	mockStore.On("FindPersonByAlias", int64(123), "John Doe (@johndoe)").
+		Return([]storage.Person{}, nil)
+	// Retry with handle suffix stripped succeeds.
+	mockStore.On("FindPersonByName", int64(123), "John Doe").
+		Return(&existingPerson, nil)
+	mockStore.On("UpdatePerson", mock.MatchedBy(func(p storage.Person) bool {
+		return p.ID == 22 && p.Circle == "Friends"
+	})).Return(nil)
+
+	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
+	exec.SetPeopleRepository(mockStore)
+
+	ctx := context.Background()
+	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+		"query": `{"operation":"update","name":"John Doe (@johndoe)","updates":{"circle":"Friends"}}`,
+	})
+
+	assert.NoError(t, err)
+	assert.Contains(t, result, "Successfully updated person")
+	mockStore.AssertExpectations(t)
+}
+
+// TestPerformManagePeople_DeleteByCompositeName mirrors the update test for the
+// delete path (same fallback logic via lookupPersonByName).
+func TestPerformManagePeople_DeleteByCompositeName(t *testing.T) {
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
+
+	existingPerson := storage.Person{
+		ID:          22,
+		UserID:      123,
+		DisplayName: "Alice Smith",
+	}
+
+	mockStore.On("FindPersonByName", int64(123), "Alice Smith (@alice)").
+		Return((*storage.Person)(nil), nil)
+	mockStore.On("FindPersonByAlias", int64(123), "Alice Smith (@alice)").
+		Return([]storage.Person{}, nil)
+	mockStore.On("FindPersonByName", int64(123), "Alice Smith").
+		Return(&existingPerson, nil)
+	mockStore.On("DeletePerson", int64(123), int64(22)).Return(nil)
+
+	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
+	exec.SetPeopleRepository(mockStore)
+
+	ctx := context.Background()
+	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+		"query": `{"operation":"delete","name":"Alice Smith (@alice)","reason":"no longer relevant"}`,
+	})
+
+	assert.NoError(t, err)
+	assert.Contains(t, result, "Successfully deleted person")
+	mockStore.AssertExpectations(t)
+}
+
+// TestPerformManagePeople_UpdateCompositeNotFound verifies that when even the
+// stripped name doesn't match anything, we still return the original error
+// message with the raw composite (so the LLM can see what it actually asked for
+// and self-correct).
+func TestPerformManagePeople_UpdateCompositeNotFound(t *testing.T) {
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockOpenRouterClient)
+
+	mockStore.On("FindPersonByName", int64(123), "Ghost Person (@ghost)").
+		Return((*storage.Person)(nil), nil)
+	mockStore.On("FindPersonByAlias", int64(123), "Ghost Person (@ghost)").
+		Return([]storage.Person{}, nil)
+	mockStore.On("FindPersonByName", int64(123), "Ghost Person").
+		Return((*storage.Person)(nil), nil)
+
+	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
+	exec.SetPeopleRepository(mockStore)
+
+	ctx := context.Background()
+	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+		"query": `{"operation":"update","name":"Ghost Person (@ghost)","updates":{"circle":"Friends"}}`,
+	})
+
+	assert.Error(t, err)
+	assert.Empty(t, result)
+	assert.Contains(t, err.Error(), "Ghost Person (@ghost)")
+	assert.Contains(t, err.Error(), "not found")
+	mockStore.AssertExpectations(t)
+}

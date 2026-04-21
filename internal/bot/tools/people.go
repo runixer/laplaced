@@ -175,17 +175,9 @@ func (e *ToolExecutor) performUpdatePerson(ctx context.Context, userID int64, na
 
 	// Fallback to name search
 	if person == nil && name != "" {
-		person, err = e.peopleRepo.FindPersonByName(userID, name)
+		person, err = lookupPersonByName(e.peopleRepo, userID, name)
 		if err != nil {
-			return "", fmt.Errorf("finding person: %w", err)
-		}
-		if person == nil {
-			// Try alias search
-			aliasPeople, err := e.peopleRepo.FindPersonByAlias(userID, name)
-			if err != nil || len(aliasPeople) == 0 {
-				return "", fmt.Errorf("person '%s' not found", name)
-			}
-			person = &aliasPeople[0]
+			return "", err
 		}
 	}
 
@@ -282,17 +274,9 @@ func (e *ToolExecutor) performDeletePerson(ctx context.Context, userID int64, na
 
 	// Fallback to name search
 	if person == nil && name != "" {
-		person, err = e.peopleRepo.FindPersonByName(userID, name)
+		person, err = lookupPersonByName(e.peopleRepo, userID, name)
 		if err != nil {
-			return "", fmt.Errorf("finding person: %w", err)
-		}
-		if person == nil {
-			// Try alias search
-			aliasPeople, err := e.peopleRepo.FindPersonByAlias(userID, name)
-			if err != nil || len(aliasPeople) == 0 {
-				return "", fmt.Errorf("person '%s' not found", name)
-			}
-			person = &aliasPeople[0]
+			return "", err
 		}
 	}
 
@@ -463,4 +447,37 @@ func (e *ToolExecutor) performMergePeople(ctx context.Context, userID int64, tar
 	)
 
 	return fmt.Sprintf("Successfully merged '%s' into '%s'", sourceName, targetName), nil
+}
+
+// lookupPersonByName resolves a person given a name the LLM passed in. Tries an
+// exact display_name match, then an alias lookup, and finally — if the name
+// looks like the composite "Name (@handle)" rendering the LLM sees in
+// <relevant_people> context — retries the display_name match with the handle
+// suffix stripped. Returns (nil, nil) when no match is found so the caller can
+// emit a "person 'X' not found" error in the same shape as before.
+func lookupPersonByName(repo storage.PeopleRepository, userID int64, name string) (*storage.Person, error) {
+	person, err := repo.FindPersonByName(userID, name)
+	if err != nil {
+		return nil, fmt.Errorf("finding person: %w", err)
+	}
+	if person != nil {
+		return person, nil
+	}
+
+	aliasPeople, err := repo.FindPersonByAlias(userID, name)
+	if err == nil && len(aliasPeople) > 0 {
+		return &aliasPeople[0], nil
+	}
+
+	if stripped := StripHandleSuffix(name); stripped != "" {
+		person, err = repo.FindPersonByName(userID, stripped)
+		if err != nil {
+			return nil, fmt.Errorf("finding person: %w", err)
+		}
+		if person != nil {
+			return person, nil
+		}
+	}
+
+	return nil, fmt.Errorf("person '%s' not found", name)
 }
