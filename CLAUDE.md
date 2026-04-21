@@ -143,6 +143,24 @@ UPDATE history SET topic_id = ? WHERE user_id = ? AND id >= ? AND id <= ?
 2. Does the SQL WHERE clause include `AND user_id = ?`?
 3. If operating on topics/facts, does it verify ownership?
 
+### Config-driven data shape: find-all-callers rule (MUST READ!)
+
+When you add a config field that changes the **shape** of data the system produces or stores (embedding dimension, encoding version, serialization format, etc.), the field must be forwarded at **every call site** that produces that data — not only the migration path.
+
+**Why this is easy to miss:**
+- Mock-based unit tests accept any struct literal; they pass whether or not the new field is set.
+- Config fields have zero defaults, so a missed site compiles and runs — it just silently uses the provider's default value instead of yours.
+- When the stored data and newly-produced data end up in incompatible shapes, many "compare" primitives degrade silently (cosine similarity returns 0, map lookups miss, parse errors → skip). The system returns empty results, not errors. Tests pass. Logs are clean.
+
+**Checklist when adding such a field:**
+
+1. **Grep every existing call site** of the affected API/struct and audit each one. Example: `git grep -n "openrouter\.EmbeddingRequest{"` before landing a new field on `EmbeddingRequest`.
+2. **Add a static guard test** that walks the source tree and fails the build if a literal of the target struct is missing the required field. Canonical example: `internal/openrouter/embedding_dimensions_guard_test.go`. Cheap insurance against the same regression recurring.
+3. **Post-migration smoke test on a real query path.** A migration test that only verifies schema-level state (rows updated, column set) doesn't catch shape mismatch between storage and query. Run an actual retrieval / read and assert non-empty results on a known input.
+4. **Watch for metrics that should not be zero.** `laplaced_rag_candidates_sum{type="topics"} = 0` across every user was the diagnostic that unlocked the v0.7.1 post-mortem — all other health signals (container healthy, API calls succeeding, tests green) lied.
+
+**Incident that motivated this (v0.7.0 → v0.7.1):** the embedding-dim migration correctly re-embedded 6500 vectors at the new 1536 dim; 14 unrelated embedding call sites (retrieval, new topics, new facts, search tools, extractor) kept the old literal without `Dimensions`; OpenRouter defaulted those to 3072; on-disk vectors (1536) and query vectors (3072) lived in different spaces; cosine returned 0 for every pair; RAG returned no candidates for anyone; reranker was silently never invoked (gated on `candidates > 0`). No errors, no warnings, green CI. Diagnosed through Prometheus showing zero candidates in prod.
+
 ### Personal Data in Code (IMPORTANT!)
 
 **NEVER put real personal data in tracked files.**
