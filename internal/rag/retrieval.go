@@ -424,6 +424,13 @@ func (s *Service) SearchArtifactsBySummary(
 		return matches[i].score > matches[j].score
 	})
 
+	// Apply configured candidates_limit (was silently unbounded — with v2
+	// embeddings producing higher similarities, hundreds of artifacts were
+	// sliding past the threshold and bloating the reranker context).
+	if limit := s.cfg.Agents.Reranker.Artifacts.CandidatesLimit; limit > 0 && len(matches) > limit {
+		matches = matches[:limit]
+	}
+
 	if len(matches) == 0 {
 		return nil, nil
 	}

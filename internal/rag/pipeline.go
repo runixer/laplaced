@@ -305,7 +305,11 @@ func (s *Service) searchPeopleAndArtifacts(ctx context.Context, userID int64, em
 	var personCandidates []reranker.PersonCandidate
 	innerCircles := []string{"Work_Inner", "Family"}
 	if s.peopleRepo != nil && s.cfg.Agents.Reranker.Enabled {
-		peopleResults, err := s.SearchPeople(ctx, userID, embedding, threshold, 20, innerCircles)
+		peopleLimit := s.cfg.Agents.Reranker.People.CandidatesLimit
+		if peopleLimit <= 0 {
+			peopleLimit = 20
+		}
+		peopleResults, err := s.SearchPeople(ctx, userID, embedding, threshold, peopleLimit, innerCircles)
 		if err != nil {
 			s.logger.Warn("failed to search people", "error", err)
 		} else {
