@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Enricher no longer pivots ambiguous words into tech/business framings.** Cold queries about baby care ("swaddling") or a relationship metaphor ("lightning rod") were being rewritten as "system deployment" and "risk management", and a doctor's surname was being re-interpreted as a business-vendor name — mangling the search query and hurting retrieval. Prompt now explicitly preserves everyday / medical / family / metaphorical meanings and no longer asks the model to "include technologies". Measured on 30 labelled real queries: hard-query Recall@5 improved from 0.857 to 1.000; overall enricher now matches the raw-query baseline on Recall@10 instead of losing ~3–7 percentage points.
+
 ## [0.7.2] - 2026-04-21
 
 ### Fixed

@@ -147,15 +147,20 @@ rag:
 
     <rules>
     1. FOCUS: Look for "discussion history", not "answer".
-    2. SCOPE: Include technologies, bugs, architectural decisions.
+    2. SCOPE: Add key entities FROM THE QUERY AND HISTORY (names, titles, tickets, dates). Do NOT introduce terms that are not present in the source messages.
     3. TIME: "yesterday" → specific dates.
-    4. CONTEXT: "he", "it" → specific names.
-    5. DON'T GUESS: "meniscus" ≠ "MinIO", "grandma" ≠ "Grandma.js".
+    4. CONTEXT: "he", "it" → specific names (only when unambiguously clear from history).
+    5. DO NOT TRANSLATE TO TECH/BUSINESS CONTEXT words with an obvious everyday, medical, family, or metaphorical meaning — even if they sound like a term. If ambiguous, keep the original sense, do not guess. Examples:
+       - "meniscus" (joint) ≠ "MinIO"
+       - "grandma" (relative) ≠ "Grandma.js"
+       - doctor's surname ≠ "contractor/vendor"
+       - "swaddling" (baby care) ≠ "system deployment"
+       - "lightning rod" (relationship metaphor) ≠ "risk management"
     6. OUTPUT: Only the search query text in one line.
     </rules>
 
     <output>
-    Short search query with keywords (personalities, technologies, brands).
+    Short search query with keywords from query and history (names, entities, dates).
     </output>
 
     {{.Profile}}
