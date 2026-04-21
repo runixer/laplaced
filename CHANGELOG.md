@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.7.0] - 2026-04-21
+## [0.7.1] - 2026-04-21
+
+### Fixed
+- **Embedding dimension mismatch broke RAG retrieval in v0.7.0.** The re-embed migration rewrote all stored vectors at the configured dimension (1536), but the per-query, per-new-topic, per-fact, and per-artifact embedding calls were never updated to pass the new `Dimensions` field — the OpenRouter server defaulted those to 3072. Cosine similarity returns 0 on length mismatch, so every vector search in prod returned zero topic / fact / people / artifact candidates, and the reranker was silently never invoked (gated on candidate count > 0). All 14 production `EmbeddingRequest` call sites now forward `cfg.Embedding.Dimensions`, and a static test fails the build if a future call site forgets it.
+
 
 **Model upgrade release: Gemini 3.1 family + Embedding 2 Preview.**
 
@@ -487,7 +491,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-language support (en, ru)
 - Docker deployment
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/runixer/laplaced/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/runixer/laplaced/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/runixer/laplaced/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/runixer/laplaced/compare/v0.6.0...v0.6.1
