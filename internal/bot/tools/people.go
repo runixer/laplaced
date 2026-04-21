@@ -125,8 +125,9 @@ func (e *ToolExecutor) performCreatePerson(ctx context.Context, userID int64, na
 		embText += " " + person.Bio
 	}
 	resp, err := e.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-		Model: e.cfg.Embedding.Model,
-		Input: []string{embText},
+		Model:      e.cfg.Embedding.Model,
+		Dimensions: e.cfg.Embedding.Dimensions,
+		Input:      []string{embText},
 	})
 	if err != nil {
 		e.logger.Warn("failed to generate person embedding", "error", err, "person", name)
@@ -231,8 +232,9 @@ func (e *ToolExecutor) performUpdatePerson(ctx context.Context, userID int64, na
 			embText += " " + person.Bio
 		}
 		resp, err := e.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-			Model: e.cfg.Embedding.Model,
-			Input: []string{embText},
+			Model:      e.cfg.Embedding.Model,
+			Dimensions: e.cfg.Embedding.Dimensions,
+			Input:      []string{embText},
 		})
 		if err != nil {
 			e.logger.Warn("failed to regenerate person embedding", "error", err, "person", name)

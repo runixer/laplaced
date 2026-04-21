@@ -197,8 +197,9 @@ func (s *Service) splitTopic(ctx context.Context, topic storage.Topic) ([]int64,
 	}
 
 	embResp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-		Model: s.cfg.Embedding.Model,
-		Input: embeddingInputs,
+		Model:      s.cfg.Embedding.Model,
+		Dimensions: s.cfg.Embedding.Dimensions,
+		Input:      embeddingInputs,
 	})
 	if err != nil {
 		return nil, stats, fmt.Errorf("failed to create embeddings: %w", err)

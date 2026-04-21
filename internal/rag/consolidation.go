@@ -273,8 +273,9 @@ func (s *Service) mergeTopics(ctx context.Context, candidate storage.MergeCandid
 
 	// Generate embedding
 	resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-		Model: s.cfg.Embedding.Model,
-		Input: []string{embeddingInput},
+		Model:      s.cfg.Embedding.Model,
+		Dimensions: s.cfg.Embedding.Dimensions,
+		Input:      []string{embeddingInput},
 	})
 	if err != nil {
 		return 0, UsageInfo{}, err

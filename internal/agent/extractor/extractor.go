@@ -258,8 +258,9 @@ func (ex *Extractor) generateSummaryEmbedding(
 	embeddingModel := ex.cfg.Embedding.Model
 
 	embReq := openrouter.EmbeddingRequest{
-		Model: embeddingModel,
-		Input: []string{summary},
+		Model:      embeddingModel,
+		Input:      []string{summary},
+		Dimensions: ex.cfg.Embedding.Dimensions,
 		LogMeta: map[string]any{
 			"user_id": userID,
 			"purpose": "artifact_summary",

@@ -177,8 +177,9 @@ func (s *Service) enrichQueryIfEnabled(ctx context.Context, userID int64, query 
 func (s *Service) createEmbedding(ctx context.Context, userID int64, query string) ([]float32, error) {
 	embeddingStart := time.Now()
 	resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-		Model: s.cfg.Embedding.Model,
-		Input: []string{query},
+		Model:      s.cfg.Embedding.Model,
+		Dimensions: s.cfg.Embedding.Dimensions,
+		Input:      []string{query},
 	})
 	embeddingDuration := time.Since(embeddingStart).Seconds()
 	if err != nil {
@@ -201,8 +202,9 @@ func (s *Service) RetrieveFacts(ctx context.Context, userID int64, query string)
 	// Embedding for query
 	embeddingStart := time.Now()
 	resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-		Model: s.cfg.Embedding.Model,
-		Input: []string{query},
+		Model:      s.cfg.Embedding.Model,
+		Dimensions: s.cfg.Embedding.Dimensions,
+		Input:      []string{query},
 	})
 	embeddingDuration := time.Since(embeddingStart).Seconds()
 	if err != nil {

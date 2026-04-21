@@ -84,8 +84,9 @@ func (e *ToolExecutor) performSearchPeople(ctx context.Context, userID int64, ar
 	if len(people) == 0 && e.ragService != nil {
 		// Generate embedding for the query
 		resp, err := e.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-			Model: e.cfg.Embedding.Model,
-			Input: []string{query},
+			Model:      e.cfg.Embedding.Model,
+			Dimensions: e.cfg.Embedding.Dimensions,
+			Input:      []string{query},
 		})
 		if err == nil && len(resp.Data) > 0 {
 			results, err := e.ragService.SearchPeople(ctx, userID, resp.Data[0].Embedding, float32(e.cfg.Search.GetPeopleSimilarityThreshold()), e.cfg.Search.GetPeopleMaxResults(), nil) // nil = no circle exclusion

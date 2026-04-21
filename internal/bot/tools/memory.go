@@ -17,8 +17,9 @@ func (e *ToolExecutor) performAddFact(ctx context.Context, userID int64, p Memor
 	}
 
 	resp, err := e.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-		Model: e.cfg.Embedding.Model,
-		Input: []string{p.Content},
+		Model:      e.cfg.Embedding.Model,
+		Dimensions: e.cfg.Embedding.Dimensions,
+		Input:      []string{p.Content},
 	})
 	if err != nil {
 		return "", fmt.Errorf("generating embedding: %w", err)
@@ -122,8 +123,9 @@ func (e *ToolExecutor) performUpdateFact(ctx context.Context, userID int64, p Me
 	}
 
 	resp, err := e.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-		Model: e.cfg.Embedding.Model,
-		Input: []string{p.Content},
+		Model:      e.cfg.Embedding.Model,
+		Dimensions: e.cfg.Embedding.Dimensions,
+		Input:      []string{p.Content},
 	})
 	if err != nil {
 		return "", fmt.Errorf("generating embedding: %w", err)

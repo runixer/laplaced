@@ -134,8 +134,9 @@ func (s *Service) processChunk(ctx context.Context, userID int64, chunk []storag
 	if len(embeddingInputs) > 0 {
 		embeddingStart := time.Now()
 		resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-			Model: s.cfg.Embedding.Model,
-			Input: embeddingInputs,
+			Model:      s.cfg.Embedding.Model,
+			Dimensions: s.cfg.Embedding.Dimensions,
+			Input:      embeddingInputs,
 		})
 		embeddingDuration := time.Since(embeddingStart).Seconds()
 		if err != nil {
@@ -266,8 +267,9 @@ func (s *Service) processChunkWithStats(ctx context.Context, userID int64, chunk
 	if len(embeddingInputs) > 0 {
 		embeddingStart := time.Now()
 		resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-			Model: s.cfg.Embedding.Model,
-			Input: embeddingInputs,
+			Model:      s.cfg.Embedding.Model,
+			Dimensions: s.cfg.Embedding.Dimensions,
+			Input:      embeddingInputs,
 		})
 		embeddingDuration := time.Since(embeddingStart).Seconds()
 		if err != nil {

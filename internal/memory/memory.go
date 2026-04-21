@@ -496,8 +496,9 @@ type embeddingUsage struct {
 
 func (s *Service) getEmbedding(ctx context.Context, text string) ([]float32, embeddingUsage, error) {
 	resp, err := s.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
-		Model: s.cfg.Embedding.Model,
-		Input: []string{text},
+		Model:      s.cfg.Embedding.Model,
+		Dimensions: s.cfg.Embedding.Dimensions,
+		Input:      []string{text},
 	})
 	if err != nil {
 		return nil, embeddingUsage{}, err
