@@ -24,7 +24,7 @@ func TestExecuteToolCall_UnknownTool(t *testing.T) {
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, cfg, testutil.TestLogger())
 
 	ctx := context.Background()
-	_, err := exec.ExecuteToolCall(ctx, 123, "unknown_tool", `{}`)
+	_, err := exec.ExecuteToolCall(ctx, CallContext{UserID: 123}, "unknown_tool", `{}`)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown tool")
@@ -41,7 +41,7 @@ func TestExecuteToolCall_InvalidArguments(t *testing.T) {
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, cfg, testutil.TestLogger())
 
 	ctx := context.Background()
-	_, err := exec.ExecuteToolCall(ctx, 123, "search_history", `{invalid json`)
+	_, err := exec.ExecuteToolCall(ctx, CallContext{UserID: 123}, "search_history", `{invalid json`)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse arguments")
@@ -60,10 +60,10 @@ func TestExecuteToolCall_SearchHistory(t *testing.T) {
 	// No RAG service set, should return "not available"
 	ctx := context.Background()
 	args, _ := json.Marshal(map[string]string{"query": "test"})
-	result, err := exec.ExecuteToolCall(ctx, 123, "search_history", string(args))
+	result, err := exec.ExecuteToolCall(ctx, CallContext{UserID: 123}, "search_history", string(args))
 
 	assert.NoError(t, err)
-	assert.Contains(t, result, "Search is not available")
+	assert.Contains(t, result.Content, "Search is not available")
 }
 
 // TestExecuteToolCall_ManageMemory tests manage_memory tool execution.
@@ -91,10 +91,10 @@ func TestExecuteToolCall_ManageMemory(t *testing.T) {
 	args, _ := json.Marshal(map[string]interface{}{
 		"query": `{"operations":[{"action":"add","content":"Test fact"}]}`,
 	})
-	result, err := exec.ExecuteToolCall(ctx, 123, "manage_memory", string(args))
+	result, err := exec.ExecuteToolCall(ctx, CallContext{UserID: 123}, "manage_memory", string(args))
 
 	assert.NoError(t, err)
-	assert.Contains(t, result, "Success")
+	assert.Contains(t, result.Content, "Success")
 
 	mockStore.AssertExpectations(t)
 	mockORClient.AssertExpectations(t)
@@ -124,11 +124,11 @@ func TestExecuteToolCall_SearchPeople(t *testing.T) {
 
 	ctx := context.Background()
 	args, _ := json.Marshal(map[string]string{"query": "@alice"})
-	result, err := exec.ExecuteToolCall(ctx, 123, "search_people", string(args))
+	result, err := exec.ExecuteToolCall(ctx, CallContext{UserID: 123}, "search_people", string(args))
 
 	assert.NoError(t, err)
-	assert.Contains(t, result, "Found 1 people")
-	assert.Contains(t, result, "Alice")
+	assert.Contains(t, result.Content, "Found 1 people")
+	assert.Contains(t, result.Content, "Alice")
 
 	mockStore.AssertExpectations(t)
 }
@@ -163,10 +163,10 @@ func TestExecuteToolCall_ManagePeople(t *testing.T) {
 	args, _ := json.Marshal(map[string]interface{}{
 		"query": `{"operation":"create","name":"Alice"}`,
 	})
-	result, err := exec.ExecuteToolCall(ctx, 123, "manage_people", string(args))
+	result, err := exec.ExecuteToolCall(ctx, CallContext{UserID: 123}, "manage_people", string(args))
 
 	assert.NoError(t, err)
-	assert.Contains(t, result, "Successfully created person")
+	assert.Contains(t, result.Content, "Successfully created person")
 
 	mockStore.AssertExpectations(t)
 	mockORClient.AssertExpectations(t)
@@ -178,25 +178,9 @@ func TestExecuteToolCall_ModelTool(t *testing.T) {
 	mockORClient := new(testutil.MockOpenRouterClient)
 
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(openrouter.ChatCompletionResponse{
-		Choices: []struct {
-			Message struct {
-				Role             string                "json:\"role\""
-				Content          string                "json:\"content\""
-				ToolCalls        []openrouter.ToolCall "json:\"tool_calls,omitempty\""
-				Reasoning        string                "json:\"reasoning,omitempty\""
-				ReasoningDetails interface{}           "json:\"reasoning_details,omitempty\""
-			} "json:\"message\""
-			FinishReason string "json:\"finish_reason,omitempty\""
-			Index        int    "json:\"index\""
-		}{
+		Choices: []openrouter.ResponseChoice{
 			{
-				Message: struct {
-					Role             string                "json:\"role\""
-					Content          string                "json:\"content\""
-					ToolCalls        []openrouter.ToolCall "json:\"tool_calls,omitempty\""
-					Reasoning        string                "json:\"reasoning,omitempty\""
-					ReasoningDetails interface{}           "json:\"reasoning_details,omitempty\""
-				}{
+				Message: openrouter.ResponseMessage{
 					Role:    "assistant",
 					Content: "Model response",
 				},
@@ -211,10 +195,10 @@ func TestExecuteToolCall_ModelTool(t *testing.T) {
 
 	ctx := context.Background()
 	args, _ := json.Marshal(map[string]string{"query": "test query"})
-	result, err := exec.ExecuteToolCall(ctx, 123, "custom_model", string(args))
+	result, err := exec.ExecuteToolCall(ctx, CallContext{UserID: 123}, "custom_model", string(args))
 
 	assert.NoError(t, err)
-	assert.Contains(t, result, "Model response")
+	assert.Contains(t, result.Content, "Model response")
 
 	mockORClient.AssertExpectations(t)
 }

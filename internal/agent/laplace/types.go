@@ -1,6 +1,7 @@
 package laplace
 
 import (
+	"context"
 	"time"
 
 	"github.com/runixer/laplaced/internal/agentlog"
@@ -33,6 +34,11 @@ type Response struct {
 	// Main response
 	Content string
 
+	// GeneratedArtifactIDs accumulates artifact IDs produced by tools during
+	// this Execute call (e.g. generate_image). The orchestrator uses them to
+	// attach photos to the Telegram reply. Empty for text-only responses.
+	GeneratedArtifactIDs []int64
+
 	// Error (non-nil if execution failed after partial completion)
 	// When set, Content may be empty or partial, but other fields (tokens, timing, turns) are valid
 	Error error
@@ -55,11 +61,28 @@ type Response struct {
 	ConversationTurns *agentlog.ConversationTurns
 }
 
+// ToolCallContext carries execution context for a tool call: the owning user
+// and any image parts from the current user message (so tools that edit/combine
+// images — e.g. generate_image — can access attached photos automatically).
+type ToolCallContext struct {
+	UserID               int64
+	CurrentMessageImages []openrouter.FilePart
+}
+
+// ToolResult is the richer return type for tool execution. Content is what
+// gets fed back to the LLM; GeneratedArtifactIDs is a side-channel carrying
+// artifact IDs produced during the call (e.g. generated images), which the
+// orchestrator collects to attach to the final user reply.
+type ToolResult struct {
+	Content              string
+	GeneratedArtifactIDs []int64
+}
+
 // ToolHandler defines the interface for executing tool calls.
 // This allows bot package to provide Telegram-aware implementations.
 type ToolHandler interface {
 	// ExecuteToolCall executes a single tool call and returns the result.
-	ExecuteToolCall(toolName string, arguments string) (string, error)
+	ExecuteToolCall(ctx context.Context, tcc ToolCallContext, toolName, arguments string) (*ToolResult, error)
 }
 
 // ContextData contains pre-built context for LLM.

@@ -187,6 +187,17 @@ type TextPart struct {
 	Text string `json:"text"`
 }
 
+// ImageURLPart represents an image reference for MODEL INPUT, in the
+// OpenAI-compatible shape. Use this when calling image-generation or
+// image-editing models (e.g. google/gemini-3.1-flash-image-preview) —
+// they reject the "file" FilePart shape with "Invalid file type: image/…".
+// Regular multimodal text models accept either shape, but for image models
+// this is the only format the provider accepts for input images.
+type ImageURLPart struct {
+	Type     string        `json:"type"` // "image_url"
+	ImageURL ImageURLValue `json:"image_url"`
+}
+
 type ToolFunction struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -236,6 +247,17 @@ type ReasoningConfig struct {
 	Exclude   bool   `json:"exclude,omitempty"`    // Suppress reasoning from response
 }
 
+// ImageConfig controls image generation output for models that support it
+// (e.g. google/gemini-3.1-flash-image-preview). Only meaningful when the
+// request sets Modalities to include "image".
+type ImageConfig struct {
+	// AspectRatio: "1:1","2:3","3:2","3:4","4:3","4:5","5:4","9:16","16:9","21:9"
+	// Extended on nano banana: "1:4","4:1","1:8","8:1".
+	AspectRatio string `json:"aspect_ratio,omitempty"`
+	// ImageSize: "0.5K" (nano banana only), "1K", "2K", "4K".
+	ImageSize string `json:"image_size,omitempty"`
+}
+
 type ChatCompletionRequest struct {
 	Model          string           `json:"model"`
 	Messages       []Message        `json:"messages"`
@@ -244,6 +266,13 @@ type ChatCompletionRequest struct {
 	ToolChoice     any              `json:"tool_choice,omitempty"`
 	ResponseFormat interface{}      `json:"response_format,omitempty"`
 	Reasoning      *ReasoningConfig `json:"reasoning,omitempty"`
+	// Modalities enables image-output models. Use ["image","text"] for Gemini
+	// image models that return both text and images. Required for image generation;
+	// see TestAllImageGenerationRequestsSetModalities.
+	Modalities []string `json:"modalities,omitempty"`
+	// ImageConfig is model-specific image-generation configuration
+	// (aspect ratio, size). Only used when Modalities includes "image".
+	ImageConfig *ImageConfig `json:"image_config,omitempty"`
 
 	// UserID is used for metrics tracking only, not sent to API
 	UserID int64 `json:"-"`
@@ -265,21 +294,44 @@ type ResponseFormatJSONSchema struct {
 	JSONSchema JSONSchema `json:"json_schema"`
 }
 
+// ImageURLValue is the inner object of an ImageOutput; kept as a named type
+// so struct literals can be written without repeating the anonymous shape.
+type ImageURLValue struct {
+	URL string `json:"url"`
+}
+
+// ImageOutput represents an image emitted by image-generation models in the
+// response. The URL is a base64 data URL, e.g. "data:image/png;base64,...".
+type ImageOutput struct {
+	Type     string        `json:"type"` // "image_url"
+	ImageURL ImageURLValue `json:"image_url"`
+}
+
+// ResponseMessage is the assistant message on a ChatCompletionResponse choice.
+// Extracted as a named type so test fixtures and helpers don't have to restate
+// the anonymous struct shape every time a field is added.
+type ResponseMessage struct {
+	Role             string        `json:"role"`
+	Content          string        `json:"content"`
+	ToolCalls        []ToolCall    `json:"tool_calls,omitempty"`
+	Reasoning        string        `json:"reasoning,omitempty"`         // Gemini 3: raw reasoning text
+	ReasoningDetails interface{}   `json:"reasoning_details,omitempty"` // Structured reasoning details
+	Images           []ImageOutput `json:"images,omitempty"`            // Generated images (image-output models)
+}
+
+// ResponseChoice is one choice on a ChatCompletionResponse. Named for the same
+// reason as ResponseMessage.
+type ResponseChoice struct {
+	Message      ResponseMessage `json:"message"`
+	FinishReason string          `json:"finish_reason,omitempty"`
+	Index        int             `json:"index"`
+}
+
 type ChatCompletionResponse struct {
-	ID      string `json:"id"`
-	Model   string `json:"model"`
-	Choices []struct {
-		Message struct {
-			Role             string      `json:"role"`
-			Content          string      `json:"content"`
-			ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
-			Reasoning        string      `json:"reasoning,omitempty"`         // Gemini 3: raw reasoning text
-			ReasoningDetails interface{} `json:"reasoning_details,omitempty"` // Structured reasoning details
-		} `json:"message"`
-		FinishReason string `json:"finish_reason,omitempty"`
-		Index        int    `json:"index"`
-	} `json:"choices"`
-	Usage struct {
+	ID      string           `json:"id"`
+	Model   string           `json:"model"`
+	Choices []ResponseChoice `json:"choices"`
+	Usage   struct {
 		PromptTokens     int      `json:"prompt_tokens"`
 		CompletionTokens int      `json:"completion_tokens"`
 		TotalTokens      int      `json:"total_tokens"`

@@ -123,24 +123,8 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		capturedRequest = args.Get(1).(openrouter.ChatCompletionRequest)
 	}).Return(openrouter.ChatCompletionResponse{
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{
-			{Message: struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
+		Choices: []openrouter.ResponseChoice{
+			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
@@ -273,24 +257,8 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		capturedRequest = args.Get(1).(openrouter.ChatCompletionRequest)
 	}).Return(openrouter.ChatCompletionResponse{
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{
-			{Message: struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
+		Choices: []openrouter.ResponseChoice{
+			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
@@ -428,24 +396,8 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		capturedRequest = args.Get(1).(openrouter.ChatCompletionRequest)
 	}).Return(openrouter.ChatCompletionResponse{
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{
-			{Message: struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
+		Choices: []openrouter.ResponseChoice{
+			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
@@ -584,24 +536,8 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		capturedRequest = args.Get(1).(openrouter.ChatCompletionRequest)
 	}).Return(openrouter.ChatCompletionResponse{
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{
-			{Message: struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
+		Choices: []openrouter.ResponseChoice{
+			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
@@ -752,24 +688,8 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		capturedRequest = args.Get(1).(openrouter.ChatCompletionRequest)
 	}).Return(openrouter.ChatCompletionResponse{
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{
-			{Message: struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
+		Choices: []openrouter.ResponseChoice{
+			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
@@ -900,24 +820,8 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		capturedRequest = args.Get(1).(openrouter.ChatCompletionRequest)
 	}).Return(openrouter.ChatCompletionResponse{
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{
-			{Message: struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
+		Choices: []openrouter.ResponseChoice{
+			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
@@ -1207,24 +1111,8 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		capturedRequest = args.Get(1).(openrouter.ChatCompletionRequest)
 	}).Return(openrouter.ChatCompletionResponse{
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{
-			{Message: struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: "You said hello."}, FinishReason: "stop"},
+		Choices: []openrouter.ResponseChoice{
+			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "You said hello."}, FinishReason: "stop"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
@@ -1492,24 +1380,8 @@ func TestSendTestMessage_Success(t *testing.T) {
 
 	// Mock LLM call
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(openrouter.ChatCompletionResponse{
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{
-			{Message: struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: "Hello! How can I help you?"}, FinishReason: "stop"},
+		Choices: []openrouter.ResponseChoice{
+			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Hello! How can I help you?"}, FinishReason: "stop"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
@@ -1589,24 +1461,8 @@ func TestSendTestMessage_SaveToHistoryFalse(t *testing.T) {
 
 	// Mock LLM call
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(openrouter.ChatCompletionResponse{
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{
-			{Message: struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{Role: "assistant", Content: "Response without history"}, FinishReason: "stop"},
+		Choices: []openrouter.ResponseChoice{
+			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Response without history"}, FinishReason: "stop"},
 		},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`

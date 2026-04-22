@@ -27,25 +27,9 @@ func TestCreateChatCompletion(t *testing.T) {
 		// Send response
 		w.Header().Set("Content-Type", "application/json")
 		resp := ChatCompletionResponse{
-			Choices: []struct {
-				Message struct {
-					Role             string      `json:"role"`
-					Content          string      `json:"content"`
-					ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
-					Reasoning        string      `json:"reasoning,omitempty"`
-					ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
-				} `json:"message"`
-				FinishReason string `json:"finish_reason,omitempty"`
-				Index        int    `json:"index"`
-			}{
+			Choices: []ResponseChoice{
 				{
-					Message: struct {
-						Role             string      `json:"role"`
-						Content          string      `json:"content"`
-						ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
-						Reasoning        string      `json:"reasoning,omitempty"`
-						ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
-					}{Role: "assistant", Content: "Hello from mock server!"},
+					Message:      ResponseMessage{Role: "assistant", Content: "Hello from mock server!"},
 					FinishReason: "stop",
 				},
 			},
@@ -94,25 +78,9 @@ func TestCreateChatCompletionLogging(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		resp := ChatCompletionResponse{
-			Choices: []struct {
-				Message struct {
-					Role             string      `json:"role"`
-					Content          string      `json:"content"`
-					ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
-					Reasoning        string      `json:"reasoning,omitempty"`
-					ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
-				} `json:"message"`
-				FinishReason string `json:"finish_reason,omitempty"`
-				Index        int    `json:"index"`
-			}{
+			Choices: []ResponseChoice{
 				{
-					Message: struct {
-						Role             string      `json:"role"`
-						Content          string      `json:"content"`
-						ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
-						Reasoning        string      `json:"reasoning,omitempty"`
-						ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
-					}{Role: "assistant", Content: "log test"},
+					Message:      ResponseMessage{Role: "assistant", Content: "log test"},
 					FinishReason: "stop",
 				},
 			},
@@ -175,25 +143,9 @@ func TestCreateChatCompletionRetry(t *testing.T) {
 		// Third attempt succeeds
 		w.Header().Set("Content-Type", "application/json")
 		resp := ChatCompletionResponse{
-			Choices: []struct {
-				Message struct {
-					Role             string      `json:"role"`
-					Content          string      `json:"content"`
-					ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
-					Reasoning        string      `json:"reasoning,omitempty"`
-					ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
-				} `json:"message"`
-				FinishReason string `json:"finish_reason,omitempty"`
-				Index        int    `json:"index"`
-			}{
+			Choices: []ResponseChoice{
 				{
-					Message: struct {
-						Role             string      `json:"role"`
-						Content          string      `json:"content"`
-						ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
-						Reasoning        string      `json:"reasoning,omitempty"`
-						ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
-					}{Role: "assistant", Content: "Success after retry!"},
+					Message:      ResponseMessage{Role: "assistant", Content: "Success after retry!"},
 					FinishReason: "stop",
 				},
 			},

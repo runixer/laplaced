@@ -23,6 +23,22 @@ func (m *mockBotAPI) SendMessage(ctx context.Context, req SendMessageRequest) (*
 	return nil, nil
 }
 
+func (m *mockBotAPI) SendPhoto(ctx context.Context, req SendPhotoRequest) (*Message, error) {
+	return nil, nil
+}
+
+func (m *mockBotAPI) SendDocument(ctx context.Context, req SendDocumentRequest) (*Message, error) {
+	return nil, nil
+}
+
+func (m *mockBotAPI) SendMediaGroup(ctx context.Context, req SendMediaGroupRequest) ([]Message, error) {
+	return nil, nil
+}
+
+func (m *mockBotAPI) SendMediaGroupDocuments(ctx context.Context, req SendMediaGroupDocumentsRequest) ([]Message, error) {
+	return nil, nil
+}
+
 func (m *mockBotAPI) SetMyCommands(ctx context.Context, req SetMyCommandsRequest) error {
 	return nil
 }

@@ -37,13 +37,14 @@ type Services struct {
 	LaplaceAgent   *laplace.Laplace
 
 	// Services
-	MemoryService  *memory.Service
-	RAGService     *rag.Service
-	ContextService *agent.ContextService
-	AgentLogger    *agentlog.Logger
-	AgentExecutor  *agent.Executor
-	Translator     *i18n.Translator
-	FileStorage    *files.FileStorage
+	MemoryService    *memory.Service
+	RAGService       *rag.Service
+	ContextService   *agent.ContextService
+	AgentLogger      *agentlog.Logger
+	AgentExecutor    *agent.Executor
+	Translator       *i18n.Translator
+	FileStorage      *files.FileStorage
+	OpenRouterClient openrouter.Client
 }
 
 // SetupServices initializes all core services and agents.
@@ -78,7 +79,7 @@ func SetupServices(
 		return nil, fmt.Errorf("translator is required")
 	}
 
-	services := &Services{}
+	services := &Services{OpenRouterClient: client}
 
 	// Create agent logger for debugging LLM calls
 	services.AgentLogger = agentlog.NewLogger(store, logger, cfg.Server.DebugMode)

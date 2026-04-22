@@ -34,36 +34,10 @@ func WithTokens(prompt, completion, total int) HelperOption {
 }
 
 // newChoice creates a new choice with the given role and content.
-func newChoice(role, content string) struct {
-	Message struct {
-		Role             string                `json:"role"`
-		Content          string                `json:"content"`
-		ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-		Reasoning        string                `json:"reasoning,omitempty"`
-		ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-	} `json:"message"`
-	FinishReason string `json:"finish_reason,omitempty"`
-	Index        int    `json:"index"`
-} {
-	return struct {
-		Message struct {
-			Role             string                `json:"role"`
-			Content          string                `json:"content"`
-			ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-			Reasoning        string                `json:"reasoning,omitempty"`
-			ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-		} `json:"message"`
-		FinishReason string `json:"finish_reason,omitempty"`
-		Index        int    `json:"index"`
-	}{
+func newChoice(role, content string) openrouter.ResponseChoice {
+	return openrouter.ResponseChoice{
 		Index: 0,
-		Message: struct {
-			Role             string                `json:"role"`
-			Content          string                `json:"content"`
-			ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-			Reasoning        string                `json:"reasoning,omitempty"`
-			ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-		}{
+		Message: openrouter.ResponseMessage{
 			Role:    role,
 			Content: content,
 		},
@@ -74,19 +48,9 @@ func newChoice(role, content string) struct {
 // makeChatResponse creates a simple chat completion response for testing.
 func makeChatResponse(content string, opts ...HelperOption) openrouter.ChatCompletionResponse {
 	resp := openrouter.ChatCompletionResponse{
-		ID:    "test-response-id",
-		Model: "test-model",
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{newChoice("assistant", content)},
+		ID:      "test-response-id",
+		Model:   "test-model",
+		Choices: []openrouter.ResponseChoice{newChoice("assistant", content)},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
 			CompletionTokens int      `json:"completion_tokens"`
@@ -123,19 +87,9 @@ func makeToolCallResponse(toolName, args string, opts ...HelperOption) openroute
 	choice.FinishReason = "tool_calls"
 
 	resp := openrouter.ChatCompletionResponse{
-		ID:    "test-response-id",
-		Model: "test-model",
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{choice},
+		ID:      "test-response-id",
+		Model:   "test-model",
+		Choices: []openrouter.ResponseChoice{choice},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
 			CompletionTokens int      `json:"completion_tokens"`
@@ -158,26 +112,10 @@ func makeEmptyResponse(opts ...HelperOption) openrouter.ChatCompletionResponse {
 	resp := openrouter.ChatCompletionResponse{
 		ID:    "test-response-id",
 		Model: "test-model",
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{
+		Choices: []openrouter.ResponseChoice{
 			{
 				Index: 0,
-				Message: struct {
-					Role             string                `json:"role"`
-					Content          string                `json:"content"`
-					ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-					Reasoning        string                `json:"reasoning,omitempty"`
-					ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-				}{
+				Message: openrouter.ResponseMessage{
 					Role:    "assistant",
 					Content: "",
 				},
@@ -221,19 +159,9 @@ func makeToolCallWithContentResponse(content, toolName, args string, toolCallID 
 	choice.FinishReason = "tool_calls"
 
 	resp := openrouter.ChatCompletionResponse{
-		ID:    "test-response-id",
-		Model: "test-model",
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{choice},
+		ID:      "test-response-id",
+		Model:   "test-model",
+		Choices: []openrouter.ResponseChoice{choice},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
 			CompletionTokens int      `json:"completion_tokens"`

@@ -179,7 +179,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	}
 
 	// Create tool handler
-	toolHandler := b.newBotToolHandler(shutdownSafeCtx, userID, logger)
+	toolHandler := b.newBotToolHandler(userID, logger)
 
 	// Build request
 	req := &laplace.Request{
@@ -241,12 +241,6 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		RecordMessageTools(userID, resp.ToolDuration.Seconds(), resp.TotalTurns)
 	}
 
-	// Finalize response
-	responses, err := b.finalizeResponse(chatID, lastMsg.MessageThreadID, userID, lastMsg.MessageID, resp.Content, logger)
-	if err != nil {
-		logger.Error("failed to finalize response", "error", err)
-	}
-
 	// Calculate cost
 	var cost float64
 	if resp.TotalCost != nil {
@@ -277,6 +271,25 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		"total_tokens", stat.TokensUsed,
 		"cost_usd", stat.CostUSD,
 	)
+
+	// Branch: if the turn produced generated images, route through the
+	// media-aware reply path. Otherwise keep the text-only path.
+	if len(resp.GeneratedArtifactIDs) > 0 {
+		mediaDur, sentCount := b.sendResponseWithGeneratedImages(
+			shutdownSafeCtx, userID, chatID, lastMsg.MessageThreadID, lastMsg.MessageID,
+			resp.Content, resp.GeneratedArtifactIDs, logger,
+		)
+		totalTelegramDuration += mediaDur
+		telegramCallCount += sentCount
+		success = true
+		return
+	}
+
+	// Finalize text-only response
+	responses, err := b.finalizeResponse(chatID, lastMsg.MessageThreadID, userID, lastMsg.MessageID, resp.Content, logger)
+	if err != nil {
+		logger.Error("failed to finalize response", "error", err)
+	}
 
 	// Save assistant response to history
 	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "assistant", Content: resp.Content}); err != nil {

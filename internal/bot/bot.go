@@ -51,6 +51,7 @@ type Bot struct {
 	fileProcessor   *files.Processor
 	messageGrouper  *MessageGrouper
 	toolExecutor    *tools.ToolExecutor // v0.6.1: Tool execution
+	fileStorage     *files.FileStorage  // v0.8.0: For media-reply path
 	logger          *slog.Logger
 	translator      *i18n.Translator
 	agentLogger     *agentlog.Logger
@@ -129,6 +130,27 @@ func (b *Bot) SetFileHandler(handler files.FileSaver) {
 // SetArtifactRepo sets the artifact repository for linking artifacts to messages
 func (b *Bot) SetArtifactRepo(repo storage.ArtifactRepository) {
 	b.artifactRepo = repo
+	if b.toolExecutor != nil {
+		b.toolExecutor.SetArtifactRepository(repo)
+	}
+}
+
+// SetImageGenerator wires the image-generation agent so the generate_image
+// tool becomes operational. No-op if the agent is nil — the tool simply
+// returns a "not configured" error to the LLM.
+func (b *Bot) SetImageGenerator(gen tools.ImageGenerator) {
+	if b.toolExecutor != nil {
+		b.toolExecutor.SetImageGenerator(gen)
+	}
+}
+
+// SetFileStorage wires the on-disk file store used by the generate_image
+// tool to persist output PNGs and by the media-reply path to read them.
+func (b *Bot) SetFileStorage(fs *files.FileStorage) {
+	b.fileStorage = fs
+	if b.toolExecutor != nil {
+		b.toolExecutor.SetFileStorage(fs)
+	}
 }
 
 // SetFileProcessor replaces the file processor (for testing).
@@ -442,7 +464,7 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, sa
 	}
 
 	// Create tool handler
-	toolHandler := b.newBotToolHandler(ctx, userID, logger)
+	toolHandler := b.newBotToolHandler(userID, logger)
 
 	// Execute via Laplace agent
 	resp, err := b.laplaceAgent.Execute(ctx, req, toolHandler)
@@ -533,22 +555,32 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, sa
 // botToolHandler implements laplace.ToolHandler for Bot.
 type botToolHandler struct {
 	bot    *Bot
-	ctx    context.Context
 	userID int64
 	logger *slog.Logger
 }
 
-// newBotToolHandler creates a new tool handler for the given context.
-func (b *Bot) newBotToolHandler(ctx context.Context, userID int64, logger *slog.Logger) *botToolHandler {
+// newBotToolHandler creates a new tool handler for the given user.
+// Ctx and per-call context data arrive via the laplace.ToolHandler interface.
+func (b *Bot) newBotToolHandler(userID int64, logger *slog.Logger) *botToolHandler {
 	return &botToolHandler{
 		bot:    b,
-		ctx:    ctx,
 		userID: userID,
 		logger: logger,
 	}
 }
 
-// ExecuteToolCall executes a tool call by name and returns the result.
-func (h *botToolHandler) ExecuteToolCall(toolName string, arguments string) (string, error) {
-	return h.bot.toolExecutor.ExecuteToolCall(h.ctx, h.userID, toolName, arguments)
+// ExecuteToolCall implements laplace.ToolHandler.
+func (h *botToolHandler) ExecuteToolCall(ctx context.Context, tcc laplace.ToolCallContext, toolName, arguments string) (*laplace.ToolResult, error) {
+	cc := tools.CallContext{
+		UserID:               h.userID,
+		CurrentMessageImages: tcc.CurrentMessageImages,
+	}
+	result, err := h.bot.toolExecutor.ExecuteToolCall(ctx, cc, toolName, arguments)
+	if err != nil {
+		return nil, err
+	}
+	return &laplace.ToolResult{
+		Content:              result.Content,
+		GeneratedArtifactIDs: result.GeneratedArtifactIDs,
+	}, nil
 }

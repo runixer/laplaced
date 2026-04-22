@@ -352,16 +352,16 @@ func TestPerformSearchPeople_FoundByUsername(t *testing.T) {
 	mockStore.On("FindPersonByUsername", userID, "johndoe").Return(foundPerson, nil).Once()
 
 	// Execute
-	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "search_people", `{"query":"@johndoe"}`)
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "search_people", `{"query":"@johndoe"}`)
 
 	// Verify
 	assert.NoError(t, err)
-	assert.Contains(t, result, "Found 1 people")
-	assert.Contains(t, result, "John Doe")
-	assert.Contains(t, result, "Friends")
-	assert.Contains(t, result, "@johndoe")
-	assert.Contains(t, result, "Johnny")
-	assert.Contains(t, result, "Software engineer")
+	assert.Contains(t, result.Content, "Found 1 people")
+	assert.Contains(t, result.Content, "John Doe")
+	assert.Contains(t, result.Content, "Friends")
+	assert.Contains(t, result.Content, "@johndoe")
+	assert.Contains(t, result.Content, "Johnny")
+	assert.Contains(t, result.Content, "Software engineer")
 	mockStore.AssertExpectations(t)
 }
 
@@ -390,13 +390,13 @@ func TestPerformSearchPeople_FoundByName(t *testing.T) {
 	mockStore.On("FindPersonByName", userID, "Jane Smith").Return(foundPerson, nil).Once()
 
 	// Execute
-	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "search_people", `{"query":"Jane Smith"}`)
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "search_people", `{"query":"Jane Smith"}`)
 
 	// Verify
 	assert.NoError(t, err)
-	assert.Contains(t, result, "Found 1 people")
-	assert.Contains(t, result, "Jane Smith")
-	assert.Contains(t, result, "Work_Inner")
+	assert.Contains(t, result.Content, "Found 1 people")
+	assert.Contains(t, result.Content, "Jane Smith")
+	assert.Contains(t, result.Content, "Work_Inner")
 	mockStore.AssertExpectations(t)
 }
 
@@ -417,11 +417,11 @@ func TestPerformSearchPeople_NotFound(t *testing.T) {
 	mockStore.On("FindPersonByAlias", userID, "unknown").Return([]storage.Person{}, nil).Once()
 
 	// Execute
-	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "search_people", `{"query":"unknown"}`)
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "search_people", `{"query":"unknown"}`)
 
 	// Verify
 	assert.NoError(t, err)
-	assert.Contains(t, result, "No people found matching 'unknown'")
+	assert.Contains(t, result.Content, "No people found matching 'unknown'")
 	mockStore.AssertExpectations(t)
 }
 
@@ -461,12 +461,12 @@ func TestPerformUpdatePerson_Success(t *testing.T) {
 	})).Return(nil).Once()
 
 	// Execute
-	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "manage_people",
 		`{"query":"{\"operation\":\"update\",\"name\":\"John Doe\",\"updates\":{\"circle\":\"Work_Inner\",\"bio_append\":\"Manager\",\"aliases_add\":[\"JD\",\"Johnny\"]}}"}`)
 
 	// Verify
 	assert.NoError(t, err)
-	assert.Contains(t, result, "Successfully updated person 'John Doe'")
+	assert.Contains(t, result.Content, "Successfully updated person 'John Doe'")
 	mockStore.AssertExpectations(t)
 	mockORClient.AssertExpectations(t)
 }
@@ -488,7 +488,7 @@ func TestPerformUpdatePerson_PersonNotFound(t *testing.T) {
 	mockStore.On("FindPersonByAlias", userID, "Unknown").Return([]storage.Person{}, nil).Once()
 
 	// Execute
-	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "manage_people",
 		`{"query":"{\"operation\":\"update\",\"name\":\"Unknown\",\"updates\":{\"circle\":\"Friends\"}}"}`)
 
 	// Verify
@@ -547,12 +547,12 @@ func TestPerformMergePeople_Success(t *testing.T) {
 	).Return(nil).Once()
 
 	// Execute
-	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "manage_people",
 		`{"query":"{\"operation\":\"merge\",\"target\":\"John Doe\",\"source\":\"J. Doe\",\"reason\":\"Same person\"}"}`)
 
 	// Verify
 	assert.NoError(t, err)
-	assert.Contains(t, result, "Successfully merged 'J. Doe' into 'John Doe'")
+	assert.Contains(t, result.Content, "Successfully merged 'J. Doe' into 'John Doe'")
 	mockStore.AssertExpectations(t)
 }
 
@@ -581,7 +581,7 @@ func TestPerformMergePeople_SelfMerge(t *testing.T) {
 	mockStore.On("FindPersonByName", userID, "John Doe").Return(person, nil).Once()
 
 	// Execute
-	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "manage_people",
 		`{"query":"{\"operation\":\"merge\",\"target\":\"John Doe\",\"source\":\"John Doe\"}"}`)
 
 	// Verify
@@ -617,7 +617,7 @@ func TestPerformMergePeople_SourceNotFound(t *testing.T) {
 	mockStore.On("FindPersonByAlias", userID, "Unknown").Return([]storage.Person{}, nil).Once()
 
 	// Execute
-	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "manage_people",
 		`{"query":"{\"operation\":\"merge\",\"target\":\"John Doe\",\"source\":\"Unknown\"}"}`)
 
 	// Verify
@@ -656,14 +656,14 @@ func TestPerformCreatePerson_Success(t *testing.T) {
 	})).Return(int64(1), nil).Once()
 
 	// Execute
-	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "manage_people",
 		`{"query":"{\"operation\":\"create\",\"name\":\"John Doe\",\"circle\":\"Friends\",\"bio\":\"Software engineer\",\"aliases\":[\"Johnny\",\"JD\"]}"}`)
 
 	// Verify
 	assert.NoError(t, err)
-	assert.Contains(t, result, "Successfully created person 'John Doe'")
-	assert.Contains(t, result, "ID: 1")
-	assert.Contains(t, result, "Circle: Friends")
+	assert.Contains(t, result.Content, "Successfully created person 'John Doe'")
+	assert.Contains(t, result.Content, "ID: 1")
+	assert.Contains(t, result.Content, "Circle: Friends")
 	mockStore.AssertExpectations(t)
 	mockORClient.AssertExpectations(t)
 }
@@ -690,7 +690,7 @@ func TestPerformCreatePerson_AlreadyExists(t *testing.T) {
 	mockStore.On("FindPersonByName", userID, "John Doe").Return(existingPerson, nil).Once()
 
 	// Execute
-	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "manage_people",
 		`{"query":"{\"operation\":\"create\",\"name\":\"John Doe\"}"}`)
 
 	// Verify
@@ -727,7 +727,7 @@ func TestPerformCreatePerson_AliasAlreadyExists(t *testing.T) {
 	mockStore.On("FindPersonByAlias", userID, "Johnny").Return([]storage.Person{*existingPerson}, nil).Once()
 
 	// Execute
-	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "manage_people",
 		`{"query":"{\"operation\":\"create\",\"name\":\"Johnny\"}"}`)
 
 	// Verify
@@ -763,12 +763,12 @@ func TestPerformCreatePerson_WithUsername(t *testing.T) {
 	})).Return(int64(1), nil).Once()
 
 	// Execute
-	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "manage_people",
 		`{"query":"{\"operation\":\"create\",\"name\":\"Jane Doe\",\"username\":\"@janedoe\"}"}`)
 
 	// Verify
 	assert.NoError(t, err)
-	assert.Contains(t, result, "Successfully created person")
+	assert.Contains(t, result.Content, "Successfully created person")
 	mockStore.AssertExpectations(t)
 }
 
@@ -797,12 +797,12 @@ func TestPerformDeletePerson_Success(t *testing.T) {
 	mockStore.On("DeletePerson", userID, int64(1)).Return(nil).Once()
 
 	// Execute
-	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "manage_people",
 		`{"query":"{\"operation\":\"delete\",\"name\":\"John Doe\",\"reason\":\"Duplicate entry\"}"}`)
 
 	// Verify
 	assert.NoError(t, err)
-	assert.Contains(t, result, "Successfully deleted person 'John Doe'")
+	assert.Contains(t, result.Content, "Successfully deleted person 'John Doe'")
 	mockStore.AssertExpectations(t)
 }
 
@@ -831,12 +831,12 @@ func TestPerformDeletePerson_ByID(t *testing.T) {
 	mockStore.On("DeletePerson", userID, int64(42)).Return(nil).Once()
 
 	// Execute
-	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "manage_people",
 		`{"query":"{\"operation\":\"delete\",\"person_id\":42}"}`)
 
 	// Verify
 	assert.NoError(t, err)
-	assert.Contains(t, result, "Successfully deleted person")
+	assert.Contains(t, result.Content, "Successfully deleted person")
 	mockStore.AssertExpectations(t)
 }
 
@@ -859,7 +859,7 @@ func TestPerformDeletePerson_NotFound(t *testing.T) {
 	mockStore.On("FindPersonByAlias", userID, "Unknown").Return([]storage.Person{}, nil).Once()
 
 	// Execute
-	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_people",
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "manage_people",
 		`{"query":"{\"operation\":\"delete\",\"name\":\"Unknown\"}"}`)
 
 	// Verify

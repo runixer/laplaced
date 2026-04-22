@@ -103,12 +103,12 @@ func TestPerformManageMemory_Add(t *testing.T) {
 
 	// Execute - properly escape the JSON
 	arguments, _ := json.Marshal(map[string]string{"query": queryJSON})
-	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_memory", string(arguments))
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "manage_memory", string(arguments))
 
 	// Assert
 	assert.NoError(t, err)
-	assert.Contains(t, result, "Successfully processed 1 operations")
-	assert.Contains(t, result, "Op 1 (add): Success")
+	assert.Contains(t, result.Content, "Successfully processed 1 operations")
+	assert.Contains(t, result.Content, "Op 1 (add): Success")
 	mockStore.AssertExpectations(t)
 	mockORClient.AssertExpectations(t)
 }
@@ -119,7 +119,7 @@ func TestPerformManageMemory_InvalidJSON(t *testing.T) {
 
 	userID := int64(123)
 
-	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_memory", `{"query":"{invalid json"}`)
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "manage_memory", `{"query":"{invalid json"}`)
 
 	assert.Error(t, err)
 	assert.Empty(t, result) // error returned, no result string
@@ -132,7 +132,7 @@ func TestPerformManageMemory_MissingQuery(t *testing.T) {
 
 	userID := int64(123)
 
-	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_memory", `{}`)
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "manage_memory", `{}`)
 
 	assert.Error(t, err)
 	assert.Empty(t, result)

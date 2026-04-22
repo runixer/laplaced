@@ -56,25 +56,9 @@ func testConfigDisabled() *config.Config {
 // makeChatResponse creates a simple text response from the LLM.
 func makeChatResponse(content string) openrouter.ChatCompletionResponse {
 	return openrouter.ChatCompletionResponse{
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{
+		Choices: []openrouter.ResponseChoice{
 			{
-				Message: struct {
-					Role             string                `json:"role"`
-					Content          string                `json:"content"`
-					ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-					Reasoning        string                `json:"reasoning,omitempty"`
-					ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-				}{
+				Message: openrouter.ResponseMessage{
 					Role:    "assistant",
 					Content: content,
 				},
@@ -96,25 +80,9 @@ func makeChatResponse(content string) openrouter.ChatCompletionResponse {
 // makeToolCallResponse creates a response with a tool call.
 func makeToolCallResponse(toolName, arguments string) openrouter.ChatCompletionResponse {
 	return openrouter.ChatCompletionResponse{
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{
+		Choices: []openrouter.ResponseChoice{
 			{
-				Message: struct {
-					Role             string                `json:"role"`
-					Content          string                `json:"content"`
-					ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-					Reasoning        string                `json:"reasoning,omitempty"`
-					ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-				}{
+				Message: openrouter.ResponseMessage{
 					Role: "assistant",
 					ToolCalls: []openrouter.ToolCall{
 						{
@@ -153,17 +121,7 @@ func makeFinalJSONResponse(jsonContent string) openrouter.ChatCompletionResponse
 // makeEmptyResponse creates an empty response (no choices).
 func makeEmptyResponse() openrouter.ChatCompletionResponse {
 	return openrouter.ChatCompletionResponse{
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{},
+		Choices: []openrouter.ResponseChoice{},
 		Usage: struct {
 			PromptTokens     int      `json:"prompt_tokens"`
 			CompletionTokens int      `json:"completion_tokens"`

@@ -27,6 +27,38 @@ func (m *MockBotAPI) SendMessage(ctx context.Context, req telegram.SendMessageRe
 	return args.Get(0).(*telegram.Message), args.Error(1)
 }
 
+func (m *MockBotAPI) SendPhoto(ctx context.Context, req telegram.SendPhotoRequest) (*telegram.Message, error) {
+	args := m.Called(ctx, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*telegram.Message), args.Error(1)
+}
+
+func (m *MockBotAPI) SendDocument(ctx context.Context, req telegram.SendDocumentRequest) (*telegram.Message, error) {
+	args := m.Called(ctx, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*telegram.Message), args.Error(1)
+}
+
+func (m *MockBotAPI) SendMediaGroup(ctx context.Context, req telegram.SendMediaGroupRequest) ([]telegram.Message, error) {
+	args := m.Called(ctx, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]telegram.Message), args.Error(1)
+}
+
+func (m *MockBotAPI) SendMediaGroupDocuments(ctx context.Context, req telegram.SendMediaGroupDocumentsRequest) ([]telegram.Message, error) {
+	args := m.Called(ctx, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]telegram.Message), args.Error(1)
+}
+
 func (m *MockBotAPI) SetMyCommands(ctx context.Context, req telegram.SetMyCommandsRequest) error {
 	args := m.Called(ctx, req)
 	return args.Error(0)
@@ -814,16 +846,11 @@ func (m *MockStorage) UpdateMessageID(userID, artifactID, messageID int64) error
 	return args.Error(0)
 }
 
-// MockToolHandler implements laplace.ToolHandler for tests.
-type MockToolHandler struct {
-	mock.Mock
-}
-
-// ExecuteToolCall executes a tool call and returns the result.
-func (m *MockToolHandler) ExecuteToolCall(toolName string, arguments string) (string, error) {
-	args := m.Called(toolName, arguments)
-	return args.String(0), args.Error(1)
-}
+// MockToolHandler lived here in earlier versions but was moved into
+// internal/agent/laplace/mocks_test.go after the ToolHandler interface
+// grew dependencies on laplace.ToolCallContext / laplace.ToolResult
+// (which would create an import cycle testutil ↔ laplace). See
+// docs/TESTING.md "Import Cycle Handling".
 
 // MockRetriever is a mock for testing code that needs rag.Retriever.
 // Due to import cycle constraints (rag tests import testutil), this mock

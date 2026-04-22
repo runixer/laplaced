@@ -82,14 +82,14 @@ func TestPerformManageMemory_BatchOperations(t *testing.T) {
 
 	// Execute
 	arguments, _ := json.Marshal(map[string]string{"query": queryJSON})
-	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_memory", string(arguments))
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "manage_memory", string(arguments))
 
 	// Assert
 	assert.NoError(t, err)
-	assert.Contains(t, result, "Successfully processed 3 operations")
-	assert.Contains(t, result, "Op 1 (add): Success")
-	assert.Contains(t, result, "Op 2 (update): Success")
-	assert.Contains(t, result, "Op 3 (delete): Success")
+	assert.Contains(t, result.Content, "Successfully processed 3 operations")
+	assert.Contains(t, result.Content, "Op 1 (add): Success")
+	assert.Contains(t, result.Content, "Op 2 (update): Success")
+	assert.Contains(t, result.Content, "Op 3 (delete): Success")
 
 	mockStore.AssertExpectations(t)
 	mockORClient.AssertExpectations(t)
@@ -130,7 +130,7 @@ func TestPerformManageMemory_BatchOperations_PartialFailure(t *testing.T) {
 
 	// Execute
 	arguments, _ := json.Marshal(map[string]string{"query": queryJSON})
-	result, err := toolExecutor.ExecuteToolCall(context.Background(), userID, "manage_memory", string(arguments))
+	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "manage_memory", string(arguments))
 
 	// Assert - any error in batch returns error
 	assert.Error(t, err)

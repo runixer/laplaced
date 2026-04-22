@@ -23,7 +23,7 @@ func TestExecuteToolCalls(t *testing.T) {
 	tests := []struct {
 		name      string
 		toolCalls []openrouter.ToolCall
-		mockSetup func(*testutil.MockToolHandler)
+		mockSetup func(*mockToolHandler)
 		verify    func(*testing.T, []openrouter.Message)
 	}{
 		{
@@ -41,9 +41,9 @@ func TestExecuteToolCalls(t *testing.T) {
 					},
 				},
 			},
-			mockSetup: func(h *testutil.MockToolHandler) {
-				h.On("ExecuteToolCall", "search_web", `{"query": "test"}`).
-					Return("Search results: found 5 items", nil)
+			mockSetup: func(h *mockToolHandler) {
+				h.On("ExecuteToolCall", mock.Anything, mock.Anything, "search_web", `{"query": "test"}`).
+					Return(&ToolResult{Content: "Search results: found 5 items"}, nil)
 			},
 			verify: func(t *testing.T, msgs []openrouter.Message) {
 				require.Len(t, msgs, 1)
@@ -67,9 +67,9 @@ func TestExecuteToolCalls(t *testing.T) {
 					},
 				},
 			},
-			mockSetup: func(h *testutil.MockToolHandler) {
-				h.On("ExecuteToolCall", "search_history", mock.Anything).
-					Return("", errors.New("database error"))
+			mockSetup: func(h *mockToolHandler) {
+				h.On("ExecuteToolCall", mock.Anything, mock.Anything, "search_history", mock.Anything).
+					Return(nil, errors.New("database error"))
 			},
 			verify: func(t *testing.T, msgs []openrouter.Message) {
 				require.Len(t, msgs, 1)
@@ -104,11 +104,11 @@ func TestExecuteToolCalls(t *testing.T) {
 					},
 				},
 			},
-			mockSetup: func(h *testutil.MockToolHandler) {
-				h.On("ExecuteToolCall", "search_web", `{"query": "golang"}`).
-					Return("Golang results", nil)
-				h.On("ExecuteToolCall", "search_history", `{"query": "memory"}`).
-					Return("History results", nil)
+			mockSetup: func(h *mockToolHandler) {
+				h.On("ExecuteToolCall", mock.Anything, mock.Anything, "search_web", `{"query": "golang"}`).
+					Return(&ToolResult{Content: "Golang results"}, nil)
+				h.On("ExecuteToolCall", mock.Anything, mock.Anything, "search_history", `{"query": "memory"}`).
+					Return(&ToolResult{Content: "History results"}, nil)
 			},
 			verify: func(t *testing.T, msgs []openrouter.Message) {
 				require.Len(t, msgs, 2)
@@ -121,7 +121,7 @@ func TestExecuteToolCalls(t *testing.T) {
 		{
 			name:      "empty tool calls list",
 			toolCalls: []openrouter.ToolCall{},
-			mockSetup: func(h *testutil.MockToolHandler) {},
+			mockSetup: func(h *mockToolHandler) {},
 			verify: func(t *testing.T, msgs []openrouter.Message) {
 				assert.Len(t, msgs, 0)
 			},
@@ -152,11 +152,11 @@ func TestExecuteToolCalls(t *testing.T) {
 					},
 				},
 			},
-			mockSetup: func(h *testutil.MockToolHandler) {
-				h.On("ExecuteToolCall", "search_web", `{"query": "good"}`).
-					Return("Success", nil)
-				h.On("ExecuteToolCall", "search_history", `{"query": "bad"}`).
-					Return("", errors.New("failed"))
+			mockSetup: func(h *mockToolHandler) {
+				h.On("ExecuteToolCall", mock.Anything, mock.Anything, "search_web", `{"query": "good"}`).
+					Return(&ToolResult{Content: "Success"}, nil)
+				h.On("ExecuteToolCall", mock.Anything, mock.Anything, "search_history", `{"query": "bad"}`).
+					Return(nil, errors.New("failed"))
 			},
 			verify: func(t *testing.T, msgs []openrouter.Message) {
 				require.Len(t, msgs, 2)
@@ -168,16 +168,17 @@ func TestExecuteToolCalls(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := new(testutil.MockToolHandler)
+			handler := new(mockToolHandler)
 			tt.mockSetup(handler)
 
 			agent := &Laplace{
 				logger: testutil.TestLogger(),
 			}
 
-			messages := agent.executeToolCalls(
+			messages, _ := agent.executeToolCalls(
 				context.Background(),
 				handler,
+				ToolCallContext{},
 				tt.toolCalls,
 				nil,
 				agent.logger,
@@ -253,8 +254,8 @@ func TestExecute_WithToolCall(t *testing.T) {
 		), nil,
 	).Once()
 
-	handler.On("ExecuteToolCall", "search_web", `{"query": "golang"}`).
-		Return("Golang is a programming language", nil)
+	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "search_web", `{"query": "golang"}`).
+		Return(&ToolResult{Content: "Golang is a programming language"}, nil)
 
 	// Second call: returns final response
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
@@ -448,7 +449,7 @@ func TestExecute_WithPDFParserPlugin(t *testing.T) {
 		makeChatResponse("Response", WithTokens(5, 3, 8)), nil,
 	)
 
-	handler := new(testutil.MockToolHandler)
+	handler := new(mockToolHandler)
 
 	resp, err := agent.Execute(context.Background(), req, handler)
 	require.NoError(t, err)
@@ -486,7 +487,7 @@ func TestExecute_IntermediateMessageWithToolCall(t *testing.T) {
 		), nil,
 	).Once()
 
-	handler.On("ExecuteToolCall", "search_web", mock.Anything).Return("Results", nil)
+	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "search_web", mock.Anything).Return(&ToolResult{Content: "Results"}, nil)
 
 	// Second response: final
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
@@ -528,7 +529,7 @@ func TestExecute_MaxIterations(t *testing.T) {
 		), nil,
 	)
 
-	handler.On("ExecuteToolCall", "search_web", mock.Anything).Return("results", nil)
+	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "search_web", mock.Anything).Return(&ToolResult{Content: "results"}, nil)
 
 	resp, err := agent.Execute(context.Background(), req, handler)
 	require.NoError(t, err)
@@ -610,7 +611,7 @@ func TestExecute_WithToolTypingAction(t *testing.T) {
 		nil,
 	).Once()
 
-	handler.On("ExecuteToolCall", "search_web", mock.Anything).Return("done", nil)
+	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "search_web", mock.Anything).Return(&ToolResult{Content: "done"}, nil)
 
 	// Second call: no more tools
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
@@ -631,7 +632,7 @@ func TestExecute_WithToolTypingAction(t *testing.T) {
 }
 
 // setupExecuteTest is a helper for Execute tests.
-func setupExecuteTest(t *testing.T) (*config.Config, *i18n.Translator, *Laplace, *testutil.MockStorage, *testutil.MockOpenRouterClient, *testutil.MockToolHandler) {
+func setupExecuteTest(t *testing.T) (*config.Config, *i18n.Translator, *Laplace, *testutil.MockStorage, *testutil.MockOpenRouterClient, *mockToolHandler) {
 	t.Helper()
 
 	cfg := testutil.TestConfig()
@@ -645,7 +646,7 @@ func setupExecuteTest(t *testing.T) (*config.Config, *i18n.Translator, *Laplace,
 	// Pass nil for ragService and artifactRepo (concrete structs, not interfaces)
 	agent := New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, testutil.TestLogger())
 
-	handler := new(testutil.MockToolHandler)
+	handler := new(mockToolHandler)
 
 	return cfg, translator, agent, mockStore, mockORClient, handler
 }

@@ -16,6 +16,10 @@ import (
 // This allows for easier mocking in tests.
 type BotAPI interface {
 	SendMessage(ctx context.Context, req SendMessageRequest) (*Message, error)
+	SendPhoto(ctx context.Context, req SendPhotoRequest) (*Message, error)
+	SendDocument(ctx context.Context, req SendDocumentRequest) (*Message, error)
+	SendMediaGroup(ctx context.Context, req SendMediaGroupRequest) ([]Message, error)
+	SendMediaGroupDocuments(ctx context.Context, req SendMediaGroupDocumentsRequest) ([]Message, error)
 	SetMyCommands(ctx context.Context, req SetMyCommandsRequest) error
 	SetWebhook(ctx context.Context, req SetWebhookRequest) error
 	SendChatAction(ctx context.Context, req SendChatActionRequest) error

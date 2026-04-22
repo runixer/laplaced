@@ -97,6 +97,14 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 	}
 	orMessages := l.BuildMessages(ctx, contextData, req.HistoryContent, req.CurrentMessageParts, enrichedQuery)
 
+	// Extract image FileParts from current message for tools that operate
+	// on attached photos (generate_image without explicit artifact IDs).
+	currentMessageImages := extractImageFileParts(req.CurrentMessageParts)
+	tcc := ToolCallContext{
+		UserID:               req.UserID,
+		CurrentMessageImages: currentMessageImages,
+	}
+
 	// Prepare plugins
 	var plugins []openrouter.Plugin
 	if l.cfg.OpenRouter.PDFParserEngine != "" {
@@ -111,6 +119,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 	// Tool loop
 	tracker := agentlog.NewTurnTracker()
 	var finalResponse string
+	var generatedArtifactIDs []int64
 	toolIterations := 0
 	emptyRetries := 0
 
@@ -236,9 +245,10 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 
 			// Execute tools
 			toolStart := time.Now()
-			toolMessages := l.executeToolCalls(ctx, toolHandler, choice.Message.ToolCalls, req.OnTypingAction, logger)
+			toolMessages, toolArtifactIDs := l.executeToolCalls(ctx, toolHandler, tcc, choice.Message.ToolCalls, req.OnTypingAction, logger)
 			totalToolDuration += time.Since(toolStart)
 
+			generatedArtifactIDs = append(generatedArtifactIDs, toolArtifactIDs...)
 			orMessages = append(orMessages, toolMessages...)
 			continue
 		}
@@ -262,35 +272,39 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 	promptTokens, completionTokens := tracker.TotalTokens()
 
 	return &Response{
-		Content:           finalResponse,
-		PromptTokens:      promptTokens,
-		CompletionTokens:  completionTokens,
-		TotalCost:         tracker.TotalCost(),
-		LLMDuration:       totalLLMDuration,
-		ToolDuration:      totalToolDuration,
-		TotalTurns:        tracker.TurnCount(),
-		RAGInfo:           contextData.RAGInfo,
-		Messages:          orMessages,
-		ConversationTurns: tracker.Build(),
+		Content:              finalResponse,
+		GeneratedArtifactIDs: generatedArtifactIDs,
+		PromptTokens:         promptTokens,
+		CompletionTokens:     completionTokens,
+		TotalCost:            tracker.TotalCost(),
+		LLMDuration:          totalLLMDuration,
+		ToolDuration:         totalToolDuration,
+		TotalTurns:           tracker.TurnCount(),
+		RAGInfo:              contextData.RAGInfo,
+		Messages:             orMessages,
+		ConversationTurns:    tracker.Build(),
 	}, nil
 }
 
-// executeToolCalls executes tool calls and returns tool result messages.
+// executeToolCalls executes tool calls and returns (tool result messages,
+// accumulated generated artifact IDs).
 func (l *Laplace) executeToolCalls(
 	ctx context.Context,
 	handler ToolHandler,
+	tcc ToolCallContext,
 	toolCalls []openrouter.ToolCall,
 	onTypingAction func(),
 	logger *slog.Logger,
-) []openrouter.Message {
+) ([]openrouter.Message, []int64) {
 	var toolMessages []openrouter.Message
+	var artifactIDs []int64
 
 	for _, toolCall := range toolCalls {
 		if onTypingAction != nil {
 			onTypingAction()
 		}
 
-		result, err := handler.ExecuteToolCall(toolCall.Function.Name, toolCall.Function.Arguments)
+		result, err := handler.ExecuteToolCall(ctx, tcc, toolCall.Function.Name, toolCall.Function.Arguments)
 		if err != nil {
 			logger.Error("tool execution failed", "error", err, "tool", toolCall.Function.Name)
 			toolMessages = append(toolMessages, openrouter.Message{
@@ -298,16 +312,37 @@ func (l *Laplace) executeToolCalls(
 				Content:    fmt.Sprintf("Tool execution failed: %v", err),
 				ToolCallID: toolCall.ID,
 			})
-		} else {
-			toolMessages = append(toolMessages, openrouter.Message{
-				Role:       "tool",
-				Content:    result,
-				ToolCallID: toolCall.ID,
-			})
+			continue
+		}
+		toolMessages = append(toolMessages, openrouter.Message{
+			Role:       "tool",
+			Content:    result.Content,
+			ToolCallID: toolCall.ID,
+		})
+		if len(result.GeneratedArtifactIDs) > 0 {
+			artifactIDs = append(artifactIDs, result.GeneratedArtifactIDs...)
 		}
 	}
 
-	return toolMessages
+	return toolMessages, artifactIDs
+}
+
+// extractImageFileParts walks the current-message multimodal parts and
+// collects FilePart entries whose file_data is an image MIME. These are
+// used by tools that edit/combine attached photos without the LLM having
+// to cite artifact IDs.
+func extractImageFileParts(parts []interface{}) []openrouter.FilePart {
+	var images []openrouter.FilePart
+	for _, p := range parts {
+		fp, ok := p.(openrouter.FilePart)
+		if !ok {
+			continue
+		}
+		if strings.HasPrefix(fp.File.FileData, "data:image/") {
+			images = append(images, fp)
+		}
+	}
+	return images
 }
 
 // LogExecution logs the execution to agent logger.

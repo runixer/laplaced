@@ -262,24 +262,8 @@ func MockChatResponse(content string) openrouter.ChatCompletionResponse {
 // and token counts. TotalTokens is calculated automatically.
 func MockChatResponseWithTokens(content string, promptTokens, completionTokens int) openrouter.ChatCompletionResponse {
 	var resp openrouter.ChatCompletionResponse
-	resp.Choices = append(resp.Choices, struct {
-		Message struct {
-			Role             string                `json:"role"`
-			Content          string                `json:"content"`
-			ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-			Reasoning        string                `json:"reasoning,omitempty"`
-			ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-		} `json:"message"`
-		FinishReason string `json:"finish_reason,omitempty"`
-		Index        int    `json:"index"`
-	}{
-		Message: struct {
-			Role             string                `json:"role"`
-			Content          string                `json:"content"`
-			ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-			Reasoning        string                `json:"reasoning,omitempty"`
-			ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-		}{
+	resp.Choices = append(resp.Choices, openrouter.ResponseChoice{
+		Message: openrouter.ResponseMessage{
 			Role:    "assistant",
 			Content: content,
 		},
@@ -294,24 +278,8 @@ func MockChatResponseWithTokens(content string, promptTokens, completionTokens i
 // Token counts are set to reasonable defaults (150/30/180).
 func MockChatResponseWithToolCalls(content string, toolCalls []openrouter.ToolCall) openrouter.ChatCompletionResponse {
 	var resp openrouter.ChatCompletionResponse
-	resp.Choices = append(resp.Choices, struct {
-		Message struct {
-			Role             string                `json:"role"`
-			Content          string                `json:"content"`
-			ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-			Reasoning        string                `json:"reasoning,omitempty"`
-			ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-		} `json:"message"`
-		FinishReason string `json:"finish_reason,omitempty"`
-		Index        int    `json:"index"`
-	}{
-		Message: struct {
-			Role             string                `json:"role"`
-			Content          string                `json:"content"`
-			ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-			Reasoning        string                `json:"reasoning,omitempty"`
-			ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-		}{
+	resp.Choices = append(resp.Choices, openrouter.ResponseChoice{
+		Message: openrouter.ResponseMessage{
 			Role:      "assistant",
 			Content:   content,
 			ToolCalls: toolCalls,

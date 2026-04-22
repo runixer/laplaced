@@ -106,6 +106,18 @@ agents:
     recovery_threshold: "10m"   # How long 'processing' state before recovery on startup
     recent_message_count: 10    # Number of recent session messages to include in artifact context (0 = disable)
 
+  # Image generator - creates/edits images via nano banana (v0.8.0)
+  image_generator:
+    name: "ImageGenerator"
+    model: "google/gemini-3.1-flash-image-preview"
+    timeout: "90s"                 # Max time per image generation call
+    default_aspect_ratio: "9:16"   # Vertical phone format. Only applied for text-to-image; edits keep the input image's own ratio.
+    default_image_size: "1K"       # 0.5K, 1K, 2K, 4K
+    max_input_images: 4            # Max reference images accepted as tool input
+    max_output_images: 4           # Max images shown to user per tool call
+    max_input_image_bytes: 20971520 # 20MB per input image
+    document_threshold_bytes: 2097152 # 2MB: larger outputs sent as Document (no Telegram recompression) instead of Photo
+
 # Embedding Configuration
 # v0.7.0: migrated to gemini-embedding-2-preview at 1536 dim.
 # On startup, vectors produced under a different model/dim are re-embedded in place
@@ -143,6 +155,8 @@ tools:
     model: "memory"
   - name: "manage_people"
     model: "memory"
+  - name: "generate_image"
+    model: "google/gemini-3.1-flash-image-preview"
 
 # Bot Configuration
 bot:

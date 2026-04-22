@@ -16,8 +16,10 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/runixer/laplaced/internal/agent/imagegen"
 	"github.com/runixer/laplaced/internal/app"
 	"github.com/runixer/laplaced/internal/bot"
+	botTools "github.com/runixer/laplaced/internal/bot/tools"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
@@ -26,6 +28,31 @@ import (
 	"github.com/runixer/laplaced/internal/telegram"
 	"github.com/runixer/laplaced/internal/web"
 )
+
+// imageGenAdapter bridges the imagegen.Agent (domain-specific types) with
+// the tool-executor's narrower ImageGenerator interface.
+type imageGenAdapter struct{ agent *imagegen.Agent }
+
+func (a *imageGenAdapter) Generate(ctx context.Context, req botTools.ImageGenRequest) (*botTools.ImageGenResponse, error) {
+	resp, err := a.agent.Generate(ctx, imagegen.Request{
+		UserID:      req.UserID,
+		Prompt:      req.Prompt,
+		InputImages: req.InputImages,
+		AspectRatio: req.AspectRatio,
+		ImageSize:   req.ImageSize,
+	})
+	if err != nil {
+		return nil, err
+	}
+	imgs := make([]botTools.ImageGenImage, len(resp.Images))
+	for i, img := range resp.Images {
+		imgs[i] = botTools.ImageGenImage{MimeType: img.MimeType, Data: img.Data}
+	}
+	return &botTools.ImageGenResponse{
+		Images:      imgs,
+		TextContent: resp.TextContent,
+	}, nil
+}
 
 var Version = "dev"
 
@@ -193,8 +220,9 @@ func main() {
 
 	// Create file storage and handler if artifacts are enabled
 	var fileHandler *bot.FileHandler
+	var fileStorage *files.FileStorage
 	if cfg.Artifacts.Enabled {
-		fileStorage := files.NewFileStorage(cfg.Artifacts.StoragePath, logger)
+		fileStorage = files.NewFileStorage(cfg.Artifacts.StoragePath, logger)
 		fileHandler = bot.NewFileHandler(fileStorage, store, logger)
 		logger.Info("Artifacts system enabled", "storage_path", cfg.Artifacts.StoragePath)
 	} else {
@@ -216,6 +244,22 @@ func main() {
 
 	// Set artifact repository for linking artifacts to messages (v0.6.0)
 	b.SetArtifactRepo(store)
+
+	// Wire image generation (v0.8.0) — requires artifacts subsystem.
+	if cfg.Artifacts.Enabled && cfg.Agents.ImageGenerator.Model != "" {
+		imgGen := imagegen.New(openrouterClient, &cfg.Agents.ImageGenerator, logger)
+		b.SetImageGenerator(&imageGenAdapter{agent: imgGen})
+		b.SetFileStorage(fileStorage)
+		logger.Info("Image generation enabled",
+			"model", cfg.Agents.ImageGenerator.Model,
+			"default_aspect_ratio", cfg.Agents.ImageGenerator.DefaultAspectRatio,
+		)
+	} else {
+		logger.Info("Image generation disabled",
+			"artifacts_enabled", cfg.Artifacts.Enabled,
+			"model", cfg.Agents.ImageGenerator.Model,
+		)
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()

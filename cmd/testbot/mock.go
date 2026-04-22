@@ -65,6 +65,26 @@ func (n *noOpBotAPI) SendMessage(ctx context.Context, req telegram.SendMessageRe
 	return &telegram.Message{MessageID: 1}, nil
 }
 
+// SendPhoto is a no-op for testbot.
+func (n *noOpBotAPI) SendPhoto(ctx context.Context, req telegram.SendPhotoRequest) (*telegram.Message, error) {
+	return &telegram.Message{MessageID: 1}, nil
+}
+
+// SendDocument is a no-op for testbot.
+func (n *noOpBotAPI) SendDocument(ctx context.Context, req telegram.SendDocumentRequest) (*telegram.Message, error) {
+	return &telegram.Message{MessageID: 1}, nil
+}
+
+// SendMediaGroup is a no-op for testbot.
+func (n *noOpBotAPI) SendMediaGroup(ctx context.Context, req telegram.SendMediaGroupRequest) ([]telegram.Message, error) {
+	return []telegram.Message{{MessageID: 1}}, nil
+}
+
+// SendMediaGroupDocuments is a no-op for testbot.
+func (n *noOpBotAPI) SendMediaGroupDocuments(ctx context.Context, req telegram.SendMediaGroupDocumentsRequest) ([]telegram.Message, error) {
+	return []telegram.Message{{MessageID: 1}}, nil
+}
+
 // SetMyCommands is a no-op for testbot (no Telegram commands needed).
 func (n *noOpBotAPI) SetMyCommands(ctx context.Context, req telegram.SetMyCommandsRequest) error {
 	return nil

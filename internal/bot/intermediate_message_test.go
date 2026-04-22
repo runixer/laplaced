@@ -115,24 +115,8 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 		// First call has only system + user message
 		return len(req.Messages) == 2
 	})).Return(openrouter.ChatCompletionResponse{
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{
-			{Message: struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{
+		Choices: []openrouter.ResponseChoice{
+			{Message: openrouter.ResponseMessage{
 				Role:    "assistant",
 				Content: intermediateText,
 				ToolCalls: []openrouter.ToolCall{
@@ -163,24 +147,8 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 		// Tool execution call
 		return req.Model == "test-tool-model"
 	})).Return(openrouter.ChatCompletionResponse{
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{
-			{Message: struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{
+		Choices: []openrouter.ResponseChoice{
+			{Message: openrouter.ResponseMessage{
 				Role:    "assistant",
 				Content: "Tool result data",
 			}, FinishReason: "stop"},
@@ -199,24 +167,8 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 		// Second call has system + user + assistant (with tool call) + tool result
 		return len(req.Messages) == 4
 	})).Return(openrouter.ChatCompletionResponse{
-		Choices: []struct {
-			Message struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason,omitempty"`
-			Index        int    `json:"index"`
-		}{
-			{Message: struct {
-				Role             string                `json:"role"`
-				Content          string                `json:"content"`
-				ToolCalls        []openrouter.ToolCall `json:"tool_calls,omitempty"`
-				Reasoning        string                `json:"reasoning,omitempty"`
-				ReasoningDetails interface{}           `json:"reasoning_details,omitempty"`
-			}{
+		Choices: []openrouter.ResponseChoice{
+			{Message: openrouter.ResponseMessage{
 				Role:    "assistant",
 				Content: finalText,
 			}, FinishReason: "stop"},

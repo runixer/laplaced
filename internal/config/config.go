@@ -135,17 +135,48 @@ func (e *ExtractorAgentConfig) GetRecoveryThreshold() time.Duration {
 	return d
 }
 
+// ImageGeneratorConfig defines configuration for the image-generation agent
+// that drives OpenRouter image-output models (v0.8.0).
+type ImageGeneratorConfig struct {
+	AgentConfig `yaml:",inline"` // Name, Model (e.g. google/gemini-3.1-flash-image-preview)
+
+	Timeout            string `yaml:"timeout" env:"LAPLACED_IMAGE_GENERATOR_TIMEOUT"`
+	DefaultAspectRatio string `yaml:"default_aspect_ratio" env:"LAPLACED_IMAGE_GENERATOR_DEFAULT_ASPECT_RATIO"`
+	DefaultImageSize   string `yaml:"default_image_size" env:"LAPLACED_IMAGE_GENERATOR_DEFAULT_IMAGE_SIZE"`
+	MaxInputImages     int    `yaml:"max_input_images" env:"LAPLACED_IMAGE_GENERATOR_MAX_INPUT_IMAGES"`
+	MaxOutputImages    int    `yaml:"max_output_images" env:"LAPLACED_IMAGE_GENERATOR_MAX_OUTPUT_IMAGES"`
+	MaxInputImageBytes int    `yaml:"max_input_image_bytes" env:"LAPLACED_IMAGE_GENERATOR_MAX_INPUT_IMAGE_BYTES"`
+	// DocumentThresholdBytes: generated images larger than this are sent via
+	// sendDocument instead of sendPhoto, preserving full resolution (Telegram
+	// recompresses photos to ~1280 px on long side). Default 2 MB covers
+	// 2K/4K outputs; set to 0 to always use sendPhoto.
+	DocumentThresholdBytes int `yaml:"document_threshold_bytes" env:"LAPLACED_IMAGE_GENERATOR_DOCUMENT_THRESHOLD_BYTES"`
+}
+
+// GetTimeout returns the per-call timeout. Defaults to 90s.
+func (c *ImageGeneratorConfig) GetTimeout() time.Duration {
+	if c.Timeout == "" {
+		return 90 * time.Second
+	}
+	d, err := time.ParseDuration(c.Timeout)
+	if err != nil || d == 0 {
+		return 90 * time.Second
+	}
+	return d
+}
+
 // AgentsConfig defines all agents in the system.
 type AgentsConfig struct {
-	Default   AgentConfig          `yaml:"default"`                            // Default model for all agents
-	Chat      AgentConfig          `yaml:"chat"`                               // Main bot - talks to users
-	ChatModel string               `yaml:"-" env:"LAPLACED_AGENTS_CHAT_MODEL"` // Override for chat agent model
-	Archivist ArchivistAgentConfig `yaml:"archivist"`                          // Extracts facts and people from conversations
-	Enricher  AgentConfig          `yaml:"enricher"`                           // Expands search queries
-	Reranker  RerankerAgentConfig  `yaml:"reranker"`                           // Filters and ranks RAG candidates
-	Splitter  AgentConfig          `yaml:"splitter"`                           // Splits large topics
-	Merger    AgentConfig          `yaml:"merger"`                             // Merges similar topics
-	Extractor ExtractorAgentConfig `yaml:"extractor"`                          // Extracts content from artifacts
+	Default        AgentConfig          `yaml:"default"`                            // Default model for all agents
+	Chat           AgentConfig          `yaml:"chat"`                               // Main bot - talks to users
+	ChatModel      string               `yaml:"-" env:"LAPLACED_AGENTS_CHAT_MODEL"` // Override for chat agent model
+	Archivist      ArchivistAgentConfig `yaml:"archivist"`                          // Extracts facts and people from conversations
+	Enricher       AgentConfig          `yaml:"enricher"`                           // Expands search queries
+	Reranker       RerankerAgentConfig  `yaml:"reranker"`                           // Filters and ranks RAG candidates
+	Splitter       AgentConfig          `yaml:"splitter"`                           // Splits large topics
+	Merger         AgentConfig          `yaml:"merger"`                             // Merges similar topics
+	Extractor      ExtractorAgentConfig `yaml:"extractor"`                          // Extracts content from artifacts
+	ImageGenerator ImageGeneratorConfig `yaml:"image_generator"`                    // Generates/edits images (v0.8.0)
 }
 
 // GetModel returns the agent's model, falling back to default if not set.
