@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-04-22
+
 ### Added
 - **Image generation and editing (nano banana).** The bot can now draw pictures in response to natural-language requests ("draw a samurai cat"), edit photos attached in the same message ("make it sepia", "replace the background"), combine multiple attachments into one image, and re-work images from earlier turns — if a photo from a past conversation comes up in reranker context, the LLM can cite its artifact ID and the tool automatically mixes it with any new attachment into a single generation. Uses `google/gemini-3.1-flash-image-preview` via OpenRouter; supports all 14 aspect ratios the model accepts (1:1, 16:9, 21:9, 1:4, 8:1, etc.) and four resolutions (0.5K / 1K / 2K / 4K).
   - Default aspect ratio is **9:16** (vertical phone format) for text-to-image requests; edits preserve the input photo's own ratio.
@@ -510,7 +512,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-language support (en, ru)
 - Docker deployment
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/runixer/laplaced/compare/v0.7.2...v0.8.0
 [0.7.2]: https://github.com/runixer/laplaced/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/runixer/laplaced/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/runixer/laplaced/compare/v0.6.2...v0.7.0
