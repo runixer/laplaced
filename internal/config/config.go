@@ -28,6 +28,14 @@ type AgentConfig struct {
 	Model string `yaml:"model"`
 }
 
+// ChatAgentConfig extends AgentConfig with chat-specific settings.
+// Setting ThinkingLevel explicitly prevents Gemini 3.1 Pro from leaking internal
+// reasoning into the user-visible content field (see docs/bugs/2026-04-22-laplace-thought-leak/).
+type ChatAgentConfig struct {
+	AgentConfig   `yaml:",inline"`
+	ThinkingLevel string `yaml:"thinking_level" env:"LAPLACED_AGENTS_CHAT_THINKING_LEVEL"`
+}
+
 // RerankerTypeConfig defines per-type reranker limits (v0.6.0).
 // RerankerTypeConfig defines per-type reranker limits (v0.6.0).
 type RerankerTypeConfig struct {
@@ -168,7 +176,7 @@ func (c *ImageGeneratorConfig) GetTimeout() time.Duration {
 // AgentsConfig defines all agents in the system.
 type AgentsConfig struct {
 	Default        AgentConfig          `yaml:"default"`                            // Default model for all agents
-	Chat           AgentConfig          `yaml:"chat"`                               // Main bot - talks to users
+	Chat           ChatAgentConfig      `yaml:"chat"`                               // Main bot - talks to users
 	ChatModel      string               `yaml:"-" env:"LAPLACED_AGENTS_CHAT_MODEL"` // Override for chat agent model
 	Archivist      ArchivistAgentConfig `yaml:"archivist"`                          // Extracts facts and people from conversations
 	Enricher       AgentConfig          `yaml:"enricher"`                           // Expands search queries
@@ -201,6 +209,17 @@ func (a *AgentsConfig) GetChatModel() string {
 		return a.ChatModel
 	}
 	return a.Chat.GetModel(a.Default.Model)
+}
+
+// GetChatThinkingLevel returns the chat agent's reasoning effort level.
+// Falls back to "low" when unset — the minimum supported on Gemini 3.1 Pro.
+// Passing an explicit level prevents the model from leaking internal reasoning
+// into content (see docs/bugs/2026-04-22-laplace-thought-leak/).
+func (a *AgentsConfig) GetChatThinkingLevel() string {
+	if a.Chat.ThinkingLevel != "" {
+		return a.Chat.ThinkingLevel
+	}
+	return "low"
 }
 
 // ArtifactsConfig defines configuration for the artifacts system (v0.6.0).
@@ -550,6 +569,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Agents.Chat.Name == "" {
 		errs = append(errs, errors.New("agents.chat.name is required"))
+	}
+	if c.Agents.Chat.ThinkingLevel != "" {
+		validLevels := map[string]bool{"off": true, "minimal": true, "low": true, "medium": true, "high": true}
+		if !validLevels[c.Agents.Chat.ThinkingLevel] {
+			errs = append(errs, fmt.Errorf("agents.chat.thinking_level: must be one of 'off', 'minimal', 'low', 'medium', 'high', got %q", c.Agents.Chat.ThinkingLevel))
+		}
 	}
 
 	// Embedding model validation

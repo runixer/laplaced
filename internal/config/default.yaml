@@ -41,7 +41,17 @@ agents:
   # Main bot - talks to users
   chat:
     name: "Laplaced"
-    model: "google/gemini-3.1-pro-preview-customtools"
+    # Plain preview (not -customtools): the -customtools variant is tuned for
+    # coding agents mixing bash with custom tools and ships with an internal
+    # "CRITICAL INSTRUCTION 1/2" template that leaks into message.content
+    # when the U+12094 thought delimiter fails to render. We don't have any
+    # bash tools, so that variant's core benefit is inapplicable here.
+    # See docs/bugs/2026-04-22-laplace-thought-leak/.
+    model: "google/gemini-3.1-pro-preview"
+    # Explicit thinking_level prevents Gemini 3.1 Pro from leaking internal reasoning
+    # into message.content. Without this, Google defaults to "high (Dynamic)".
+    # "minimal" is unsupported on Gemini 3.1 Pro; floor is "low".
+    thinking_level: "low"
 
   # Archivist - extracts facts and people from conversations
   archivist:

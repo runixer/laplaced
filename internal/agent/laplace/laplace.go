@@ -116,6 +116,15 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 		})
 	}
 
+	// Build reasoning config once — constant across tool iterations.
+	// Explicit reasoning.effort prevents Gemini 3.1 Pro from leaking internal
+	// chain-of-thought into message.content (see docs/bugs/2026-04-22-laplace-thought-leak/).
+	var reasoning *openrouter.ReasoningConfig
+	thinkingLevel := l.cfg.Agents.GetChatThinkingLevel()
+	if thinkingLevel != "" && thinkingLevel != "off" {
+		reasoning = &openrouter.ReasoningConfig{Effort: thinkingLevel}
+	}
+
 	// Tool loop
 	tracker := agentlog.NewTurnTracker()
 	var finalResponse string
@@ -134,11 +143,12 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 		toolIterations++
 
 		orReq := openrouter.ChatCompletionRequest{
-			Model:    l.cfg.Agents.GetChatModel(),
-			Messages: orMessages,
-			Plugins:  plugins,
-			Tools:    l.tools,
-			UserID:   req.UserID,
+			Model:     l.cfg.Agents.GetChatModel(),
+			Messages:  orMessages,
+			Plugins:   plugins,
+			Tools:     l.tools,
+			Reasoning: reasoning,
+			UserID:    req.UserID,
 		}
 
 		tracker.StartTurn()
@@ -453,10 +463,78 @@ var HallucinationTags = []string{
 var consecutiveJSONBlocksPattern = regexp.MustCompile("(?s)(```json\\s*\\{[^`]*\\}\\s*```\\s*){3,}")
 var defaultAPIPattern = regexp.MustCompile(`default_api:\w+\{`)
 
+// thoughtTagPattern matches leading thought-tag wrappers that Gemini 3.x
+// occasionally emits into content instead of the reasoning field.
+// Covers: `![thought ... ]`, `[thought ... ]`, `<thought>...</thought>`,
+// `[light_thought ... ]`, `![light_thought ... ]`.
+// Only matches when there's a clear closing bracket/tag — conservative.
+var thoughtTagPattern = regexp.MustCompile(
+	`(?s)\A\s*(?:!?\s*\[\s*(?:thought|light_thought)\b.*?\]|<thought>.*?</thought>)\s*`,
+)
+
+// thoughtProseSentinels are phrases that mark the end of a leaked reasoning
+// block when the model emits pure English chain-of-thought without any tag
+// wrapper. Each sentinel is specific enough not to collide with legitimate
+// Russian answers. See docs/bugs/2026-04-22-laplace-thought-leak/.
+//
+// Processed in order — first match wins. "Before" behaviour strips the sentinel
+// and everything that precedes it. "After" behaviour keeps the sentinel as part
+// of the answer (used when the sentinel is the model's own apology line).
+var thoughtProseSentinels = []struct {
+	marker string
+	// if true, the marker itself is the start of the real answer (keep it);
+	// if false, the marker ends the reasoning (drop everything up to and
+	// including it).
+	keepMarker bool
+}{
+	// Russian apology-start is checked first — it unambiguously marks the real
+	// answer even when preceding (Done) loop noise is present.
+	{"Системный тайм-аут вызвал дублирование", true},
+	{"Thinking Process End.\n\n", false},
+	{"Proceeding to generate.\n", false},
+	{"End of thought process.\n", false},
+	{"(Done)\n(Done)\n(Done)", false},
+}
+
+// latinRatioThreshold is the minimum ratio of Latin to (Latin + Cyrillic)
+// letters in the first ~200 letters that makes the prose-sentinel tier
+// consider stripping. Counting only letters (not punctuation or digits)
+// keeps the gate stable regardless of how punctuation-heavy the prose is.
+const latinRatioThreshold = 0.9
+
+// isLeadingLatinProse reports whether the first ~100 letters of text are
+// overwhelmingly Latin — the signature of a leaked English chain-of-thought
+// block preceding a real (usually Russian) answer. A handful of Cyrillic
+// characters (quoted draft phrases, proper nouns) won't trip the gate.
+// The window is deliberately small so a sentinel boundary close to the
+// start of content doesn't drag the ratio down with Russian that follows it.
+func isLeadingLatinProse(text string) bool {
+	const sampleLetters = 100
+	latin, cyrillic := 0, 0
+	for _, r := range text {
+		switch {
+		case (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z'):
+			latin++
+		case (r >= 'А' && r <= 'я') || r == 'Ё' || r == 'ё':
+			cyrillic++
+		}
+		if latin+cyrillic >= sampleLetters {
+			break
+		}
+	}
+	total := latin + cyrillic
+	if total < 40 {
+		// Too short to judge; don't fire tier B.
+		return false
+	}
+	return float64(latin)/float64(total) >= latinRatioThreshold
+}
+
 // SanitizeLLMResponse removes hallucination artifacts from LLM response.
 // Returns the sanitized text and a boolean indicating if sanitization occurred.
+// An empty result is a legitimate outcome — the caller substitutes the
+// localized bot.empty_response string when this function returns "".
 func SanitizeLLMResponse(text string) (string, bool) {
-	original := text
 	sanitized := false
 
 	// Remove Gemini's "default_api:" hallucinated tool calls
@@ -494,8 +572,32 @@ func SanitizeLLMResponse(text string) (string, bool) {
 		sanitized = true
 	}
 
-	if sanitized && text == "" {
-		return original, false
+	// Tier A: strip leading thought-tag wrapper (Gemini 3.x reasoning leak).
+	if loc := thoughtTagPattern.FindStringIndex(text); len(loc) == 2 && loc[0] == 0 {
+		text = strings.TrimSpace(text[loc[1]:])
+		sanitized = true
+	}
+
+	// Tier B: untagged reasoning leak — content begins with English prose
+	// and contains one of a small set of known sentinel phrases. Only
+	// fires when leading content is Latin-dominant; avoids false
+	// positives on legitimate Russian responses that happen to quote
+	// English.
+	if isLeadingLatinProse(text) {
+		for _, s := range thoughtProseSentinels {
+			idx := strings.Index(text, s.marker)
+			if idx < 0 {
+				continue
+			}
+			if s.keepMarker {
+				text = text[idx:]
+			} else {
+				text = text[idx+len(s.marker):]
+			}
+			text = strings.TrimSpace(text)
+			sanitized = true
+			break
+		}
 	}
 
 	return text, sanitized

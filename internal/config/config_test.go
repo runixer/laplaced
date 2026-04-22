@@ -657,10 +657,36 @@ func TestAgentsConfig_GetChatModel(t *testing.T) {
 			cfg := AgentsConfig{
 				ChatModel: tt.chatModel,
 				Default:   AgentConfig{Model: tt.defaultModel},
-				Chat:      AgentConfig{Model: tt.chatName},
+				Chat:      ChatAgentConfig{AgentConfig: AgentConfig{Model: tt.chatName}},
 			}
 			result := cfg.GetChatModel()
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestAgentsConfig_GetChatThinkingLevel(t *testing.T) {
+	tests := []struct {
+		name     string
+		level    string
+		expected string
+	}{
+		{"falls back to low when unset", "", "low"},
+		{"passes through explicit low", "low", "low"},
+		{"passes through medium", "medium", "medium"},
+		{"passes through high", "high", "high"},
+		{"passes through off", "off", "off"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := AgentsConfig{
+				Chat: ChatAgentConfig{
+					AgentConfig:   AgentConfig{Name: "Test", Model: "test-model"},
+					ThinkingLevel: tt.level,
+				},
+			}
+			assert.Equal(t, tt.expected, cfg.GetChatThinkingLevel())
 		})
 	}
 }
@@ -1048,6 +1074,22 @@ func TestValidate_AgentsDefaults(t *testing.T) {
 			modify:      func(c *Config) { c.Agents.Chat.Name = "" },
 			wantErr:     true,
 			errContains: "agents.chat.name is required",
+		},
+		{
+			name:        "invalid chat thinking_level",
+			modify:      func(c *Config) { c.Agents.Chat.ThinkingLevel = "xhigh" },
+			wantErr:     true,
+			errContains: "agents.chat.thinking_level",
+		},
+		{
+			name:    "valid chat thinking_level=low",
+			modify:  func(c *Config) { c.Agents.Chat.ThinkingLevel = "low" },
+			wantErr: false,
+		},
+		{
+			name:    "empty chat thinking_level is allowed (GetChatThinkingLevel defaults to low)",
+			modify:  func(c *Config) { c.Agents.Chat.ThinkingLevel = "" },
+			wantErr: false,
 		},
 	}
 

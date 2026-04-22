@@ -28,9 +28,11 @@ func TestConfig() *config.Config {
 				Name:  "TestAgent",
 				Model: "test-model",
 			},
-			Chat: config.AgentConfig{
-				Name:  "TestBot",
-				Model: "test-model",
+			Chat: config.ChatAgentConfig{
+				AgentConfig: config.AgentConfig{
+					Name:  "TestBot",
+					Model: "test-model",
+				},
 			},
 			Archivist: config.ArchivistAgentConfig{AgentConfig: config.AgentConfig{Name: "Archivist"}},
 			Enricher:  config.AgentConfig{Name: "Enricher"},
