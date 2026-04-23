@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Upgraded the Go toolchain from 1.24 to 1.25.9, closing 13 known stdlib CVEs (in `crypto/tls`, `crypto/x509`, `html/template`, `net/url`, `os`). CI now also runs `govulncheck` as a blocking job on every push and PR so future CVE exposures are caught at merge time rather than release time.
+
 ## [0.8.0] - 2026-04-22
 
 ### Added
