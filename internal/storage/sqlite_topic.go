@@ -161,19 +161,13 @@ func (s *SQLiteStore) GetTopicsByIDs(userID int64, ids []int64) ([]Topic, error)
 		return nil, nil
 	}
 
-	// Build placeholders for IN clause
-	placeholders := make([]string, len(ids))
-	args := make([]interface{}, len(ids)+1)
-	args[0] = userID
-	for i, id := range ids {
-		placeholders[i] = "?"
-		args[i+1] = id
-	}
-
-	query := fmt.Sprintf(
-		"SELECT id, user_id, summary, start_msg_id, end_msg_id, size_chars, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at FROM topics WHERE user_id = ? AND id IN (%s)",
-		strings.Join(placeholders, ","),
+	query, args, err := ExpandIn(
+		"SELECT id, user_id, summary, start_msg_id, end_msg_id, size_chars, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at FROM topics WHERE user_id = ? AND id IN (?)",
+		userID, ids,
 	)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
@@ -322,6 +316,7 @@ func (s *SQLiteStore) GetTopicsExtended(filter TopicFilter, limit, offset int, s
 		sortDir = "DESC"
 	}
 
+	// #nosec G201 -- sortCol mapped from whitelist above; sortDir validated as ASC/DESC; whereSQL built from static fragments
 	query := fmt.Sprintf(`
 		SELECT
 			t.id, t.user_id, t.summary, t.start_msg_id, t.end_msg_id, t.size_chars, t.embedding, t.facts_extracted, t.is_consolidated, t.consolidation_checked, t.created_at,

@@ -169,11 +169,12 @@ func (s *Service) applyPeopleUpdated(ctx context.Context, userID int64, updated 
 		existingPerson := findPersonByIDOrName(personIDStr, hasPersonID, upd.DisplayName, currentPeople, s.logger)
 
 		if existingPerson == nil {
-			if hasPersonID {
+			switch {
+			case hasPersonID:
 				s.logger.Warn("Person to update not found", "person_id", personIDStr)
-			} else if upd.DisplayName != "" {
+			case upd.DisplayName != "":
 				s.logger.Warn("Person to update not found", "name", upd.DisplayName)
-			} else {
+			default:
 				s.logger.Warn("Person to update not found", "person_id", "", "name", "")
 			}
 			continue

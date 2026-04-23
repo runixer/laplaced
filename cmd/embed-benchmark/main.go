@@ -204,10 +204,12 @@ func loadTopics(dbPath string, limit int) ([]topic, error) {
 	}
 	defer db.Close()
 	q := `SELECT id, summary FROM topics WHERE summary IS NOT NULL AND LENGTH(summary) > 30 ORDER BY id`
+	var rows *sql.Rows
 	if limit > 0 {
-		q += fmt.Sprintf(" LIMIT %d", limit)
+		rows, err = db.QueryContext(context.Background(), q+` LIMIT ?`, limit)
+	} else {
+		rows, err = db.QueryContext(context.Background(), q)
 	}
-	rows, err := db.QueryContext(context.Background(), q)
 	if err != nil {
 		return nil, err
 	}

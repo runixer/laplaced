@@ -169,17 +169,14 @@ func (s *SQLiteStore) GetPeopleByIDs(userID int64, ids []int64) ([]Person, error
 		return nil, nil
 	}
 
-	placeholders := strings.Repeat(",?", len(ids)-1)
-	query := `
-		SELECT id, user_id, display_name, aliases, telegram_id, username, circle, bio, embedding, first_seen, last_seen, mention_count
+	query, args, err := ExpandIn(
+		`SELECT id, user_id, display_name, aliases, telegram_id, username, circle, bio, embedding, first_seen, last_seen, mention_count
 		FROM people
-		WHERE user_id = ? AND id IN (?` + placeholders + `)
-	`
-
-	args := make([]interface{}, len(ids)+1)
-	args[0] = userID
-	for i, id := range ids {
-		args[i+1] = id
+		WHERE user_id = ? AND id IN (?)`,
+		userID, ids,
+	)
+	if err != nil {
+		return nil, err
 	}
 
 	rows, err := s.db.Query(query, args...)
@@ -393,6 +390,7 @@ func (s *SQLiteStore) GetPeopleExtended(filter PersonFilter, limit, offset int, 
 	}
 
 	// Build query with pagination
+	// #nosec G201 -- sortBy validated against whitelist above; sortDir validated as ASC/DESC; whereClause built from static fragments
 	query := fmt.Sprintf(`
 		SELECT id, user_id, display_name, aliases, telegram_id, username, circle, bio, embedding, first_seen, last_seen, mention_count
 		FROM people

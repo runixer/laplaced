@@ -168,11 +168,12 @@ func TestMessageGrouper_FIFOOrdering(t *testing.T) {
 		// Identify which group this is by message ID
 		groupNum := group.Messages[0].MessageID
 
-		if groupNum == 1 {
+		switch groupNum {
+		case 1:
 			close(group1Processing) // Signal that group 1 started
 			// Simulate slow processing (e.g., voice transcription)
 			time.Sleep(100 * time.Millisecond)
-		} else if groupNum == 2 {
+		case 2:
 			// This should NOT start until group 1 is done
 			close(group2CanStart)
 			// Fast processing
@@ -244,11 +245,12 @@ func TestMessageGrouper_DifferentUsersParallel(t *testing.T) {
 	var countMu sync.Mutex
 
 	onGroupReady := func(ctx context.Context, group *MessageGroup) {
-		if group.UserID == 111 {
+		switch group.UserID {
+		case 111:
 			close(user1Started)
 			// User 1 is slow (e.g., long voice)
 			time.Sleep(200 * time.Millisecond)
-		} else if group.UserID == 222 {
+		case 222:
 			close(user2Started)
 			// User 2 is fast
 			time.Sleep(10 * time.Millisecond)

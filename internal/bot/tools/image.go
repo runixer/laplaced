@@ -222,7 +222,7 @@ func buildToolReplyForLLM(artifactIDs []int64, modelText string) string {
 	if len(artifactIDs) == 1 {
 		fmt.Fprintf(&sb, "Generated 1 image (artifact:%d).", artifactIDs[0])
 	} else {
-		sb.WriteString(fmt.Sprintf("Generated %d images (", len(artifactIDs)))
+		fmt.Fprintf(&sb, "Generated %d images (", len(artifactIDs))
 		for i, id := range artifactIDs {
 			if i > 0 {
 				sb.WriteString(", ")

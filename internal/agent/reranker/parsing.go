@@ -156,15 +156,16 @@ func extractJSONFromResponse(content string) string {
 
 	var startIdx int
 	var openBrace, closeBrace byte
-	if startArray >= 0 && (startObj < 0 || startArray < startObj) {
+	switch {
+	case startArray >= 0 && (startObj < 0 || startArray < startObj):
 		startIdx = startArray
 		openBrace = '['
 		closeBrace = ']'
-	} else if startObj >= 0 {
+	case startObj >= 0:
 		startIdx = startObj
 		openBrace = '{'
 		closeBrace = '}'
-	} else {
+	default:
 		return content
 	}
 
@@ -188,9 +189,10 @@ func extractJSONFromResponse(content string) string {
 		if inString {
 			continue
 		}
-		if c == openBrace {
+		switch c {
+		case openBrace:
 			depth++
-		} else if c == closeBrace {
+		case closeBrace:
 			depth--
 			if depth == 0 {
 				return content[startIdx : i+1]

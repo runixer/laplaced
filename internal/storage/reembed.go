@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 )
@@ -24,6 +25,7 @@ type ReembedCandidate struct {
 //
 // limit == 0 means unlimited.
 func (s *SQLiteStore) reembedSelect(table, contentExpr, expectedVersion string, limit int) ([]ReembedCandidate, error) {
+	// #nosec G201 -- `table` and `contentExpr` are internal constants from this package, never user input
 	q := fmt.Sprintf(
 		`SELECT id, user_id, %s FROM %s
 		 WHERE embedding IS NOT NULL
@@ -31,10 +33,13 @@ func (s *SQLiteStore) reembedSelect(table, contentExpr, expectedVersion string, 
 		 ORDER BY id`,
 		contentExpr, table,
 	)
+	var rows *sql.Rows
+	var err error
 	if limit > 0 {
-		q += fmt.Sprintf(" LIMIT %d", limit)
+		rows, err = s.db.Query(q+" LIMIT ?", expectedVersion, limit)
+	} else {
+		rows, err = s.db.Query(q, expectedVersion)
 	}
-	rows, err := s.db.Query(q, expectedVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -60,6 +65,7 @@ func (s *SQLiteStore) reembedUpdate(table string, id int64, emb []float32, versi
 	if err != nil {
 		return err
 	}
+	// #nosec G201 -- `table` is an internal constant from this package, never user input
 	q := fmt.Sprintf(`UPDATE %s SET embedding = ?, embedding_version = ? WHERE id = ?`, table)
 	_, err = s.db.Exec(q, embBytes, version, id)
 	return err
@@ -96,10 +102,13 @@ func (s *SQLiteStore) GetPeopleNeedingReembed(expectedVersion string, limit int)
 	      WHERE embedding IS NOT NULL
 	        AND (embedding_version IS NULL OR embedding_version != ?)
 	      ORDER BY id`
+	var rows *sql.Rows
+	var err error
 	if limit > 0 {
-		q += fmt.Sprintf(" LIMIT %d", limit)
+		rows, err = s.db.Query(q+" LIMIT ?", expectedVersion, limit)
+	} else {
+		rows, err = s.db.Query(q, expectedVersion)
 	}
-	rows, err := s.db.Query(q, expectedVersion)
 	if err != nil {
 		return nil, err
 	}

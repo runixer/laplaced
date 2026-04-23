@@ -52,7 +52,8 @@ type MessageGrouper struct {
 
 // NewMessageGrouper creates a new MessageGrouper.
 func NewMessageGrouper(b *Bot, logger *slog.Logger, turnWait time.Duration, onGroupReady func(ctx context.Context, group *MessageGroup)) *MessageGrouper {
-	ctx, cancel := context.WithCancel(context.Background())
+	// cancel is stored as parentCancel and invoked from Stop().
+	ctx, cancel := context.WithCancel(context.Background()) // #nosec G118 -- cancel persisted in struct, invoked in Stop
 	return &MessageGrouper{
 		groups:          make(map[int64]*MessageGroup),
 		bot:             b,
@@ -172,6 +173,7 @@ func (mg *MessageGrouper) AddMessage(msg *telegram.Message) {
 	mg.wg.Add(1)
 	group.Timer = time.AfterFunc(mg.turnWait, func() {
 		defer mg.wg.Done()
+		defer cancel() // release ctx when processing completes; idempotent if AddMessage already preempted
 		mg.processGroup(ctx, userID)
 	})
 }

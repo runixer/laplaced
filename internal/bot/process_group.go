@@ -72,9 +72,11 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	// even when graceful shutdown is triggered.
 	shutdownSafeCtx := context.WithoutCancel(ctx)
 
-	// React to the message with a certain probability
+	// React to the message with a certain probability.
+	// #nosec G404 -- emoji reactions are a UX flourish, not a security primitive
 	if rand.Float32() < 0.1 { // 10% chance
 		reactionStart := time.Now()
+		// #nosec G404 -- emoji reactions are a UX flourish, not a security primitive
 		reaction := availableReactions[rand.IntN(len(availableReactions))]
 		reactionReq := telegram.SetMessageReactionRequest{
 			ChatID:    chatID,

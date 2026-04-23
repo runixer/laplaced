@@ -168,11 +168,9 @@ func (r *TelegramHTMLRenderer) renderList(w util.BufWriter, source []byte, node 
 		if parent != nil && parent.Kind() != ast.KindDocument {
 			_, _ = w.WriteString("\n")
 		}
-	} else {
+	} else if node.NextSibling() != nil {
 		// Add double newline after the entire list if there's a next sibling
-		if node.NextSibling() != nil {
-			_, _ = w.WriteString("\n\n")
-		}
+		_, _ = w.WriteString("\n\n")
 	}
 	return ast.WalkContinue, nil
 }
@@ -195,11 +193,9 @@ func (r *TelegramHTMLRenderer) renderListItem(w util.BufWriter, source []byte, n
 				_, _ = w.WriteString("• ")
 			}
 		}
-	} else {
+	} else if n.NextSibling() != nil {
 		// Add newline only if there's a next sibling (not the last item)
-		if n.NextSibling() != nil {
-			_, _ = w.WriteString("\n")
-		}
+		_, _ = w.WriteString("\n")
 	}
 	return ast.WalkContinue, nil
 }
@@ -650,34 +646,31 @@ func convertTablesToMonospace(htmlStr string) string {
 
 		var extractTable func(*htmlparser.Node)
 		extractTable = func(n *htmlparser.Node) {
-			if n.Type == htmlparser.ElementNode {
-				switch n.Data {
-				case "tr":
-					var row []string
-					for c := n.FirstChild; c != nil; c = c.NextSibling {
-						if c.Type == htmlparser.ElementNode && (c.Data == "th" || c.Data == "td") {
-							cellText := extractText(c)
-							row = append(row, cellText)
+			if n.Type == htmlparser.ElementNode && n.Data == "tr" {
+				var row []string
+				for c := n.FirstChild; c != nil; c = c.NextSibling {
+					if c.Type == htmlparser.ElementNode && (c.Data == "th" || c.Data == "td") {
+						cellText := extractText(c)
+						row = append(row, cellText)
 
-							// Extract alignment from style attribute (only for first row)
-							if len(rows) == 0 && c.Data == "th" {
-								align := "left"
-								for _, attr := range c.Attr {
-									if attr.Key == "style" && strings.Contains(attr.Val, "text-align") {
-										if strings.Contains(attr.Val, "center") {
-											align = "center"
-										} else if strings.Contains(attr.Val, "right") {
-											align = "right"
-										}
+						// Extract alignment from style attribute (only for first row)
+						if len(rows) == 0 && c.Data == "th" {
+							align := "left"
+							for _, attr := range c.Attr {
+								if attr.Key == "style" && strings.Contains(attr.Val, "text-align") {
+									if strings.Contains(attr.Val, "center") {
+										align = "center"
+									} else if strings.Contains(attr.Val, "right") {
+										align = "right"
 									}
 								}
-								alignments = append(alignments, align)
 							}
+							alignments = append(alignments, align)
 						}
 					}
-					if len(row) > 0 {
-						rows = append(rows, row)
-					}
+				}
+				if len(row) > 0 {
+					rows = append(rows, row)
 				}
 			}
 

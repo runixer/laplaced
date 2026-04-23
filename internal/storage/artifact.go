@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -380,25 +379,21 @@ func (s *SQLiteStore) GetArtifactsByIDs(userID int64, artifactIDs []int64) ([]Ar
 		return nil, nil
 	}
 
-	placeholders := make([]string, len(artifactIDs))
-	args := make([]interface{}, len(artifactIDs)+1)
-	args[0] = userID
-	for i, id := range artifactIDs {
-		placeholders[i] = "?"
-		args[i+1] = id
-	}
-
-	query := `
-		SELECT id, user_id, message_id, file_type, file_path, file_size,
+	query, args, err := ExpandIn(
+		`SELECT id, user_id, message_id, file_type, file_path, file_size,
 			mime_type, original_name, content_hash, state, error_message,
 			retry_count, last_failed_at,
 			summary, keywords, entities, rag_hints, embedding,
 			created_at, processed_at,
 			context_load_count, last_loaded_at, user_context
 		FROM artifacts
-		WHERE user_id = ? AND id IN (` + strings.Join(placeholders, ",") + `)
-		ORDER BY id ASC
-	`
+		WHERE user_id = ? AND id IN (?)
+		ORDER BY id ASC`,
+		userID, artifactIDs,
+	)
+	if err != nil {
+		return nil, err
+	}
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -493,19 +488,16 @@ func (s *SQLiteStore) IncrementContextLoadCount(userID int64, artifactIDs []int6
 		return nil
 	}
 
-	placeholders := make([]string, len(artifactIDs))
-	args := []interface{}{time.Now().UTC().Format("2006-01-02 15:04:05.999"), userID}
-	for i, id := range artifactIDs {
-		placeholders[i] = "?"
-		args = append(args, id)
+	query, args, err := ExpandIn(
+		`UPDATE artifacts
+		SET context_load_count = context_load_count + 1,
+		    last_loaded_at = ?
+		WHERE user_id = ? AND id IN (?)`,
+		time.Now().UTC().Format("2006-01-02 15:04:05.999"), userID, artifactIDs,
+	)
+	if err != nil {
+		return err
 	}
-
-	query := `
-        UPDATE artifacts
-        SET context_load_count = context_load_count + 1,
-            last_loaded_at = ?
-        WHERE user_id = ? AND id IN (` + strings.Join(placeholders, ",") + `)
-    `
 
 	result, err := s.db.Exec(query, args...)
 	if err != nil {

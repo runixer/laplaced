@@ -285,7 +285,7 @@ func (s *Server) Start(ctx context.Context) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	go func() {
+	go func() { // #nosec G118 -- detached ctx is intentional: parent ctx is already done here; need fresh ctx to let Shutdown drain
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -565,6 +565,7 @@ func (s *Server) statsHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) sessionsHandler(w http.ResponseWriter, r *http.Request) {
 	// Handle POST request to force close a session
 	if r.Method == http.MethodPost {
+		r.Body = http.MaxBytesReader(w, r.Body, 1024)
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, "Invalid form data", http.StatusBadRequest)
 			return

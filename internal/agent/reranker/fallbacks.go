@@ -4,6 +4,7 @@ package reranker
 
 import (
 	"log/slog"
+	"strconv"
 
 	"github.com/runixer/laplaced/internal/config"
 )
@@ -165,32 +166,5 @@ func formatArtifactID(id int64) string {
 }
 
 func formatID(prefix string, id int64) string {
-	return prefix + ":" + formatInt64(id)
-}
-
-func formatInt64(i int64) string {
-	const maxInt64Digits = 19
-	var buf [maxInt64Digits]byte
-	n := maxInt64Digits
-	var negative bool
-
-	if i < 0 {
-		negative = true
-		i = -i
-	}
-
-	for i >= 10 {
-		n--
-		buf[n] = byte('0' + i%10)
-		i /= 10
-	}
-	n--
-	buf[n] = byte('0' + i)
-
-	if negative {
-		n--
-		buf[n] = '-'
-	}
-
-	return string(buf[n:])
+	return prefix + ":" + strconv.FormatInt(id, 10)
 }

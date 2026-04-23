@@ -198,8 +198,7 @@ func (l *Laplace) LoadContextData(
 		// Extract media parts for multimodal RAG (v0.6.0: unified on FilePart)
 		var mediaParts []interface{}
 		for _, part := range currentMessageParts {
-			switch part.(type) {
-			case openrouter.FilePart:
+			if _, ok := part.(openrouter.FilePart); ok {
 				mediaParts = append(mediaParts, part)
 			}
 		}
@@ -486,11 +485,11 @@ func formatRAGResults(results []rag.TopicSearchResult, query string) string {
 		}
 
 		ragContent.WriteString("  <topic id=\"")
-		ragContent.WriteString(fmt.Sprintf("%d", topicRes.Topic.ID))
+		fmt.Fprintf(&ragContent, "%d", topicRes.Topic.ID)
 		ragContent.WriteString("\" summary=\"")
 		ragContent.WriteString(escapeXMLAttr(topicRes.Topic.Summary))
 		ragContent.WriteString("\" relevance=\"")
-		ragContent.WriteString(fmt.Sprintf("%.2f", topicRes.Score))
+		fmt.Fprintf(&ragContent, "%.2f", topicRes.Score)
 		ragContent.WriteString("\" date=\"")
 		ragContent.WriteString(topicDate)
 		ragContent.WriteString("\">\n")
@@ -506,7 +505,7 @@ func formatRAGResults(results []rag.TopicSearchResult, query string) string {
 				textContent = fmt.Sprintf("[%s (%s)]: %s", roleTitle, dateStr, msg.Content)
 			}
 
-			ragContent.WriteString(fmt.Sprintf("%d. %s\n", i+1, textContent))
+			fmt.Fprintf(&ragContent, "%d. %s\n", i+1, textContent)
 		}
 
 		ragContent.WriteString("  </topic>\n")
@@ -543,11 +542,11 @@ func formatArtifactResults(artifacts []rag.ArtifactResult, query string) string 
 		}
 
 		content.WriteString("  <artifact id=\"")
-		content.WriteString(fmt.Sprintf("%d", artifactRes.ArtifactID))
+		fmt.Fprintf(&content, "%d", artifactRes.ArtifactID)
 		content.WriteString("\" type=\"")
 		content.WriteString(escapeXMLAttr(fileType))
 		content.WriteString("\" relevance=\"")
-		content.WriteString(fmt.Sprintf("%.2f", artifactRes.Score))
+		fmt.Fprintf(&content, "%.2f", artifactRes.Score)
 		content.WriteString("\">\n")
 
 		if artifactRes.Summary != "" {

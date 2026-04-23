@@ -124,7 +124,7 @@ func (s *Service) processChunk(ctx context.Context, userID int64, chunk []storag
 		var contentBuilder strings.Builder
 		for _, msg := range chunk {
 			if msg.ID >= t.StartMsgID && msg.ID <= t.EndMsgID {
-				contentBuilder.WriteString(fmt.Sprintf("[%s]: %s\n", msg.Role, msg.Content))
+				fmt.Fprintf(&contentBuilder, "[%s]: %s\n", msg.Role, msg.Content)
 			}
 		}
 		embeddingInput := fmt.Sprintf("Topic Summary: %s\n\nConversation Log:\n%s", t.Summary, contentBuilder.String())
@@ -257,7 +257,7 @@ func (s *Service) processChunkWithStats(ctx context.Context, userID int64, chunk
 		var contentBuilder strings.Builder
 		for _, msg := range chunk {
 			if msg.ID >= t.StartMsgID && msg.ID <= t.EndMsgID {
-				contentBuilder.WriteString(fmt.Sprintf("[%s]: %s\n", msg.Role, msg.Content))
+				fmt.Fprintf(&contentBuilder, "[%s]: %s\n", msg.Role, msg.Content)
 			}
 		}
 		embeddingInput := fmt.Sprintf("Topic Summary: %s\n\nConversation Log:\n%s", t.Summary, contentBuilder.String())

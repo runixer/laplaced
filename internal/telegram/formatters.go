@@ -99,15 +99,16 @@ func (m *Message) BuildContent(translator *i18n.Translator, lang string) string 
 	}
 
 	if messageText == "" {
-		if len(m.Photo) > 0 {
+		switch {
+		case len(m.Photo) > 0:
 			messageText = "(photo)"
-		} else if m.Voice != nil {
+		case m.Voice != nil:
 			// Voice content is transcribed separately in the bot logic
 			// Return empty string here, the actual content will be built after transcription
 			return ""
-		} else if m.Document != nil {
+		case m.Document != nil:
 			// Document content is handled separately in the bot logic
-		} else {
+		default:
 			return "" // No text and no media we describe
 		}
 	}

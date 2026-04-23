@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -84,11 +85,21 @@ func runHealthcheck(configPath string) int {
 		}
 	}
 
-	url := fmt.Sprintf("http://localhost:%s/healthz", port)
+	// Reject non-numeric port values so nothing user-supplied can reshape the URL.
+	portNum, err := strconv.ParseUint(port, 10, 16)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Healthcheck: invalid port %q\n", port)
+		return 1
+	}
+
+	url := fmt.Sprintf("http://localhost:%d/healthz", portNum)
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 	}
-	resp, err := client.Get(url)
+	// gosec's taint analysis flags any non-literal URL in Get().
+	// Here the host is literal "localhost" and the port is a validated uint16 above;
+	// no untrusted input remains in the URL.
+	resp, err := client.Get(url) // #nosec G704
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Healthcheck failed: %v\n", err)
 		return 1
@@ -114,6 +125,12 @@ func logTimeFormat(groups []string, a slog.Attr) slog.Attr {
 }
 
 func main() {
+	os.Exit(run())
+}
+
+// run is the real entry point; wrapping main ensures deferred cleanup
+// (store.Close, etc.) runs before the process exits on any error path.
+func run() int {
 	// Set up JSON logging early (before config load) with default INFO level.
 	// Will be reconfigured with correct level after config is loaded.
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -133,23 +150,23 @@ func main() {
 
 	if *showVersion {
 		fmt.Println("laplaced", Version)
-		os.Exit(0)
+		return 0
 	}
 
 	if *healthcheck {
-		os.Exit(runHealthcheck(*configPath))
+		return runHealthcheck(*configPath)
 	}
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		// Can't use logger here, because it's not initialized yet
 		slog.Error("failed to load config", "error", err)
-		os.Exit(1)
+		return 1
 	}
 
 	if err := cfg.Validate(); err != nil {
 		slog.Error("invalid configuration", "error", err)
-		os.Exit(1)
+		return 1
 	}
 
 	var logLevel slog.Level
@@ -173,13 +190,13 @@ func main() {
 	store, err := storage.NewSQLiteStore(logger, cfg.Database.Path)
 	if err != nil {
 		logger.Error("failed to create storage", "error", err)
-		os.Exit(1)
+		return 1
 	}
 	defer store.Close()
 
 	if err := store.Init(); err != nil {
 		logger.Error("failed to initialize storage", "error", err)
-		os.Exit(1)
+		return 1
 	}
 
 	// Recovery: Reset zombie artifact states (v0.6.0)
@@ -193,21 +210,21 @@ func main() {
 	openrouterClient, err := openrouter.NewClient(logger, cfg.OpenRouter.APIKey, cfg.OpenRouter.ProxyURL)
 	if err != nil {
 		logger.Error("failed to create openrouter client", "error", err)
-		os.Exit(1)
+		return 1
 	}
 	logger.Info("OpenRouter client created successfully.")
 
 	api, err := telegram.NewExtendedClient(cfg.Telegram.Token, cfg.Telegram.ProxyURL)
 	if err != nil {
 		logger.Error("failed to create telegram client", "error", err)
-		os.Exit(1)
+		return 1
 	}
 	logger.Info("Telegram client created successfully.")
 
 	translator, err := i18n.NewTranslator(cfg.Bot.Language)
 	if err != nil {
 		logger.Error("failed to initialize translator", "error", err)
-		os.Exit(1)
+		return 1
 	}
 	logger.Info("Translator initialized", "default_lang", cfg.Bot.Language)
 
@@ -215,7 +232,7 @@ func main() {
 	services, err := app.SetupServices(context.Background(), logger, cfg, store, openrouterClient, translator)
 	if err != nil {
 		logger.Error("failed to setup services", "error", err)
-		os.Exit(1)
+		return 1
 	}
 
 	// Create file storage and handler if artifacts are enabled
@@ -232,7 +249,7 @@ func main() {
 	b, err := bot.NewBot(logger, api, cfg, store, store, store, store, store, store, openrouterClient, services.RAGService, services.ContextService, translator)
 	if err != nil {
 		logger.Error("failed to create bot", "error", err)
-		os.Exit(1)
+		return 1
 	}
 	b.SetAgentLogger(services.AgentLogger)
 	b.SetLaplaceAgent(services.LaplaceAgent)
@@ -291,7 +308,7 @@ func main() {
 	webServer, err := web.NewServer(ctx, logger, cfg, store, store, store, store, store, store, store, store, b, services.RAGService)
 	if err != nil {
 		logger.Error("failed to create web server", "error", err)
-		os.Exit(1)
+		return 1
 	}
 	webServer.SetAgentLogRepo(store)
 	webServer.SetPeopleRepository(store)   // v0.5.1: People page
@@ -316,7 +333,7 @@ func main() {
 		webhookURL := cfg.Telegram.WebhookURL + "/telegram/" + cfg.Telegram.WebhookPath
 		if err := b.SetWebhook(webhookURL, cfg.Telegram.WebhookSecret); err != nil {
 			logger.Error("failed to set webhook", "error", err)
-			os.Exit(1)
+			return 1
 		}
 		logger.Info("Webhook set", "url", cfg.Telegram.WebhookURL)
 		close(pollingDone) // No polling, close immediately
@@ -374,4 +391,5 @@ func main() {
 	// Wait for web server to stop
 	<-srvDone
 	logger.Info("Web server stopped")
+	return 0
 }

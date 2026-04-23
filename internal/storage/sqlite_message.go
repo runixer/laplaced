@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"strings"
 	"time"
 )
 
@@ -51,11 +50,12 @@ func (s *SQLiteStore) GetMessagesByIDs(userID int64, ids []int64) ([]Message, er
 		return nil, nil
 	}
 
-	query := "SELECT id, user_id, role, content, created_at, topic_id FROM history WHERE user_id = ? AND id IN (?" + strings.Repeat(",?", len(ids)-1) + ")"
-	args := make([]interface{}, len(ids)+1)
-	args[0] = userID
-	for i, id := range ids {
-		args[i+1] = id
+	query, args, err := ExpandIn(
+		"SELECT id, user_id, role, content, created_at, topic_id FROM history WHERE user_id = ? AND id IN (?)",
+		userID, ids,
+	)
+	if err != nil {
+		return nil, err
 	}
 
 	rows, err := s.db.Query(query, args...)
@@ -176,20 +176,25 @@ func (s *SQLiteStore) GetRecentSessionMessages(ctx context.Context, userID int64
 		return nil, nil
 	}
 
-	query := "SELECT id, user_id, role, content, created_at, topic_id FROM history WHERE user_id = ? AND topic_id IS NULL"
-	args := []interface{}{userID}
-
-	// Add exclusion for MessageGroup message IDs to avoid duplicates
-	if len(excludeIDs) > 0 {
-		placeholders := strings.Repeat(",?", len(excludeIDs)-1)
-		query += " AND id NOT IN (?" + placeholders + ")"
-		for _, id := range excludeIDs {
-			args = append(args, id)
+	var query string
+	var args []any
+	if len(excludeIDs) == 0 {
+		query = `SELECT id, user_id, role, content, created_at, topic_id FROM history
+			WHERE user_id = ? AND topic_id IS NULL
+			ORDER BY created_at DESC, id DESC LIMIT ?`
+		args = []any{userID, limit}
+	} else {
+		var err error
+		query, args, err = ExpandIn(
+			`SELECT id, user_id, role, content, created_at, topic_id FROM history
+				WHERE user_id = ? AND topic_id IS NULL AND id NOT IN (?)
+				ORDER BY created_at DESC, id DESC LIMIT ?`,
+			userID, excludeIDs, limit,
+		)
+		if err != nil {
+			return nil, err
 		}
 	}
-
-	query += " ORDER BY created_at DESC, id DESC LIMIT ?"
-	args = append(args, limit)
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
