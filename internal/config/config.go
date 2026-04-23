@@ -434,6 +434,16 @@ func (c *SearchConfig) GetPeopleMaxResults() int {
 	return DefaultPeopleMaxResults
 }
 
+// TelemetryConfig defines configuration for OpenTelemetry export (traces first,
+// metrics and logs as subsequent iterations). Disabled by default — callers
+// must flip `enabled: true` (or set LAPLACED_TELEMETRY_ENABLED=true) to start
+// an exporter. When disabled, the global OTel provider stays no-op.
+type TelemetryConfig struct {
+	Enabled      bool   `yaml:"enabled" env:"LAPLACED_TELEMETRY_ENABLED"`
+	OTLPEndpoint string `yaml:"otlp_endpoint" env:"LAPLACED_TELEMETRY_OTLP_ENDPOINT"`
+	ServiceName  string `yaml:"service_name" env:"LAPLACED_TELEMETRY_SERVICE_NAME"`
+}
+
 type Config struct {
 	Log struct {
 		Level string `yaml:"level" env:"LAPLACED_LOG_LEVEL"`
@@ -466,6 +476,7 @@ type Config struct {
 	Artifacts ArtifactsConfig `yaml:"artifacts"`
 	Memory    MemoryConfig    `yaml:"memory"`
 	Search    SearchConfig    `yaml:"search"`
+	Telemetry TelemetryConfig `yaml:"telemetry"`
 }
 
 // Load loads configuration from the specified file path.
@@ -694,6 +705,11 @@ func (c *Config) Validate() error {
 		if c.Agents.Extractor.MaxFileSizeMB <= 0 {
 			errs = append(errs, fmt.Errorf("agents.extractor.max_file_size_mb must be positive, got %d", c.Agents.Extractor.MaxFileSizeMB))
 		}
+	}
+
+	// Telemetry: endpoint is mandatory only when export is turned on.
+	if c.Telemetry.Enabled && c.Telemetry.OTLPEndpoint == "" {
+		errs = append(errs, errors.New("telemetry.otlp_endpoint is required when telemetry.enabled is true"))
 	}
 
 	if len(errs) > 0 {

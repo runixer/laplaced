@@ -186,6 +186,15 @@ bot:
 database:
   path: "data/laplaced.db"
 
+# Telemetry Configuration (OpenTelemetry export)
+# Disabled by default. Flip `enabled: true` (or LAPLACED_TELEMETRY_ENABLED=true)
+# when a local OTLP collector is reachable on otlp_endpoint. Traces only in
+# this iteration; metrics and logs land in subsequent iterations.
+telemetry:
+  enabled: false
+  otlp_endpoint: "localhost:4317"
+  service_name: "laplaced"
+
 # Artifacts Configuration (v0.6.0)
 artifacts:
   enabled: true
