@@ -82,7 +82,7 @@ func (e *Enricher) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 			content = content[:500] + "..."
 		}
 		content = strings.ReplaceAll(content, "\n", " ")
-		historyStr.WriteString(fmt.Sprintf("- [%s]: %s\n", msg.Role, content))
+		fmt.Fprintf(&historyStr, "- [%s]: %s\n", msg.Role, content)
 	}
 
 	// Build user prompt

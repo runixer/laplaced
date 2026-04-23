@@ -164,6 +164,7 @@ func calculateBackoff(attempt int) time.Duration {
 	}
 
 	// Add jitter: ±20%
+	// #nosec G404 -- retry jitter is a throughput tweak, not a security primitive
 	jitter := time.Duration(float64(delay) * jitterFactor * (2*rand.Float64() - 1))
 	return delay + jitter
 }

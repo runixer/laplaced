@@ -415,7 +415,7 @@ func formatMessagesForLog(messages []openrouter.Message) string {
 			sb.WriteString("\n\n")
 		}
 		role := strings.ToUpper(msg.Role)
-		sb.WriteString(fmt.Sprintf("=== %s ===\n", role))
+		fmt.Fprintf(&sb, "=== %s ===\n", role)
 
 		switch content := msg.Content.(type) {
 		case string:
@@ -441,7 +441,7 @@ func formatMessagesForLog(messages []openrouter.Message) string {
 		if len(msg.ToolCalls) > 0 {
 			sb.WriteString("\n\n[TOOL CALLS]")
 			for _, tc := range msg.ToolCalls {
-				sb.WriteString(fmt.Sprintf("\n- %s(%s)", tc.Function.Name, tc.Function.Arguments))
+				fmt.Fprintf(&sb, "\n- %s(%s)", tc.Function.Name, tc.Function.Arguments)
 			}
 		}
 	}
@@ -544,11 +544,12 @@ func SanitizeLLMResponse(text string) (string, bool) {
 		if endIdx != -1 {
 			before := strings.TrimSpace(text[:loc[0]])
 			after := strings.TrimSpace(text[endIdx+1:])
-			if before != "" && after != "" {
+			switch {
+			case before != "" && after != "":
 				text = before + "\n\n" + after
-			} else if after != "" {
+			case after != "":
 				text = after
-			} else {
+			default:
 				text = before
 			}
 			sanitized = true
@@ -636,9 +637,10 @@ func FindMatchingBrace(text string, startIdx int) int {
 			continue
 		}
 
-		if c == '{' {
+		switch c {
+		case '{':
 			depth++
-		} else if c == '}' {
+		case '}':
 			depth--
 			if depth == 0 {
 				return i

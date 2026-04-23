@@ -474,9 +474,10 @@ func (s *Service) formatSessionMessages(history []storage.Message) string {
 
 	for _, m := range history[start:] {
 		role := m.Role
-		if role == "assistant" {
+		switch role {
+		case "assistant":
 			role = "Assistant"
-		} else if role == "user" {
+		case "user":
 			role = "User"
 		}
 		// Truncate very long messages

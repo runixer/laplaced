@@ -104,14 +104,14 @@ func (e *ToolExecutor) performSearchPeople(ctx context.Context, userID int64, ar
 
 	// Format results
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Found %d people:\n\n", len(people)))
+	fmt.Fprintf(&sb, "Found %d people:\n\n", len(people))
 	for _, p := range people {
-		sb.WriteString(fmt.Sprintf("**%s** [%s]\n", p.DisplayName, p.Circle))
+		fmt.Fprintf(&sb, "**%s** [%s]\n", p.DisplayName, p.Circle)
 		if p.Username != nil && *p.Username != "" {
-			sb.WriteString(fmt.Sprintf("Username: @%s\n", *p.Username))
+			fmt.Fprintf(&sb, "Username: @%s\n", *p.Username)
 		}
 		if len(p.Aliases) > 0 {
-			sb.WriteString(fmt.Sprintf("Aliases: %s\n", strings.Join(p.Aliases, ", ")))
+			fmt.Fprintf(&sb, "Aliases: %s\n", strings.Join(p.Aliases, ", "))
 		}
 		if p.Bio != "" {
 			// Truncate long bios
@@ -119,7 +119,7 @@ func (e *ToolExecutor) performSearchPeople(ctx context.Context, userID int64, ar
 			if len(bio) > 200 {
 				bio = bio[:200] + "..."
 			}
-			sb.WriteString(fmt.Sprintf("Bio: %s\n", bio))
+			fmt.Fprintf(&sb, "Bio: %s\n", bio)
 		}
 		sb.WriteString("\n")
 	}
@@ -130,18 +130,18 @@ func (e *ToolExecutor) performSearchPeople(ctx context.Context, userID int64, ar
 // formatRAGResults formats RAG search results for display.
 func (e *ToolExecutor) formatRAGResults(topics []rag.TopicSearchResult, query string) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Found %d topics:\n\n", len(topics)))
+	fmt.Fprintf(&sb, "Found %d topics:\n\n", len(topics))
 	for i, t := range topics {
-		sb.WriteString(fmt.Sprintf("%d. **%s**\n", i+1, t.Topic.Summary))
-		sb.WriteString(fmt.Sprintf("   Date: %s\n", t.Topic.CreatedAt.Format("2006-01-02")))
-		sb.WriteString(fmt.Sprintf("   Messages: %d\n", len(t.Messages)))
+		fmt.Fprintf(&sb, "%d. **%s**\n", i+1, t.Topic.Summary)
+		fmt.Fprintf(&sb, "   Date: %s\n", t.Topic.CreatedAt.Format("2006-01-02"))
+		fmt.Fprintf(&sb, "   Messages: %d\n", len(t.Messages))
 		if len(t.Messages) > 0 {
 			// Show first message as preview
 			preview := t.Messages[0].Content
 			if len(preview) > 100 {
 				preview = preview[:100] + "..."
 			}
-			sb.WriteString(fmt.Sprintf("   Preview: %s\n", preview))
+			fmt.Fprintf(&sb, "   Preview: %s\n", preview)
 		}
 		sb.WriteString("\n")
 	}

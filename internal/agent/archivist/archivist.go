@@ -374,7 +374,7 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (*agent.Res
 		return nil, fmt.Errorf("failed to build user prompt: %w", err)
 	}
 
-	messages_llm := []openrouter.Message{
+	llmMessages := []openrouter.Message{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: userPrompt},
 	}
@@ -391,7 +391,7 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (*agent.Res
 
 	llmReq := openrouter.ChatCompletionRequest{
 		Model:    model,
-		Messages: messages_llm,
+		Messages: llmMessages,
 		// NOTE: response-healing plugin breaks reasoning visibility when combined with json_object format.
 		// Reasoning works correctly without plugins.
 		ResponseFormat: openrouter.ResponseFormat{Type: "json_object"},
@@ -669,15 +669,15 @@ func (a *Archivist) buildConversation(messages []storage.Message, user *storage.
 	for _, msg := range messages {
 		if msg.Role == "user" {
 			if strings.HasPrefix(msg.Content, "[") && strings.Contains(msg.Content, "]:") {
-				sb.WriteString(fmt.Sprintf("%s\n", msg.Content))
+				fmt.Fprintf(&sb, "%s\n", msg.Content)
 			} else {
 				name := a.formatUserName(user)
 				dateStr := msg.CreatedAt.Format("2006-01-02 15:04:05")
-				sb.WriteString(fmt.Sprintf("[%s (%s)]: %s\n", name, dateStr, msg.Content))
+				fmt.Fprintf(&sb, "[%s (%s)]: %s\n", name, dateStr, msg.Content)
 			}
 		} else {
 			dateStr := msg.CreatedAt.Format("2006-01-02 15:04:05")
-			sb.WriteString(fmt.Sprintf("[Bot (%s)]: %s\n", dateStr, msg.Content))
+			fmt.Fprintf(&sb, "[Bot (%s)]: %s\n", dateStr, msg.Content)
 		}
 	}
 	return sb.String()

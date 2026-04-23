@@ -266,7 +266,7 @@ func (s *Service) mergeTopics(ctx context.Context, candidate storage.MergeCandid
 	var contentBuilder strings.Builder
 	var sizeChars int
 	for _, msg := range msgs {
-		contentBuilder.WriteString(fmt.Sprintf("[%s]: %s\n", msg.Role, msg.Content))
+		fmt.Fprintf(&contentBuilder, "[%s]: %s\n", msg.Role, msg.Content)
 		sizeChars += len(msg.Content)
 	}
 	embeddingInput := fmt.Sprintf("Topic Summary: %s\n\nConversation Log:\n%s", newSummary, contentBuilder.String())

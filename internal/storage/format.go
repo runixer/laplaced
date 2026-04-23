@@ -17,8 +17,8 @@ func FormatUserProfile(facts []Fact) string {
 	var sb strings.Builder
 	sb.WriteString("<user_profile>\n")
 	for _, f := range facts {
-		sb.WriteString(fmt.Sprintf("- [Fact:%d] [%s/%s] (Updated: %s) %s\n",
-			f.ID, f.Category, f.Type, f.LastUpdated.Format("2006-01-02"), f.Content))
+		fmt.Fprintf(&sb, "- [Fact:%d] [%s/%s] (Updated: %s) %s\n",
+			f.ID, f.Category, f.Type, f.LastUpdated.Format("2006-01-02"), f.Content)
 	}
 	sb.WriteString("</user_profile>")
 	return sb.String()
@@ -37,8 +37,8 @@ func FormatUserProfileCompact(facts []Fact) string {
 	var sb strings.Builder
 	sb.WriteString("<user_profile>\n")
 	for _, f := range facts {
-		sb.WriteString(fmt.Sprintf("- [%s/%s] (%s) %s\n",
-			f.Category, f.Type, f.LastUpdated.Format("2006-01-02"), f.Content))
+		fmt.Fprintf(&sb, "- [%s/%s] (%s) %s\n",
+			f.Category, f.Type, f.LastUpdated.Format("2006-01-02"), f.Content)
 	}
 	sb.WriteString("</user_profile>")
 	return sb.String()
@@ -55,12 +55,11 @@ func FormatRecentTopics(topics []TopicExtended) string {
 	var sb strings.Builder
 	sb.WriteString("<recent_topics>\n")
 	for _, t := range topics {
-		sb.WriteString(fmt.Sprintf("- %s: %q (%d msg, ~%dk chars)\n",
+		fmt.Fprintf(&sb, "- %s: %q (%d msg, ~%dk chars)\n",
 			t.CreatedAt.Format("2006-01-02"),
 			t.Summary,
 			t.MessageCount,
-			t.SizeChars/1000,
-		))
+			t.SizeChars/1000)
 	}
 	sb.WriteString("</recent_topics>")
 	return sb.String()
@@ -98,28 +97,28 @@ func FormatPeople(people []Person, tag string) string {
 
 	var sb strings.Builder
 	if tag != "" {
-		sb.WriteString(fmt.Sprintf("<%s>\n", tag))
+		fmt.Fprintf(&sb, "<%s>\n", tag)
 	}
 	for _, p := range people {
-		sb.WriteString(fmt.Sprintf("[Person:%d] %s", p.ID, p.DisplayName))
+		fmt.Fprintf(&sb, "[Person:%d] %s", p.ID, p.DisplayName)
 
 		if p.Username != nil && *p.Username != "" {
-			sb.WriteString(fmt.Sprintf(" (@%s)", *p.Username))
+			fmt.Fprintf(&sb, " (@%s)", *p.Username)
 		}
 
 		if len(p.Aliases) > 0 {
-			sb.WriteString(fmt.Sprintf(" (aka %s)", strings.Join(p.Aliases, ", ")))
+			fmt.Fprintf(&sb, " (aka %s)", strings.Join(p.Aliases, ", "))
 		}
 
-		sb.WriteString(fmt.Sprintf(" [%s]", p.Circle))
+		fmt.Fprintf(&sb, " [%s]", p.Circle)
 
 		if p.Bio != "" {
-			sb.WriteString(fmt.Sprintf(": %s", p.Bio))
+			fmt.Fprintf(&sb, ": %s", p.Bio)
 		}
 		sb.WriteString("\n")
 	}
 	if tag != "" {
-		sb.WriteString(fmt.Sprintf("</%s>", tag))
+		fmt.Fprintf(&sb, "</%s>", tag)
 	}
 	return sb.String()
 }

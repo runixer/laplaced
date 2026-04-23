@@ -139,6 +139,7 @@ func (s *SQLiteStore) GetFactHistoryExtended(filter FactHistoryFilter, limit, of
 		sortDir = "DESC"
 	}
 
+	// #nosec G201 -- sortBy validated against whitelist above; sortDir validated as ASC/DESC; whereSQL built from static fragments
 	query := fmt.Sprintf(`
 		SELECT id, fact_id, user_id, action, old_content, new_content, reason, category, relation, importance, topic_id, request_input, created_at
 		FROM fact_history

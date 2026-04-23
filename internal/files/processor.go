@@ -488,15 +488,16 @@ func (p *Processor) processVoiceWithRetry(ctx context.Context, voice *telegram.V
 	var artifactID *int64
 	if p.fileHandler != nil {
 		shouldSave := false
-		if p.minVoiceDurationSec == -1 {
+		switch {
+		case p.minVoiceDurationSec == -1:
 			// Voice artifacts disabled
 			p.logger.Debug("voice artifacts disabled, skipping save",
 				"user_id", userID,
 				"duration", voice.Duration,
 			)
-		} else if p.minVoiceDurationSec == 0 || voice.Duration >= p.minVoiceDurationSec {
+		case p.minVoiceDurationSec == 0 || voice.Duration >= p.minVoiceDurationSec:
 			shouldSave = true
-		} else {
+		default:
 			p.logger.Debug("voice too short, skipping artifact save",
 				"user_id", userID,
 				"duration", voice.Duration,
@@ -576,11 +577,12 @@ func (p *Processor) processAudioWithRetry(ctx context.Context, audio *telegram.A
 	filename := audio.FileName
 	if filename == "" {
 		// Use title + performer if available, else generic name
-		if audio.Title != "" && audio.Performers != "" {
+		switch {
+		case audio.Title != "" && audio.Performers != "":
 			filename = fmt.Sprintf("%s - %s.mp3", audio.Performers, audio.Title)
-		} else if audio.Title != "" {
+		case audio.Title != "":
 			filename = audio.Title + ".mp3"
-		} else {
+		default:
 			filename = "audio.mp3"
 		}
 	}

@@ -82,9 +82,10 @@ Examples:
 		ts := time.Now().UTC().Format("20060102T150405Z")
 		for i, img := range resp.Images {
 			ext := ".png"
-			if img.MimeType == "image/jpeg" {
+			switch img.MimeType {
+			case "image/jpeg":
 				ext = ".jpg"
-			} else if img.MimeType == "image/webp" {
+			case "image/webp":
 				ext = ".webp"
 			}
 			filename := fmt.Sprintf("gen_%s_%d%s", ts, i+1, ext)

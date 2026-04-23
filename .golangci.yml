@@ -9,56 +9,29 @@ linters:
     - unconvert
   settings:
     gocritic:
-      disabled-checks:
-        - exitAfterDefer
-        - ifElseChain
-        - elseif
-        - singleCaseSwitch
       enabled-tags:
         - diagnostic
-    gosec:
-      excludes:
-        - G201
-        - G202
-        - G404
-        # v2 migration: new rules surfaced — see docs/plans/ci-polish-next-steps.md
-        - G115
-        - G118
-        - G120
-        - G704
-    staticcheck:
-      # v2 enables QF (quickfix) and ST (style) groups by default;
-      # v1 had only SA (static analysis) enabled. Match v1 behaviour here;
-      # findings from the broader groups are deferred to
-      # docs/plans/ci-polish-next-steps.md.
-      checks:
-        - SA*
   exclusions:
     generated: lax
+    # Standard exclusion presets: suppress universal Go patterns like
+    # `defer x.Close()` without error handling (std-error-handling),
+    # well-known false positives, and comment-related noise.
     presets:
       - comments
       - common-false-positives
       - legacy
       - std-error-handling
     rules:
+      # Tests generate throwaway fixtures (0644 file perms, unchecked bodies,
+      # commented-out debug code). Don't enforce production-grade hygiene there.
       - linters:
           - bodyclose
           - gocritic
           - gosec
         path: _test\.go
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
 formatters:
   enable:
     - goimports
-  exclusions:
-    generated: lax
-    paths:
-      - third_party$
-      - builtin$
-      - examples$

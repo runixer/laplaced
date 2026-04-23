@@ -118,7 +118,7 @@ func (s *Service) processArtifactExtraction(ctx context.Context) {
 		sem <- struct{}{}
 		wg.Add(1)
 
-		go func(a storage.Artifact) {
+		go func(a storage.Artifact) { // #nosec G118 -- detached ctx is intentional (see below): LLM calls must survive parent shutdown
 			defer wg.Done()
 			defer func() { <-sem }() // Release semaphore
 			defer s.finishProcessingArtifact(a.ID)

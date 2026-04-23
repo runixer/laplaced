@@ -189,7 +189,7 @@ func (s *Service) splitTopic(ctx context.Context, topic storage.Topic) ([]int64,
 		var contentBuilder strings.Builder
 		for _, msg := range messages {
 			if msg.ID >= t.StartMsgID && msg.ID <= t.EndMsgID {
-				contentBuilder.WriteString(fmt.Sprintf("[%s]: %s\n", msg.Role, msg.Content))
+				fmt.Fprintf(&contentBuilder, "[%s]: %s\n", msg.Role, msg.Content)
 			}
 		}
 		embeddingInput := fmt.Sprintf("Topic Summary: %s\n\nConversation Log:\n%s", t.Summary, contentBuilder.String())

@@ -88,9 +88,10 @@ func loadTopicsContent(
 		for _, m := range msgs {
 			timestamp := m.CreatedAt.Format("2006-01-02 15:04:05")
 			role := m.Role
-			if role == "assistant" {
+			switch role {
+			case "assistant":
 				role = "Assistant"
-			} else if role == "user" {
+			case "user":
 				role = "User"
 			}
 			fmt.Fprintf(&sb, "[%s (%s)]: %s\n", role, timestamp, m.Content)

@@ -3,7 +3,6 @@ package storage
 import (
 	"database/sql"
 	"encoding/json"
-	"strings"
 	"time"
 )
 
@@ -229,11 +228,12 @@ func (s *SQLiteStore) GetFactsByIDs(userID int64, ids []int64) ([]Fact, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	query := "SELECT id, user_id, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE user_id = ? AND id IN (?" + strings.Repeat(",?", len(ids)-1) + ")"
-	args := make([]interface{}, len(ids)+1)
-	args[0] = userID
-	for i, id := range ids {
-		args[i+1] = id
+	query, args, err := ExpandIn(
+		"SELECT id, user_id, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE user_id = ? AND id IN (?)",
+		userID, ids,
+	)
+	if err != nil {
+		return nil, err
 	}
 
 	rows, err := s.db.Query(query, args...)
