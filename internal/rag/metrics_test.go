@@ -226,6 +226,20 @@ func TestMetricsRegistration(t *testing.T) {
 		"laplaced_rag_candidates",
 	}
 
+	// DefaultGatherer.Gather() reports Vec families only for label combinations
+	// that have been touched. Under -shuffle=on this test may run before
+	// any other test exercises these metrics, so force-instantiate each one.
+	embeddingRequestDuration.WithLabelValues("0", "t", "t", "t")
+	embeddingRequestsTotal.WithLabelValues("0", "t", "t", "t")
+	embeddingTokensTotal.WithLabelValues("0", "t")
+	embeddingCostTotal.WithLabelValues("0", "t")
+	vectorSearchDuration.WithLabelValues("0", "t")
+	vectorSearchVectorsScanned.WithLabelValues("0", "t")
+	vectorIndexSize.WithLabelValues("t")
+	vectorIndexMemoryBytes.WithLabelValues("t")
+	ragRetrievalTotal.WithLabelValues("0", "t")
+	ragCandidatesTotal.WithLabelValues("0", "t")
+
 	// Collect all metric names from default registry
 	mfs, err := prometheus.DefaultGatherer.Gather()
 	assert.NoError(t, err)
