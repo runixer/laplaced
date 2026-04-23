@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Runs cheap checks that CI enforces. Skip with `git commit --no-verify`.
+
+set -eu
+
+export PATH="$HOME/go/bin:$PATH"
+
+echo "==> golangci-lint"
+golangci-lint run --timeout=2m
+
+echo "==> go.mod / go.sum drift"
+if ! go mod tidy -diff >/dev/null 2>&1; then
+    echo "go.mod / go.sum out of sync. Run 'go mod tidy' to fix. Diff:"
+    go mod tidy -diff
+    exit 1
+fi
+
+echo "==> go build ./..."
+go build ./...
+
+echo "pre-commit OK"

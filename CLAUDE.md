@@ -478,9 +478,18 @@ EOF
 )"
 ```
 
-### Pre-commit Hook
+### Git Hooks
 
-Project has `golangci-lint` pre-commit hook. If commit fails, fix lint errors and retry.
+Project ships git hooks in `scripts/githooks/`. Install once after clone:
+
+```bash
+make hooks
+```
+
+- `pre-commit` — `golangci-lint`, `go mod tidy` drift check, `go build ./...`
+- `pre-push` — `go test -race -shuffle=on -short ./...`, plus `govulncheck` if installed
+
+Skip with `--no-verify` if needed. CI is the source of truth; hooks just save round-trips.
 
 ## Changelog
 
