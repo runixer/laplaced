@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Runs tests that catch order/race bugs. Skip with `git push --no-verify`.
+
+set -eu
+
+export PATH="$HOME/go/bin:$PATH"
+
+echo "==> go test -race -shuffle=on -short ./..."
+go test -race -shuffle=on -short ./...
+
+if command -v govulncheck >/dev/null 2>&1; then
+    echo "==> govulncheck ./..."
+    govulncheck ./...
+fi
+
+echo "pre-push OK"
