@@ -189,6 +189,7 @@ func run() int {
 	// the batcher is drained.
 	tracerShutdown, err := obs.InitTracing(context.Background(), obs.TracingConfig{
 		Enabled:      cfg.Telemetry.Enabled,
+		Exporter:     cfg.Telemetry.Exporter,
 		OTLPEndpoint: cfg.Telemetry.OTLPEndpoint,
 		ServiceName:  cfg.Telemetry.ServiceName,
 	}, Version)

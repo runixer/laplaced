@@ -7,12 +7,20 @@ package obs
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+)
+
+// Exporter names for TracingConfig.Exporter.
+const (
+	ExporterOTLP   = "otlp"
+	ExporterStdout = "stdout"
 )
 
 // TracingConfig is the minimal contract tracing.Init needs from caller config.
@@ -20,7 +28,8 @@ import (
 // of upstream dependencies — useful for tests and for future reuse.
 type TracingConfig struct {
 	Enabled      bool
-	OTLPEndpoint string
+	Exporter     string // "otlp" (default) or "stdout"
+	OTLPEndpoint string // required when Exporter == "otlp"
 	ServiceName  string
 }
 
@@ -37,10 +46,13 @@ func noopShutdown(context.Context) error { return nil }
 // (noop provider) stays in effect, otel.Tracer(...) returns cheap no-op
 // spans, and the returned ShutdownFunc does nothing.
 //
-// When enabled, it builds an OTLP/gRPC exporter pointed at cfg.OTLPEndpoint
-// (loopback, insecure — this is for a local collector like Alloy on the
-// same host). Sampling is AlwaysSample: low-volume workload, short
-// retention downstream.
+// When enabled, it builds an exporter based on cfg.Exporter:
+//   - "otlp" (default): OTLP/gRPC pointed at cfg.OTLPEndpoint (loopback,
+//     insecure — for a local collector like Alloy on the same host).
+//   - "stdout": pretty-prints spans to stderr, for local dev where
+//     network-level delivery is not what's being tested.
+//
+// Sampling is AlwaysSample: low-volume workload, short retention downstream.
 //
 // serviceVersion is recorded as the service.version resource attribute;
 // callers typically pass the build-time Version variable.
@@ -48,21 +60,10 @@ func InitTracing(ctx context.Context, cfg TracingConfig, serviceVersion string) 
 	if !cfg.Enabled {
 		return noopShutdown, nil
 	}
-	if cfg.OTLPEndpoint == "" {
-		return noopShutdown, fmt.Errorf("obs: OTLPEndpoint is required when tracing is enabled")
-	}
 
 	serviceName := cfg.ServiceName
 	if serviceName == "" {
 		serviceName = "laplaced"
-	}
-
-	exporter, err := otlptracegrpc.New(ctx,
-		otlptracegrpc.WithEndpoint(cfg.OTLPEndpoint),
-		otlptracegrpc.WithInsecure(),
-	)
-	if err != nil {
-		return noopShutdown, fmt.Errorf("obs: create OTLP exporter: %w", err)
 	}
 
 	res, err := resource.Merge(
@@ -84,8 +85,47 @@ func InitTracing(ctx context.Context, cfg TracingConfig, serviceVersion string) 
 		)
 	}
 
+	// Empty Exporter defaults to OTLP for backwards compatibility with
+	// existing prod config that predates the field.
+	exporterName := cfg.Exporter
+	if exporterName == "" {
+		exporterName = ExporterOTLP
+	}
+
+	var spanProcessor sdktrace.SpanProcessor
+	switch exporterName {
+	case ExporterOTLP:
+		if cfg.OTLPEndpoint == "" {
+			return noopShutdown, fmt.Errorf("obs: OTLPEndpoint is required when exporter is %q", ExporterOTLP)
+		}
+		exporter, err := otlptracegrpc.New(ctx,
+			otlptracegrpc.WithEndpoint(cfg.OTLPEndpoint),
+			otlptracegrpc.WithInsecure(),
+		)
+		if err != nil {
+			return noopShutdown, fmt.Errorf("obs: create OTLP exporter: %w", err)
+		}
+		// Batching is fine in long-running processes (cmd/bot) where
+		// the shutdown defer gives the batcher time to drain.
+		spanProcessor = sdktrace.NewBatchSpanProcessor(exporter)
+	case ExporterStdout:
+		// Write to stderr so it does not mix with JSON logs on stdout.
+		exporter, err := stdouttrace.New(
+			stdouttrace.WithWriter(os.Stderr),
+			stdouttrace.WithPrettyPrint(),
+		)
+		if err != nil {
+			return noopShutdown, fmt.Errorf("obs: create stdout exporter: %w", err)
+		}
+		// Sync processor: short-lived CLI processes would otherwise
+		// exit before a batcher flushes.
+		spanProcessor = sdktrace.NewSimpleSpanProcessor(exporter)
+	default:
+		return noopShutdown, fmt.Errorf("obs: unknown exporter %q (expected %q or %q)", cfg.Exporter, ExporterOTLP, ExporterStdout)
+	}
+
 	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter),
+		sdktrace.WithSpanProcessor(spanProcessor),
 		sdktrace.WithResource(res),
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
 	)

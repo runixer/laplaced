@@ -1266,6 +1266,34 @@ func TestValidate_Telemetry(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "enabled with explicit otlp exporter and endpoint",
+			modify: func(c *Config) {
+				c.Telemetry.Enabled = true
+				c.Telemetry.Exporter = "otlp"
+				c.Telemetry.OTLPEndpoint = "localhost:4317"
+			},
+			wantErr: false,
+		},
+		{
+			name: "enabled stdout exporter - endpoint not required",
+			modify: func(c *Config) {
+				c.Telemetry.Enabled = true
+				c.Telemetry.Exporter = "stdout"
+				c.Telemetry.OTLPEndpoint = ""
+			},
+			wantErr: false,
+		},
+		{
+			name: "enabled with unknown exporter",
+			modify: func(c *Config) {
+				c.Telemetry.Enabled = true
+				c.Telemetry.Exporter = "jaeger"
+				c.Telemetry.OTLPEndpoint = "localhost:4317"
+			},
+			wantErr:     true,
+			errContains: "telemetry.exporter must be one of",
+		},
 	}
 
 	for _, tt := range tests {
