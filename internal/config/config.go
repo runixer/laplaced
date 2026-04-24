@@ -447,6 +447,11 @@ type TelemetryConfig struct {
 	Exporter     string `yaml:"exporter" env:"LAPLACED_TELEMETRY_EXPORTER"`
 	OTLPEndpoint string `yaml:"otlp_endpoint" env:"LAPLACED_TELEMETRY_OTLP_ENDPOINT"`
 	ServiceName  string `yaml:"service_name" env:"LAPLACED_TELEMETRY_SERVICE_NAME"`
+	// TraceContent, when true, asks tracing to record full content (LLM
+	// request/response bodies, raw RAG queries, tool args/results) as span
+	// events. Default off — flip only for debug sessions. Also surfaces as
+	// resource attribute laplaced.trace_content on the captured trace.
+	TraceContent bool `yaml:"trace_content" env:"LAPLACED_TELEMETRY_TRACE_CONTENT"`
 }
 
 type Config struct {

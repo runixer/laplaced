@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -31,6 +32,11 @@ type TracingConfig struct {
 	Exporter     string // "otlp" (default) or "stdout"
 	OTLPEndpoint string // required when Exporter == "otlp"
 	ServiceName  string
+	// TraceContent, when true, flips the content toggle via SetContentEnabled
+	// so RecordContent starts attaching body-bearing span events. The trace
+	// carries a resource attribute laplaced.trace_content=true so the mode
+	// is self-identifying at query time.
+	TraceContent bool
 }
 
 // ShutdownFunc flushes pending spans and releases exporter resources.
@@ -66,24 +72,31 @@ func InitTracing(ctx context.Context, cfg TracingConfig, serviceVersion string) 
 		serviceName = "laplaced"
 	}
 
+	resAttrs := []attribute.KeyValue{
+		semconv.ServiceName(serviceName),
+		semconv.ServiceVersion(serviceVersion),
+	}
+	if cfg.TraceContent {
+		// Self-identify traces captured while content recording is on.
+		// Useful at query time to separate debug-session traces from
+		// everyday ones.
+		resAttrs = append(resAttrs, attribute.Bool("laplaced.trace_content", true))
+	}
+
 	res, err := resource.Merge(
 		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceName(serviceName),
-			semconv.ServiceVersion(serviceVersion),
-		),
+		resource.NewWithAttributes(semconv.SchemaURL, resAttrs...),
 	)
 	if err != nil {
 		// Merge only fails on schema URL conflicts. If it does, fall back
 		// to the non-merged custom resource — better a working tracer with
 		// a minimal resource than no tracer at all.
-		res = resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceName(serviceName),
-			semconv.ServiceVersion(serviceVersion),
-		)
+		res = resource.NewWithAttributes(semconv.SchemaURL, resAttrs...)
 	}
+
+	// Flip the content toggle BEFORE returning so spans opened by early
+	// caller code already see the right state.
+	SetContentEnabled(cfg.TraceContent)
 
 	// Empty Exporter defaults to OTLP for backwards compatibility with
 	// existing prod config that predates the field.

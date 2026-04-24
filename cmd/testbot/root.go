@@ -268,6 +268,7 @@ func setupTestBot(cfg *config.Config, logger *slog.Logger, dbPath string, dbChan
 		Exporter:     tb.cfg.Telemetry.Exporter,
 		OTLPEndpoint: tb.cfg.Telemetry.OTLPEndpoint,
 		ServiceName:  tb.cfg.Telemetry.ServiceName,
+		TraceContent: tb.cfg.Telemetry.TraceContent,
 	}, "dev-testbot")
 	if err != nil {
 		return nil, fmt.Errorf("failed to init tracing: %w", err)

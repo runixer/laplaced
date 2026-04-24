@@ -192,6 +192,7 @@ func run() int {
 		Exporter:     cfg.Telemetry.Exporter,
 		OTLPEndpoint: cfg.Telemetry.OTLPEndpoint,
 		ServiceName:  cfg.Telemetry.ServiceName,
+		TraceContent: cfg.Telemetry.TraceContent,
 	}, Version)
 	if err != nil {
 		logger.Error("failed to initialize tracing", "error", err)
