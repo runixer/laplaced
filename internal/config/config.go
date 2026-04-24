@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ilyakaznacheev/cleanenv"
+	"github.com/runixer/laplaced/internal/openrouter"
 	"gopkg.in/yaml.v3"
 )
 
@@ -258,11 +259,38 @@ type ToolConfig struct {
 }
 
 type OpenRouterConfig struct {
-	APIKey          string      `yaml:"api_key" env:"LAPLACED_OPENROUTER_API_KEY"`
-	ProxyURL        string      `yaml:"proxy_url" env:"LAPLACED_OPENROUTER_PROXY_URL"`
-	PDFParserEngine string      `yaml:"pdf_parser_engine"`
-	RequestCost     float64     `yaml:"request_cost"`
-	PriceTiers      []PriceTier `yaml:"price_tiers"`
+	APIKey          string                `yaml:"api_key" env:"LAPLACED_OPENROUTER_API_KEY"`
+	ProxyURL        string                `yaml:"proxy_url" env:"LAPLACED_OPENROUTER_PROXY_URL"`
+	PDFParserEngine string                `yaml:"pdf_parser_engine"`
+	RequestCost     float64               `yaml:"request_cost"`
+	PriceTiers      []PriceTier           `yaml:"price_tiers"`
+	Provider        ProviderRoutingConfig `yaml:"provider"`
+}
+
+// ProviderRoutingConfig configures OpenRouter provider preference.
+// See https://openrouter.ai/docs/features/provider-routing for semantics.
+// When Order is empty, no routing header is sent — OpenRouter picks freely.
+// AllowFallbacks is a pointer: unset means "use OpenRouter default (true)";
+// explicit false means "never fall back outside the order list".
+type ProviderRoutingConfig struct {
+	Order []string `yaml:"order" env:"LAPLACED_OPENROUTER_PROVIDER_ORDER" env-separator:","`
+	// AllowFallbacks is YAML-only: cleanenv doesn't support *bool via env tags.
+	// The common case (prefer a provider with default fallback) needs only Order,
+	// so this is not a practical limitation.
+	AllowFallbacks *bool `yaml:"allow_fallbacks"`
+}
+
+// ToRouting converts the YAML config to an openrouter.ProviderRouting pointer.
+// Returns nil when no preference is configured, so the client stays on
+// OpenRouter's default behavior.
+func (c ProviderRoutingConfig) ToRouting() *openrouter.ProviderRouting {
+	if len(c.Order) == 0 && c.AllowFallbacks == nil {
+		return nil
+	}
+	return &openrouter.ProviderRouting{
+		Order:          c.Order,
+		AllowFallbacks: c.AllowFallbacks,
+	}
 }
 
 // EmbeddingConfig defines embedding model settings.

@@ -207,7 +207,7 @@ func run() int {
 
 	logger.Info("Database initialized successfully.")
 
-	openrouterClient, err := openrouter.NewClient(logger, cfg.OpenRouter.APIKey, cfg.OpenRouter.ProxyURL)
+	openrouterClient, err := openrouter.NewClient(logger, cfg.OpenRouter.APIKey, cfg.OpenRouter.ProxyURL, cfg.OpenRouter.Provider.ToRouting())
 	if err != nil {
 		logger.Error("failed to create openrouter client", "error", err)
 		return 1

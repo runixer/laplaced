@@ -270,7 +270,7 @@ func setupTestBot(cfg *config.Config, logger *slog.Logger, dbPath string, dbChan
 	}
 
 	// Create OpenRouter client
-	client, err := openrouter.NewClient(tb.logger, cfg.OpenRouter.APIKey, cfg.OpenRouter.ProxyURL)
+	client, err := openrouter.NewClient(tb.logger, cfg.OpenRouter.APIKey, cfg.OpenRouter.ProxyURL, cfg.OpenRouter.Provider.ToRouting())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OpenRouter client: %w", err)
 	}

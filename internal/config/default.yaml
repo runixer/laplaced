@@ -30,6 +30,15 @@ openrouter:
     - up_to_tokens: 1048576
       prompt_cost: 2.50
       completion_cost: 15.0
+  # Provider routing: prefer Vertex (Google) first, fall back to AI Studio.
+  # AI Studio has been less reliable for Gemini 3 preview models; keeping it as
+  # a safety net so a single-provider outage doesn't take the bot down.
+  # See https://openrouter.ai/docs/features/provider-routing
+  # Override by setting LAPLACED_OPENROUTER_PROVIDER_ORDER (comma-separated)
+  # or clearing the list in a local config. For strict routing (no fallback),
+  # set allow_fallbacks: false in YAML.
+  provider:
+    order: ["Google", "Google AI Studio"]
 
 # Agents Configuration
 agents:

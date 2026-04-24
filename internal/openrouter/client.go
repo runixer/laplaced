@@ -73,10 +73,11 @@ func truncateForLog(s string, maxLen int) string {
 }
 
 type clientImpl struct {
-	httpClient  *http.Client
-	apiKey      string
-	apiEndpoint string
-	logger      *slog.Logger
+	httpClient      *http.Client
+	apiKey          string
+	apiEndpoint     string
+	logger          *slog.Logger
+	defaultProvider *ProviderRouting
 }
 
 // openRouterBodyError represents an error reported inside an HTTP 200 response
@@ -237,6 +238,16 @@ type Plugin struct {
 	PDF PDFConfig `json:"pdf,omitempty"`
 }
 
+// ProviderRouting controls OpenRouter's provider selection for a request.
+// Order lists preferred providers (tried in sequence). AllowFallbacks is a
+// pointer so callers can distinguish "unset" (default true on OpenRouter's
+// side) from an explicit false (strict routing — fail instead of falling
+// back to providers outside the order list).
+type ProviderRouting struct {
+	Order          []string `json:"order,omitempty"`
+	AllowFallbacks *bool    `json:"allow_fallbacks,omitempty"`
+}
+
 // ReasoningConfig controls the model's internal reasoning behavior.
 // For Gemini 3: effort levels "minimal", "low", "medium", "high".
 // For other models: max_tokens (1024-128000) controls reasoning depth.
@@ -274,6 +285,9 @@ type ChatCompletionRequest struct {
 	// ImageConfig is model-specific image-generation configuration
 	// (aspect ratio, size). Only used when Modalities includes "image".
 	ImageConfig *ImageConfig `json:"image_config,omitempty"`
+	// Provider overrides OpenRouter's provider routing for this request.
+	// When nil, the client-level default (if any) is applied before sending.
+	Provider *ProviderRouting `json:"provider,omitempty"`
 
 	// UserID is used for metrics tracking only, not sent to API
 	UserID int64 `json:"-"`
@@ -329,10 +343,11 @@ type ResponseChoice struct {
 }
 
 type ChatCompletionResponse struct {
-	ID      string           `json:"id"`
-	Model   string           `json:"model"`
-	Choices []ResponseChoice `json:"choices"`
-	Usage   struct {
+	ID       string           `json:"id"`
+	Model    string           `json:"model"`
+	Provider string           `json:"provider,omitempty"` // Actual provider that served the request (e.g. "Google", "Google AI Studio")
+	Choices  []ResponseChoice `json:"choices"`
+	Usage    struct {
 		PromptTokens     int      `json:"prompt_tokens"`
 		CompletionTokens int      `json:"completion_tokens"`
 		TotalTokens      int      `json:"total_tokens"`
@@ -352,6 +367,7 @@ type EmbeddingRequest struct {
 	Model      string                 `json:"model"`
 	Input      []string               `json:"input"`
 	Dimensions int                    `json:"dimensions,omitempty"`
+	Provider   *ProviderRouting       `json:"provider,omitempty"`
 	LogMeta    map[string]interface{} `json:"-"`
 }
 
@@ -372,11 +388,11 @@ type EmbeddingResponse struct {
 	} `json:"usage"`
 }
 
-func NewClient(logger *slog.Logger, apiKey, proxyURL string) (Client, error) {
-	return NewClientWithBaseURL(logger, apiKey, proxyURL, "https://openrouter.ai/api/v1")
+func NewClient(logger *slog.Logger, apiKey, proxyURL string, defaultProvider *ProviderRouting) (Client, error) {
+	return NewClientWithBaseURL(logger, apiKey, proxyURL, "https://openrouter.ai/api/v1", defaultProvider)
 }
 
-func NewClientWithBaseURL(logger *slog.Logger, apiKey, proxyURL, baseURL string) (Client, error) {
+func NewClientWithBaseURL(logger *slog.Logger, apiKey, proxyURL, baseURL string, defaultProvider *ProviderRouting) (Client, error) {
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
@@ -417,9 +433,10 @@ func NewClientWithBaseURL(logger *slog.Logger, apiKey, proxyURL, baseURL string)
 			Transport: transport,
 			Timeout:   300 * time.Second, // Global timeout for requests (5 min for large contexts)
 		},
-		apiKey:      apiKey,
-		apiEndpoint: baseURL,
-		logger:      clientLogger,
+		apiKey:          apiKey,
+		apiEndpoint:     baseURL,
+		logger:          clientLogger,
+		defaultProvider: defaultProvider,
 	}, nil
 }
 
@@ -448,6 +465,10 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 	}
 	// Rough estimate: ~4 chars per token for Gemini
 	estimatedTokens := contextChars / 4
+
+	if req.Provider == nil && c.defaultProvider != nil {
+		req.Provider = c.defaultProvider
+	}
 
 	// Log request summary (full details available in Agent Debug UI)
 	c.logger.Info("Sending request to OpenRouter",
@@ -608,6 +629,9 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		"completion_tokens", chatResp.Usage.CompletionTokens,
 		"total_tokens", chatResp.Usage.TotalTokens,
 	}
+	if chatResp.Provider != "" {
+		logAttrs = append(logAttrs, "provider", chatResp.Provider)
+	}
 	if chatResp.Usage.Cost != nil {
 		logAttrs = append(logAttrs, "cost_usd", *chatResp.Usage.Cost)
 	}
@@ -624,6 +648,10 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 	embeddingsURL, err := url.JoinPath(c.apiEndpoint, "embeddings")
 	if err != nil {
 		return EmbeddingResponse{}, err
+	}
+
+	if req.Provider == nil && c.defaultProvider != nil {
+		req.Provider = c.defaultProvider
 	}
 
 	c.logger.Debug("Sending embedding request to OpenRouter",
