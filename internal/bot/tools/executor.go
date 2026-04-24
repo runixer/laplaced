@@ -6,9 +6,14 @@ import (
 	"fmt"
 	"log/slog"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
@@ -138,7 +143,30 @@ func (e *ToolExecutor) SetFileStorage(fs *files.FileStorage) {
 // ExecuteToolCall dispatches tool execution by name.
 // Returns a Result with Content (fed back to the LLM) and any generated
 // artifact IDs (for media-producing tools like generate_image).
-func (e *ToolExecutor) ExecuteToolCall(ctx context.Context, cc CallContext, toolName string, arguments string) (*Result, error) {
+func (e *ToolExecutor) ExecuteToolCall(ctx context.Context, cc CallContext, toolName string, arguments string) (result *Result, err error) {
+	// One span per dispatched call. The tool.name attribute pivots across
+	// all six handlers. When a handler makes its own downstream LLM call
+	// (e.g. performModelTool → openrouter.CreateChatCompletion), the inner
+	// span naturally nests here via ctx, which is the trace we want.
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/bot/tools").Start(
+		ctx, "tool_executor.ExecuteToolCall",
+		trace.WithAttributes(
+			attribute.String("tool.name", toolName),
+			attribute.Int64("user.id", cc.UserID),
+		),
+	)
+	defer func() {
+		span.SetAttributes(attribute.Bool("tool.ok", err == nil))
+		if arguments != "" {
+			obs.RecordContent(span, "tool.args", arguments)
+		}
+		if result != nil && result.Content != "" {
+			obs.RecordContent(span, "tool.result", result.Content)
+		}
+		_ = obs.ObserveErr(span, err)
+		span.End()
+	}()
+
 	// Find tool config
 	var matchedTool *config.ToolConfig
 	for _, t := range e.cfg.Tools {
