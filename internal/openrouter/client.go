@@ -15,7 +15,12 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/runixer/laplaced/internal/jobtype"
+	"github.com/runixer/laplaced/internal/obs"
 )
 
 // Retry configuration
@@ -440,9 +445,53 @@ func NewClientWithBaseURL(logger *slog.Logger, apiKey, proxyURL, baseURL string,
 	}, nil
 }
 
-func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletionRequest) (ChatCompletionResponse, error) {
+func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletionRequest) (resp ChatCompletionResponse, err error) {
 	startTime := time.Now()
 	jt := jobtype.FromContext(ctx).String()
+
+	// Span covers the whole call including retries. Per-attempt signals
+	// (attempts, retry_delays_ms) land as attrs, not child spans, so we
+	// don't multiply cardinality. Named returns let the deferred closure
+	// route any terminal err through ObserveErr.
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/openrouter").Start(
+		ctx, "openrouter.CreateChatCompletion",
+		trace.WithAttributes(
+			attribute.String("gen_ai.system", "openrouter"),
+			attribute.String("gen_ai.request.model", req.Model),
+			attribute.Int64("user.id", req.UserID),
+		),
+	)
+	var (
+		attempts    int
+		retryDelays []int64
+		reqBody     []byte
+	)
+	defer func() {
+		span.SetAttributes(attribute.Int("llm.attempts", attempts))
+		if len(retryDelays) > 0 {
+			span.SetAttributes(attribute.Int64Slice("llm.retry_delays_ms", retryDelays))
+		}
+		if resp.Model != "" {
+			span.SetAttributes(attribute.String("gen_ai.response.model", resp.Model))
+		}
+		if resp.Usage.PromptTokens > 0 || resp.Usage.CompletionTokens > 0 {
+			span.SetAttributes(
+				attribute.Int("gen_ai.usage.input_tokens", resp.Usage.PromptTokens),
+				attribute.Int("gen_ai.usage.output_tokens", resp.Usage.CompletionTokens),
+			)
+		}
+		if resp.Usage.Cost != nil {
+			span.SetAttributes(attribute.Float64("llm.cost_usd", *resp.Usage.Cost))
+		}
+		if len(reqBody) > 0 {
+			obs.RecordContent(span, "llm.request", string(reqBody))
+		}
+		if resp.DebugResponseBody != "" {
+			obs.RecordContent(span, "llm.response", resp.DebugResponseBody)
+		}
+		_ = obs.ObserveErr(span, err)
+		span.End()
+	}()
 
 	// Calculate context size for logging (text content only, not images/files)
 	contextChars := 0
@@ -483,6 +532,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 	if err != nil {
 		return ChatCompletionResponse{}, err
 	}
+	reqBody = body
 
 	// Debug: log request body to inspect multimodal content
 	if len(body) > 0 {
@@ -515,9 +565,11 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 	var lastErr error
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
+		attempts = attempt + 1
 		if attempt > 0 {
 			RecordLLMRetry(req.Model)
 			delay := calculateBackoff(attempt - 1)
+			retryDelays = append(retryDelays, delay.Milliseconds())
 			c.logger.Warn("Retrying OpenRouter request",
 				"attempt", attempt,
 				"max_retries", maxRetries,
@@ -644,7 +696,36 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 	return chatResp, nil
 }
 
-func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest) (EmbeddingResponse, error) {
+func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest) (resp EmbeddingResponse, err error) {
+	// Compute total input size once; used both as a span attribute and as a
+	// content-event payload when trace_content is on.
+	totalChars := 0
+	for _, s := range req.Input {
+		totalChars += len(s)
+	}
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/openrouter").Start(
+		ctx, "openrouter.CreateEmbeddings",
+		trace.WithAttributes(
+			attribute.String("gen_ai.system", "openrouter"),
+			attribute.String("gen_ai.request.model", req.Model),
+			attribute.Int("emb.dimensions", req.Dimensions),
+			attribute.Int("emb.input_count", len(req.Input)),
+			attribute.Int("emb.total_chars", totalChars),
+		),
+	)
+	defer func() {
+		if resp.Usage.PromptTokens > 0 {
+			span.SetAttributes(attribute.Int("gen_ai.usage.input_tokens", resp.Usage.PromptTokens))
+		}
+		if obs.ContentEnabled() && len(req.Input) > 0 {
+			if body, mErr := json.Marshal(req.Input); mErr == nil {
+				obs.RecordContent(span, "emb.inputs", string(body))
+			}
+		}
+		_ = obs.ObserveErr(span, err)
+		span.End()
+	}()
+
 	embeddingsURL, err := url.JoinPath(c.apiEndpoint, "embeddings")
 	if err != nil {
 		return EmbeddingResponse{}, err
