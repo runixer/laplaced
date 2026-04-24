@@ -158,6 +158,77 @@ func TestCreateChatCompletion_TerminalError_SetsErrorStatus(t *testing.T) {
 	assert.Equal(t, sdkcodes.Error, spans[0].Status.Code)
 }
 
+// TestCreateChatCompletion_PopulatesBroadcastFields asserts the outgoing
+// request carries the fields OpenRouter Broadcast needs to nest its own
+// spans under ours: trace.trace_id, trace.parent_span_id, and user.
+func TestCreateChatCompletion_PopulatesBroadcastFields(t *testing.T) {
+	_ = withTracingCapture(t)
+
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(ChatCompletionResponse{
+			Choices: []ResponseChoice{{Message: ResponseMessage{Role: "assistant", Content: "ok"}, FinishReason: "stop"}},
+		})
+	}))
+	defer server.Close()
+
+	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
+	require.NoError(t, err)
+
+	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
+		Model:    "m",
+		UserID:   314,
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+
+	require.NotNil(t, gotBody, "server should have received a request body")
+	assert.Equal(t, "314", gotBody["user"], "user field must be stringified UserID")
+
+	trc, ok := gotBody["trace"].(map[string]any)
+	require.True(t, ok, "trace field must be a map")
+	// Active span is the openrouter.CreateChatCompletion one — so
+	// trace_id matches the span's trace, and parent_span_id is that
+	// span's id. We do not know the IDs ahead of time; assert shape only.
+	assert.NotEmpty(t, trc["trace_id"], "trace.trace_id must be populated from ctx")
+	assert.NotEmpty(t, trc["parent_span_id"], "trace.parent_span_id must be populated from ctx")
+}
+
+// TestCreateChatCompletion_BroadcastFields_CallerWins asserts caller-set
+// trace/user values are not overwritten by the auto-populate helper.
+func TestCreateChatCompletion_BroadcastFields_CallerWins(t *testing.T) {
+	_ = withTracingCapture(t)
+
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(ChatCompletionResponse{
+			Choices: []ResponseChoice{{Message: ResponseMessage{Role: "assistant", Content: "ok"}, FinishReason: "stop"}},
+		})
+	}))
+	defer server.Close()
+
+	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
+	require.NoError(t, err)
+
+	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
+		Model:    "m",
+		UserID:   314,
+		User:     "explicit-user",
+		Trace:    map[string]any{"trace_id": "caller-trace", "parent_span_id": "caller-span"},
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, "explicit-user", gotBody["user"])
+	trc := gotBody["trace"].(map[string]any)
+	assert.Equal(t, "caller-trace", trc["trace_id"])
+	assert.Equal(t, "caller-span", trc["parent_span_id"])
+}
+
 func TestCreateEmbeddings_RecordsSpan(t *testing.T) {
 	getSpans := withTracingCapture(t)
 

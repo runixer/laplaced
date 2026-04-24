@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -293,6 +294,17 @@ type ChatCompletionRequest struct {
 	// Provider overrides OpenRouter's provider routing for this request.
 	// When nil, the client-level default (if any) is applied before sending.
 	Provider *ProviderRouting `json:"provider,omitempty"`
+	// User is the OpenAI/OpenRouter-standard end-user id, used for abuse
+	// signals on the provider side and as user.id on OR-emitted Broadcast
+	// spans. Auto-populated from UserID in CreateChatCompletion when empty.
+	User string `json:"user,omitempty"`
+	// Trace carries OpenRouter's Broadcast metadata. Keys with special
+	// meaning: trace_id, parent_span_id, trace_name, span_name,
+	// generation_name. CreateChatCompletion auto-fills trace_id and
+	// parent_span_id from the current span context so OR-emitted spans
+	// nest under our local trace when Broadcast is configured. When
+	// Broadcast is disabled on the OR side, the field is ignored.
+	Trace map[string]any `json:"trace,omitempty"`
 
 	// UserID is used for metrics tracking only, not sent to API
 	UserID int64 `json:"-"`
@@ -374,6 +386,12 @@ type EmbeddingRequest struct {
 	Dimensions int                    `json:"dimensions,omitempty"`
 	Provider   *ProviderRouting       `json:"provider,omitempty"`
 	LogMeta    map[string]interface{} `json:"-"`
+	// User mirrors the OpenAI-standard end-user id. See the identical
+	// field on ChatCompletionRequest for semantics.
+	User string `json:"user,omitempty"`
+	// Trace carries OpenRouter Broadcast metadata. See
+	// ChatCompletionRequest.Trace for semantics and auto-populated keys.
+	Trace map[string]any `json:"trace,omitempty"`
 }
 
 type EmbeddingObject struct {
@@ -443,6 +461,31 @@ func NewClientWithBaseURL(logger *slog.Logger, apiKey, proxyURL, baseURL string,
 		logger:          clientLogger,
 		defaultProvider: defaultProvider,
 	}, nil
+}
+
+// withBroadcastFields returns trc and user enriched with OpenRouter
+// Broadcast linking metadata. When ctx carries a valid span context,
+// trace_id and parent_span_id are filled (callers' values win). When user
+// is empty and userID is non-zero, user becomes the stringified userID.
+// Safe to call when Broadcast is disabled on the OR side — OR ignores
+// unknown fields. Returning the values (instead of mutating pointers)
+// keeps the call-site one-liner at request assembly time.
+func withBroadcastFields(ctx context.Context, trc map[string]any, user string, userID int64) (map[string]any, string) {
+	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+		if trc == nil {
+			trc = map[string]any{}
+		}
+		if _, ok := trc["trace_id"]; !ok {
+			trc["trace_id"] = sc.TraceID().String()
+		}
+		if _, ok := trc["parent_span_id"]; !ok {
+			trc["parent_span_id"] = sc.SpanID().String()
+		}
+	}
+	if user == "" && userID != 0 {
+		user = strconv.FormatInt(userID, 10)
+	}
+	return trc, user
 }
 
 func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletionRequest) (resp ChatCompletionResponse, err error) {
@@ -518,6 +561,11 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 	if req.Provider == nil && c.defaultProvider != nil {
 		req.Provider = c.defaultProvider
 	}
+
+	// Link our local trace to OR's Broadcast-emitted span, if Broadcast is
+	// configured. Does nothing when ctx has no active span or when
+	// Broadcast is disabled on the OR side.
+	req.Trace, req.User = withBroadcastFields(ctx, req.Trace, req.User, req.UserID)
 
 	// Log request summary (full details available in Agent Debug UI)
 	c.logger.Info("Sending request to OpenRouter",
@@ -734,6 +782,12 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 	if req.Provider == nil && c.defaultProvider != nil {
 		req.Provider = c.defaultProvider
 	}
+
+	// No per-request userID is plumbed into EmbeddingRequest today (unlike
+	// ChatCompletionRequest.UserID), so user is left empty unless the
+	// caller sets it explicitly — but trace_id/parent_span_id still link
+	// the OR-side span to our tracing.
+	req.Trace, req.User = withBroadcastFields(ctx, req.Trace, req.User, 0)
 
 	c.logger.Debug("Sending embedding request to OpenRouter",
 		"model", req.Model,
