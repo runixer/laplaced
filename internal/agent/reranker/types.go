@@ -193,6 +193,17 @@ type trace struct {
 	systemPrompt      string                // Full system prompt for debug UI
 	userPrompt        string                // Full user prompt for debug UI
 	tracker           *agentlog.TurnTracker // Unified turn tracking for multi-turn visualization
+
+	// Counts from the model's final JSON response, captured before validation.
+	// Distinguishes "model explicitly returned empty arrays" (raw == 0) from
+	// "model returned IDs but all were filtered as hallucinated" (raw > 0, kept == 0).
+	modelRawTopics    int
+	modelRawPeople    int
+	modelRawArtifacts int
+	// Counts after filterValid* — what survived ID validation against candidates.
+	modelKeptTopics    int
+	modelKeptPeople    int
+	modelKeptArtifacts int
 }
 
 // response is the expected JSON response from Flash.

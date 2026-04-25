@@ -145,16 +145,49 @@ func (r *Reranker) rerank(
 	)
 	defer func() {
 		reason := ""
+		var (
+			llmCalls                              int
+			costUSD                               float64
+			rawTopics, rawPeople, rawArtifacts    int
+			keptTopics, keptPeople, keptArtifacts int
+		)
 		if tr != nil {
 			reason = tr.fallbackReason
+			rawTopics = tr.modelRawTopics
+			rawPeople = tr.modelRawPeople
+			rawArtifacts = tr.modelRawArtifacts
+			keptTopics = tr.modelKeptTopics
+			keptPeople = tr.modelKeptPeople
+			keptArtifacts = tr.modelKeptArtifacts
+			if tr.tracker != nil {
+				llmCalls = tr.tracker.TurnCount()
+				costUSD = tr.tracker.TotalCostValue()
+			}
 		}
 		span.SetAttributes(
-			attribute.Int("reranker.iterations", iterations),
+			attribute.Int("reranker.tool_calls", iterations),
+			attribute.Int("reranker.llm_calls", llmCalls),
 			attribute.String("reranker.fallback_reason", reason),
+			attribute.Int("reranker.candidates_in.topics", len(candidates)),
+			attribute.Int("reranker.candidates_in.people", len(personCandidates)),
+			attribute.Int("reranker.candidates_in.artifacts", len(artifactCandidates)),
+			attribute.Int("reranker.model_raw_count.topics", rawTopics),
+			attribute.Int("reranker.model_raw_count.people", rawPeople),
+			attribute.Int("reranker.model_raw_count.artifacts", rawArtifacts),
+			attribute.Int("reranker.model_kept.topics", keptTopics),
+			attribute.Int("reranker.model_kept.people", keptPeople),
+			attribute.Int("reranker.model_kept.artifacts", keptArtifacts),
+			attribute.Float64("reranker.cost_usd", costUSD),
 		)
 		if obs.ContentEnabled() {
+			if originalQuery != "" {
+				obs.RecordContent(span, "reranker.raw_query", originalQuery)
+			}
+			if contextualizedQuery != "" {
+				obs.RecordContent(span, "reranker.enriched_query", contextualizedQuery)
+			}
 			if len(candidates) > 0 {
-				obs.RecordContent(span, "reranker.candidates_preview",
+				obs.RecordContent(span, "reranker.candidates_input",
 					formatCandidatesForReranker(candidates))
 			}
 			if tr != nil && len(tr.selectedTopics) > 0 {
@@ -454,6 +487,15 @@ func (r *Reranker) rerank(
 
 			tr.toolCalls = append(tr.toolCalls, toolCall)
 
+			span.AddEvent("reranker.tool_call",
+				oteltrace.WithAttributes(
+					attribute.Int("iteration", iterations),
+					attribute.Int64Slice("requested_ids", toolCall.TopicIDs),
+					attribute.Int("requested_count", len(toolCall.TopicIDs)),
+					attribute.Int("valid_count", len(toolCall.Topics)),
+				),
+			)
+
 			messages = append(messages, openrouter.Message{
 				Role:             "assistant",
 				Content:          choice.Message.Content,
@@ -492,10 +534,18 @@ func (r *Reranker) rerank(
 			return fallbackResult, nil
 		}
 
+		tr.modelRawTopics = len(result.Topics)
+		tr.modelRawPeople = len(result.People)
+		tr.modelRawArtifacts = len(result.Artifacts)
+
 		// Validate topics and people
 		result = filterValidTopics(userID, result, candidateMap, r.logger)
 		result = filterValidPeople(userID, result, peopleMap, r.logger)
 		result = filterValidArtifacts(userID, result, artifactsMap, r.logger)
+
+		tr.modelKeptTopics = len(result.Topics)
+		tr.modelKeptPeople = len(result.People)
+		tr.modelKeptArtifacts = len(result.Artifacts)
 		if len(result.Topics) == 0 && len(result.People) == 0 && len(result.Artifacts) == 0 {
 			r.logger.Warn("reranker returned no valid results (all hallucinated)", "user_id", userID)
 			tr.fallbackReason = "all_hallucinated"
