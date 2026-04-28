@@ -171,6 +171,7 @@ func (r *Reranker) rerank(
 			attribute.Int("reranker.candidates_in.topics", len(candidates)),
 			attribute.Int("reranker.candidates_in.people", len(personCandidates)),
 			attribute.Int("reranker.candidates_in.artifacts", len(artifactCandidates)),
+			attribute.Int("reranker.candidates_in.media", len(mediaParts)),
 			attribute.Int("reranker.model_raw_count.topics", rawTopics),
 			attribute.Int("reranker.model_raw_count.people", rawPeople),
 			attribute.Int("reranker.model_raw_count.artifacts", rawArtifacts),
@@ -206,6 +207,14 @@ func (r *Reranker) rerank(
 			if len(artifactCandidates) > 0 {
 				obs.RecordContent(span, "reranker.artifacts_candidates_input",
 					formatArtifactCandidates(artifactCandidates))
+			}
+			// Multimodal inputs (images, voice, PDFs). Recorded as metadata +
+			// content_hash so a faithful replay can re-fetch the file from
+			// artifact storage by hash without the trace carrying base64.
+			if len(mediaParts) > 0 {
+				if body := formatMediaParts(mediaParts); body != "" {
+					obs.RecordContent(span, "reranker.media_parts", body)
+				}
 			}
 			if tr != nil && len(tr.selectedTopics) > 0 {
 				if body, err := json.Marshal(tr.selectedTopics); err == nil {
