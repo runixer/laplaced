@@ -91,8 +91,10 @@ type clientImpl struct {
 // the upstream provider is unavailable; this must be treated as retryable,
 // not as a silent success.
 type openRouterBodyError struct {
-	Message string
-	Code    int
+	Message      string
+	Code         int
+	ProviderName string // from error.metadata.provider_name when OR proxies an upstream error
+	Raw          string // upstream provider's raw error body, mirrored at error.metadata.raw
 }
 
 func (e *openRouterBodyError) Error() string {
@@ -107,8 +109,12 @@ func (e *openRouterBodyError) Error() string {
 func detectOpenRouterBodyError(body []byte) *openRouterBodyError {
 	var probe struct {
 		Error *struct {
-			Message string          `json:"message"`
-			Code    json.RawMessage `json:"code"`
+			Message  string          `json:"message"`
+			Code     json.RawMessage `json:"code"`
+			Metadata *struct {
+				Raw          string `json:"raw"`
+				ProviderName string `json:"provider_name"`
+			} `json:"metadata"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(body, &probe); err != nil || probe.Error == nil {
@@ -124,7 +130,40 @@ func detectOpenRouterBodyError(body []byte) *openRouterBodyError {
 			}
 		}
 	}
+	if probe.Error.Metadata != nil {
+		bodyErr.ProviderName = probe.Error.Metadata.ProviderName
+		bodyErr.Raw = probe.Error.Metadata.Raw
+	}
 	return bodyErr
+}
+
+// recordOpenRouterError attaches an OR error envelope to a span: the raw body
+// as an llm.response content event (subject to ContentEnabled gating) and the
+// parsed envelope fields as structured attributes (always set when present).
+// Attributes let TraceQL filter "show me 400s caused by AI Studio" without
+// scanning bodies. No-op on empty or non-error bodies.
+func recordOpenRouterError(span trace.Span, body []byte) {
+	if len(body) == 0 {
+		return
+	}
+	obs.RecordContent(span, "llm.response", string(body))
+	bodyErr := detectOpenRouterBodyError(body)
+	if bodyErr == nil {
+		return
+	}
+	attrs := make([]attribute.KeyValue, 0, 3)
+	if bodyErr.Message != "" {
+		attrs = append(attrs, attribute.String("error.upstream_message", bodyErr.Message))
+	}
+	if bodyErr.Code != 0 {
+		attrs = append(attrs, attribute.Int("error.upstream_code", bodyErr.Code))
+	}
+	if bodyErr.ProviderName != "" {
+		attrs = append(attrs, attribute.String("error.upstream_provider", bodyErr.ProviderName))
+	}
+	if len(attrs) > 0 {
+		span.SetAttributes(attrs...)
+	}
 }
 
 // isRetryableStatusCode returns true if the HTTP status code indicates a retryable error.
@@ -673,6 +712,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 					continue
 				}
 				RecordLLMRequest(req.UserID, req.Model, time.Since(startTime).Seconds(), false, 0, 0, nil, jt)
+				recordOpenRouterError(span, responseBody)
 				return ChatCompletionResponse{}, bodyErr
 			}
 			break // Success
@@ -687,6 +727,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		// Non-retryable error or max retries reached
 		c.logger.Error("OpenRouter returned non-OK status", "status", resp.Status, "body", string(responseBody))
 		RecordLLMRequest(req.UserID, req.Model, time.Since(startTime).Seconds(), false, 0, 0, nil, jt)
+		recordOpenRouterError(span, responseBody)
 		return ChatCompletionResponse{}, fmt.Errorf("openrouter API error: %s", resp.Status)
 	}
 
@@ -694,6 +735,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 	if err := json.NewDecoder(bytes.NewBuffer(responseBody)).Decode(&chatResp); err != nil {
 		c.logger.Error("Failed to decode OpenRouter response", "error", err, "body_length", len(responseBody))
 		RecordLLMRequest(req.UserID, req.Model, time.Since(startTime).Seconds(), false, 0, 0, nil, jt)
+		recordOpenRouterError(span, responseBody)
 		return ChatCompletionResponse{}, err
 	}
 
@@ -860,6 +902,7 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 					lastErr = bodyErr
 					continue
 				}
+				recordOpenRouterError(span, responseBody)
 				return EmbeddingResponse{}, bodyErr
 			}
 			break // Success
@@ -873,12 +916,14 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 
 		// Non-retryable error or max retries reached
 		c.logger.Error("OpenRouter embeddings returned non-OK status", "status", resp.Status, "body", string(responseBody))
+		recordOpenRouterError(span, responseBody)
 		return EmbeddingResponse{}, fmt.Errorf("openrouter API error: %s", resp.Status)
 	}
 
 	var embeddingResp EmbeddingResponse
 	if err := json.Unmarshal(responseBody, &embeddingResp); err != nil {
 		c.logger.Error("Failed to decode embedding response", "error", err, "body", string(responseBody))
+		recordOpenRouterError(span, responseBody)
 		return EmbeddingResponse{}, err
 	}
 

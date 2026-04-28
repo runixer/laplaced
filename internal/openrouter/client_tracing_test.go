@@ -158,6 +158,62 @@ func TestCreateChatCompletion_TerminalError_SetsErrorStatus(t *testing.T) {
 	assert.Equal(t, sdkcodes.Error, spans[0].Status.Code)
 }
 
+// TestCreateChatCompletion_UpstreamProviderError_AttachesEnvelope mirrors the
+// 2026-04-28 reranker incident: AI Studio rejected a vertex-issued thought
+// signature with "Corrupted thought signature.", OR wrapped it in its standard
+// envelope with provider_name and raw fields. Asserts that we lift those
+// fields onto the span as queryable attrs and emit the body as llm.response.
+func TestCreateChatCompletion_UpstreamProviderError_AttachesEnvelope(t *testing.T) {
+	prev := obs.ContentEnabled()
+	t.Cleanup(func() { obs.SetContentEnabled(prev) })
+	obs.SetContentEnabled(true)
+
+	getSpans := withTracingCapture(t)
+
+	envelope := `{"error":{"message":"Provider returned error","code":400,"metadata":{"raw":"{\"error\":{\"code\":400,\"message\":\"Corrupted thought signature.\",\"status\":\"INVALID_ARGUMENT\"}}","provider_name":"Google AI Studio","is_byok":false}}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(envelope))
+	}))
+	defer server.Close()
+
+	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
+	require.NoError(t, err)
+
+	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
+		Model:    "m",
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	require.Error(t, err)
+
+	spans := getSpans()
+	require.Len(t, spans, 1)
+	span := spans[0]
+	assert.Equal(t, sdkcodes.Error, span.Status.Code)
+
+	attrs := map[attribute.Key]attribute.Value{}
+	for _, kv := range span.Attributes {
+		attrs[kv.Key] = kv.Value
+	}
+	assert.Equal(t, "Provider returned error", attrs["error.upstream_message"].AsString())
+	assert.Equal(t, int64(400), attrs["error.upstream_code"].AsInt64())
+	assert.Equal(t, "Google AI Studio", attrs["error.upstream_provider"].AsString())
+
+	var responseEvent *string
+	for i := range span.Events {
+		if span.Events[i].Name == "llm.response" {
+			for _, kv := range span.Events[i].Attributes {
+				if kv.Key == "body" {
+					s := kv.Value.AsString()
+					responseEvent = &s
+				}
+			}
+		}
+	}
+	require.NotNil(t, responseEvent, "llm.response event must be present on error path")
+	assert.Equal(t, envelope, *responseEvent)
+}
+
 // TestCreateChatCompletion_PopulatesBroadcastFields asserts the outgoing
 // request carries the fields OpenRouter Broadcast needs to nest its own
 // spans under ours: trace.trace_id, trace.parent_span_id, and user.
