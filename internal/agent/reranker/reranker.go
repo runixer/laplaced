@@ -186,6 +186,15 @@ func (r *Reranker) rerank(
 			if contextualizedQuery != "" {
 				obs.RecordContent(span, "reranker.enriched_query", contextualizedQuery)
 			}
+			// Shared context that lands in the system prompt — captured so a
+			// faithful replay can reconstruct the exact reranker input without
+			// drifting through the live DB at replay time.
+			if userProfile != "" {
+				obs.RecordContent(span, "reranker.user_profile", userProfile)
+			}
+			if recentTopics != "" {
+				obs.RecordContent(span, "reranker.recent_topics", recentTopics)
+			}
 			if len(candidates) > 0 {
 				obs.RecordContent(span, "reranker.candidates_input",
 					formatCandidatesForReranker(candidates))
