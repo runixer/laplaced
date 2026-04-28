@@ -190,6 +190,14 @@ func (r *Reranker) rerank(
 				obs.RecordContent(span, "reranker.candidates_input",
 					formatCandidatesForReranker(candidates))
 			}
+			if len(personCandidates) > 0 {
+				obs.RecordContent(span, "reranker.people_candidates_input",
+					FormatPeopleForReranker(personCandidates))
+			}
+			if len(artifactCandidates) > 0 {
+				obs.RecordContent(span, "reranker.artifacts_candidates_input",
+					formatArtifactCandidates(artifactCandidates))
+			}
 			if tr != nil && len(tr.selectedTopics) > 0 {
 				if body, err := json.Marshal(tr.selectedTopics); err == nil {
 					obs.RecordContent(span, "reranker.selection_reasons", string(body))
