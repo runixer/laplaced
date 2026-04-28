@@ -491,6 +491,31 @@ make hooks
 
 Skip with `--no-verify` if needed. CI is the source of truth; hooks just save round-trips.
 
+### Multi-instance coordination (git worktrees)
+
+When another Claude Code instance (or human) is already working on a different branch of this repo, **never `git checkout <other-branch>` in a directory the other instance is using.** It blows away their working tree, and `git stash` is repo-global — so a hurried `stash push` mixes your WIP into theirs.
+
+Instead, give each active feature branch its own directory via `git worktree`. Objects are shared (`.git/objects`), working trees and indexes are independent.
+
+```bash
+# First time, from the main repo dir:
+git worktree add ../laplaced-<feature> <branch>
+
+# Cleanup once the branch is merged:
+git worktree remove ../laplaced-<feature>
+```
+
+Convention for this repo:
+- `~/projects/laplaced` — the integration dir, sits on `main` most of the time. Use it for reviewing merged work, NOT for long-running feature branches.
+- `~/projects/laplaced-<feature>` — one per active branch. Start a separate Claude Code instance inside this dir.
+
+Per-worktree setup:
+- `.env` and `data/` are gitignored and don't follow the worktree. Symlink from the main dir: `ln -s ../laplaced/.env .` and `ln -s ../laplaced/data .` (or make per-worktree copies when you want isolation).
+- Runtime collisions are NOT solved by worktrees. If two instances run concurrently: use `--db ""` (temp) or a distinct `--db` path for testbot, and different `LAPLACED_SERVER_PORT` for `cmd/bot`.
+- Prefer committing WIP to the feature branch over `git stash` — stash is visible to every worktree and is easy to mix up.
+
+If you realize you're on the wrong branch in a shared dir with uncommitted edits: stop, `git status` to catalog what's yours, then either (a) commit to the right branch from a worktree, or (b) cherry-pick specific files out via `git checkout <stash> -- <paths>` after stashing. Do not branch-switch through the shared dir while another instance is mid-flight.
+
 ## Changelog
 
 This project uses [Keep a Changelog](https://keepachangelog.com/) format.

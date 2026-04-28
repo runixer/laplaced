@@ -13,12 +13,15 @@ import (
 	"path/filepath"
 	"strings"
 
+	"time"
+
 	"github.com/runixer/laplaced/internal/agent/imagegen"
 	"github.com/runixer/laplaced/internal/app"
 	"github.com/runixer/laplaced/internal/bot"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/markdown"
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
@@ -51,13 +54,14 @@ type testbotOptions struct {
 
 // testBot wraps a full bot instance for CLI testing.
 type testBot struct {
-	logger    *slog.Logger
-	store     *storage.SQLiteStore
-	cfg       *config.Config
-	bot       *bot.Bot
-	storePath string
-	tempDir   string
-	services  *app.Services
+	logger         *slog.Logger
+	store          *storage.SQLiteStore
+	cfg            *config.Config
+	bot            *bot.Bot
+	storePath      string
+	tempDir        string
+	services       *app.Services
+	tracerShutdown obs.ShutdownFunc
 }
 
 // Root command
@@ -253,8 +257,25 @@ func setupTestBot(cfg *config.Config, logger *slog.Logger, dbPath string, dbChan
 			}())
 	}
 
+	// Init tracing. Defaults off (telemetry.enabled=false in config) — dev
+	// enables via LAPLACED_TELEMETRY_ENABLED=true plus either an OTLP
+	// endpoint or LAPLACED_TELEMETRY_EXPORTER=stdout for local stderr
+	// output. "dev-testbot" is the hard-coded service.version so testbot
+	// traces are trivially distinguishable from cmd/bot traces (which stamp
+	// the real git sha via ldflags).
+	tracerShutdown, err := obs.InitTracing(context.Background(), obs.TracingConfig{
+		Enabled:      tb.cfg.Telemetry.Enabled,
+		Exporter:     tb.cfg.Telemetry.Exporter,
+		OTLPEndpoint: tb.cfg.Telemetry.OTLPEndpoint,
+		ServiceName:  tb.cfg.Telemetry.ServiceName,
+		TraceContent: tb.cfg.Telemetry.TraceContent,
+	}, "dev-testbot")
+	if err != nil {
+		return nil, fmt.Errorf("failed to init tracing: %w", err)
+	}
+	tb.tracerShutdown = tracerShutdown
+
 	// Create store
-	var err error
 	tb.store, err = storage.NewSQLiteStore(tb.logger, tb.storePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create store: %w", err)
@@ -270,7 +291,7 @@ func setupTestBot(cfg *config.Config, logger *slog.Logger, dbPath string, dbChan
 	}
 
 	// Create OpenRouter client
-	client, err := openrouter.NewClient(tb.logger, cfg.OpenRouter.APIKey, cfg.OpenRouter.ProxyURL)
+	client, err := openrouter.NewClient(tb.logger, cfg.OpenRouter.APIKey, cfg.OpenRouter.ProxyURL, cfg.OpenRouter.Provider.ToRouting())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OpenRouter client: %w", err)
 	}
@@ -336,6 +357,17 @@ func (tb *testBot) close() error {
 	// Stop RAG service if running
 	if tb.services != nil && tb.services.RAGService != nil {
 		tb.services.RAGService.Stop()
+	}
+
+	// Flush pending spans BEFORE closing the store. CLI processes exit
+	// fast, so without an explicit shutdown the OTLP batcher is cut off
+	// mid-flush.
+	if tb.tracerShutdown != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := tb.tracerShutdown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("tracer shutdown: %w", err))
+		}
 	}
 
 	if tb.store != nil {

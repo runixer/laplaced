@@ -13,6 +13,10 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/runixer/laplaced/internal/agent"
@@ -53,6 +57,31 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		duration := time.Since(startTime).Seconds()
 		RecordMessageProcessing(user.ID, duration, success)
 	}()
+
+	// Root span for the whole turn. Child spans (RAG, reranker, LLM, tools)
+	// will attach here in later iterations; this one establishes the trace
+	// id and the user.id/message.count attributes every downstream query
+	// in Tempo will filter by. Declared AFTER the metrics defer so it fires
+	// first (LIFO) and can set error status before span.End().
+	totalChars := 0
+	for _, m := range group.Messages {
+		totalChars += len(m.Text) + len(m.Caption)
+	}
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/bot").Start(
+		ctx, "bot.processMessageGroup",
+		trace.WithAttributes(
+			attribute.Int64("user.id", user.ID),
+			attribute.Int("message.count", len(group.Messages)),
+			attribute.Int("message.total_chars", totalChars),
+		),
+	)
+	defer func() {
+		if !success {
+			span.SetStatus(codes.Error, "message processing failed")
+		}
+		span.End()
+	}()
+
 	logger := b.logger.With(
 		"user_id", user.ID,
 		"username", user.Username,

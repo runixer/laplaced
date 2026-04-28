@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **OpenRouter provider routing.** The bot now prefers Google (Vertex) for all Gemini calls, with Google AI Studio as a fallback if Vertex is unavailable. Vertex has a published SLA and dynamic shared quota; AI Studio runs on a capacity-constrained shared pool with tighter per-key limits and noticeably more frequent "model overloaded" errors during peak hours. Non-Gemini models (Perplexity search, etc.) continue to route freely thanks to the default fallback behavior. Configurable via `openrouter.provider.order` in YAML or `LAPLACED_OPENROUTER_PROVIDER_ORDER` env. The actual provider that served each request is now logged alongside cost, so fallbacks are visible.
+
 ### Security
 - Upgraded the Go toolchain from 1.24 to 1.25.9, closing 13 known stdlib CVEs (in `crypto/tls`, `crypto/x509`, `html/template`, `net/url`, `os`). CI now also runs `govulncheck` as a blocking job on every push and PR so future CVE exposures are caught at merge time rather than release time.
 

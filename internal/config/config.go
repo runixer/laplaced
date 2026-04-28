@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ilyakaznacheev/cleanenv"
+	"github.com/runixer/laplaced/internal/openrouter"
 	"gopkg.in/yaml.v3"
 )
 
@@ -258,11 +259,38 @@ type ToolConfig struct {
 }
 
 type OpenRouterConfig struct {
-	APIKey          string      `yaml:"api_key" env:"LAPLACED_OPENROUTER_API_KEY"`
-	ProxyURL        string      `yaml:"proxy_url" env:"LAPLACED_OPENROUTER_PROXY_URL"`
-	PDFParserEngine string      `yaml:"pdf_parser_engine"`
-	RequestCost     float64     `yaml:"request_cost"`
-	PriceTiers      []PriceTier `yaml:"price_tiers"`
+	APIKey          string                `yaml:"api_key" env:"LAPLACED_OPENROUTER_API_KEY"`
+	ProxyURL        string                `yaml:"proxy_url" env:"LAPLACED_OPENROUTER_PROXY_URL"`
+	PDFParserEngine string                `yaml:"pdf_parser_engine"`
+	RequestCost     float64               `yaml:"request_cost"`
+	PriceTiers      []PriceTier           `yaml:"price_tiers"`
+	Provider        ProviderRoutingConfig `yaml:"provider"`
+}
+
+// ProviderRoutingConfig configures OpenRouter provider preference.
+// See https://openrouter.ai/docs/features/provider-routing for semantics.
+// When Order is empty, no routing header is sent — OpenRouter picks freely.
+// AllowFallbacks is a pointer: unset means "use OpenRouter default (true)";
+// explicit false means "never fall back outside the order list".
+type ProviderRoutingConfig struct {
+	Order []string `yaml:"order" env:"LAPLACED_OPENROUTER_PROVIDER_ORDER" env-separator:","`
+	// AllowFallbacks is YAML-only: cleanenv doesn't support *bool via env tags.
+	// The common case (prefer a provider with default fallback) needs only Order,
+	// so this is not a practical limitation.
+	AllowFallbacks *bool `yaml:"allow_fallbacks"`
+}
+
+// ToRouting converts the YAML config to an openrouter.ProviderRouting pointer.
+// Returns nil when no preference is configured, so the client stays on
+// OpenRouter's default behavior.
+func (c ProviderRoutingConfig) ToRouting() *openrouter.ProviderRouting {
+	if len(c.Order) == 0 && c.AllowFallbacks == nil {
+		return nil
+	}
+	return &openrouter.ProviderRouting{
+		Order:          c.Order,
+		AllowFallbacks: c.AllowFallbacks,
+	}
 }
 
 // EmbeddingConfig defines embedding model settings.
@@ -406,6 +434,26 @@ func (c *SearchConfig) GetPeopleMaxResults() int {
 	return DefaultPeopleMaxResults
 }
 
+// TelemetryConfig defines configuration for OpenTelemetry export (traces first,
+// metrics and logs as subsequent iterations). Disabled by default — callers
+// must flip `enabled: true` (or set LAPLACED_TELEMETRY_ENABLED=true) to start
+// an exporter. When disabled, the global OTel provider stays no-op.
+type TelemetryConfig struct {
+	Enabled bool `yaml:"enabled" env:"LAPLACED_TELEMETRY_ENABLED"`
+	// Exporter selects the span exporter backend. Valid values: "otlp"
+	// (default, sends to an OTLP/gRPC collector like Alloy) and "stdout"
+	// (pretty-prints spans to stderr; for local dev where network-level
+	// trace delivery is not being tested).
+	Exporter     string `yaml:"exporter" env:"LAPLACED_TELEMETRY_EXPORTER"`
+	OTLPEndpoint string `yaml:"otlp_endpoint" env:"LAPLACED_TELEMETRY_OTLP_ENDPOINT"`
+	ServiceName  string `yaml:"service_name" env:"LAPLACED_TELEMETRY_SERVICE_NAME"`
+	// TraceContent, when true, asks tracing to record full content (LLM
+	// request/response bodies, raw RAG queries, tool args/results) as span
+	// events. Default off — flip only for debug sessions. Also surfaces as
+	// resource attribute laplaced.trace_content on the captured trace.
+	TraceContent bool `yaml:"trace_content" env:"LAPLACED_TELEMETRY_TRACE_CONTENT"`
+}
+
 type Config struct {
 	Log struct {
 		Level string `yaml:"level" env:"LAPLACED_LOG_LEVEL"`
@@ -438,6 +486,7 @@ type Config struct {
 	Artifacts ArtifactsConfig `yaml:"artifacts"`
 	Memory    MemoryConfig    `yaml:"memory"`
 	Search    SearchConfig    `yaml:"search"`
+	Telemetry TelemetryConfig `yaml:"telemetry"`
 }
 
 // Load loads configuration from the specified file path.
@@ -665,6 +714,20 @@ func (c *Config) Validate() error {
 	if c.Artifacts.Enabled {
 		if c.Agents.Extractor.MaxFileSizeMB <= 0 {
 			errs = append(errs, fmt.Errorf("agents.extractor.max_file_size_mb must be positive, got %d", c.Agents.Extractor.MaxFileSizeMB))
+		}
+	}
+
+	// Telemetry: validation depends on the chosen exporter.
+	if c.Telemetry.Enabled {
+		switch c.Telemetry.Exporter {
+		case "", "otlp":
+			if c.Telemetry.OTLPEndpoint == "" {
+				errs = append(errs, errors.New("telemetry.otlp_endpoint is required when telemetry.enabled=true and exporter=otlp"))
+			}
+		case "stdout":
+			// No extra requirements — writes to stderr.
+		default:
+			errs = append(errs, fmt.Errorf("telemetry.exporter must be one of 'otlp' or 'stdout', got %q", c.Telemetry.Exporter))
 		}
 	}
 

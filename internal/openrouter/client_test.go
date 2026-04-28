@@ -46,7 +46,7 @@ func TestCreateChatCompletion(t *testing.T) {
 
 	// Create client
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1", nil)
 	assert.NoError(t, err)
 
 	// Create request
@@ -95,7 +95,7 @@ func TestCreateChatCompletionLogging(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, _ := NewClientWithBaseURL(logger, "test_api_key", "", server.URL)
+	client, _ := NewClientWithBaseURL(logger, "test_api_key", "", server.URL, nil)
 
 	req := ChatCompletionRequest{
 		Model: "test_model",
@@ -155,7 +155,7 @@ func TestCreateChatCompletionRetry(t *testing.T) {
 	defer server.Close()
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1", nil)
 	assert.NoError(t, err)
 
 	req := ChatCompletionRequest{
@@ -181,7 +181,7 @@ func TestCreateChatCompletionMaxRetriesExceeded(t *testing.T) {
 	defer server.Close()
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1", nil)
 	assert.NoError(t, err)
 
 	req := ChatCompletionRequest{
@@ -438,7 +438,7 @@ func TestCreateEmbeddings(t *testing.T) {
 	defer server.Close()
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1", nil)
 	assert.NoError(t, err)
 
 	req := EmbeddingRequest{
@@ -479,7 +479,7 @@ func TestCreateEmbeddingsDimensionsSerialization(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "k", "", server.URL+"/api/v1")
+			client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "k", "", server.URL+"/api/v1", nil)
 			assert.NoError(t, err)
 
 			_, err = client.CreateEmbeddings(context.Background(), EmbeddingRequest{
@@ -523,7 +523,7 @@ func TestCreateEmbeddingsRetry(t *testing.T) {
 	defer server.Close()
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1", nil)
 	assert.NoError(t, err)
 
 	req := EmbeddingRequest{
@@ -550,7 +550,7 @@ func TestCreateEmbeddingsEmptyResponse(t *testing.T) {
 
 	var logBuf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1", nil)
 	assert.NoError(t, err)
 
 	req := EmbeddingRequest{
@@ -588,7 +588,7 @@ func TestCreateEmbeddingsHTTP200WithBodyErrorRetries(t *testing.T) {
 	defer server.Close()
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1", nil)
 	assert.NoError(t, err)
 
 	resp, err := client.CreateEmbeddings(context.Background(), EmbeddingRequest{
@@ -611,7 +611,7 @@ func TestCreateEmbeddingsHTTP200WithBodyErrorExhaustsRetries(t *testing.T) {
 	defer server.Close()
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1", nil)
 	assert.NoError(t, err)
 
 	_, err = client.CreateEmbeddings(context.Background(), EmbeddingRequest{
@@ -643,7 +643,7 @@ func TestCreateChatCompletionHTTP200WithBodyErrorRetries(t *testing.T) {
 	defer server.Close()
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1", nil)
 	assert.NoError(t, err)
 
 	resp, err := client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
@@ -657,17 +657,33 @@ func TestCreateChatCompletionHTTP200WithBodyErrorRetries(t *testing.T) {
 
 func TestDetectOpenRouterBodyError(t *testing.T) {
 	tests := []struct {
-		name     string
-		body     string
-		wantNil  bool
-		wantMsg  string
-		wantCode int
+		name         string
+		body         string
+		wantNil      bool
+		wantMsg      string
+		wantCode     int
+		wantProvider string
+		wantRaw      string
 	}{
-		{"no error field", `{"data":[{"embedding":[0.1]}]}`, true, "", 0},
-		{"error with numeric code", `{"error":{"message":"x","code":404}}`, false, "x", 404},
-		{"error with string code", `{"error":{"message":"y","code":"503"}}`, false, "y", 503},
-		{"error without code", `{"error":{"message":"z"}}`, false, "z", 0},
-		{"invalid json", `not json`, true, "", 0},
+		{"no error field", `{"data":[{"embedding":[0.1]}]}`, true, "", 0, "", ""},
+		{"error with numeric code", `{"error":{"message":"x","code":404}}`, false, "x", 404, "", ""},
+		{"error with string code", `{"error":{"message":"y","code":"503"}}`, false, "y", 503, "", ""},
+		{"error without code", `{"error":{"message":"z"}}`, false, "z", 0, "", ""},
+		{"invalid json", `not json`, true, "", 0, "", ""},
+		{
+			// Real shape OR returns when proxying an upstream provider error,
+			// e.g. AI Studio's "Corrupted thought signature" case captured during
+			// the 2026-04-28 reranker incident. Critical that provider_name and
+			// raw survive the round-trip so traces can pinpoint which provider
+			// rejected the request.
+			"upstream provider error with metadata",
+			`{"error":{"message":"Provider returned error","code":400,"metadata":{"raw":"{\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"Corrupted thought signature.\",\n    \"status\": \"INVALID_ARGUMENT\"\n  }\n}\n","provider_name":"Google AI Studio","is_byok":false}}}`,
+			false,
+			"Provider returned error",
+			400,
+			"Google AI Studio",
+			"{\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"Corrupted thought signature.\",\n    \"status\": \"INVALID_ARGUMENT\"\n  }\n}\n",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -679,6 +695,8 @@ func TestDetectOpenRouterBodyError(t *testing.T) {
 			assert.NotNil(t, got)
 			assert.Equal(t, tt.wantMsg, got.Message)
 			assert.Equal(t, tt.wantCode, got.Code)
+			assert.Equal(t, tt.wantProvider, got.ProviderName)
+			assert.Equal(t, tt.wantRaw, got.Raw)
 		})
 	}
 }
@@ -691,7 +709,7 @@ func TestCreateEmbeddingsNonRetryableError(t *testing.T) {
 	defer server.Close()
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1", nil)
 	assert.NoError(t, err)
 
 	req := EmbeddingRequest{
@@ -709,7 +727,7 @@ func TestNewClientWithProxy(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	// Test with valid proxy URL
-	client, err := NewClientWithBaseURL(logger, "test_key", "http://user:pass@proxy.example.com:8080", "https://api.example.com")
+	client, err := NewClientWithBaseURL(logger, "test_key", "http://user:pass@proxy.example.com:8080", "https://api.example.com", nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, client)
 
@@ -725,7 +743,7 @@ func TestNewClientWithInvalidProxy(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 
 	// Test with invalid proxy URL
-	_, err := NewClientWithBaseURL(logger, "test_key", "://invalid", "https://api.example.com")
+	_, err := NewClientWithBaseURL(logger, "test_key", "://invalid", "https://api.example.com", nil)
 	assert.Error(t, err)
 }
 
@@ -738,7 +756,7 @@ func TestCreateChatCompletionContextCanceled(t *testing.T) {
 	defer server.Close()
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1", nil)
 	assert.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -762,7 +780,7 @@ func TestCreateEmbeddingsContextCanceled(t *testing.T) {
 	defer server.Close()
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1")
+	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1", nil)
 	assert.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
