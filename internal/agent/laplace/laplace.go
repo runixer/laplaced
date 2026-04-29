@@ -10,10 +10,15 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
@@ -81,14 +86,53 @@ func (l *Laplace) Type() agent.AgentType {
 }
 
 // Execute runs the main chat loop with tool calls.
-func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHandler) (*Response, error) {
+func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHandler) (resp *Response, err error) {
 	logger := l.logger.With("user_id", req.UserID)
+
+	// Wrap the entire chat-agent loop in a span so child openrouter calls,
+	// tool dispatches, and artifact-loading events nest under one clear
+	// pipeline boundary. Pre-this commit they hung directly off bot.process-
+	// MessageGroup which made it hard to tell laplace turns from enricher /
+	// reranker calls in TraceQL.
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/laplace").Start(
+		ctx, "laplace.Execute",
+		trace.WithAttributes(attribute.Int64("user.id", req.UserID)),
+	)
+	// Captured by the deferred closure for span attrs. tool/llm counters
+	// live with the existing tracker; we copy at end-of-turn into attrs.
+	var toolIterationsFinal int
+	var totalArtifactsLoaded int
+	defer func() {
+		llmCalls := 0
+		costUSD := 0.0
+		if resp != nil {
+			llmCalls = resp.TotalTurns
+			if resp.TotalCost != nil {
+				costUSD = *resp.TotalCost
+			}
+		}
+		span.SetAttributes(
+			attribute.Int("laplace.iterations", toolIterationsFinal),
+			attribute.Int("laplace.llm_calls", llmCalls),
+			attribute.Float64("laplace.cost_usd", costUSD),
+			attribute.Int("laplace.artifacts_loaded", totalArtifactsLoaded),
+		)
+		_ = obs.ObserveErr(span, err)
+		span.End()
+	}()
 
 	// Load context data
 	contextData, err := l.LoadContextData(ctx, req.UserID, req.RawQuery, req.CurrentMessageParts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load context: %w", err)
 	}
+	totalArtifactsLoaded = len(contextData.SelectedArtifactIDs)
+
+	// Emit a media inventory event covering BOTH origins of media in the
+	// laplace context — current-message attachments and reranker-selected
+	// artifacts loaded from storage. Replay reads this to reconstruct the
+	// multimodal context without parsing redacted llm.request bodies.
+	l.recordMediaParts(ctx, req, contextData)
 
 	// Build initial messages
 	enrichedQuery := ""
@@ -129,18 +173,20 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 	tracker := agentlog.NewTurnTracker()
 	var finalResponse string
 	var generatedArtifactIDs []int64
-	toolIterations := 0
 	emptyRetries := 0
 
 	var totalLLMDuration time.Duration
 	var totalToolDuration time.Duration
 
 	for {
-		if toolIterations >= maxToolIterations {
-			logger.Warn("max tool iterations reached", "iterations", toolIterations)
+		// toolIterationsFinal is the span-captured counter declared at the
+		// top of Execute — using it directly means the final value already
+		// lives where the deferred closure can read it.
+		if toolIterationsFinal >= maxToolIterations {
+			logger.Warn("max tool iterations reached", "iterations", toolIterationsFinal)
 			break
 		}
-		toolIterations++
+		toolIterationsFinal++
 
 		orReq := openrouter.ChatCompletionRequest{
 			Model:     l.cfg.Agents.GetChatModel(),
@@ -253,7 +299,10 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 				ReasoningDetails: choice.Message.ReasoningDetails,
 			})
 
-			// Execute tools
+			// Execute tools — stamp the iteration so the tool span carries
+			// "this dispatch belongs to laplace turn N", queryable as
+			// {span.tool.iteration=2} in TraceQL.
+			tcc.Iteration = toolIterationsFinal
 			toolStart := time.Now()
 			toolMessages, toolArtifactIDs := l.executeToolCalls(ctx, toolHandler, tcc, choice.Message.ToolCalls, req.OnTypingAction, logger)
 			totalToolDuration += time.Since(toolStart)
@@ -335,6 +384,38 @@ func (l *Laplace) executeToolCalls(
 	}
 
 	return toolMessages, artifactIDs
+}
+
+// recordMediaParts emits a laplace.media_parts span event listing every
+// piece of multimodal input the agent will see this turn — both attachments
+// from the current user message and artifacts the reranker pulled from
+// storage. The body is hash-addressed metadata only; replay matches each
+// entry to artifact storage by sha256 to reconstruct the original FilePart.
+//
+// Always emit (even when empty) so absence in the trace is meaningful — it
+// means the user's turn truly had no media, not that we forgot to record.
+func (l *Laplace) recordMediaParts(ctx context.Context, req *Request, contextData *ContextData) {
+	span := trace.SpanFromContext(ctx)
+	parts := make([]agent.MediaPartWithSource, 0, len(req.CurrentMessageParts)+len(contextData.SelectedArtifactIDs))
+	for _, p := range req.CurrentMessageParts {
+		if _, ok := p.(openrouter.FilePart); ok {
+			parts = append(parts, agent.MediaPartWithSource{Part: p, Source: "current_message"})
+		}
+	}
+	// Reranker-selected artifact bytes are loaded later in BuildMessages —
+	// at this point we only know the IDs. Emit minimal entries (no hash) so
+	// replay sees the count + source; the per-artifact loaded event below
+	// fills in mime/size/sha once the file is read off disk.
+	span.SetAttributes(
+		attribute.Int("laplace.media.current_message", len(parts)),
+		attribute.Int("laplace.media.reranker_selected", len(contextData.SelectedArtifactIDs)),
+	)
+	if len(parts) == 0 {
+		return
+	}
+	if body := agent.FormatMediaPartsWithSources(parts); body != "" {
+		obs.RecordContent(span, "laplace.media_parts", body)
+	}
 }
 
 // extractImageFileParts walks the current-message multimodal parts and

@@ -137,6 +137,36 @@ func detectOpenRouterBodyError(body []byte) *openRouterBodyError {
 	return bodyErr
 }
 
+// classifyUpstreamError maps a parsed OR error envelope to a stable kind
+// attribute that TraceQL can filter on without grepping free-form messages.
+// The classification is intentionally coarse — fine-grained provider error
+// shapes change between deploys, but these buckets stay stable enough that
+// a query like {span.error.upstream_kind="invalid_argument"} still matches
+// next year. New shapes get "unknown" and surface in raw_message for triage.
+func classifyUpstreamError(bodyErr *openRouterBodyError) string {
+	if bodyErr == nil {
+		return ""
+	}
+	msg := strings.ToLower(bodyErr.Message + " " + bodyErr.Raw)
+	switch {
+	case strings.Contains(msg, "invalid_argument") || strings.Contains(msg, "invalid argument"):
+		return "invalid_argument"
+	case strings.Contains(msg, "safety") || strings.Contains(msg, "harm_category") || strings.Contains(msg, "blocked"):
+		return "safety"
+	case strings.Contains(msg, "rate_limit") || strings.Contains(msg, "rate limit") || bodyErr.Code == 429:
+		return "rate_limited"
+	case strings.Contains(msg, "context") && strings.Contains(msg, "length"):
+		return "context_length"
+	case strings.Contains(msg, "corrupted thought signature"):
+		return "thought_signature"
+	case bodyErr.Code >= 500:
+		return "upstream_5xx"
+	case bodyErr.Code >= 400:
+		return "upstream_4xx"
+	}
+	return "unknown"
+}
+
 // recordOpenRouterError attaches an OR error envelope to a span: the raw body
 // as an llm.response content event (subject to ContentEnabled gating) and the
 // parsed envelope fields as structured attributes (always set when present).
@@ -146,12 +176,12 @@ func recordOpenRouterError(span trace.Span, body []byte) {
 	if len(body) == 0 {
 		return
 	}
-	obs.RecordContent(span, "llm.response", string(body))
+	obs.RecordContent(span, "llm.response", obs.RedactBase64Payloads(string(body)))
 	bodyErr := detectOpenRouterBodyError(body)
 	if bodyErr == nil {
 		return
 	}
-	attrs := make([]attribute.KeyValue, 0, 3)
+	attrs := make([]attribute.KeyValue, 0, 4)
 	if bodyErr.Message != "" {
 		attrs = append(attrs, attribute.String("error.upstream_message", bodyErr.Message))
 	}
@@ -160,6 +190,9 @@ func recordOpenRouterError(span trace.Span, body []byte) {
 	}
 	if bodyErr.ProviderName != "" {
 		attrs = append(attrs, attribute.String("error.upstream_provider", bodyErr.ProviderName))
+	}
+	if kind := classifyUpstreamError(bodyErr); kind != "" {
+		attrs = append(attrs, attribute.String("error.upstream_kind", kind))
 	}
 	if len(attrs) > 0 {
 		span.SetAttributes(attrs...)
@@ -566,10 +599,17 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 			span.SetAttributes(attribute.Float64("llm.cost_usd", *resp.Usage.Cost))
 		}
 		if len(reqBody) > 0 {
-			obs.RecordContent(span, "llm.request", string(reqBody))
+			// Redact: multimodal inputs carry full base64 (1-5 MB per image,
+			// 3-4 calls per turn) which trips Tempo max_bytes_per_trace if
+			// left raw. Replay reconstructs FilePart bytes via the placeholder
+			// hash → snapshot artifact storage. See internal/obs/content.go.
+			obs.RecordContent(span, "llm.request", obs.RedactBase64Payloads(string(reqBody)))
 		}
 		if resp.DebugResponseBody != "" {
-			obs.RecordContent(span, "llm.response", resp.DebugResponseBody)
+			// imagegen success responses carry generated image as base64 in
+			// choices[].message.images[].image_url.url — redact for the same
+			// trace-size reasons. Failure responses are small text, untouched.
+			obs.RecordContent(span, "llm.response", obs.RedactBase64Payloads(resp.DebugResponseBody))
 		}
 		_ = obs.ObserveErr(span, err)
 		span.End()

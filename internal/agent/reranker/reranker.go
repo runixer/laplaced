@@ -212,7 +212,7 @@ func (r *Reranker) rerank(
 			// content_hash so a faithful replay can re-fetch the file from
 			// artifact storage by hash without the trace carrying base64.
 			if len(mediaParts) > 0 {
-				if body := formatMediaParts(mediaParts); body != "" {
+				if body := agent.FormatMediaParts(mediaParts, ""); body != "" {
 					obs.RecordContent(span, "reranker.media_parts", body)
 				}
 			}

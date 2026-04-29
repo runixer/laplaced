@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -28,6 +29,10 @@ type CallContext struct {
 	// user message. generate_image uses these as default input when the LLM
 	// does not pass explicit artifact IDs.
 	CurrentMessageImages []openrouter.FilePart
+	// Iteration is the 1-based laplace tool-loop iteration. Recorded on the
+	// tool_executor span as tool.iteration; zero is acceptable for callers
+	// outside the laplace loop (none today).
+	Iteration int
 }
 
 // Result is the richer return type of tool execution. Content is what gets
@@ -153,10 +158,14 @@ func (e *ToolExecutor) ExecuteToolCall(ctx context.Context, cc CallContext, tool
 		trace.WithAttributes(
 			attribute.String("tool.name", toolName),
 			attribute.Int64("user.id", cc.UserID),
+			attribute.Int("tool.iteration", cc.Iteration),
 		),
 	)
 	defer func() {
 		span.SetAttributes(attribute.Bool("tool.ok", err == nil))
+		if err != nil {
+			span.SetAttributes(attribute.String("tool.error_kind", classifyToolError(err)))
+		}
 		if arguments != "" {
 			obs.RecordContent(span, "tool.args", arguments)
 		}
@@ -222,4 +231,28 @@ func textResult(content string, err error) (*Result, error) {
 		return nil, err
 	}
 	return &Result{Content: content}, nil
+}
+
+// classifyToolError maps a tool-dispatch error to a stable kind attribute
+// so TraceQL can group failures without grepping free-form messages. The
+// classification is intentionally coarse — covers the failure modes that
+// have actually shown up in prod, with a residual "unknown" for new shapes.
+//
+// The error string is stable enough to match: each value comes from a
+// fmt.Errorf inside this package, not from underlying libs whose phrasing
+// could shift between versions.
+func classifyToolError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "unknown tool"):
+		return "unknown_tool"
+	case strings.Contains(msg, "failed to parse arguments"):
+		return "bad_arguments"
+	case strings.Contains(msg, "context deadline exceeded") || strings.Contains(msg, "context canceled"):
+		return "context"
+	}
+	return "unknown"
 }

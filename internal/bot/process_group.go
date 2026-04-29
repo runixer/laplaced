@@ -23,6 +23,7 @@ import (
 	"github.com/runixer/laplaced/internal/agent/laplace"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/markdown"
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
@@ -75,7 +76,31 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 			attribute.Int("message.total_chars", totalChars),
 		),
 	)
+	// Captured by the deferred closure for end-of-turn aggregations. These
+	// roll up into bot.* span attrs so a single TraceQL query like
+	// {span.bot.had_errors=true} or {span.bot.total_cost_usd > 0.1} surfaces
+	// problem turns without aggregating across child spans.
+	var (
+		botLLMCalls   int
+		botToolCalls  int
+		botCostUSD    float64
+		botToolsUsed  []string // distinct tool names invoked this turn
+		botHadErrors  bool
+		botErrorKinds []string
+	)
 	defer func() {
+		span.SetAttributes(
+			attribute.Int("bot.llm_calls_count", botLLMCalls),
+			attribute.Int("bot.tool_calls_count", botToolCalls),
+			attribute.Float64("bot.total_cost_usd", botCostUSD),
+			attribute.Bool("bot.had_errors", botHadErrors),
+		)
+		if len(botToolsUsed) > 0 {
+			span.SetAttributes(attribute.StringSlice("bot.tools_used", botToolsUsed))
+		}
+		if len(botErrorKinds) > 0 {
+			span.SetAttributes(attribute.StringSlice("bot.error_kinds", botErrorKinds))
+		}
 		if !success {
 			span.SetStatus(codes.Error, "message processing failed")
 		}
@@ -242,6 +267,8 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	if err != nil {
 		// Fatal error (not a partial execution failure)
 		logger.Error("laplace execution fatal error", "error", err)
+		botHadErrors = true
+		botErrorKinds = append(botErrorKinds, "laplace_fatal")
 		tgStart := time.Now()
 		b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
 		totalTelegramDuration += time.Since(tgStart)
@@ -252,6 +279,8 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	// Check for partial execution error (e.g., max retries reached)
 	if resp.Error != nil {
 		logger.Error("laplace execution failed", "error", resp.Error, "total_turns", resp.TotalTurns)
+		botHadErrors = true
+		botErrorKinds = append(botErrorKinds, "laplace_partial")
 		tgStart := time.Now()
 		b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
 		totalTelegramDuration += time.Since(tgStart)
@@ -280,6 +309,25 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		cost = b.getTieredCost(resp.PromptTokens, resp.CompletionTokens, logger)
 	}
 
+	// Roll up turn aggregations onto the root span. Tool counts and names
+	// come from walking the assistant messages that carry tool_calls — the
+	// tracker doesn't expose this directly, but resp.Messages does.
+	botLLMCalls = resp.TotalTurns
+	botCostUSD = cost
+	toolNamesSeen := map[string]bool{}
+	for _, m := range resp.Messages {
+		if m.Role != "assistant" {
+			continue
+		}
+		for _, tc := range m.ToolCalls {
+			botToolCalls++
+			if !toolNamesSeen[tc.Function.Name] {
+				toolNamesSeen[tc.Function.Name] = true
+				botToolsUsed = append(botToolsUsed, tc.Function.Name)
+			}
+		}
+	}
+
 	// Record stats
 	stat := storage.Stat{
 		UserID:     userID,
@@ -306,6 +354,8 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	// Branch: if the turn produced generated images, route through the
 	// media-aware reply path. Otherwise keep the text-only path.
 	if len(resp.GeneratedArtifactIDs) > 0 {
+		obs.RecordContent(span, "bot.reply_sent", resp.Content,
+			attribute.Int64Slice("generated_artifact_ids", resp.GeneratedArtifactIDs))
 		mediaDur, sentCount := b.sendResponseWithGeneratedImages(
 			shutdownSafeCtx, userID, chatID, lastMsg.MessageThreadID, lastMsg.MessageID,
 			resp.Content, resp.GeneratedArtifactIDs, logger,
@@ -326,6 +376,13 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "assistant", Content: resp.Content}); err != nil {
 		logger.Error("failed to add assistant message to history", "error", err)
 	}
+
+	// Capture the final reply on the root span — what the user actually saw
+	// after sanitize/markdown/chunking. Closes the "what did the bot reply"
+	// gap that today required ssh + docker logs to answer. Under content
+	// toggle since this is user-visible text.
+	obs.RecordContent(span, "bot.reply_sent", resp.Content,
+		attribute.Int("chunks", len(responses)))
 
 	// Send response
 	tgStart := time.Now()

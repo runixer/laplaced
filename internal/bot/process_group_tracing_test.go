@@ -99,10 +99,17 @@ func TestProcessMessageGroup_RecordsRootSpan(t *testing.T) {
 	})
 
 	spans := getSpans()
-	require.Len(t, spans, 1, "exactly one root span is expected")
-
-	span := spans[0]
-	assert.Equal(t, "bot.processMessageGroup", span.Name)
+	// processMessageGroup now starts a child laplace.Execute span too —
+	// pick out the root by name rather than asserting span count.
+	var rootIdx = -1
+	for i := range spans {
+		if spans[i].Name == "bot.processMessageGroup" {
+			rootIdx = i
+			break
+		}
+	}
+	require.GreaterOrEqual(t, rootIdx, 0, "bot.processMessageGroup span must be present")
+	span := spans[rootIdx]
 
 	attrs := make(map[attribute.Key]attribute.Value, len(span.Attributes))
 	for _, kv := range span.Attributes {

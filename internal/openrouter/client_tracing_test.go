@@ -2,11 +2,14 @@ package openrouter
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -328,4 +331,190 @@ func TestCreateEmbeddings_RecordsSpan(t *testing.T) {
 	assert.Equal(t, int64(1536), attrs["emb.dimensions"].AsInt64())
 	assert.Equal(t, int64(7), attrs["gen_ai.usage.input_tokens"].AsInt64())
 	assert.Equal(t, sdkcodes.Unset, span.Status.Code)
+}
+
+// TestCreateChatCompletion_RedactsBase64InContentEvents is the guard against
+// raw base64 leaking into trace events. The exact failure mode this prevents:
+// a 5 MB image in llm.request × 3-4 OR calls × bot+OR sides crosses Tempo's
+// max_bytes_per_trace and the second half of the trace silently disappears.
+//
+// Asserts that BOTH llm.request and llm.response (imagegen output) carry
+// only "redacted:sha256:..." placeholders — no "data:<mime>;base64,<long>"
+// substring should survive on any span event body.
+func TestCreateChatCompletion_RedactsBase64InContentEvents(t *testing.T) {
+	prev := obs.ContentEnabled()
+	t.Cleanup(func() { obs.SetContentEnabled(prev) })
+	obs.SetContentEnabled(true)
+
+	getSpans := withTracingCapture(t)
+
+	// Synthesize a payload that satisfies the regex's 32+ char floor.
+	rawIn := []byte(strings.Repeat("INPUT-IMAGE-PAYLOAD-", 4))   // 80 bytes
+	rawOut := []byte(strings.Repeat("OUTPUT-IMAGE-PAYLOAD-", 4)) // 84 bytes
+	inputDataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(rawIn)
+	outputDataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(rawOut)
+
+	// imagegen-shape response: choices[].message.images[].image_url.url
+	// carries the generated image as a data URL — the redact must catch it.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		body := map[string]any{
+			"model": "google/gemini-3.1-flash-image-preview",
+			"choices": []map[string]any{{
+				"message": map[string]any{
+					"role":    "assistant",
+					"content": "",
+					"images": []map[string]any{{
+						"type":      "image_url",
+						"image_url": map[string]any{"url": outputDataURL},
+					}},
+				},
+				"finish_reason": "stop",
+			}},
+			"usage": map[string]any{"prompt_tokens": 50, "completion_tokens": 0, "total_tokens": 50},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(body)
+	}))
+	defer server.Close()
+
+	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
+	require.NoError(t, err)
+
+	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
+		Model:      "google/gemini-3.1-flash-image-preview",
+		Modalities: []string{"image", "text"},
+		Messages: []Message{{Role: "user", Content: []interface{}{
+			TextPart{Type: "text", Text: "edit this"},
+			ImageURLPart{Type: "image_url", ImageURL: ImageURLValue{URL: inputDataURL}},
+		}}},
+	})
+	require.NoError(t, err)
+
+	spans := getSpans()
+	require.Len(t, spans, 1)
+
+	rawBase64Re := regexp.MustCompile(`data:[a-zA-Z0-9./+\-]+;base64,[A-Za-z0-9+/=]{32,}`)
+
+	var sawRequest, sawResponse bool
+	for _, ev := range spans[0].Events {
+		if ev.Name != "llm.request" && ev.Name != "llm.response" {
+			continue
+		}
+		for _, kv := range ev.Attributes {
+			if kv.Key != "body" {
+				continue
+			}
+			body := kv.Value.AsString()
+			assert.False(t, rawBase64Re.MatchString(body),
+				"event %q body must not contain raw data:<mime>;base64,<long-payload> after redact: got %q",
+				ev.Name, body[:min(200, len(body))])
+			assert.Contains(t, body, "redacted:sha256:",
+				"event %q body should carry the placeholder for the multimodal input", ev.Name)
+			if ev.Name == "llm.request" {
+				sawRequest = true
+			}
+			if ev.Name == "llm.response" {
+				sawResponse = true
+			}
+		}
+	}
+	assert.True(t, sawRequest, "llm.request event must be present")
+	assert.True(t, sawResponse, "llm.response event must be present")
+}
+
+// TestClassifyUpstreamError pins the coarse error kind classification used by
+// recordOpenRouterError. The scenarios mirror real OR error envelopes seen
+// in prod (INVALID_ARGUMENT for image-size+input-image incompat, Corrupted
+// thought signature for the reranker-turn-2 case from 2026-04-28, plus
+// generic 5xx and 429s). New classes get "unknown" not error.
+func TestClassifyUpstreamError(t *testing.T) {
+	cases := []struct {
+		name string
+		in   *openRouterBodyError
+		want string
+	}{
+		{"nil", nil, ""},
+		{
+			"invalid_argument from Google",
+			&openRouterBodyError{Message: "Provider returned error", Code: 400, Raw: `{"error":{"code":400,"message":"Request contains an invalid argument.","status":"INVALID_ARGUMENT"}}`},
+			"invalid_argument",
+		},
+		{
+			"thought signature corruption",
+			&openRouterBodyError{Message: "Provider returned error", Code: 400, Raw: `{"error":{"message":"Corrupted thought signature."}}`},
+			"thought_signature",
+		},
+		{
+			"safety blocked",
+			&openRouterBodyError{Message: "Content blocked due to safety policy", Code: 400},
+			"safety",
+		},
+		{
+			"rate limit by code",
+			&openRouterBodyError{Message: "Too many requests", Code: 429},
+			"rate_limited",
+		},
+		{
+			"rate limit by message",
+			&openRouterBodyError{Message: "rate_limit_exceeded", Code: 400},
+			"rate_limited",
+		},
+		{
+			"context length",
+			&openRouterBodyError{Message: "context length exceeded for model", Code: 400},
+			"context_length",
+		},
+		{
+			"upstream 5xx",
+			&openRouterBodyError{Message: "internal error", Code: 503},
+			"upstream_5xx",
+		},
+		{
+			"plain 4xx falls through to upstream_4xx",
+			&openRouterBodyError{Message: "weird payload", Code: 422},
+			"upstream_4xx",
+		},
+		{
+			"unknown shape",
+			&openRouterBodyError{Message: "something weird"},
+			"unknown",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, classifyUpstreamError(c.in))
+		})
+	}
+}
+
+// TestCreateChatCompletion_UpstreamError_PopulatesKindAttr verifies the
+// classification feeds onto the span as error.upstream_kind. With this attr
+// in place, TraceQL queries like {span.error.upstream_kind="invalid_argument"}
+// surface 2026-04-29-style imagegen failures without scraping logs.
+func TestCreateChatCompletion_UpstreamError_PopulatesKindAttr(t *testing.T) {
+	getSpans := withTracingCapture(t)
+
+	envelope := `{"error":{"message":"Provider returned error","code":400,"metadata":{"raw":"{\"error\":{\"code\":400,\"message\":\"Request contains an invalid argument.\",\"status\":\"INVALID_ARGUMENT\"}}","provider_name":"Google AI Studio","is_byok":false}}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(envelope))
+	}))
+	defer server.Close()
+
+	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
+	require.NoError(t, err)
+
+	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
+		Model:    "m",
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	require.Error(t, err)
+
+	spans := getSpans()
+	require.Len(t, spans, 1)
+	attrs := map[attribute.Key]attribute.Value{}
+	for _, kv := range spans[0].Attributes {
+		attrs[kv.Key] = kv.Value
+	}
+	assert.Equal(t, "invalid_argument", attrs["error.upstream_kind"].AsString())
 }

@@ -8,10 +8,15 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -60,6 +65,28 @@ func (e *Enricher) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 		}, nil
 	}
 
+	// Span wraps the whole enricher call so the nested openrouter span
+	// attaches at a clear pipeline boundary instead of dangling under
+	// rag.Retrieve. Parallel to reranker.Execute and laplace.Execute.
+	userID := int64(0)
+	if req.Shared != nil {
+		userID = req.Shared.UserID
+	}
+	mediaParts := e.getMediaParts(req)
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/enricher").Start(
+		ctx, "enricher.Execute",
+		trace.WithAttributes(
+			attribute.Int64("user.id", userID),
+			attribute.Int("enricher.candidates_in.media", len(mediaParts)),
+		),
+	)
+	defer span.End()
+	if obs.ContentEnabled() && len(mediaParts) > 0 {
+		if body := agent.FormatMediaParts(mediaParts, ""); body != "" {
+			obs.RecordContent(span, "enricher.media_parts", body)
+		}
+	}
+
 	// Get profile and recent topics from SharedContext or load directly
 	profile, recentTopics := e.getContext(ctx, req)
 
@@ -97,12 +124,7 @@ func (e *Enricher) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 	// Build messages with optional multimodal content
 	messages := e.buildMessages(systemPrompt, userPrompt, req)
 
-	// Execute LLM call
-	userID := int64(0)
-	if req.Shared != nil {
-		userID = req.Shared.UserID
-	}
-
+	// Execute LLM call (userID was hoisted earlier for span attrs)
 	resp, err := e.executor.ExecuteSingleShot(ctx, agent.SingleShotRequest{
 		AgentType: agent.TypeEnricher,
 		UserID:    userID,
@@ -154,6 +176,18 @@ func (e *Enricher) getHistory(req *agent.Request) []storage.Message {
 	}
 	if history, ok := req.Params[ParamHistory].([]storage.Message); ok {
 		return history
+	}
+	return nil
+}
+
+// getMediaParts extracts the multimodal content slice from request params.
+// Returns nil when no media was attached. Matches the buildMessages contract.
+func (e *Enricher) getMediaParts(req *agent.Request) []interface{} {
+	if req.Params == nil {
+		return nil
+	}
+	if parts, ok := req.Params[ParamMediaParts].([]interface{}); ok {
+		return parts
 	}
 	return nil
 }

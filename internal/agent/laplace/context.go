@@ -2,19 +2,24 @@ package laplace
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/files"
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
@@ -255,6 +260,11 @@ func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID int64, art
 	loadedCount := 0
 	// Track successfully loaded artifact IDs for usage counting (v0.6.0)
 	var loadedArtifactIDs []int64
+	// Capture each loaded artifact's metadata for the laplace.artifacts_loaded
+	// span event. We accumulate during the loop and emit once at the end so
+	// replay sees the full set as a single batch entry. content_hash matches
+	// artifacts.content_hash → enables snapshot-DB lookup without raw base64.
+	loadedEntries := make([]agent.MediaEntry, 0, len(artifactIDs))
 
 	for _, artifactID := range artifactIDs {
 		// Check artifact count limit (v0.6.0)
@@ -312,6 +322,22 @@ func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID int64, art
 		totalBytes += len(fileData)
 		loadedCount++
 		loadedArtifactIDs = append(loadedArtifactIDs, artifact.ID)
+		// Sha256 here — the file is on disk by content_hash already, so this
+		// is mainly a defensive recompute (~5MB/ms). Replay validates: if the
+		// hash in the trace does not match what's on disk in the snapshot,
+		// surface a clear error rather than silently using corrupted bytes.
+		fileHash := sha256.Sum256(fileData)
+		entryName := artifact.OriginalName
+		if entryName == "" {
+			entryName = fmt.Sprintf("artifact_%d", artifact.ID)
+		}
+		loadedEntries = append(loadedEntries, agent.MediaEntry{
+			Filename:  entryName,
+			Mime:      artifact.MimeType,
+			SizeBytes: len(fileData),
+			SHA256:    hex.EncodeToString(fileHash[:]),
+			Source:    "reranker_selected",
+		})
 
 		// Encode as base64
 		base64Data := base64.StdEncoding.EncodeToString(fileData)
@@ -430,6 +456,16 @@ func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID int64, art
 			"max_artifacts", maxArtifacts,
 			"max_bytes", maxBytes,
 		)
+	}
+
+	// Emit laplace.artifacts_loaded under the laplace.Execute span — replay
+	// reads this to learn which artifacts the agent actually saw this turn,
+	// in what order, and with what bytes (sha256 contract). Always emit when
+	// we loaded anything; absence in the trace is meaningful.
+	if len(loadedEntries) > 0 && obs.ContentEnabled() {
+		if body, err := json.Marshal(loadedEntries); err == nil {
+			obs.RecordContent(trace.SpanFromContext(ctx), "laplace.artifacts_loaded", string(body))
+		}
 	}
 
 	// Track artifact usage (v0.6.0)

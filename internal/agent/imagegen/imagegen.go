@@ -3,13 +3,33 @@ package imagegen
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
+)
+
+// Outcome classifies the terminal state of a Generate call. It lives on
+// the imagegen.Generate span as imagegen.outcome and powers TraceQL queries
+// like {span.imagegen.outcome="provider_error"} for triage. New shapes
+// land in OutcomeUnknown — surfaces in error.upstream_message rather than
+// inventing a new bucket silently.
+const (
+	OutcomeSuccess        = "success"
+	OutcomeProviderError  = "provider_error"
+	OutcomeNoImages       = "no_images" // model returned text only or all decodes failed
+	OutcomeEmptyPrompt    = "empty_prompt"
+	OutcomeNoChoices      = "no_choices"
+	OutcomeUnknownFailure = "unknown"
 )
 
 // Agent wraps an OpenRouter client and emits image-generation requests with
@@ -32,8 +52,39 @@ func New(client openrouter.Client, cfg *config.ImageGeneratorConfig, logger *slo
 // Generate runs a single image-generation call. It never returns partial
 // results: if the model produced zero images it returns an error the caller
 // can surface to the user.
-func (a *Agent) Generate(ctx context.Context, req Request) (*Response, error) {
+func (a *Agent) Generate(ctx context.Context, req Request) (resp *Response, err error) {
+	// Span attrs let TraceQL pinpoint the 2026-04-29-style failure mode:
+	// {span.imagegen.outcome="provider_error" && span.imagegen.image_size="0.5K"}
+	// surfaces every image-edit-with-explicit-size that Google rejected, no
+	// log scraping. Outcome resolves in the deferred closure below.
+	outcome := OutcomeUnknownFailure
+	var inputBytes int
+	for _, img := range req.InputImages {
+		// Rough estimate: data URL length ≈ base64 encoding overhead 4/3.
+		// Used only for span attr observability; not load-bearing.
+		inputBytes += len(img.File.FileData) * 3 / 4
+	}
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/imagegen").Start(
+		ctx, "imagegen.Generate",
+		trace.WithAttributes(
+			attribute.Int64("user.id", req.UserID),
+			attribute.String("imagegen.aspect_ratio_requested", req.AspectRatio),
+			attribute.String("imagegen.image_size_requested", req.ImageSize),
+			attribute.Int("imagegen.input_count", len(req.InputImages)),
+			attribute.Int("imagegen.input_bytes_est", inputBytes),
+		),
+	)
+	defer func() {
+		span.SetAttributes(attribute.String("imagegen.outcome", outcome))
+		if resp != nil {
+			span.SetAttributes(attribute.Int("imagegen.output_count", len(resp.Images)))
+		}
+		_ = obs.ObserveErr(span, err)
+		span.End()
+	}()
+
 	if strings.TrimSpace(req.Prompt) == "" {
+		outcome = OutcomeEmptyPrompt
 		return nil, fmt.Errorf("imagegen: prompt is empty")
 	}
 
@@ -76,6 +127,14 @@ func (a *Agent) Generate(ctx context.Context, req Request) (*Response, error) {
 			ImageSize:   imageSize,
 		}
 	}
+	// Effective values (after defaulting) — separate from *_requested attrs
+	// so triage can distinguish "user/LLM asked for 0.5K" from "we defaulted
+	// to 1K because nothing was set". 2026-04-29 incident specifically came
+	// from edit-with-explicit-0.5K, so this distinction matters.
+	trace.SpanFromContext(ctx).SetAttributes(
+		attribute.String("imagegen.aspect_ratio", aspectRatio),
+		attribute.String("imagegen.image_size", imageSize),
+	)
 
 	orReq := openrouter.ChatCompletionRequest{
 		Model:       a.cfg.Model,
@@ -88,42 +147,55 @@ func (a *Agent) Generate(ctx context.Context, req Request) (*Response, error) {
 	}
 
 	start := time.Now()
-	resp, err := a.client.CreateChatCompletion(ctx, orReq)
+	orResp, callErr := a.client.CreateChatCompletion(ctx, orReq)
 	duration := time.Since(start)
-	if err != nil {
-		return nil, fmt.Errorf("imagegen: chat completion failed: %w", err)
+	if callErr != nil {
+		// Differentiate provider-side reject (most common: 4xx with body
+		// envelope) from local issues (timeout, transport). The OR client
+		// already wraps both as one error type; we use string match as the
+		// stable signal since openrouter.* package types are unexported.
+		if errors.Is(callErr, context.DeadlineExceeded) {
+			outcome = OutcomeUnknownFailure
+		} else {
+			outcome = OutcomeProviderError
+		}
+		return nil, fmt.Errorf("imagegen: chat completion failed: %w", callErr)
 	}
-	if len(resp.Choices) == 0 {
+	if len(orResp.Choices) == 0 {
+		outcome = OutcomeNoChoices
 		return nil, fmt.Errorf("imagegen: model returned no choices")
 	}
 
-	msg := resp.Choices[0].Message
+	msg := orResp.Choices[0].Message
 	if len(msg.Images) == 0 {
 		// Model chose to answer in text only — surface its text to the
 		// caller so it can be shown to the user as a graceful refusal.
+		outcome = OutcomeNoImages
 		return nil, fmt.Errorf("imagegen: model produced no images (text reply: %q)",
 			truncateForError(msg.Content, 200))
 	}
 
 	decoded := make([]DecodedImage, 0, len(msg.Images))
 	for i, img := range msg.Images {
-		mime, data, err := decodeDataURL(img.ImageURL.URL)
-		if err != nil {
-			a.logger.Warn("failed to decode image", "index", i, "err", err)
+		mime, data, decodeErr := decodeDataURL(img.ImageURL.URL)
+		if decodeErr != nil {
+			a.logger.Warn("failed to decode image", "index", i, "err", decodeErr)
 			continue
 		}
 		decoded = append(decoded, DecodedImage{MimeType: mime, Data: data})
 	}
 	if len(decoded) == 0 {
+		outcome = OutcomeNoImages
 		return nil, fmt.Errorf("imagegen: all %d output images failed to decode", len(msg.Images))
 	}
 
+	outcome = OutcomeSuccess
 	return &Response{
 		Images:           decoded,
 		TextContent:      msg.Content,
-		PromptTokens:     resp.Usage.PromptTokens,
-		CompletionTokens: resp.Usage.CompletionTokens,
-		Cost:             resp.Usage.Cost,
+		PromptTokens:     orResp.Usage.PromptTokens,
+		CompletionTokens: orResp.Usage.CompletionTokens,
+		Cost:             orResp.Usage.Cost,
 		Duration:         duration,
 	}, nil
 }
