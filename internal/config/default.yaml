@@ -131,7 +131,7 @@ agents:
     model: "google/gemini-3.1-flash-image-preview"
     timeout: "90s"                 # Max time per image generation call
     default_aspect_ratio: "9:16"   # Vertical phone format. Only applied for text-to-image; edits keep the input image's own ratio.
-    default_image_size: "1K"       # 0.5K, 1K, 2K, 4K
+    default_image_size: "1K"       # 512, 1K, 2K, 4K (API uses literal "512", not "0.5K")
     max_input_images: 4            # Max reference images accepted as tool input
     max_output_images: 4           # Max images shown to user per tool call
     max_input_image_bytes: 20971520 # 20MB per input image

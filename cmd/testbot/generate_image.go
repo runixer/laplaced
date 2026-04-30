@@ -112,7 +112,7 @@ Examples:
 
 func init() {
 	generateImageCmd.Flags().StringVar(&generateImageAspectRatio, "aspect-ratio", "", "Aspect ratio: 1:1, 16:9, 21:9, 1:4, 8:1, etc.")
-	generateImageCmd.Flags().StringVar(&generateImageSize, "size", "", "Image size: 0.5K, 1K, 2K, 4K")
+	generateImageCmd.Flags().StringVar(&generateImageSize, "size", "", "Image size: 512, 1K, 2K, 4K")
 	generateImageCmd.Flags().StringVar(&generateImageOutputDir, "output", "", "Output directory (default: $TMPDIR/testbot-images)")
 	rootCmd.AddCommand(generateImageCmd)
 }
