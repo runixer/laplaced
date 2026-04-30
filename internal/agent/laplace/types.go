@@ -67,6 +67,11 @@ type Response struct {
 type ToolCallContext struct {
 	UserID               int64
 	CurrentMessageImages []openrouter.FilePart
+	// Iteration is the 1-based tool-loop iteration this dispatch belongs
+	// to. Recorded on the tool_executor span as tool.iteration so traces
+	// can answer "which turn dispatched this tool" without matching by
+	// timestamp. Zero/unset is acceptable for non-laplace callers.
+	Iteration int
 }
 
 // ToolResult is the richer return type for tool execution. Content is what

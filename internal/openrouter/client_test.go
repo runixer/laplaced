@@ -657,17 +657,33 @@ func TestCreateChatCompletionHTTP200WithBodyErrorRetries(t *testing.T) {
 
 func TestDetectOpenRouterBodyError(t *testing.T) {
 	tests := []struct {
-		name     string
-		body     string
-		wantNil  bool
-		wantMsg  string
-		wantCode int
+		name         string
+		body         string
+		wantNil      bool
+		wantMsg      string
+		wantCode     int
+		wantProvider string
+		wantRaw      string
 	}{
-		{"no error field", `{"data":[{"embedding":[0.1]}]}`, true, "", 0},
-		{"error with numeric code", `{"error":{"message":"x","code":404}}`, false, "x", 404},
-		{"error with string code", `{"error":{"message":"y","code":"503"}}`, false, "y", 503},
-		{"error without code", `{"error":{"message":"z"}}`, false, "z", 0},
-		{"invalid json", `not json`, true, "", 0},
+		{"no error field", `{"data":[{"embedding":[0.1]}]}`, true, "", 0, "", ""},
+		{"error with numeric code", `{"error":{"message":"x","code":404}}`, false, "x", 404, "", ""},
+		{"error with string code", `{"error":{"message":"y","code":"503"}}`, false, "y", 503, "", ""},
+		{"error without code", `{"error":{"message":"z"}}`, false, "z", 0, "", ""},
+		{"invalid json", `not json`, true, "", 0, "", ""},
+		{
+			// Real shape OR returns when proxying an upstream provider error,
+			// e.g. AI Studio's "Corrupted thought signature" case captured during
+			// the 2026-04-28 reranker incident. Critical that provider_name and
+			// raw survive the round-trip so traces can pinpoint which provider
+			// rejected the request.
+			"upstream provider error with metadata",
+			`{"error":{"message":"Provider returned error","code":400,"metadata":{"raw":"{\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"Corrupted thought signature.\",\n    \"status\": \"INVALID_ARGUMENT\"\n  }\n}\n","provider_name":"Google AI Studio","is_byok":false}}}`,
+			false,
+			"Provider returned error",
+			400,
+			"Google AI Studio",
+			"{\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"Corrupted thought signature.\",\n    \"status\": \"INVALID_ARGUMENT\"\n  }\n}\n",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -679,6 +695,8 @@ func TestDetectOpenRouterBodyError(t *testing.T) {
 			assert.NotNil(t, got)
 			assert.Equal(t, tt.wantMsg, got.Message)
 			assert.Equal(t, tt.wantCode, got.Code)
+			assert.Equal(t, tt.wantProvider, got.ProviderName)
+			assert.Equal(t, tt.wantRaw, got.Raw)
 		})
 	}
 }

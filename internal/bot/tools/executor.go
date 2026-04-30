@@ -5,10 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
@@ -23,6 +29,10 @@ type CallContext struct {
 	// user message. generate_image uses these as default input when the LLM
 	// does not pass explicit artifact IDs.
 	CurrentMessageImages []openrouter.FilePart
+	// Iteration is the 1-based laplace tool-loop iteration. Recorded on the
+	// tool_executor span as tool.iteration; zero is acceptable for callers
+	// outside the laplace loop (none today).
+	Iteration int
 }
 
 // Result is the richer return type of tool execution. Content is what gets
@@ -138,7 +148,34 @@ func (e *ToolExecutor) SetFileStorage(fs *files.FileStorage) {
 // ExecuteToolCall dispatches tool execution by name.
 // Returns a Result with Content (fed back to the LLM) and any generated
 // artifact IDs (for media-producing tools like generate_image).
-func (e *ToolExecutor) ExecuteToolCall(ctx context.Context, cc CallContext, toolName string, arguments string) (*Result, error) {
+func (e *ToolExecutor) ExecuteToolCall(ctx context.Context, cc CallContext, toolName string, arguments string) (result *Result, err error) {
+	// One span per dispatched call. The tool.name attribute pivots across
+	// all six handlers. When a handler makes its own downstream LLM call
+	// (e.g. performModelTool → openrouter.CreateChatCompletion), the inner
+	// span naturally nests here via ctx, which is the trace we want.
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/bot/tools").Start(
+		ctx, "tool_executor.ExecuteToolCall",
+		trace.WithAttributes(
+			attribute.String("tool.name", toolName),
+			attribute.Int64("user.id", cc.UserID),
+			attribute.Int("tool.iteration", cc.Iteration),
+		),
+	)
+	defer func() {
+		span.SetAttributes(attribute.Bool("tool.ok", err == nil))
+		if err != nil {
+			span.SetAttributes(attribute.String("tool.error_kind", classifyToolError(err)))
+		}
+		if arguments != "" {
+			obs.RecordContent(span, "tool.args", arguments)
+		}
+		if result != nil && result.Content != "" {
+			obs.RecordContent(span, "tool.result", result.Content)
+		}
+		_ = obs.ObserveErr(span, err)
+		span.End()
+	}()
+
 	// Find tool config
 	var matchedTool *config.ToolConfig
 	for _, t := range e.cfg.Tools {
@@ -194,4 +231,28 @@ func textResult(content string, err error) (*Result, error) {
 		return nil, err
 	}
 	return &Result{Content: content}, nil
+}
+
+// classifyToolError maps a tool-dispatch error to a stable kind attribute
+// so TraceQL can group failures without grepping free-form messages. The
+// classification is intentionally coarse — covers the failure modes that
+// have actually shown up in prod, with a residual "unknown" for new shapes.
+//
+// The error string is stable enough to match: each value comes from a
+// fmt.Errorf inside this package, not from underlying libs whose phrasing
+// could shift between versions.
+func classifyToolError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "unknown tool"):
+		return "unknown_tool"
+	case strings.Contains(msg, "failed to parse arguments"):
+		return "bad_arguments"
+	case strings.Contains(msg, "context deadline exceeded") || strings.Contains(msg, "context canceled"):
+		return "context"
+	}
+	return "unknown"
 }

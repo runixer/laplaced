@@ -13,16 +13,58 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/laplace"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/markdown"
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
 )
+
+// disclaimerPhrases are case-folded fragments that signal a model refusing to
+// read a file. detectFalseDisclaimer flags a turn when one of these appears
+// alongside a substantive answer body — i.e. the model said "couldn't read
+// the file" and still answered correctly using its visible content. The
+// canonical case is the historical artifact / live attachment filename
+// collision, where reasoning-mode Pro models prepend a defensive disclaimer
+// despite having read the live photo. Match list is intentionally short and
+// high-precision; widen only after observing prod traces.
+var disclaimerPhrases = []string{
+	"не смог прочитать этот файл",
+	"не удалось прочитать",
+	"не распозналось",
+	"формат не поддерживается",
+	"i can't read this file",
+	"i couldn't read",
+	"i'm unable to read",
+	"cannot interpret the image",
+}
+
+// detectFalseDisclaimer returns the matched disclaimer phrase when reply
+// contains a refusal AND has a substantive body alongside it. Returns ""
+// when no anomaly is suspected. minSubstantiveLen filters out genuine
+// short refusals where the model truly couldn't read the file.
+func detectFalseDisclaimer(reply string) string {
+	const minSubstantiveLen = 300
+	if len(reply) < minSubstantiveLen {
+		return ""
+	}
+	lower := strings.ToLower(reply)
+	for _, p := range disclaimerPhrases {
+		if strings.Contains(lower, p) {
+			return p
+		}
+	}
+	return ""
+}
 
 // fileProcessingError wraps a file processing error for identification.
 type fileProcessingError struct {
@@ -53,6 +95,55 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		duration := time.Since(startTime).Seconds()
 		RecordMessageProcessing(user.ID, duration, success)
 	}()
+
+	// Root span for the whole turn. Child spans (RAG, reranker, LLM, tools)
+	// will attach here in later iterations; this one establishes the trace
+	// id and the user.id/message.count attributes every downstream query
+	// in Tempo will filter by. Declared AFTER the metrics defer so it fires
+	// first (LIFO) and can set error status before span.End().
+	totalChars := 0
+	for _, m := range group.Messages {
+		totalChars += len(m.Text) + len(m.Caption)
+	}
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/bot").Start(
+		ctx, "bot.processMessageGroup",
+		trace.WithAttributes(
+			attribute.Int64("user.id", user.ID),
+			attribute.Int("message.count", len(group.Messages)),
+			attribute.Int("message.total_chars", totalChars),
+		),
+	)
+	// Captured by the deferred closure for end-of-turn aggregations. These
+	// roll up into bot.* span attrs so a single TraceQL query like
+	// {span.bot.had_errors=true} or {span.bot.total_cost_usd > 0.1} surfaces
+	// problem turns without aggregating across child spans.
+	var (
+		botLLMCalls   int
+		botToolCalls  int
+		botCostUSD    float64
+		botToolsUsed  []string // distinct tool names invoked this turn
+		botHadErrors  bool
+		botErrorKinds []string
+	)
+	defer func() {
+		span.SetAttributes(
+			attribute.Int("bot.llm_calls_count", botLLMCalls),
+			attribute.Int("bot.tool_calls_count", botToolCalls),
+			attribute.Float64("bot.total_cost_usd", botCostUSD),
+			attribute.Bool("bot.had_errors", botHadErrors),
+		)
+		if len(botToolsUsed) > 0 {
+			span.SetAttributes(attribute.StringSlice("bot.tools_used", botToolsUsed))
+		}
+		if len(botErrorKinds) > 0 {
+			span.SetAttributes(attribute.StringSlice("bot.error_kinds", botErrorKinds))
+		}
+		if !success {
+			span.SetStatus(codes.Error, "message processing failed")
+		}
+		span.End()
+	}()
+
 	logger := b.logger.With(
 		"user_id", user.ID,
 		"username", user.Username,
@@ -125,6 +216,27 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	if len(currentUserMessageContent) == 0 {
 		logger.Warn("message group was empty after processing")
 		return
+	}
+
+	// Record live attachments on the root span so triage can answer
+	// "what did the user just send" without parsing the openrouter llm.request
+	// body. Each entry is {filename, mime, sha256, size, source}; the sha256
+	// matches artifacts.content_hash, so a snapshot replay can reconstruct
+	// the original FilePart bytes from the artifact storage.
+	hasCurrentMedia := false
+	for _, p := range currentUserMessageContent {
+		if _, ok := p.(openrouter.FilePart); ok {
+			hasCurrentMedia = true
+			break
+		}
+	}
+	if hasCurrentMedia {
+		span.SetAttributes(attribute.Bool("bot.has_current_media", true))
+	}
+	if obs.ContentEnabled() {
+		if body := agent.FormatMediaParts(currentUserMessageContent, "current_message"); body != "" {
+			obs.RecordContent(span, "bot.current_media", body)
+		}
 	}
 
 	userID := group.UserID
@@ -213,6 +325,8 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	if err != nil {
 		// Fatal error (not a partial execution failure)
 		logger.Error("laplace execution fatal error", "error", err)
+		botHadErrors = true
+		botErrorKinds = append(botErrorKinds, "laplace_fatal")
 		tgStart := time.Now()
 		b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
 		totalTelegramDuration += time.Since(tgStart)
@@ -223,6 +337,8 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	// Check for partial execution error (e.g., max retries reached)
 	if resp.Error != nil {
 		logger.Error("laplace execution failed", "error", resp.Error, "total_turns", resp.TotalTurns)
+		botHadErrors = true
+		botErrorKinds = append(botErrorKinds, "laplace_partial")
 		tgStart := time.Now()
 		b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
 		totalTelegramDuration += time.Since(tgStart)
@@ -251,6 +367,25 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		cost = b.getTieredCost(resp.PromptTokens, resp.CompletionTokens, logger)
 	}
 
+	// Roll up turn aggregations onto the root span. Tool counts and names
+	// come from walking the assistant messages that carry tool_calls — the
+	// tracker doesn't expose this directly, but resp.Messages does.
+	botLLMCalls = resp.TotalTurns
+	botCostUSD = cost
+	toolNamesSeen := map[string]bool{}
+	for _, m := range resp.Messages {
+		if m.Role != "assistant" {
+			continue
+		}
+		for _, tc := range m.ToolCalls {
+			botToolCalls++
+			if !toolNamesSeen[tc.Function.Name] {
+				toolNamesSeen[tc.Function.Name] = true
+				botToolsUsed = append(botToolsUsed, tc.Function.Name)
+			}
+		}
+	}
+
 	// Record stats
 	stat := storage.Stat{
 		UserID:     userID,
@@ -274,9 +409,26 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		"cost_usd", stat.CostUSD,
 	)
 
+	// Flag a likely false "I can't read this file" disclaimer — the model
+	// said it couldn't read the user's attachment yet still produced a long
+	// answer that contradicts the disclaimer. Only checked when the current
+	// turn carried media (the disclaimer is meaningless without an attachment
+	// to refuse). Surfaces as a span attribute so a TraceQL query like
+	// {span.bot.anomaly.false_disclaimer=true} pulls every offending turn.
+	if hasCurrentMedia {
+		if phrase := detectFalseDisclaimer(resp.Content); phrase != "" {
+			span.SetAttributes(
+				attribute.Bool("bot.anomaly.false_disclaimer", true),
+				attribute.String("bot.anomaly.disclaimer_phrase", phrase),
+			)
+		}
+	}
+
 	// Branch: if the turn produced generated images, route through the
 	// media-aware reply path. Otherwise keep the text-only path.
 	if len(resp.GeneratedArtifactIDs) > 0 {
+		obs.RecordContent(span, "bot.reply_sent", resp.Content,
+			attribute.Int64Slice("generated_artifact_ids", resp.GeneratedArtifactIDs))
 		mediaDur, sentCount := b.sendResponseWithGeneratedImages(
 			shutdownSafeCtx, userID, chatID, lastMsg.MessageThreadID, lastMsg.MessageID,
 			resp.Content, resp.GeneratedArtifactIDs, logger,
@@ -297,6 +449,13 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "assistant", Content: resp.Content}); err != nil {
 		logger.Error("failed to add assistant message to history", "error", err)
 	}
+
+	// Capture the final reply on the root span — what the user actually saw
+	// after sanitize/markdown/chunking. Closes the "what did the bot reply"
+	// gap that today required ssh + docker logs to answer. Under content
+	// toggle since this is user-visible text.
+	obs.RecordContent(span, "bot.reply_sent", resp.Content,
+		attribute.Int("chunks", len(responses)))
 
 	// Send response
 	tgStart := time.Now()

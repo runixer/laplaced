@@ -24,6 +24,7 @@ import (
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
@@ -181,6 +182,29 @@ func run() int {
 	}))
 	slog.SetDefault(logger)
 	logger.Info("Config loaded successfully", "allowed_users", len(cfg.Bot.AllowedUserIDs))
+
+	// Tracer provider lifecycle. Declared here so the shutdown defer runs
+	// LAST (LIFO) — after b.Stop / RAGService.Stop / store.Close further
+	// below — giving span producers a chance to close their spans before
+	// the batcher is drained.
+	tracerShutdown, err := obs.InitTracing(context.Background(), obs.TracingConfig{
+		Enabled:      cfg.Telemetry.Enabled,
+		Exporter:     cfg.Telemetry.Exporter,
+		OTLPEndpoint: cfg.Telemetry.OTLPEndpoint,
+		ServiceName:  cfg.Telemetry.ServiceName,
+		TraceContent: cfg.Telemetry.TraceContent,
+	}, Version)
+	if err != nil {
+		logger.Error("failed to initialize tracing", "error", err)
+		return 1
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := tracerShutdown(shutdownCtx); err != nil {
+			logger.Warn("tracer shutdown error", "error", err)
+		}
+	}()
 
 	if cfg.Bot.Language == "" {
 		cfg.Bot.Language = "en"

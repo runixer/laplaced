@@ -1229,6 +1229,110 @@ func TestValidate_RAGThresholdsRange(t *testing.T) {
 	}
 }
 
+func TestValidate_Telemetry(t *testing.T) {
+	validConfig := func() *Config {
+		cfg, _ := LoadDefault()
+		cfg.Telegram.Token = "test_token"
+		cfg.OpenRouter.APIKey = "test_api_key"
+		cfg.Database.Path = "test.db"
+		return cfg
+	}
+
+	tests := []struct {
+		name        string
+		modify      func(*Config)
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:    "disabled - endpoint not required",
+			modify:  func(c *Config) { c.Telemetry.Enabled = false; c.Telemetry.OTLPEndpoint = "" },
+			wantErr: false,
+		},
+		{
+			name: "enabled without endpoint",
+			modify: func(c *Config) {
+				c.Telemetry.Enabled = true
+				c.Telemetry.OTLPEndpoint = ""
+			},
+			wantErr:     true,
+			errContains: "telemetry.otlp_endpoint is required",
+		},
+		{
+			name: "enabled with endpoint",
+			modify: func(c *Config) {
+				c.Telemetry.Enabled = true
+				c.Telemetry.OTLPEndpoint = "localhost:4317"
+			},
+			wantErr: false,
+		},
+		{
+			name: "enabled with explicit otlp exporter and endpoint",
+			modify: func(c *Config) {
+				c.Telemetry.Enabled = true
+				c.Telemetry.Exporter = "otlp"
+				c.Telemetry.OTLPEndpoint = "localhost:4317"
+			},
+			wantErr: false,
+		},
+		{
+			name: "enabled stdout exporter - endpoint not required",
+			modify: func(c *Config) {
+				c.Telemetry.Enabled = true
+				c.Telemetry.Exporter = "stdout"
+				c.Telemetry.OTLPEndpoint = ""
+			},
+			wantErr: false,
+		},
+		{
+			name: "enabled with unknown exporter",
+			modify: func(c *Config) {
+				c.Telemetry.Enabled = true
+				c.Telemetry.Exporter = "jaeger"
+				c.Telemetry.OTLPEndpoint = "localhost:4317"
+			},
+			wantErr:     true,
+			errContains: "telemetry.exporter must be one of",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			tt.modify(cfg)
+
+			err := cfg.Validate()
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestLoad_Telemetry_EnvOverride(t *testing.T) {
+	t.Setenv("LAPLACED_TELEMETRY_ENABLED", "true")
+	t.Setenv("LAPLACED_TELEMETRY_OTLP_ENDPOINT", "collector.example:4317")
+	t.Setenv("LAPLACED_TELEMETRY_SERVICE_NAME", "laplaced-custom")
+
+	cfg, err := Load("non_existent_file.yaml")
+	assert.NoError(t, err)
+	assert.True(t, cfg.Telemetry.Enabled)
+	assert.Equal(t, "collector.example:4317", cfg.Telemetry.OTLPEndpoint)
+	assert.Equal(t, "laplaced-custom", cfg.Telemetry.ServiceName)
+}
+
+func TestLoad_Telemetry_Defaults(t *testing.T) {
+	// Fresh env: nothing set → defaults from default.yaml apply.
+	cfg, err := LoadDefault()
+	assert.NoError(t, err)
+	assert.False(t, cfg.Telemetry.Enabled)
+	assert.Equal(t, "localhost:4317", cfg.Telemetry.OTLPEndpoint)
+	assert.Equal(t, "laplaced", cfg.Telemetry.ServiceName)
+}
+
 func TestLoad_InvalidYAML(t *testing.T) {
 	// Use truly invalid YAML (unmatched brackets)
 	content := `

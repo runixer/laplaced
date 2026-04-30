@@ -2,16 +2,22 @@ package reranker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"log/slog"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	oteltrace "go.opentelemetry.io/otel/trace"
 
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -125,6 +131,102 @@ func (r *Reranker) rerank(
 	mediaParts []interface{},
 ) (*Result, error) {
 	cfg := r.cfg.Agents.Reranker
+
+	// Tracing-observable state hoisted here so the deferred End() sees the
+	// right values regardless of which internal return fires. tr stays nil
+	// if we bail out via the "disabled or empty candidates" shortcut.
+	var (
+		iterations int
+		tr         *trace
+	)
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/reranker").Start(
+		ctx, "reranker.Execute",
+		oteltrace.WithAttributes(attribute.Int64("user.id", userID)),
+	)
+	defer func() {
+		reason := ""
+		var (
+			llmCalls                              int
+			costUSD                               float64
+			rawTopics, rawPeople, rawArtifacts    int
+			keptTopics, keptPeople, keptArtifacts int
+		)
+		if tr != nil {
+			reason = tr.fallbackReason
+			rawTopics = tr.modelRawTopics
+			rawPeople = tr.modelRawPeople
+			rawArtifacts = tr.modelRawArtifacts
+			keptTopics = tr.modelKeptTopics
+			keptPeople = tr.modelKeptPeople
+			keptArtifacts = tr.modelKeptArtifacts
+			if tr.tracker != nil {
+				llmCalls = tr.tracker.TurnCount()
+				costUSD = tr.tracker.TotalCostValue()
+			}
+		}
+		span.SetAttributes(
+			attribute.Int("reranker.tool_calls", iterations),
+			attribute.Int("reranker.llm_calls", llmCalls),
+			attribute.String("reranker.fallback_reason", reason),
+			attribute.Int("reranker.candidates_in.topics", len(candidates)),
+			attribute.Int("reranker.candidates_in.people", len(personCandidates)),
+			attribute.Int("reranker.candidates_in.artifacts", len(artifactCandidates)),
+			attribute.Int("reranker.candidates_in.media", len(mediaParts)),
+			attribute.Int("reranker.model_raw_count.topics", rawTopics),
+			attribute.Int("reranker.model_raw_count.people", rawPeople),
+			attribute.Int("reranker.model_raw_count.artifacts", rawArtifacts),
+			attribute.Int("reranker.model_kept.topics", keptTopics),
+			attribute.Int("reranker.model_kept.people", keptPeople),
+			attribute.Int("reranker.model_kept.artifacts", keptArtifacts),
+			attribute.Float64("reranker.cost_usd", costUSD),
+		)
+		if obs.ContentEnabled() {
+			if originalQuery != "" {
+				obs.RecordContent(span, "reranker.raw_query", originalQuery)
+			}
+			if contextualizedQuery != "" {
+				obs.RecordContent(span, "reranker.enriched_query", contextualizedQuery)
+			}
+			// Shared context that lands in the system prompt — captured so a
+			// faithful replay can reconstruct the exact reranker input without
+			// drifting through the live DB at replay time.
+			if userProfile != "" {
+				obs.RecordContent(span, "reranker.user_profile", userProfile)
+			}
+			if recentTopics != "" {
+				obs.RecordContent(span, "reranker.recent_topics", recentTopics)
+			}
+			if len(candidates) > 0 {
+				obs.RecordContent(span, "reranker.candidates_input",
+					formatCandidatesForReranker(candidates))
+			}
+			if len(personCandidates) > 0 {
+				obs.RecordContent(span, "reranker.people_candidates_input",
+					FormatPeopleForReranker(personCandidates))
+			}
+			if len(artifactCandidates) > 0 {
+				obs.RecordContent(span, "reranker.artifacts_candidates_input",
+					formatArtifactCandidates(artifactCandidates))
+			}
+			// Multimodal inputs (images, voice, PDFs). Recorded as metadata +
+			// content_hash so a faithful replay can re-fetch the file from
+			// artifact storage by hash without the trace carrying base64.
+			if len(mediaParts) > 0 {
+				if body := agent.FormatMediaParts(mediaParts, ""); body != "" {
+					obs.RecordContent(span, "reranker.media_parts", body)
+				}
+			}
+			if tr != nil && len(tr.selectedTopics) > 0 {
+				if body, err := json.Marshal(tr.selectedTopics); err == nil {
+					obs.RecordContent(span, "reranker.selection_reasons", string(body))
+				}
+			}
+		}
+		// Reranker NEVER surfaces as span Error: it always returns a result
+		// (LLM failures are reflected via fallback_reason). No ObserveErr.
+		span.End()
+	}()
+
 	// v0.6.0: Use LLM reranking if we have any candidates (topics, people, or artifacts)
 	// Only fallback immediately if ALL candidate lists are empty
 	if !cfg.Enabled || (len(candidates) == 0 && len(personCandidates) == 0 && len(artifactCandidates) == 0) {
@@ -152,7 +254,7 @@ func (r *Reranker) rerank(
 	defer cancel()
 
 	st := &state{}
-	tr := &trace{
+	tr = &trace{
 		tracker: agentlog.NewTurnTracker(),
 	}
 	startTime := time.Now()
@@ -261,14 +363,14 @@ func (r *Reranker) rerank(
 	}
 
 	// Agentic loop
-	toolCallCount := 0
+	iterations = 0
 
-	for toolCallCount < cfg.MaxToolCalls {
+	for iterations < cfg.MaxToolCalls {
 		var toolChoice any
 		var responseFormat interface{}
 
 		// v0.6.0: If no topic candidates (only artifacts/people), skip tool call and go directly to JSON
-		if toolCallCount == 0 && len(candidates) > 0 {
+		if iterations == 0 && len(candidates) > 0 {
 			toolChoice = map[string]any{
 				"type": "function",
 				"function": map[string]any{
@@ -312,7 +414,7 @@ func (r *Reranker) rerank(
 			}
 			r.logger.Warn("reranker LLM call failed",
 				"error", err,
-				"tool_calls", toolCallCount,
+				"tool_calls", iterations,
 				"reason", fallbackReason,
 			)
 			tr.fallbackReason = fallbackReason
@@ -350,12 +452,12 @@ func (r *Reranker) rerank(
 			reasoningText := extractReasoningText(choice.Message.ReasoningDetails)
 			r.logger.Debug("reranker reasoning",
 				"user_id", userID,
-				"iteration", toolCallCount+1,
+				"iteration", iterations+1,
 				"reasoning", openrouter.FilterReasoningForLog(choice.Message.ReasoningDetails),
 			)
 			if reasoningText != "" {
 				tr.reasoning = append(tr.reasoning, ReasoningEntry{
-					Iteration: toolCallCount + 1,
+					Iteration: iterations + 1,
 					Text:      reasoningText,
 				})
 			}
@@ -363,10 +465,10 @@ func (r *Reranker) rerank(
 
 		// Check for tool calls
 		if len(choice.Message.ToolCalls) > 0 {
-			toolCallCount++
+			iterations++
 
 			var toolResults []openrouter.Message
-			toolCall := storage.RerankerToolCall{Iteration: toolCallCount}
+			toolCall := storage.RerankerToolCall{Iteration: iterations}
 
 			for _, tc := range choice.Message.ToolCalls {
 				if tc.Function.Name == "get_topics_content" {
@@ -411,6 +513,15 @@ func (r *Reranker) rerank(
 
 			tr.toolCalls = append(tr.toolCalls, toolCall)
 
+			span.AddEvent("reranker.tool_call",
+				oteltrace.WithAttributes(
+					attribute.Int("iteration", iterations),
+					attribute.Int64Slice("requested_ids", toolCall.TopicIDs),
+					attribute.Int("requested_count", len(toolCall.TopicIDs)),
+					attribute.Int("valid_count", len(toolCall.Topics)),
+				),
+			)
+
 			messages = append(messages, openrouter.Message{
 				Role:             "assistant",
 				Content:          choice.Message.Content,
@@ -423,7 +534,7 @@ func (r *Reranker) rerank(
 
 		// No tool calls - expect final JSON response
 		// v0.6.0: Exception: if no topic candidates, skipping tool call is expected
-		if toolCallCount == 0 && len(candidates) > 0 {
+		if iterations == 0 && len(candidates) > 0 {
 			r.logger.Warn("reranker protocol violation: no tool calls before final response",
 				"user_id", userID,
 				"content_preview", truncateForLog(choice.Message.Content, 200),
@@ -449,10 +560,18 @@ func (r *Reranker) rerank(
 			return fallbackResult, nil
 		}
 
+		tr.modelRawTopics = len(result.Topics)
+		tr.modelRawPeople = len(result.People)
+		tr.modelRawArtifacts = len(result.Artifacts)
+
 		// Validate topics and people
 		result = filterValidTopics(userID, result, candidateMap, r.logger)
 		result = filterValidPeople(userID, result, peopleMap, r.logger)
 		result = filterValidArtifacts(userID, result, artifactsMap, r.logger)
+
+		tr.modelKeptTopics = len(result.Topics)
+		tr.modelKeptPeople = len(result.People)
+		tr.modelKeptArtifacts = len(result.Artifacts)
 		if len(result.Topics) == 0 && len(result.People) == 0 && len(result.Artifacts) == 0 {
 			r.logger.Warn("reranker returned no valid results (all hallucinated)", "user_id", userID)
 			tr.fallbackReason = "all_hallucinated"
@@ -472,7 +591,7 @@ func (r *Reranker) rerank(
 			"people_out", len(result.People),
 			"artifacts_candidates_in", len(artifactCandidates),
 			"artifacts_out", len(result.Artifacts),
-			"tool_calls", toolCallCount,
+			"tool_calls", iterations,
 			"duration_ms", int(time.Since(startTime).Milliseconds()),
 			"cost_usd", tr.tracker.TotalCostValue(),
 		)
