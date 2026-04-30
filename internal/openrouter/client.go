@@ -215,15 +215,36 @@ func countFilenameCollisions(messages []Message) int {
 // recordOpenRouterError attaches an OR error envelope to a span: the raw body
 // as an llm.response content event (subject to ContentEnabled gating) and the
 // parsed envelope fields as structured attributes (always set when present).
-// Attributes let TraceQL filter "show me 400s caused by AI Studio" without
-// scanning bodies. No-op on empty or non-error bodies.
-func recordOpenRouterError(span trace.Span, body []byte) {
+// httpStatus, when non-zero, is recorded verbatim as http.response.status_code
+// for filterability and is also used to bucket non-JSON 5xx bodies into an
+// edge_<status> error.upstream_kind — non-JSON 5xx bodies (e.g. plain-text
+// "error code: 502") fall through every JSON-envelope classifier branch and
+// would otherwise leave the span without any structured error class.
+// No-op on empty body and zero status.
+func recordOpenRouterError(span trace.Span, body []byte, httpStatus int) {
+	if len(body) == 0 && httpStatus == 0 {
+		return
+	}
+	if httpStatus > 0 {
+		span.SetAttributes(attribute.Int("http.response.status_code", httpStatus))
+	}
 	if len(body) == 0 {
 		return
 	}
 	obs.RecordContent(span, "llm.response", obs.RedactBase64Payloads(string(body)))
 	bodyErr := detectOpenRouterBodyError(body)
 	if bodyErr == nil {
+		// Edge classification: a 4xx/5xx response with a non-JSON body almost
+		// always means OR's edge/CDN (Cloudflare-style) killed the request
+		// before OR's app server saw it. Distinguishing this from a real
+		// provider error matters because retrying is much less useful here
+		// (everything's broken upstream of OR's routing).
+		if httpStatus >= 400 && !json.Valid(body) {
+			span.SetAttributes(
+				attribute.String("error.upstream_kind", fmt.Sprintf("edge_%d", httpStatus)),
+				attribute.String("error.upstream_message", truncateForLog(strings.TrimSpace(string(body)), 256)),
+			)
+		}
 		return
 	}
 	attrs := make([]attribute.KeyValue, 0, 4)
@@ -242,6 +263,78 @@ func recordOpenRouterError(span trace.Span, body []byte) {
 	if len(attrs) > 0 {
 		span.SetAttributes(attrs...)
 	}
+}
+
+// attemptOutcome describes the result of one HTTP attempt inside a retry loop.
+// It exists so recordAttemptEvent can render a single structured event with
+// duration, status, body preview, and a classified error.class — without
+// scattering AddEvent calls across half a dozen retry-loop branches.
+type attemptOutcome struct {
+	httpStatus int                  // 0 if no response received (transport err)
+	err        error                // non-nil on transport/IO failure
+	bodyErr    *openRouterBodyError // OR-envelope error parsed from a 200 body
+	body       []byte               // raw response body (may be nil)
+}
+
+// classifyAttemptOutcome buckets an attempt into a stable error.class string.
+// Buckets are coarse on purpose: TraceQL queries like
+// {span.event.error.class =~ "edge_.*"} keep working as new HTTP codes appear.
+// "edge_<status>" specifically means OR's edge/CDN returned a non-JSON 4xx/5xx
+// (Cloudflare-style) — strong signal that OR's routing logic never ran.
+func classifyAttemptOutcome(o attemptOutcome) string {
+	if o.err != nil {
+		var netErr net.Error
+		if errors.As(o.err, &netErr) && netErr.Timeout() {
+			return "timeout"
+		}
+		return "network"
+	}
+	if o.httpStatus == 0 {
+		return "unknown"
+	}
+	if o.httpStatus == http.StatusOK {
+		if o.bodyErr != nil {
+			return "body_error"
+		}
+		return "none"
+	}
+	if !json.Valid(o.body) {
+		return fmt.Sprintf("edge_%d", o.httpStatus)
+	}
+	return fmt.Sprintf("http_%d", o.httpStatus)
+}
+
+// recordAttemptEvent emits one "attempt" span event per HTTP attempt. Cheap
+// (events don't multiply spans), and lets each attempt's wall-time, status,
+// and class be queried in TraceQL instead of being collapsed into a single
+// llm.attempts counter on the parent span. Successful 200 attempts emit an
+// event too (class=none) for consistency, but skip the body preview to keep
+// traces compact.
+func recordAttemptEvent(span trace.Span, idx int, start time.Time, o attemptOutcome) {
+	class := classifyAttemptOutcome(o)
+	attrs := []attribute.KeyValue{
+		attribute.Int("attempt.idx", idx),
+		attribute.Int64("attempt.duration_ms", time.Since(start).Milliseconds()),
+		attribute.String("error.class", class),
+	}
+	if o.httpStatus > 0 {
+		attrs = append(attrs, attribute.Int("http.response.status_code", o.httpStatus))
+	}
+	// Tiny preview helps triage edge errors ("error code: 502" et al) without
+	// flipping on full content tracing. Skip on the success class to keep the
+	// happy-path event lean. Redact base64 first — image-gen 200 bodies and
+	// upstream provider envelopes can carry data URLs in `error.metadata.raw`.
+	if class != "none" && len(o.body) > 0 {
+		preview := obs.RedactBase64Payloads(string(o.body))
+		if len(preview) > 256 {
+			preview = preview[:256]
+		}
+		attrs = append(attrs, attribute.String("body_preview", preview))
+	}
+	if o.err != nil {
+		attrs = append(attrs, attribute.String("error.message", o.err.Error()))
+	}
+	span.AddEvent("attempt", trace.WithAttributes(attrs...))
 }
 
 // isRetryableStatusCode returns true if the HTTP status code indicates a retryable error.
@@ -769,8 +862,10 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("User-Agent", "laplaced/1.0")
 
+		attemptStart := time.Now()
 		resp, err := c.httpClient.Do(httpReq)
 		if err != nil {
+			recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{err: err})
 			if isRetryableError(err) && attempt < maxRetries {
 				lastErr = err
 				continue
@@ -781,6 +876,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		responseBody, err = io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
+			recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{err: err, httpStatus: resp.StatusCode})
 			if isRetryableError(err) && attempt < maxRetries {
 				lastErr = err
 				continue
@@ -794,6 +890,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 			// OpenRouter sometimes returns 200 with an error payload in body when
 			// the upstream provider fails. Treat as retryable.
 			if bodyErr := detectOpenRouterBodyError(responseBody); bodyErr != nil {
+				recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode, bodyErr: bodyErr, body: responseBody})
 				c.logger.Warn("OpenRouter returned HTTP 200 with error body",
 					"error", bodyErr, "body", string(responseBody), "attempt", attempt)
 				if attempt < maxRetries {
@@ -801,11 +898,14 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 					continue
 				}
 				RecordLLMRequest(req.UserID, req.Model, time.Since(startTime).Seconds(), false, 0, 0, nil, jt)
-				recordOpenRouterError(span, responseBody)
+				recordOpenRouterError(span, responseBody, resp.StatusCode)
 				return ChatCompletionResponse{}, bodyErr
 			}
+			recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode, body: responseBody})
 			break // Success
 		}
+
+		recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode, body: responseBody})
 
 		// Check if we should retry
 		if isRetryableStatusCode(resp.StatusCode) && attempt < maxRetries {
@@ -816,7 +916,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		// Non-retryable error or max retries reached
 		c.logger.Error("OpenRouter returned non-OK status", "status", resp.Status, "body", string(responseBody))
 		RecordLLMRequest(req.UserID, req.Model, time.Since(startTime).Seconds(), false, 0, 0, nil, jt)
-		recordOpenRouterError(span, responseBody)
+		recordOpenRouterError(span, responseBody, resp.StatusCode)
 		return ChatCompletionResponse{}, fmt.Errorf("openrouter API error: %s", resp.Status)
 	}
 
@@ -824,7 +924,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 	if err := json.NewDecoder(bytes.NewBuffer(responseBody)).Decode(&chatResp); err != nil {
 		c.logger.Error("Failed to decode OpenRouter response", "error", err, "body_length", len(responseBody))
 		RecordLLMRequest(req.UserID, req.Model, time.Since(startTime).Seconds(), false, 0, 0, nil, jt)
-		recordOpenRouterError(span, responseBody)
+		recordOpenRouterError(span, responseBody, http.StatusOK)
 		return ChatCompletionResponse{}, err
 	}
 
@@ -960,8 +1060,10 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("User-Agent", "laplaced/1.0")
 
+		attemptStart := time.Now()
 		resp, err := c.httpClient.Do(httpReq)
 		if err != nil {
+			recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{err: err})
 			if isRetryableError(err) && attempt < maxRetries {
 				lastErr = err
 				continue
@@ -972,6 +1074,7 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 		responseBody, err = io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
+			recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{err: err, httpStatus: resp.StatusCode})
 			if isRetryableError(err) && attempt < maxRetries {
 				lastErr = err
 				continue
@@ -985,17 +1088,21 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 			// retryable so we don't silently return an empty Data array and
 			// cause callers to waste tokens on the next attempt.
 			if bodyErr := detectOpenRouterBodyError(responseBody); bodyErr != nil {
+				recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode, bodyErr: bodyErr, body: responseBody})
 				c.logger.Warn("OpenRouter embeddings returned HTTP 200 with error body",
 					"error", bodyErr, "body", string(responseBody), "attempt", attempt)
 				if attempt < maxRetries {
 					lastErr = bodyErr
 					continue
 				}
-				recordOpenRouterError(span, responseBody)
+				recordOpenRouterError(span, responseBody, resp.StatusCode)
 				return EmbeddingResponse{}, bodyErr
 			}
+			recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode, body: responseBody})
 			break // Success
 		}
+
+		recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode, body: responseBody})
 
 		// Check if we should retry
 		if isRetryableStatusCode(resp.StatusCode) && attempt < maxRetries {
@@ -1005,14 +1112,14 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 
 		// Non-retryable error or max retries reached
 		c.logger.Error("OpenRouter embeddings returned non-OK status", "status", resp.Status, "body", string(responseBody))
-		recordOpenRouterError(span, responseBody)
+		recordOpenRouterError(span, responseBody, resp.StatusCode)
 		return EmbeddingResponse{}, fmt.Errorf("openrouter API error: %s", resp.Status)
 	}
 
 	var embeddingResp EmbeddingResponse
 	if err := json.Unmarshal(responseBody, &embeddingResp); err != nil {
 		c.logger.Error("Failed to decode embedding response", "error", err, "body", string(responseBody))
-		recordOpenRouterError(span, responseBody)
+		recordOpenRouterError(span, responseBody, http.StatusOK)
 		return EmbeddingResponse{}, err
 	}
 

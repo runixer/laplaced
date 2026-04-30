@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -111,8 +113,14 @@ func TestCreateChatCompletion_ContentEventsGatedByToggle(t *testing.T) {
 		require.NoError(t, err)
 		spans := getSpans()
 		require.Len(t, spans, 1)
+		// Filter out "attempt" events — those are structured per-attempt signals
+		// (idx, duration, status, class) and are not content; they're emitted
+		// regardless of obs.ContentEnabled.
 		names := make([]string, 0, len(spans[0].Events))
 		for _, ev := range spans[0].Events {
+			if ev.Name == "attempt" {
+				continue
+			}
 			names = append(names, ev.Name)
 		}
 		return names
@@ -159,6 +167,13 @@ func TestCreateChatCompletion_TerminalError_SetsErrorStatus(t *testing.T) {
 	spans := getSpans()
 	require.Len(t, spans, 1)
 	assert.Equal(t, sdkcodes.Error, spans[0].Status.Code)
+
+	attrs := map[attribute.Key]attribute.Value{}
+	for _, kv := range spans[0].Attributes {
+		attrs[kv.Key] = kv.Value
+	}
+	assert.Equal(t, int64(401), attrs["http.response.status_code"].AsInt64(),
+		"http.response.status_code attribute should always be present on error path")
 }
 
 // TestCreateChatCompletion_UpstreamProviderError_AttachesEnvelope mirrors the
@@ -517,4 +532,197 @@ func TestCreateChatCompletion_UpstreamError_PopulatesKindAttr(t *testing.T) {
 		attrs[kv.Key] = kv.Value
 	}
 	assert.Equal(t, "invalid_argument", attrs["error.upstream_kind"].AsString())
+}
+
+// attemptEventsByIdx returns attempt-event attribute maps in idx order. Helper
+// for the attempt-event tests below.
+func attemptEventsByIdx(t *testing.T, evs []sdktrace.Event) []map[attribute.Key]attribute.Value {
+	t.Helper()
+	out := []map[attribute.Key]attribute.Value{}
+	for _, ev := range evs {
+		if ev.Name != "attempt" {
+			continue
+		}
+		m := map[attribute.Key]attribute.Value{}
+		for _, kv := range ev.Attributes {
+			m[kv.Key] = kv.Value
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// TestCreateChatCompletion_EdgePlainText502_4xRetries covers the case where
+// OR's edge returns a non-JSON 502 ("error code: 502") for every retry. With
+// no JSON envelope to parse, classifyUpstreamError can't help — the new
+// instrumentation must still classify the span as error.upstream_kind="edge_502"
+// + http.response.status_code=502, and emit one "attempt" event per retry
+// with class="edge_502" so TraceQL can find these without scraping bodies.
+func TestCreateChatCompletion_EdgePlainText502_4xRetries(t *testing.T) {
+	getSpans := withTracingCapture(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("error code: 502"))
+	}))
+	defer server.Close()
+
+	// Override the package-level baseDelay/maxDelay via a tighter http client
+	// timeout — the retry loop itself uses calculateBackoff(maxDelay=30s) so
+	// a real four-attempt loop would block 30+ seconds. We can't shrink that
+	// from outside, so this test accepts ~6s of real time across 3 backoffs
+	// (1s + 2s + 4s with ±20% jitter). Acceptable for a guard test that fires
+	// once per CI run; if it becomes painful, parameterize calculateBackoff.
+	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
+	require.NoError(t, err)
+
+	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
+		Model:    "m",
+		UserID:   42,
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	require.Error(t, err)
+
+	spans := getSpans()
+	require.Len(t, spans, 1)
+	span := spans[0]
+	assert.Equal(t, sdkcodes.Error, span.Status.Code)
+
+	attrs := map[attribute.Key]attribute.Value{}
+	for _, kv := range span.Attributes {
+		attrs[kv.Key] = kv.Value
+	}
+	assert.Equal(t, int64(maxRetries+1), attrs["llm.attempts"].AsInt64(),
+		"all retries should exhaust on 502")
+	assert.Equal(t, int64(502), attrs["http.response.status_code"].AsInt64())
+	assert.Equal(t, "edge_502", attrs["error.upstream_kind"].AsString(),
+		"plain-text 502 body must classify as edge_502, not unknown")
+	assert.Equal(t, "error code: 502", attrs["error.upstream_message"].AsString())
+
+	events := attemptEventsByIdx(t, span.Events)
+	require.Len(t, events, maxRetries+1, "one attempt event per HTTP attempt")
+	for i, ev := range events {
+		assert.Equal(t, int64(i), ev["attempt.idx"].AsInt64())
+		assert.Equal(t, int64(502), ev["http.response.status_code"].AsInt64())
+		assert.Equal(t, "edge_502", ev["error.class"].AsString())
+		assert.Equal(t, "error code: 502", ev["body_preview"].AsString())
+		assert.GreaterOrEqual(t, ev["attempt.duration_ms"].AsInt64(), int64(0))
+	}
+}
+
+// TestCreateChatCompletion_AttemptEvent_SuccessSingleAttempt asserts that a
+// single successful 200 response still emits exactly one attempt event with
+// class="none" and no body_preview. Lets dashboards count attempt events as
+// a stand-in for "OR call count" without conditioning on error state.
+func TestCreateChatCompletion_AttemptEvent_SuccessSingleAttempt(t *testing.T) {
+	getSpans := withTracingCapture(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(ChatCompletionResponse{
+			Choices: []ResponseChoice{{Message: ResponseMessage{Role: "assistant", Content: "ok"}, FinishReason: "stop"}},
+		})
+	}))
+	defer server.Close()
+
+	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
+	require.NoError(t, err)
+
+	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
+		Model:    "m",
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+
+	spans := getSpans()
+	require.Len(t, spans, 1)
+
+	events := attemptEventsByIdx(t, spans[0].Events)
+	require.Len(t, events, 1)
+	ev := events[0]
+	assert.Equal(t, int64(0), ev["attempt.idx"].AsInt64())
+	assert.Equal(t, int64(200), ev["http.response.status_code"].AsInt64())
+	assert.Equal(t, "none", ev["error.class"].AsString())
+	_, hasPreview := ev["body_preview"]
+	assert.False(t, hasPreview, "success attempts must skip body_preview to keep happy-path traces lean")
+}
+
+// TestCreateChatCompletion_AttemptEvent_RetryThenSucceed asserts both
+// transient-failure and final-success attempts are recorded — one retryable
+// 503 followed by a 200 should produce exactly two attempt events with the
+// expected class progression (http_503 → none).
+func TestCreateChatCompletion_AttemptEvent_RetryThenSucceed(t *testing.T) {
+	getSpans := withTracingCapture(t)
+
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":{"message":"upstream busy","code":503}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(ChatCompletionResponse{
+			Choices: []ResponseChoice{{Message: ResponseMessage{Role: "assistant", Content: "ok"}, FinishReason: "stop"}},
+		})
+	}))
+	defer server.Close()
+
+	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
+	require.NoError(t, err)
+
+	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
+		Model:    "m",
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+
+	spans := getSpans()
+	require.Len(t, spans, 1)
+
+	events := attemptEventsByIdx(t, spans[0].Events)
+	require.Len(t, events, 2)
+
+	assert.Equal(t, int64(0), events[0]["attempt.idx"].AsInt64())
+	assert.Equal(t, int64(503), events[0]["http.response.status_code"].AsInt64())
+	// JSON-shaped 5xx body classifies as http_503 (not edge) — the body has
+	// the OR envelope shape, so OR's app server saw the request.
+	assert.Equal(t, "http_503", events[0]["error.class"].AsString())
+	assert.Contains(t, events[0]["body_preview"].AsString(), "upstream busy")
+
+	assert.Equal(t, int64(1), events[1]["attempt.idx"].AsInt64())
+	assert.Equal(t, int64(200), events[1]["http.response.status_code"].AsInt64())
+	assert.Equal(t, "none", events[1]["error.class"].AsString())
+}
+
+// TestClassifyAttemptOutcome pins the class buckets used by attempt events.
+// Cases mirror real shapes seen in production: edge plain-text 502 from a
+// CDN, JSON-shaped upstream 5xx, 200 with envelope error, network and
+// timeout transport errors, and the plain happy path.
+func TestClassifyAttemptOutcome(t *testing.T) {
+	netTimeout := &net.OpError{Op: "dial", Net: "tcp", Err: &timeoutError{}}
+	netRefused := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
+
+	cases := []struct {
+		name string
+		o    attemptOutcome
+		want string
+	}{
+		{"happy path 200", attemptOutcome{httpStatus: 200, body: []byte(`{"id":"x"}`)}, "none"},
+		{"200 with body envelope", attemptOutcome{httpStatus: 200, bodyErr: &openRouterBodyError{Message: "x"}, body: []byte(`{"error":{}}`)}, "body_error"},
+		{"edge plain-text 502", attemptOutcome{httpStatus: 502, body: []byte("error code: 502")}, "edge_502"},
+		{"edge empty body 504", attemptOutcome{httpStatus: 504, body: nil}, "edge_504"},
+		{"edge HTML 503", attemptOutcome{httpStatus: 503, body: []byte("<html>nope</html>")}, "edge_503"},
+		{"json 503 from OR", attemptOutcome{httpStatus: 503, body: []byte(`{"error":{"code":503}}`)}, "http_503"},
+		{"json 401", attemptOutcome{httpStatus: 401, body: []byte(`{"error":"nope"}`)}, "http_401"},
+		{"timeout", attemptOutcome{err: netTimeout}, "timeout"},
+		{"network", attemptOutcome{err: netRefused}, "network"},
+		{"unknown no status no err", attemptOutcome{}, "unknown"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, classifyAttemptOutcome(c.o))
+		})
+	}
 }
