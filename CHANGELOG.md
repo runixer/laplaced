@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **No more false "I can't read this file" disclaimer when an old photo and a fresh photo land in the same answer.** When the bot pulled a related image out of memory to compare against a freshly attached photo, both files reached the model with the same generic name (Telegram photos default to `photo.jpg`) — and if the older photo's stored description was about a different device than what the new photo showed, the chat model would defensively prepend "Я не смог прочитать этот файл" to its reply, even though it had clearly read the new photo and went on to answer correctly about it. Historical files pulled out of memory are now labelled distinctly (e.g. "memory artifact #1053") and given a unique name internally, so the model can tell which photo is "the one you just sent" vs "the one we discussed before".
+
 ### Added
 - **OpenRouter provider routing.** The bot now prefers Google (Vertex) for all Gemini calls, with Google AI Studio as a fallback if Vertex is unavailable. Vertex has a published SLA and dynamic shared quota; AI Studio runs on a capacity-constrained shared pool with tighter per-key limits and noticeably more frequent "model overloaded" errors during peak hours. Non-Gemini models (Perplexity search, etc.) continue to route freely thanks to the default fallback behavior. Configurable via `openrouter.provider.order` in YAML or `LAPLACED_OPENROUTER_PROVIDER_ORDER` env. The actual provider that served each request is now logged alongside cost, so fallbacks are visible.
 
