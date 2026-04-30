@@ -28,8 +28,11 @@ type Request struct {
 	// "1:1", "16:9", "21:9". Empty means model default (typically 1:1).
 	AspectRatio string
 
-	// ImageSize is one of "512", "1K", "2K", "4K". Empty means model default.
-	// Note: the API uses literal "512" (no K suffix); "0.5K" is invalid.
+	// ImageSize is one of "1K", "2K", "4K". Empty means model default (1K).
+	// Note: "0.5K" passes the OpenRouter validator but is rejected upstream
+	// by Google for gemini-3.1-flash-image-preview (verified end-to-end via
+	// curl on 2026-04-30). "512" is blocked by OR's validator. Both ranges
+	// are unusable today — only the larger sizes work.
 	ImageSize string
 }
 

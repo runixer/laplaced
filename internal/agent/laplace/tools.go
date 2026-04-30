@@ -77,8 +77,8 @@ func buildImageGenerationSchema() map[string]interface{} {
 			},
 			"image_size": map[string]interface{}{
 				"type":        "string",
-				"enum":        []string{"512", "1K", "2K", "4K"},
-				"description": "Output resolution. Default 1K. Use 2K/4K for detailed work, 512 for quick drafts (Gemini 3.1 Flash Image only).",
+				"enum":        []string{"1K", "2K", "4K"},
+				"description": "Output resolution. Default 1K. Use 2K/4K for detailed work. (Cheap drafts at 512 px are not supported via OpenRouter today — its validator accepts only \"0.5K\", which the upstream rejects.)",
 			},
 			"input_artifact_ids": map[string]interface{}{
 				"type":        "array",

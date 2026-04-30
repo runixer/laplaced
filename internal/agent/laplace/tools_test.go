@@ -149,8 +149,13 @@ func TestImageGenerationSchemaEnums(t *testing.T) {
 	props, ok := schema["properties"].(map[string]interface{})
 	require.True(t, ok)
 
+	// Working set verified end-to-end via curl on 2026-04-30: OpenRouter's
+	// validator accepts only {"0.5K","1K","2K","4K"}, but "0.5K" is broken
+	// upstream at Google (both Vertex and AI Studio return INVALID_ARGUMENT).
+	// The Gemini API's actual enum value "512" is rejected by OR's validator.
+	// So the only safe enum to advertise to the LLM is {1K, 2K, 4K}.
 	validImageSizes := map[string]struct{}{
-		"512": {}, "1K": {}, "2K": {}, "4K": {},
+		"1K": {}, "2K": {}, "4K": {},
 	}
 	imageSize, ok := props["image_size"].(map[string]interface{})
 	require.True(t, ok, "image_size property missing from schema")
@@ -158,9 +163,9 @@ func TestImageGenerationSchemaEnums(t *testing.T) {
 	require.True(t, ok)
 	for _, v := range imageSizeEnum {
 		assert.Contains(t, validImageSizes, v,
-			"image_size enum contains %q which is not in the API's valid set "+
-				"{512, 1K, 2K, 4K} — the API rejects anything else with "+
-				"400 INVALID_ARGUMENT (this was the 0.5K typo bug)", v)
+			"image_size enum contains %q which is not safe to advertise — "+
+				"both \"0.5K\" (broken at Google upstream) and \"512\" (blocked "+
+				"by OR validator) fail end-to-end, see the 2026-04-30 bug doc", v)
 	}
 
 	validAspectRatios := map[string]struct{}{
