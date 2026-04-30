@@ -266,7 +266,10 @@ type ImageConfig struct {
 	// AspectRatio: "1:1","2:3","3:2","3:4","4:3","4:5","5:4","9:16","16:9","21:9"
 	// Extended on nano banana: "1:4","4:1","1:8","8:1".
 	AspectRatio string `json:"aspect_ratio,omitempty"`
-	// ImageSize: "512" (nano banana only — literal "512", not "0.5K"), "1K", "2K", "4K".
+	// ImageSize: "1K", "2K", "4K". OpenRouter's validator advertises "0.5K"
+	// as a fourth value but Google rejects that upstream as INVALID_ARGUMENT;
+	// the actual Gemini enum value "512" is in turn rejected by OR's validator.
+	// Don't advertise either to the LLM — see docs/bugs/2026-04-30-nano-banana-*.
 	ImageSize string `json:"image_size,omitempty"`
 }
 
