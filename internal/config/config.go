@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/ilyakaznacheev/cleanenv"
@@ -152,9 +153,14 @@ type ImageGeneratorConfig struct {
 	Timeout            string `yaml:"timeout" env:"LAPLACED_IMAGE_GENERATOR_TIMEOUT"`
 	DefaultAspectRatio string `yaml:"default_aspect_ratio" env:"LAPLACED_IMAGE_GENERATOR_DEFAULT_ASPECT_RATIO"`
 	DefaultImageSize   string `yaml:"default_image_size" env:"LAPLACED_IMAGE_GENERATOR_DEFAULT_IMAGE_SIZE"`
-	MaxInputImages     int    `yaml:"max_input_images" env:"LAPLACED_IMAGE_GENERATOR_MAX_INPUT_IMAGES"`
-	MaxOutputImages    int    `yaml:"max_output_images" env:"LAPLACED_IMAGE_GENERATOR_MAX_OUTPUT_IMAGES"`
-	MaxInputImageBytes int    `yaml:"max_input_image_bytes" env:"LAPLACED_IMAGE_GENERATOR_MAX_INPUT_IMAGE_BYTES"`
+	// SupportedImageSizes / SupportedAspectRatios drive the generate_image tool
+	// JSON schema. They MUST match what the configured Model accepts upstream —
+	// see the commented alternative in default.yaml for verified per-model sets.
+	SupportedImageSizes   []string `yaml:"supported_image_sizes" env:"LAPLACED_IMAGE_GENERATOR_SUPPORTED_IMAGE_SIZES" env-separator:","`
+	SupportedAspectRatios []string `yaml:"supported_aspect_ratios" env:"LAPLACED_IMAGE_GENERATOR_SUPPORTED_ASPECT_RATIOS" env-separator:","`
+	MaxInputImages        int      `yaml:"max_input_images" env:"LAPLACED_IMAGE_GENERATOR_MAX_INPUT_IMAGES"`
+	MaxOutputImages       int      `yaml:"max_output_images" env:"LAPLACED_IMAGE_GENERATOR_MAX_OUTPUT_IMAGES"`
+	MaxInputImageBytes    int      `yaml:"max_input_image_bytes" env:"LAPLACED_IMAGE_GENERATOR_MAX_INPUT_IMAGE_BYTES"`
 	// DocumentThresholdBytes: generated images larger than this are sent via
 	// sendDocument instead of sendPhoto, preserving full resolution (Telegram
 	// recompresses photos to ~1280 px on long side). Default 2 MB covers
@@ -729,6 +735,17 @@ func (c *Config) Validate() error {
 		default:
 			errs = append(errs, fmt.Errorf("telemetry.exporter must be one of 'otlp' or 'stdout', got %q", c.Telemetry.Exporter))
 		}
+	}
+
+	// Image generator: defaults must be inside the supported lists. This catches
+	// the misconfig "swapped Model but forgot to narrow supported_image_sizes",
+	// which would otherwise surface as a runtime 400 from the upstream provider.
+	ig := &c.Agents.ImageGenerator
+	if ig.DefaultImageSize != "" && len(ig.SupportedImageSizes) > 0 && !slices.Contains(ig.SupportedImageSizes, ig.DefaultImageSize) {
+		errs = append(errs, fmt.Errorf("agents.image_generator.default_image_size %q is not in supported_image_sizes %v", ig.DefaultImageSize, ig.SupportedImageSizes))
+	}
+	if ig.DefaultAspectRatio != "" && len(ig.SupportedAspectRatios) > 0 && !slices.Contains(ig.SupportedAspectRatios, ig.DefaultAspectRatio) {
+		errs = append(errs, fmt.Errorf("agents.image_generator.default_aspect_ratio %q is not in supported_aspect_ratios %v", ig.DefaultAspectRatio, ig.SupportedAspectRatios))
 	}
 
 	if len(errs) > 0 {

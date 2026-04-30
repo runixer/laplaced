@@ -136,49 +136,93 @@ func TestBuildTools_ParameterStructure(t *testing.T) {
 }
 
 // TestImageGenerationSchemaEnums guards the generate_image schema against
-// silently re-introducing invalid values. The Gemini API rejects anything
-// outside the documented enums with 400 INVALID_ARGUMENT (no detail), and
-// the bot then makes up a "safety filter" story to the user.
+// silently advertising values the upstream model rejects. The schema is now
+// derived from ImageGeneratorConfig.SupportedImageSizes / SupportedAspectRatios,
+// so the test verifies the wiring across two real-world fixtures (nano banana
+// and openai/gpt-5.4-image-2) plus the empty-list fallback.
 //
-// Source of truth for the valid sets: docs/external/gemini/image-generation.md
-// (line 1314 for image_size: "You must use an uppercase 'K' (e.g. 1K, 2K, 4K).
-// The 512 value does not use a 'K' suffix.").
+// When the upstream enum doesn't match what the LLM advertised, callers see a
+// 400 INVALID_ARGUMENT and the bot makes up a "safety filter" story to the user
+// — the regressions that motivated this guard. Both enum sets were verified
+// end-to-end via curl on 2026-04-30.
 func TestImageGenerationSchemaEnums(t *testing.T) {
-	schema := buildImageGenerationSchema()
-
-	props, ok := schema["properties"].(map[string]interface{})
-	require.True(t, ok)
-
-	// Working set verified end-to-end via curl on 2026-04-30: OpenRouter's
-	// validator accepts only {"0.5K","1K","2K","4K"}, but "0.5K" is broken
-	// upstream at Google (both Vertex and AI Studio return INVALID_ARGUMENT).
-	// The Gemini API's actual enum value "512" is rejected by OR's validator.
-	// So the only safe enum to advertise to the LLM is {1K, 2K, 4K}.
-	validImageSizes := map[string]struct{}{
-		"1K": {}, "2K": {}, "4K": {},
+	geminiSizes := []string{"1K", "2K", "4K"}
+	geminiAspects := []string{
+		"1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4",
+		"9:16", "16:9", "21:9",
+		"1:4", "4:1", "1:8", "8:1",
 	}
-	imageSize, ok := props["image_size"].(map[string]interface{})
-	require.True(t, ok, "image_size property missing from schema")
-	imageSizeEnum, ok := imageSize["enum"].([]string)
-	require.True(t, ok)
-	for _, v := range imageSizeEnum {
-		assert.Contains(t, validImageSizes, v,
-			"image_size enum contains %q which is not safe to advertise — "+
-				"both \"0.5K\" (broken at Google upstream) and \"512\" (blocked "+
-				"by OR validator) fail end-to-end, see the 2026-04-30 bug doc", v)
+	openaiSizes := []string{"1K", "2K"}
+	openaiAspects := []string{
+		"1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4",
+		"9:16", "16:9", "21:9",
 	}
 
-	validAspectRatios := map[string]struct{}{
-		"1:1": {}, "1:4": {}, "1:8": {}, "2:3": {}, "3:2": {}, "3:4": {},
-		"4:1": {}, "4:3": {}, "4:5": {}, "5:4": {}, "8:1": {}, "9:16": {},
-		"16:9": {}, "21:9": {},
+	tests := []struct {
+		name        string
+		cfg         *config.ImageGeneratorConfig
+		wantSizes   []string
+		wantAspects []string
+		// forbidden values that MUST NOT appear in the schema for this fixture.
+		forbiddenSizes   []string
+		forbiddenAspects []string
+	}{
+		{
+			name: "nano banana — full set",
+			cfg: &config.ImageGeneratorConfig{
+				SupportedImageSizes:   geminiSizes,
+				SupportedAspectRatios: geminiAspects,
+			},
+			wantSizes:        geminiSizes,
+			wantAspects:      geminiAspects,
+			forbiddenSizes:   []string{"0.5K", "512"},
+			forbiddenAspects: nil,
+		},
+		{
+			name: "openai/gpt-5.4-image-2 — narrowed set",
+			cfg: &config.ImageGeneratorConfig{
+				SupportedImageSizes:   openaiSizes,
+				SupportedAspectRatios: openaiAspects,
+			},
+			wantSizes:        openaiSizes,
+			wantAspects:      openaiAspects,
+			forbiddenSizes:   []string{"4K", "0.5K"},
+			forbiddenAspects: []string{"1:4", "4:1", "1:8", "8:1"},
+		},
+		{
+			name:             "empty config — falls back to gemini superset",
+			cfg:              &config.ImageGeneratorConfig{},
+			wantSizes:        geminiSizes,
+			wantAspects:      geminiAspects,
+			forbiddenSizes:   []string{"0.5K", "512"},
+			forbiddenAspects: nil,
+		},
 	}
-	aspectRatio, ok := props["aspect_ratio"].(map[string]interface{})
-	require.True(t, ok, "aspect_ratio property missing from schema")
-	aspectRatioEnum, ok := aspectRatio["enum"].([]string)
-	require.True(t, ok)
-	for _, v := range aspectRatioEnum {
-		assert.Contains(t, validAspectRatios, v,
-			"aspect_ratio enum contains %q which is not in the API's valid set", v)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			schema := buildImageGenerationSchema(tt.cfg)
+			props, ok := schema["properties"].(map[string]interface{})
+			require.True(t, ok)
+
+			imageSize, ok := props["image_size"].(map[string]interface{})
+			require.True(t, ok, "image_size property missing from schema")
+			gotSizes, ok := imageSize["enum"].([]string)
+			require.True(t, ok)
+			assert.Equal(t, tt.wantSizes, gotSizes)
+			for _, v := range tt.forbiddenSizes {
+				assert.NotContains(t, gotSizes, v,
+					"image_size enum must not include %q for this model", v)
+			}
+
+			aspectRatio, ok := props["aspect_ratio"].(map[string]interface{})
+			require.True(t, ok, "aspect_ratio property missing from schema")
+			gotAspects, ok := aspectRatio["enum"].([]string)
+			require.True(t, ok)
+			assert.Equal(t, tt.wantAspects, gotAspects)
+			for _, v := range tt.forbiddenAspects {
+				assert.NotContains(t, gotAspects, v,
+					"aspect_ratio enum must not include %q for this model", v)
+			}
+		})
 	}
 }
