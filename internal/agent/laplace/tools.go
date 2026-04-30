@@ -20,7 +20,7 @@ func BuildTools(cfg *config.Config, translator *i18n.Translator) []openrouter.To
 		var parameters map[string]interface{}
 		switch toolCfg.Name {
 		case "generate_image":
-			parameters = buildImageGenerationSchema()
+			parameters = buildImageGenerationSchema(&cfg.Agents.ImageGenerator)
 		default:
 			paramDesc := toolCfg.ParameterDescription
 			if paramDesc == "" {
@@ -56,9 +56,22 @@ func BuildTools(cfg *config.Config, translator *i18n.Translator) []openrouter.To
 }
 
 // buildImageGenerationSchema returns the JSON schema for the generate_image
-// tool. Unlike other tools, image generation accepts structured parameters
-// (prompt, aspect_ratio enum, image_size enum, optional input_artifact_ids).
-func buildImageGenerationSchema() map[string]interface{} {
+// tool, with the aspect_ratio and image_size enums derived from
+// ImageGeneratorConfig so the LLM only ever sees options the upstream model
+// accepts. Empty lists fall back to the nano-banana superset for safety.
+func buildImageGenerationSchema(cfg *config.ImageGeneratorConfig) map[string]interface{} {
+	sizes := cfg.SupportedImageSizes
+	if len(sizes) == 0 {
+		sizes = []string{"1K", "2K", "4K"}
+	}
+	aspects := cfg.SupportedAspectRatios
+	if len(aspects) == 0 {
+		aspects = []string{
+			"1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4",
+			"9:16", "16:9", "21:9",
+			"1:4", "4:1", "1:8", "8:1",
+		}
+	}
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -67,18 +80,14 @@ func buildImageGenerationSchema() map[string]interface{} {
 				"description": "Detailed image description in any language. Be specific about subject, style, composition, lighting.",
 			},
 			"aspect_ratio": map[string]interface{}{
-				"type": "string",
-				"enum": []string{
-					"1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4",
-					"9:16", "16:9", "21:9",
-					"1:4", "4:1", "1:8", "8:1",
-				},
-				"description": "Aspect ratio. Default 1:1. Use 16:9 for wide shots, 9:16 for portrait, 21:9 for cinematic.",
+				"type":        "string",
+				"enum":        aspects,
+				"description": "Aspect ratio. Default is 9:16 (vertical, optimized for phone screens) — leave unset for portraits, selfies, and most everyday shots. Override only when the framing actively wants something else: 16:9 for wide/landscape, 1:1 for square, 21:9 for cinematic.",
 			},
 			"image_size": map[string]interface{}{
 				"type":        "string",
-				"enum":        []string{"1K", "2K", "4K"},
-				"description": "Output resolution. Default 1K. Use 2K/4K for detailed work. (Cheap drafts at 512 px are not supported via OpenRouter today — its validator accepts only \"0.5K\", which the upstream rejects.)",
+				"enum":        sizes,
+				"description": "Output resolution. Default 1K. Higher sizes cost more and take longer.",
 			},
 			"input_artifact_ids": map[string]interface{}{
 				"type":        "array",

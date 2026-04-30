@@ -280,6 +280,34 @@ func TestValidate(t *testing.T) {
 			wantErr:     true,
 			errContains: "telegram.token is required",
 		},
+		{
+			name: "image_generator default_image_size outside supported list",
+			modify: func(c *Config) {
+				c.Agents.ImageGenerator.SupportedImageSizes = []string{"1K", "2K"}
+				c.Agents.ImageGenerator.DefaultImageSize = "4K"
+			},
+			wantErr:     true,
+			errContains: "default_image_size",
+		},
+		{
+			name: "image_generator default_aspect_ratio outside supported list",
+			modify: func(c *Config) {
+				c.Agents.ImageGenerator.SupportedAspectRatios = []string{"1:1", "9:16", "16:9"}
+				c.Agents.ImageGenerator.DefaultAspectRatio = "1:8"
+			},
+			wantErr:     true,
+			errContains: "default_aspect_ratio",
+		},
+		{
+			name: "image_generator empty supported lists skip the check",
+			modify: func(c *Config) {
+				c.Agents.ImageGenerator.SupportedImageSizes = nil
+				c.Agents.ImageGenerator.SupportedAspectRatios = nil
+				c.Agents.ImageGenerator.DefaultImageSize = "4K"
+				c.Agents.ImageGenerator.DefaultAspectRatio = "1:8"
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {

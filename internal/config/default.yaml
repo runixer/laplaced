@@ -125,13 +125,53 @@ agents:
     recovery_threshold: "10m"   # How long 'processing' state before recovery on startup
     recent_message_count: 10    # Number of recent session messages to include in artifact context (0 = disable)
 
-  # Image generator - creates/edits images via nano banana (v0.8.0)
+  # Image generator - creates/edits images (v0.8.0).
+  # Two verified configurations below — pick one. supported_image_sizes /
+  # supported_aspect_ratios drive the generate_image tool's JSON schema, so the
+  # LLM only sees options the upstream model actually accepts; switching models
+  # requires updating these lists or you'll get runtime 400s.
   image_generator:
     name: "ImageGenerator"
     model: "google/gemini-3.1-flash-image-preview"
     timeout: "90s"                 # Max time per image generation call
     default_aspect_ratio: "9:16"   # Vertical phone format. Only applied for text-to-image; edits keep the input image's own ratio.
-    default_image_size: "1K"       # 1K, 2K, 4K (sub-1K via OR is currently broken end-to-end)
+    default_image_size: "1K"
+    # Curl-verified for nano banana on 2026-04-30: sub-1K is broken end-to-end via OpenRouter.
+    supported_image_sizes: ["1K", "2K", "4K"]
+    supported_aspect_ratios:
+      - "1:1"
+      - "2:3"
+      - "3:2"
+      - "3:4"
+      - "4:3"
+      - "4:5"
+      - "5:4"
+      - "9:16"
+      - "16:9"
+      - "21:9"
+      - "1:4"
+      - "4:1"
+      - "1:8"
+      - "8:1"
+    # Alternative: openai/gpt-5.4-image-2 — generally higher quality, ~10x slower,
+    # ~2x cost (~$0.13/img at 1K). Curl-verified 2026-04-30: image_size accepts
+    # only {"1K","2K"} (0.5K/4K return 400); aspect_ratio drops the {1:4, 4:1,
+    # 1:8, 8:1} extremes. To switch, replace the four fields above with:
+    #
+    # model: "openai/gpt-5.4-image-2"
+    # timeout: "180s"
+    # supported_image_sizes: ["1K", "2K"]
+    # supported_aspect_ratios:
+    #   - "1:1"
+    #   - "2:3"
+    #   - "3:2"
+    #   - "3:4"
+    #   - "4:3"
+    #   - "4:5"
+    #   - "5:4"
+    #   - "9:16"
+    #   - "16:9"
+    #   - "21:9"
     max_input_images: 4            # Max reference images accepted as tool input
     max_output_images: 4           # Max images shown to user per tool call
     max_input_image_bytes: 20971520 # 20MB per input image
