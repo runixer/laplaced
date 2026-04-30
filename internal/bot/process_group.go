@@ -29,6 +29,43 @@ import (
 	"github.com/runixer/laplaced/internal/telegram"
 )
 
+// disclaimerPhrases are case-folded fragments that signal a model refusing to
+// read a file. detectFalseDisclaimer flags a turn when one of these appears
+// alongside a substantive answer body — i.e. the model said "couldn't read
+// the file" and still answered correctly using its visible content. The
+// canonical case is the historical artifact / live attachment filename
+// collision, where reasoning-mode Pro models prepend a defensive disclaimer
+// despite having read the live photo. Match list is intentionally short and
+// high-precision; widen only after observing prod traces.
+var disclaimerPhrases = []string{
+	"не смог прочитать этот файл",
+	"не удалось прочитать",
+	"не распозналось",
+	"формат не поддерживается",
+	"i can't read this file",
+	"i couldn't read",
+	"i'm unable to read",
+	"cannot interpret the image",
+}
+
+// detectFalseDisclaimer returns the matched disclaimer phrase when reply
+// contains a refusal AND has a substantive body alongside it. Returns ""
+// when no anomaly is suspected. minSubstantiveLen filters out genuine
+// short refusals where the model truly couldn't read the file.
+func detectFalseDisclaimer(reply string) string {
+	const minSubstantiveLen = 300
+	if len(reply) < minSubstantiveLen {
+		return ""
+	}
+	lower := strings.ToLower(reply)
+	for _, p := range disclaimerPhrases {
+		if strings.Contains(lower, p) {
+			return p
+		}
+	}
+	return ""
+}
+
 // fileProcessingError wraps a file processing error for identification.
 type fileProcessingError struct {
 	err          error
@@ -179,6 +216,27 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	if len(currentUserMessageContent) == 0 {
 		logger.Warn("message group was empty after processing")
 		return
+	}
+
+	// Record live attachments on the root span so triage can answer
+	// "what did the user just send" without parsing the openrouter llm.request
+	// body. Each entry is {filename, mime, sha256, size, source}; the sha256
+	// matches artifacts.content_hash, so a snapshot replay can reconstruct
+	// the original FilePart bytes from the artifact storage.
+	hasCurrentMedia := false
+	for _, p := range currentUserMessageContent {
+		if _, ok := p.(openrouter.FilePart); ok {
+			hasCurrentMedia = true
+			break
+		}
+	}
+	if hasCurrentMedia {
+		span.SetAttributes(attribute.Bool("bot.has_current_media", true))
+	}
+	if obs.ContentEnabled() {
+		if body := agent.FormatMediaParts(currentUserMessageContent, "current_message"); body != "" {
+			obs.RecordContent(span, "bot.current_media", body)
+		}
 	}
 
 	userID := group.UserID
@@ -350,6 +408,21 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		"total_tokens", stat.TokensUsed,
 		"cost_usd", stat.CostUSD,
 	)
+
+	// Flag a likely false "I can't read this file" disclaimer — the model
+	// said it couldn't read the user's attachment yet still produced a long
+	// answer that contradicts the disclaimer. Only checked when the current
+	// turn carried media (the disclaimer is meaningless without an attachment
+	// to refuse). Surfaces as a span attribute so a TraceQL query like
+	// {span.bot.anomaly.false_disclaimer=true} pulls every offending turn.
+	if hasCurrentMedia {
+		if phrase := detectFalseDisclaimer(resp.Content); phrase != "" {
+			span.SetAttributes(
+				attribute.Bool("bot.anomaly.false_disclaimer", true),
+				attribute.String("bot.anomaly.disclaimer_phrase", phrase),
+			)
+		}
+	}
 
 	// Branch: if the turn produced generated images, route through the
 	// media-aware reply path. Otherwise keep the text-only path.

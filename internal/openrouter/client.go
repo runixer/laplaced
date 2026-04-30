@@ -3,6 +3,7 @@ package openrouter
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -165,6 +166,50 @@ func classifyUpstreamError(bodyErr *openRouterBodyError) string {
 		return "upstream_4xx"
 	}
 	return "unknown"
+}
+
+// countFilenameCollisions returns the number of FilePart pairs across
+// req.Messages that share a FileName but carry different file_data. Zero is
+// the normal case — non-zero is a canary for the same-filename multi-FilePart
+// bug class. Telegram defaults photos to "photo.jpg" both for live downloads
+// and for stored artifacts, so a prompt that mixes a fresh attachment with a
+// reranker-loaded historical artifact can present two distinct images named
+// "photo.jpg" to a multimodal model. Reasoning-mode models trip on the
+// dissonance and prepend a false "I can't read this file" disclaimer.
+//
+// We compare file_data bodies via sha256 to avoid keying maps on multi-MB
+// strings. The hash is over the entire data URL string (including the
+// "data:image/jpeg;base64," prefix); two FileParts with identical bytes but
+// different mime declarations still count as distinct, which is what we want.
+func countFilenameCollisions(messages []Message) int {
+	// filename -> set of distinct content fingerprints
+	seen := map[string]map[[32]byte]struct{}{}
+	for _, msg := range messages {
+		parts, ok := msg.Content.([]interface{})
+		if !ok {
+			continue
+		}
+		for _, p := range parts {
+			fp, ok := p.(FilePart)
+			if !ok {
+				continue
+			}
+			h := sha256.Sum256([]byte(fp.File.FileData))
+			set := seen[fp.File.FileName]
+			if set == nil {
+				set = map[[32]byte]struct{}{}
+				seen[fp.File.FileName] = set
+			}
+			set[h] = struct{}{}
+		}
+	}
+	collisions := 0
+	for _, hashes := range seen {
+		if len(hashes) > 1 {
+			collisions += len(hashes) - 1
+		}
+	}
+	return collisions
 }
 
 // recordOpenRouterError attaches an OR error envelope to a span: the raw body
@@ -598,6 +643,10 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		if resp.Usage.Cost != nil {
 			span.SetAttributes(attribute.Float64("llm.cost_usd", *resp.Usage.Cost))
 		}
+		// Canary attribute, always set: 0 in the normal case. A non-zero count
+		// flags that the assembled prompt contains FileParts that share a
+		// FileName but differ in content — see countFilenameCollisions for why.
+		span.SetAttributes(attribute.Int("prompt.media.filename_collisions", countFilenameCollisions(req.Messages)))
 		if len(reqBody) > 0 {
 			// Redact: multimodal inputs carry full base64 (1-5 MB per image,
 			// 3-4 calls per turn) which trips Tempo max_bytes_per_trace if

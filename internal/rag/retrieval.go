@@ -74,11 +74,12 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		),
 	)
 	var (
-		candidatesIn     int
-		candidatesOut    int
-		usedReranker     bool
-		selectedTopicIDs []int64
-		spanErr          error
+		candidatesIn        int
+		candidatesOut       int
+		usedReranker        bool
+		selectedTopicIDs    []int64
+		selectedArtifactIDs []int64
+		spanErr             error
 	)
 	defer func() {
 		span.SetAttributes(
@@ -88,6 +89,13 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		)
 		if len(selectedTopicIDs) > 0 {
 			span.SetAttributes(attribute.Int64Slice("rag.selected_topic_ids", selectedTopicIDs))
+		}
+		if len(selectedArtifactIDs) > 0 {
+			// Symmetric to selected_topic_ids — same "why was this retrieved"
+			// signal for artifacts. Lets a TraceQL query line up the live
+			// FilePart hashes from bot.current_media against the historical
+			// artifact IDs the reranker chose for the same prompt window.
+			span.SetAttributes(attribute.Int64Slice("rag.selected_artifact_ids", selectedArtifactIDs))
 		}
 		obs.RecordContent(span, "rag.raw_query", query)
 		if debugInfo.EnrichedQuery != "" && debugInfo.EnrichedQuery != query {
@@ -193,6 +201,7 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		return nil, debugInfo, err
 	}
 	candidatesOut = len(result.Topics)
+	selectedArtifactIDs = append(selectedArtifactIDs, result.SelectedArtifactIDs...)
 
 	// 10. Record metrics
 	debugInfo.Results = result.Topics
