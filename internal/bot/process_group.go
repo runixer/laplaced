@@ -66,6 +66,74 @@ func detectFalseDisclaimer(reply string) string {
 	return ""
 }
 
+// voiceQuotePrefix matches a leading "> 🎤 ...\n+" Telegram voice
+// transcription quote that bot.voice_instruction tells the LLM to prepend
+// to voice replies. detectEchoOfLastUserMessage strips it so the echo
+// check compares the substantive reply, not the boilerplate quote.
+var voiceQuotePrefix = regexp.MustCompile(`(?s)^>\s*🎤\s*[^\n]*\n+`)
+
+// detectEchoOfLastUserMessage returns true when the assistant reply is
+// (after trim + voice-quote stripping) byte-identical to the last user
+// message text. Catches a Gemini 3.x degenerate failure mode where the
+// model copies the user's input as its completion. Min length 30 chars
+// to avoid false positives on trivially short replies (e.g. "ok").
+func detectEchoOfLastUserMessage(reply, userText string) bool {
+	const minLen = 30
+	cleaned := strings.TrimSpace(voiceQuotePrefix.ReplaceAllString(reply, ""))
+	user := strings.TrimSpace(userText)
+	if len(cleaned) < minLen || len(user) < minLen {
+		return false
+	}
+	return cleaned == user
+}
+
+// recordLaplaceAnomalies surfaces the four bot.anomaly.* span attributes
+// on the root processMessageGroup span. Called once per turn after
+// laplace.Execute returns, regardless of resp.Error — empty_response in
+// particular fires on the retries-exhausted path which is also the error
+// path. Sanitized / echo / false_disclaimer guards safely no-op when
+// resp.Content is empty.
+func recordLaplaceAnomalies(span trace.Span, resp *laplace.Response, lastMsg *telegram.Message, hasCurrentMedia bool) {
+	// false_disclaimer — model claimed it couldn't read the attachment
+	// yet still produced a long answer. Only meaningful with attached media.
+	if hasCurrentMedia {
+		if phrase := detectFalseDisclaimer(resp.Content); phrase != "" {
+			span.SetAttributes(
+				attribute.Bool("bot.anomaly.false_disclaimer", true),
+				attribute.String("bot.anomaly.disclaimer_phrase", phrase),
+			)
+		}
+	}
+
+	// empty_response — laplace produced no usable content. resp.Content
+	// will be the localized fallback string (success path) or empty (error
+	// path); either way the upstream failure is the signal.
+	if resp.WasEmpty {
+		span.SetAttributes(attribute.Bool("bot.anomaly.empty_response", true))
+	}
+
+	// sanitized — hallucination artifacts (</tool_code>, default_api: ...)
+	// were stripped from the completion. OriginalContent (pre-sanitization)
+	// goes on a span event so it inherits the trace_content privacy toggle.
+	if resp.WasSanitized {
+		span.SetAttributes(attribute.Bool("bot.anomaly.sanitized", true))
+		obs.RecordContent(span, "bot.anomaly.sanitized_from", resp.OriginalContent)
+	}
+
+	// echo_user_message — Gemini degenerate failure mode where the model
+	// returns the user's last message verbatim as its completion.
+	userText := lastMsg.Text
+	if userText == "" {
+		userText = lastMsg.Caption
+	}
+	if detectEchoOfLastUserMessage(resp.Content, userText) {
+		span.SetAttributes(
+			attribute.Bool("bot.anomaly.echo_user_message", true),
+			attribute.Int("bot.anomaly.echo_output_tokens", resp.CompletionTokens),
+		)
+	}
+}
+
 // fileProcessingError wraps a file processing error for identification.
 type fileProcessingError struct {
 	err          error
@@ -334,6 +402,12 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		return
 	}
 
+	// Surface anomaly signals on the root span BEFORE branching on
+	// resp.Error — empty_response in particular fires on the retries-
+	// exhausted path which is also the error path. Sanitized / echo do
+	// require non-empty content; their guards handle the no-op cases.
+	recordLaplaceAnomalies(span, resp, lastMsg, hasCurrentMedia)
+
 	// Check for partial execution error (e.g., max retries reached)
 	if resp.Error != nil {
 		logger.Error("laplace execution failed", "error", resp.Error, "total_turns", resp.TotalTurns)
@@ -408,21 +482,6 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		"total_tokens", stat.TokensUsed,
 		"cost_usd", stat.CostUSD,
 	)
-
-	// Flag a likely false "I can't read this file" disclaimer — the model
-	// said it couldn't read the user's attachment yet still produced a long
-	// answer that contradicts the disclaimer. Only checked when the current
-	// turn carried media (the disclaimer is meaningless without an attachment
-	// to refuse). Surfaces as a span attribute so a TraceQL query like
-	// {span.bot.anomaly.false_disclaimer=true} pulls every offending turn.
-	if hasCurrentMedia {
-		if phrase := detectFalseDisclaimer(resp.Content); phrase != "" {
-			span.SetAttributes(
-				attribute.Bool("bot.anomaly.false_disclaimer", true),
-				attribute.String("bot.anomaly.disclaimer_phrase", phrase),
-			)
-		}
-	}
 
 	// Branch: if the turn produced generated images, route through the
 	// media-aware reply path. Otherwise keep the text-only path.

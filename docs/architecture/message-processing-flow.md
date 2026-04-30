@@ -238,7 +238,7 @@ sequenceDiagram
 1. **Sanitization**
    - Удаление артефактов (`</tool_code>`, `</s>`)
    - Детекция runaway JSON (3+ consecutive blocks)
-   - Метрика: `AnomalySanitized`
+   - Span attribute: `bot.anomaly.sanitized` (см. секцию Аномалии)
 
 2. **Конвертация**
    - Markdown → HTML (Telegram формат)
@@ -284,12 +284,18 @@ sequenceDiagram
 
 ### Аномалии
 
-| Тип | Описание |
-|-----|----------|
-| `empty_response` | LLM вернул пустой ответ (0 токенов) |
-| `sanitized` | Ответ содержал артефакты галлюцинации |
-| `retry_success` | Retry после пустого ответа успешен |
-| `retry_failed` | Все retry исчерпаны, fallback ответ |
+Аномалии живут как span-атрибуты на корневом `bot.processMessageGroup`,
+не как Prometheus counter'ы — TraceQL даёт и счёт, и сам трейс с
+контекстом. Один общий префикс `bot.anomaly.*` для фильтрации:
+`{ span.bot.anomaly.echo_user_message=true }`,
+`{ span.bot.anomaly.empty_response=true }` и т.д.
+
+| Span attribute | Описание |
+|---|---|
+| `bot.anomaly.empty_response` | Финальный completion пуст (после sanitize). Юзеру отправлен локализованный fallback `bot.empty_response`. Включает retries-exhausted путь. |
+| `bot.anomaly.sanitized` | `SanitizeLLMResponse` срезал артефакты галлюцинации. Сопровождается событием `bot.anomaly.sanitized_from` с оригинальным (грязным) текстом — гейтится `trace_content` toggle'ом. |
+| `bot.anomaly.false_disclaimer` | Модель сказала «не могу прочитать файл», но всё равно выдала >300 символов осмысленного ответа. Только при `hasCurrentMedia=true`. Сопровождается `bot.anomaly.disclaimer_phrase`. |
+| `bot.anomaly.echo_user_message` | Gemini-style degenerate echo: completion дословно совпадает с последним user-сообщением (≥30 символов, после strip'а voice-quote). Сопровождается `bot.anomaly.echo_output_tokens`. |
 
 ## Ключевые паттерны
 

@@ -59,6 +59,16 @@ type Response struct {
 	// Debug info
 	Messages          []openrouter.Message // Full conversation for logging
 	ConversationTurns *agentlog.ConversationTurns
+
+	// Anomaly signals for the orchestrator to surface as bot.anomaly.*
+	// span attributes on bot.processMessageGroup. WasEmpty marks an
+	// originally-empty completion that was replaced with the localized
+	// fallback. WasSanitized marks a completion that had hallucination
+	// artifacts stripped; OriginalContent then carries the pre-strip text
+	// for triage (recorded as a span event when content tracing is on).
+	WasEmpty        bool
+	WasSanitized    bool
+	OriginalContent string
 }
 
 // ToolCallContext carries execution context for a tool call: the owning user

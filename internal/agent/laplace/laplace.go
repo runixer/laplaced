@@ -267,6 +267,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 				RAGInfo:           contextData.RAGInfo,
 				Messages:          orMessages,
 				ConversationTurns: tracker.Build(),
+				WasEmpty:          true, // retries exhausted — orchestrator surfaces bot.anomaly.empty_response
 			}, nil
 		}
 
@@ -318,19 +319,21 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 	}
 
 	// Sanitize response
+	originalContent := finalResponse
 	finalResponse, wasSanitized := SanitizeLLMResponse(finalResponse)
 	if wasSanitized {
 		logger.Warn("sanitized LLM response (removed hallucination artifacts)")
 	}
 
 	// Handle empty final response
-	if strings.TrimSpace(finalResponse) == "" {
+	wasEmpty := strings.TrimSpace(finalResponse) == ""
+	if wasEmpty {
 		finalResponse = l.translator.Get(l.cfg.Bot.Language, "bot.empty_response")
 	}
 
 	promptTokens, completionTokens := tracker.TotalTokens()
 
-	return &Response{
+	resp = &Response{
 		Content:              finalResponse,
 		GeneratedArtifactIDs: generatedArtifactIDs,
 		PromptTokens:         promptTokens,
@@ -342,7 +345,13 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 		RAGInfo:              contextData.RAGInfo,
 		Messages:             orMessages,
 		ConversationTurns:    tracker.Build(),
-	}, nil
+		WasEmpty:             wasEmpty,
+		WasSanitized:         wasSanitized,
+	}
+	if wasSanitized {
+		resp.OriginalContent = originalContent
+	}
+	return resp, nil
 }
 
 // executeToolCalls executes tool calls and returns (tool result messages,

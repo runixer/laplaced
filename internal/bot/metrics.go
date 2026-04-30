@@ -189,33 +189,11 @@ var (
 		},
 		[]string{"user_id"},
 	)
-
-	// llmAnomaliesTotal tracks LLM response anomalies.
-	// Labels:
-	//   - user_id: user identifier
-	//   - type: anomaly type (empty_response, sanitized, retry_success, retry_failed)
-	llmAnomaliesTotal = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: metricsNamespace,
-			Subsystem: "bot",
-			Name:      "llm_anomalies_total",
-			Help:      "Total number of LLM response anomalies (empty responses, hallucinations)",
-		},
-		[]string{"user_id", "type"},
-	)
 )
 
 const (
 	statusSuccess = "success"
 	statusError   = "error"
-)
-
-// LLM anomaly types
-const (
-	AnomalyEmptyResponse = "empty_response"
-	AnomalySanitized     = "sanitized"
-	AnomalyRetrySuccess  = "retry_success"
-	AnomalyRetryFailed   = "retry_failed"
 )
 
 // Context source types
@@ -298,11 +276,4 @@ func RecordMessageTelegram(userID int64, totalDuration float64, callCount int) {
 func RecordMessageReaction(userID int64, duration float64) {
 	uid := formatUserID(userID)
 	messageReactionDuration.WithLabelValues(uid).Observe(duration)
-}
-
-// RecordLLMAnomaly records an LLM response anomaly.
-// anomalyType should be one of: AnomalyEmptyResponse, AnomalySanitized, AnomalyRetrySuccess, AnomalyRetryFailed
-func RecordLLMAnomaly(userID int64, anomalyType string) {
-	uid := formatUserID(userID)
-	llmAnomaliesTotal.WithLabelValues(uid, anomalyType).Inc()
 }
