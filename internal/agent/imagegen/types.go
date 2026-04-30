@@ -28,7 +28,8 @@ type Request struct {
 	// "1:1", "16:9", "21:9". Empty means model default (typically 1:1).
 	AspectRatio string
 
-	// ImageSize is one of "0.5K", "1K", "2K", "4K". Empty means model default.
+	// ImageSize is one of "512", "1K", "2K", "4K". Empty means model default.
+	// Note: the API uses literal "512" (no K suffix); "0.5K" is invalid.
 	ImageSize string
 }
 

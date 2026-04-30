@@ -134,3 +134,46 @@ func TestBuildTools_ParameterStructure(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, []string{"query"}, required)
 }
+
+// TestImageGenerationSchemaEnums guards the generate_image schema against
+// silently re-introducing invalid values. The Gemini API rejects anything
+// outside the documented enums with 400 INVALID_ARGUMENT (no detail), and
+// the bot then makes up a "safety filter" story to the user.
+//
+// Source of truth for the valid sets: docs/external/gemini/image-generation.md
+// (line 1314 for image_size: "You must use an uppercase 'K' (e.g. 1K, 2K, 4K).
+// The 512 value does not use a 'K' suffix.").
+func TestImageGenerationSchemaEnums(t *testing.T) {
+	schema := buildImageGenerationSchema()
+
+	props, ok := schema["properties"].(map[string]interface{})
+	require.True(t, ok)
+
+	validImageSizes := map[string]struct{}{
+		"512": {}, "1K": {}, "2K": {}, "4K": {},
+	}
+	imageSize, ok := props["image_size"].(map[string]interface{})
+	require.True(t, ok, "image_size property missing from schema")
+	imageSizeEnum, ok := imageSize["enum"].([]string)
+	require.True(t, ok)
+	for _, v := range imageSizeEnum {
+		assert.Contains(t, validImageSizes, v,
+			"image_size enum contains %q which is not in the API's valid set "+
+				"{512, 1K, 2K, 4K} — the API rejects anything else with "+
+				"400 INVALID_ARGUMENT (this was the 0.5K typo bug)", v)
+	}
+
+	validAspectRatios := map[string]struct{}{
+		"1:1": {}, "1:4": {}, "1:8": {}, "2:3": {}, "3:2": {}, "3:4": {},
+		"4:1": {}, "4:3": {}, "4:5": {}, "5:4": {}, "8:1": {}, "9:16": {},
+		"16:9": {}, "21:9": {},
+	}
+	aspectRatio, ok := props["aspect_ratio"].(map[string]interface{})
+	require.True(t, ok, "aspect_ratio property missing from schema")
+	aspectRatioEnum, ok := aspectRatio["enum"].([]string)
+	require.True(t, ok)
+	for _, v := range aspectRatioEnum {
+		assert.Contains(t, validAspectRatios, v,
+			"aspect_ratio enum contains %q which is not in the API's valid set", v)
+	}
+}

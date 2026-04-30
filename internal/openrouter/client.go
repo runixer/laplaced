@@ -266,7 +266,7 @@ type ImageConfig struct {
 	// AspectRatio: "1:1","2:3","3:2","3:4","4:3","4:5","5:4","9:16","16:9","21:9"
 	// Extended on nano banana: "1:4","4:1","1:8","8:1".
 	AspectRatio string `json:"aspect_ratio,omitempty"`
-	// ImageSize: "0.5K" (nano banana only), "1K", "2K", "4K".
+	// ImageSize: "512" (nano banana only — literal "512", not "0.5K"), "1K", "2K", "4K".
 	ImageSize string `json:"image_size,omitempty"`
 }
 
