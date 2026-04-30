@@ -355,20 +355,27 @@ func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID int64, art
 			dateStr = artifact.CreatedAt.Format("2 Jan")
 		}
 
-		// Add text label to identify the artifact (helps LLM follow artifact_protocol)
+		// Add text label to identify the artifact (helps LLM follow artifact_protocol).
+		// Explicit "memory artifact #ID" cue lets the model distinguish a historical
+		// FilePart from a live attachment that may share the same OriginalName —
+		// Telegram photos default to "photo.jpg" both on download and in storage.
 		contentParts = append(contentParts, openrouter.TextPart{
 			Type: "text",
-			Text: fmt.Sprintf("📄 %s (%s)", displayName, dateStr),
+			Text: fmt.Sprintf("📄 %s — memory artifact #%d (%s)", displayName, artifact.ID, dateStr),
 		})
 
-		// Create appropriate content part based on file type
+		// Create appropriate content part based on file type.
+		// Each FilePart.FileName is prefixed "memory_<id>_" so the binding the model
+		// makes between the text marker, the FilePart bytes, and the <artifact_context>
+		// summary is anchored on a unique token instead of a generic "photo.jpg".
 		switch artifact.FileType {
 		case "pdf", "document":
 			// PDF and documents use FilePart with data URL format
 			fileName := artifact.OriginalName
 			if fileName == "" {
-				fileName = fmt.Sprintf("artifact_%d.pdf", artifact.ID)
+				fileName = "artifact.pdf"
 			}
+			fileName = fmt.Sprintf("memory_%d_%s", artifact.ID, fileName)
 			// Build MIME type for data URL
 			mimeType := artifact.MimeType
 			if mimeType == "" {
@@ -395,8 +402,9 @@ func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID int64, art
 			}
 			fileName := artifact.OriginalName
 			if fileName == "" {
-				fileName = fmt.Sprintf("image_%d", artifact.ID)
+				fileName = "image"
 			}
+			fileName = fmt.Sprintf("memory_%d_%s", artifact.ID, fileName)
 			// Normalize MIME type for Gemini
 			mimeType = files.NormalizeMimeForGemini(mimeType)
 			contentParts = append(contentParts, openrouter.FilePart{
@@ -426,8 +434,9 @@ func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID int64, art
 						ext = "mp4"
 					}
 				}
-				fileName = fmt.Sprintf("artifact_%d.%s", artifact.ID, ext)
+				fileName = "audio." + ext
 			}
+			fileName = fmt.Sprintf("memory_%d_%s", artifact.ID, fileName)
 			mimeType := artifact.MimeType
 			if mimeType == "" {
 				mimeType = "audio/ogg"
