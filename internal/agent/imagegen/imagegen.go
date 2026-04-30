@@ -29,6 +29,7 @@ const (
 	OutcomeNoImages       = "no_images" // model returned text only or all decodes failed
 	OutcomeEmptyPrompt    = "empty_prompt"
 	OutcomeNoChoices      = "no_choices"
+	OutcomeTimeout        = "timeout" // local context deadline tripped before upstream replied
 	OutcomeUnknownFailure = "unknown"
 )
 
@@ -64,10 +65,18 @@ func (a *Agent) Generate(ctx context.Context, req Request) (resp *Response, err 
 		// Used only for span attr observability; not load-bearing.
 		inputBytes += len(img.File.FileData) * 3 / 4
 	}
+	timeout := a.cfg.GetTimeout()
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/imagegen").Start(
 		ctx, "imagegen.Generate",
 		trace.WithAttributes(
 			attribute.Int64("user.id", req.UserID),
+			// imagegen.model is duplicated from the OR-client child span so that
+			// dashboards can slice imagegen outcomes / latency by configured
+			// model without traversing parent→child. imagegen.timeout_seconds
+			// disambiguates "we set 90s for nano banana, openai needs 180s"
+			// when a span hits OutcomeTimeout.
+			attribute.String("imagegen.model", a.cfg.Model),
+			attribute.Float64("imagegen.timeout_seconds", timeout.Seconds()),
 			attribute.String("imagegen.aspect_ratio_requested", req.AspectRatio),
 			attribute.String("imagegen.image_size_requested", req.ImageSize),
 			attribute.Int("imagegen.input_count", len(req.InputImages)),
@@ -88,7 +97,6 @@ func (a *Agent) Generate(ctx context.Context, req Request) (resp *Response, err 
 		return nil, fmt.Errorf("imagegen: prompt is empty")
 	}
 
-	timeout := a.cfg.GetTimeout()
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
@@ -155,11 +163,19 @@ func (a *Agent) Generate(ctx context.Context, req Request) (resp *Response, err 
 		// already wraps both as one error type; we use string match as the
 		// stable signal since openrouter.* package types are unexported.
 		if errors.Is(callErr, context.DeadlineExceeded) {
-			outcome = OutcomeUnknownFailure
+			// Local deadline trip — distinct from upstream errors so dashboards
+			// can plot "timeout rate per model" and tell "openai needs >180s"
+			// apart from real provider failures.
+			outcome = OutcomeTimeout
 		} else {
 			outcome = OutcomeProviderError
 		}
 		return nil, fmt.Errorf("imagegen: chat completion failed: %w", callErr)
+	}
+	// Resolved snapshot string (e.g. "openai/gpt-5.4-image-2-20260421") catches
+	// upstream model-version rotations that change behavior under us.
+	if orResp.Model != "" {
+		span.SetAttributes(attribute.String("imagegen.model_resolved", orResp.Model))
 	}
 	if len(orResp.Choices) == 0 {
 		outcome = OutcomeNoChoices
