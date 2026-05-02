@@ -37,7 +37,7 @@ func TestFormatArtifactResults_XMLStructure(t *testing.T) {
 	if !containsSubstring(output, `id="1"`) {
 		t.Error("missing artifact id attribute")
 	}
-	if !containsSubstring(output, `type="pdf (meeting.pdf)"`) {
+	if !containsSubstring(output, `type="pdf (memory_1_meeting.pdf)"`) {
 		t.Error("missing or incorrect type attribute")
 	}
 	if !containsSubstring(output, `relevance="0.85"`) {
