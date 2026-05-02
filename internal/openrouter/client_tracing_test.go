@@ -502,6 +502,110 @@ func TestClassifyUpstreamError(t *testing.T) {
 	}
 }
 
+// TestRecordOpenRouterError_RateLimitVariants pins the span attributes that
+// distinguish 429 sub-cases. We test the recorder directly (not through a
+// 4-retry HTTP flow) — the parser is shared regardless of HTTP status, so a
+// synthetic span exercises the same emission path for a fraction of the cost.
+//
+// The variants matter operationally:
+//   - OR-gateway throttle on our key (provider_name=null + X-RateLimit-* headers):
+//     fixable by reset-aware retry timing or pacing on our side.
+//   - Upstream provider 429 wrapped in HTTP 200 (no metadata): pooled-quota
+//     issue on OR's side, nothing we can fix; needs a "wait it out" approach.
+//
+// TraceQL queries unlocked by these attrs:
+//
+//	{span.error.upstream_kind="rate_limited" && span.error.upstream_provider="openrouter"}
+//	{span.error.upstream_kind="rate_limited" && !span.error.upstream_provider}
+func TestRecordOpenRouterError_RateLimitVariants(t *testing.T) {
+	cases := []struct {
+		name     string
+		body     string
+		status   int
+		wantAttr map[string]any // string keys → string|int64 expected values
+		denyAttr []string       // attrs that must NOT be set
+	}{
+		{
+			name:   "gateway 429 with rate-limit headers",
+			body:   `{"error":{"message":"Rate limit exceeded: @ratelimit/too-many-requests.","code":429,"metadata":{"headers":{"X-RateLimit-Remaining":"0","X-RateLimit-Reset":"1777759860000"},"provider_name":null}}}`,
+			status: 429,
+			wantAttr: map[string]any{
+				"http.response.status_code":      int64(429),
+				"error.upstream_kind":            "rate_limited",
+				"error.upstream_code":            int64(429),
+				"error.upstream_provider":        "openrouter",
+				"error.rate_limit.reset_unix_ms": int64(1777759860000),
+				"error.rate_limit.remaining":     int64(0),
+			},
+			denyAttr: []string{"error.retry_after_s"},
+		},
+		{
+			name:   "upstream 429 wrapped in HTTP 200, no metadata",
+			body:   `{"error":{"message":"HTTP 429: quota exceeded","code":429}}`,
+			status: 200,
+			wantAttr: map[string]any{
+				"http.response.status_code": int64(200),
+				"error.upstream_kind":       "rate_limited",
+				"error.upstream_code":       int64(429),
+			},
+			denyAttr: []string{
+				"error.upstream_provider",
+				"error.rate_limit.reset_unix_ms",
+				"error.rate_limit.remaining",
+				"error.retry_after_s",
+			},
+		},
+		{
+			name:   "upstream provider 429 with Retry-After header",
+			body:   `{"error":{"message":"slow down","code":429,"metadata":{"headers":{"Retry-After":"60"},"provider_name":"Some Provider"}}}`,
+			status: 429,
+			wantAttr: map[string]any{
+				"http.response.status_code": int64(429),
+				"error.upstream_kind":       "rate_limited",
+				"error.upstream_provider":   "Some Provider",
+				"error.retry_after_s":       int64(60),
+			},
+			denyAttr: []string{
+				"error.rate_limit.reset_unix_ms",
+				"error.rate_limit.remaining",
+			},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			getSpans := withTracingCapture(t)
+			tracer := otel.GetTracerProvider().Tracer("test")
+			_, span := tracer.Start(context.Background(), "test")
+			recordOpenRouterError(span, []byte(c.body), c.status)
+			span.End()
+
+			spans := getSpans()
+			require.Len(t, spans, 1)
+			attrs := map[attribute.Key]attribute.Value{}
+			for _, kv := range spans[0].Attributes {
+				attrs[kv.Key] = kv.Value
+			}
+
+			for k, want := range c.wantAttr {
+				got, ok := attrs[attribute.Key(k)]
+				require.True(t, ok, "attr %q must be set", k)
+				switch w := want.(type) {
+				case string:
+					assert.Equal(t, w, got.AsString(), "attr %q", k)
+				case int64:
+					assert.Equal(t, w, got.AsInt64(), "attr %q", k)
+				default:
+					t.Fatalf("unsupported want type for %q: %T", k, want)
+				}
+			}
+			for _, k := range c.denyAttr {
+				_, ok := attrs[attribute.Key(k)]
+				assert.False(t, ok, "attr %q must NOT be set", k)
+			}
+		})
+	}
+}
+
 // TestCreateChatCompletion_UpstreamError_PopulatesKindAttr verifies the
 // classification feeds onto the span as error.upstream_kind. With this attr
 // in place, TraceQL queries like {span.error.upstream_kind="invalid_argument"}

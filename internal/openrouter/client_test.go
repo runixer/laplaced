@@ -657,32 +657,71 @@ func TestCreateChatCompletionHTTP200WithBodyErrorRetries(t *testing.T) {
 
 func TestDetectOpenRouterBodyError(t *testing.T) {
 	tests := []struct {
-		name         string
-		body         string
-		wantNil      bool
-		wantMsg      string
-		wantCode     int
-		wantProvider string
-		wantRaw      string
+		name           string
+		body           string
+		wantNil        bool
+		wantMsg        string
+		wantCode       int
+		wantProvider   string
+		wantRaw        string
+		wantMetadata   bool
+		wantResetMs    int64
+		wantRemaining  int64
+		wantRetryAfter int64
 	}{
-		{"no error field", `{"data":[{"embedding":[0.1]}]}`, true, "", 0, "", ""},
-		{"error with numeric code", `{"error":{"message":"x","code":404}}`, false, "x", 404, "", ""},
-		{"error with string code", `{"error":{"message":"y","code":"503"}}`, false, "y", 503, "", ""},
-		{"error without code", `{"error":{"message":"z"}}`, false, "z", 0, "", ""},
-		{"invalid json", `not json`, true, "", 0, "", ""},
+		{name: "no error field", body: `{"data":[{"embedding":[0.1]}]}`, wantNil: true},
+		{name: "error with numeric code", body: `{"error":{"message":"x","code":404}}`, wantMsg: "x", wantCode: 404},
+		{name: "error with string code", body: `{"error":{"message":"y","code":"503"}}`, wantMsg: "y", wantCode: 503},
+		{name: "error without code", body: `{"error":{"message":"z"}}`, wantMsg: "z"},
+		{name: "invalid json", body: `not json`, wantNil: true},
 		{
 			// Real shape OR returns when proxying an upstream provider error,
 			// e.g. AI Studio's "Corrupted thought signature" case captured during
 			// the 2026-04-28 reranker incident. Critical that provider_name and
 			// raw survive the round-trip so traces can pinpoint which provider
 			// rejected the request.
-			"upstream provider error with metadata",
-			`{"error":{"message":"Provider returned error","code":400,"metadata":{"raw":"{\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"Corrupted thought signature.\",\n    \"status\": \"INVALID_ARGUMENT\"\n  }\n}\n","provider_name":"Google AI Studio","is_byok":false}}}`,
-			false,
-			"Provider returned error",
-			400,
-			"Google AI Studio",
-			"{\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"Corrupted thought signature.\",\n    \"status\": \"INVALID_ARGUMENT\"\n  }\n}\n",
+			name:         "upstream provider error with metadata",
+			body:         `{"error":{"message":"Provider returned error","code":400,"metadata":{"raw":"{\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"Corrupted thought signature.\",\n    \"status\": \"INVALID_ARGUMENT\"\n  }\n}\n","provider_name":"Google AI Studio","is_byok":false}}}`,
+			wantMsg:      "Provider returned error",
+			wantCode:     400,
+			wantProvider: "Google AI Studio",
+			wantRaw:      "{\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"Corrupted thought signature.\",\n    \"status\": \"INVALID_ARGUMENT\"\n  }\n}\n",
+			wantMetadata: true,
+		},
+		{
+			// OR-gateway 429 against our API key (the 2026-05-03 imagegen-lost
+			// incident). provider_name is null because OR rejected at its own
+			// gateway before routing to a provider; X-RateLimit-* headers tell
+			// us when the bucket refills. All three signals must be parsed.
+			name:          "openrouter gateway 429 with rate-limit headers",
+			body:          `{"error":{"message":"Rate limit exceeded: @ratelimit/too-many-requests.","code":429,"metadata":{"headers":{"X-RateLimit-Remaining":"0","X-RateLimit-Reset":"1777759860000"},"provider_name":null}}}`,
+			wantMsg:       "Rate limit exceeded: @ratelimit/too-many-requests.",
+			wantCode:      429,
+			wantMetadata:  true,
+			wantResetMs:   1777759860000,
+			wantRemaining: 0,
+		},
+		{
+			// Some providers populate Retry-After instead of X-RateLimit-Reset.
+			// We don't have a captured prod sample for this shape yet, so this
+			// case pins the parser contract: int64 seconds, lives under the
+			// same metadata.headers map.
+			name:           "metadata headers with Retry-After",
+			body:           `{"error":{"message":"slow down","code":429,"metadata":{"headers":{"Retry-After":"42"},"provider_name":"Some Provider"}}}`,
+			wantMsg:        "slow down",
+			wantCode:       429,
+			wantProvider:   "Some Provider",
+			wantMetadata:   true,
+			wantRetryAfter: 42,
+		},
+		{
+			// Vertex gemini-embedding-2 quota 429 wrapped in HTTP 200, captured
+			// 2026-05-02. No metadata block at all — distinguishable from the
+			// gateway 429 above by MetadataPresent=false.
+			name:     "upstream 429 wrapped in HTTP 200, no metadata",
+			body:     `{"error":{"message":"HTTP 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"Quota exceeded for aiplatform.googleapis.com/online_prediction_requests_per_base_model with base model: gemini-embedding-2.\",\n    \"status\": \"RESOURCE_EXHAUSTED\"\n  }\n}\n","code":429}}`,
+			wantMsg:  "HTTP 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"Quota exceeded for aiplatform.googleapis.com/online_prediction_requests_per_base_model with base model: gemini-embedding-2.\",\n    \"status\": \"RESOURCE_EXHAUSTED\"\n  }\n}\n",
+			wantCode: 429,
 		},
 	}
 	for _, tt := range tests {
@@ -697,6 +736,10 @@ func TestDetectOpenRouterBodyError(t *testing.T) {
 			assert.Equal(t, tt.wantCode, got.Code)
 			assert.Equal(t, tt.wantProvider, got.ProviderName)
 			assert.Equal(t, tt.wantRaw, got.Raw)
+			assert.Equal(t, tt.wantMetadata, got.MetadataPresent)
+			assert.Equal(t, tt.wantResetMs, got.RateLimitResetMs)
+			assert.Equal(t, tt.wantRemaining, got.RateLimitRemaining)
+			assert.Equal(t, tt.wantRetryAfter, got.RetryAfterSeconds)
 		})
 	}
 }

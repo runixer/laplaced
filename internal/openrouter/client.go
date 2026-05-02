@@ -96,6 +96,22 @@ type openRouterBodyError struct {
 	Code         int
 	ProviderName string // from error.metadata.provider_name when OR proxies an upstream error
 	Raw          string // upstream provider's raw error body, mirrored at error.metadata.raw
+
+	// MetadataPresent distinguishes "OR sent an error.metadata{} block (even
+	// if provider_name=null) → OR-gateway-level rejection on our API key"
+	// from "no metadata at all → upstream provider rejected and OR just wrapped
+	// the response body in HTTP 200" (the Vertex gemini-embedding-2 quota case
+	// looks like the latter). The two need different ops responses, so the
+	// distinction has to survive the parse boundary.
+	MetadataPresent bool
+
+	// Rate-limit signals from error.metadata.headers, parsed from string to
+	// int64 once at the boundary. Zero means "absent" — for 429s, treat zero
+	// as "no reset hint" rather than "now". OpenRouter populates X-RateLimit-*
+	// on its own gateway throttles; some upstream providers populate Retry-After.
+	RateLimitResetMs   int64
+	RateLimitRemaining int64
+	RetryAfterSeconds  int64
 }
 
 func (e *openRouterBodyError) Error() string {
@@ -113,8 +129,9 @@ func detectOpenRouterBodyError(body []byte) *openRouterBodyError {
 			Message  string          `json:"message"`
 			Code     json.RawMessage `json:"code"`
 			Metadata *struct {
-				Raw          string `json:"raw"`
-				ProviderName string `json:"provider_name"`
+				Raw          string            `json:"raw"`
+				ProviderName string            `json:"provider_name"`
+				Headers      map[string]string `json:"headers"`
 			} `json:"metadata"`
 		} `json:"error"`
 	}
@@ -132,10 +149,29 @@ func detectOpenRouterBodyError(body []byte) *openRouterBodyError {
 		}
 	}
 	if probe.Error.Metadata != nil {
+		bodyErr.MetadataPresent = true
 		bodyErr.ProviderName = probe.Error.Metadata.ProviderName
 		bodyErr.Raw = probe.Error.Metadata.Raw
+		bodyErr.RateLimitResetMs = parseInt64Header(probe.Error.Metadata.Headers, "X-RateLimit-Reset")
+		bodyErr.RateLimitRemaining = parseInt64Header(probe.Error.Metadata.Headers, "X-RateLimit-Remaining")
+		bodyErr.RetryAfterSeconds = parseInt64Header(probe.Error.Metadata.Headers, "Retry-After")
 	}
 	return bodyErr
+}
+
+// parseInt64Header pulls a string value from an OR error.metadata.headers map
+// and parses it as int64. Returns 0 when the key is absent or unparseable —
+// callers treat zero as "no signal" rather than a literal value.
+func parseInt64Header(h map[string]string, key string) int64 {
+	v, ok := h[key]
+	if !ok || v == "" {
+		return 0
+	}
+	var n int64
+	if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
+		return 0
+	}
+	return n
 }
 
 // classifyUpstreamError maps a parsed OR error envelope to a stable kind
@@ -247,18 +283,40 @@ func recordOpenRouterError(span trace.Span, body []byte, httpStatus int) {
 		}
 		return
 	}
-	attrs := make([]attribute.KeyValue, 0, 4)
+	attrs := make([]attribute.KeyValue, 0, 8)
 	if bodyErr.Message != "" {
 		attrs = append(attrs, attribute.String("error.upstream_message", bodyErr.Message))
 	}
 	if bodyErr.Code != 0 {
 		attrs = append(attrs, attribute.Int("error.upstream_code", bodyErr.Code))
 	}
-	if bodyErr.ProviderName != "" {
+	// upstream_provider gets a sentinel "openrouter" when OR sent a metadata
+	// block but provider_name was null/empty — that's the OR-gateway throttle
+	// case (chat 429 against our API key). With this, a TraceQL query like
+	// {span.error.upstream_provider="openrouter" && span.error.upstream_kind="rate_limited"}
+	// isolates "OR throttled us" from "Vertex/AI Studio threw a 429 and OR
+	// passed it through" (provider non-empty) without parsing message strings.
+	switch {
+	case bodyErr.ProviderName != "":
 		attrs = append(attrs, attribute.String("error.upstream_provider", bodyErr.ProviderName))
+	case bodyErr.MetadataPresent:
+		attrs = append(attrs, attribute.String("error.upstream_provider", "openrouter"))
 	}
 	if kind := classifyUpstreamError(bodyErr); kind != "" {
 		attrs = append(attrs, attribute.String("error.upstream_kind", kind))
+	}
+	// Rate-limit signals correlate the 429 with the next reset window. We
+	// emit Remaining alongside Reset (even when Remaining=0) because "0
+	// remaining" is exactly the throttled-now signal — distinguishable in
+	// TraceQL from "field absent" (no signal available).
+	if bodyErr.RateLimitResetMs > 0 {
+		attrs = append(attrs,
+			attribute.Int64("error.rate_limit.reset_unix_ms", bodyErr.RateLimitResetMs),
+			attribute.Int64("error.rate_limit.remaining", bodyErr.RateLimitRemaining),
+		)
+	}
+	if bodyErr.RetryAfterSeconds > 0 {
+		attrs = append(attrs, attribute.Int64("error.retry_after_s", bodyErr.RetryAfterSeconds))
 	}
 	if len(attrs) > 0 {
 		span.SetAttributes(attrs...)
