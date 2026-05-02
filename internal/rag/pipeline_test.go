@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/reranker"
@@ -14,6 +15,7 @@ import (
 	"github.com/runixer/laplaced/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // TestSearchTopicCandidates tests vector search for topics.
@@ -793,6 +795,82 @@ func TestSearchPeopleAndArtifacts(t *testing.T) {
 	assert.Equal(t, int64(5), artifactCandidates[0].ArtifactID)
 
 	mockStore.AssertExpectations(t)
+	mockArtifactRepo.AssertExpectations(t)
+}
+
+// TestSearchPeopleAndArtifacts_SessionMergePrepend verifies that when session-aware
+// injection is enabled, session artifacts are prepended to the candidate list and
+// duplicates against vector results are removed in favor of the session record.
+func TestSearchPeopleAndArtifacts_SessionMergePrepend(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	cfg := testutil.TestConfig()
+	cfg.Artifacts.Enabled = true
+	cfg.Agents.Reranker.Enabled = true
+	cfg.Agents.Reranker.Artifacts.CandidatesLimit = 20
+	cfg.Agents.Reranker.Artifacts.Session.Max = 3
+	cfg.Agents.Reranker.Artifacts.Session.MaxAge = "24h"
+
+	mockStore := new(testutil.MockStorage)
+	mockClient := new(testutil.MockOpenRouterClient)
+	mockArtifactRepo := new(testutil.MockStorage)
+	translator := testutil.TestTranslator(t)
+
+	userID := int64(123)
+
+	// Vector search returns artifact 5 (also exists in session — must dedupe).
+	mockArtifactRepo.On("GetArtifactsByIDs", userID, []int64{5}).Return(
+		[]storage.Artifact{{ID: 5, FileType: "pdf", OriginalName: "vector-also.pdf"}}, nil,
+	).Once()
+
+	// Session repo returns artifacts 5 (dup) and 1197 (fresh).
+	summary1197 := "freshly generated portrait"
+	mockArtifactRepo.On("GetSessionArtifacts", mock.Anything, userID, 3, 24*time.Hour).Return(
+		[]storage.Artifact{
+			{ID: 1197, FileType: "image", OriginalName: "fresh.png", Summary: &summary1197, State: "ready"},
+			{ID: 5, FileType: "pdf", OriginalName: "session-name.pdf", State: "ready"},
+		}, nil,
+	).Once()
+
+	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
+	svc, err := NewServiceBuilder().
+		WithLogger(logger).
+		WithConfig(cfg).
+		WithOpenRouterClient(mockClient).
+		WithTopicRepository(mockStore).
+		WithFactRepository(mockStore).
+		WithFactHistoryRepository(mockStore).
+		WithMessageRepository(mockStore).
+		WithMaintenanceRepository(mockStore).
+		WithMemoryService(memSvc).
+		WithTranslator(translator).
+		Build()
+	if err != nil {
+		t.Fatalf("failed to build RAG service: %v", err)
+	}
+	svc.SetArtifactRepository(mockArtifactRepo)
+
+	svc.mu.Lock()
+	svc.artifactVectors[userID] = []ArtifactVectorItem{
+		{ArtifactID: 5, UserID: userID, Embedding: []float32{0.6, 0.4}},
+	}
+	svc.mu.Unlock()
+
+	_, artifactCandidates := svc.searchPeopleAndArtifacts(
+		context.Background(), userID, []float32{0.1, 0.2}, 0.5,
+	)
+
+	require.Len(t, artifactCandidates, 2, "should keep both unique IDs after dedupe")
+
+	// Session candidates come first, with the IsSession marker preserved.
+	assert.Equal(t, int64(1197), artifactCandidates[0].ArtifactID)
+	assert.True(t, artifactCandidates[0].IsSession, "fresh session artifact must keep marker")
+
+	// The duplicated ID 5 keeps the session record (not the vector one) — verifiable
+	// by name: vector returned "vector-also.pdf", session returned "session-name.pdf".
+	assert.Equal(t, int64(5), artifactCandidates[1].ArtifactID)
+	assert.True(t, artifactCandidates[1].IsSession, "session record must win on dedupe")
+	assert.Equal(t, "session-name.pdf", artifactCandidates[1].OriginalName)
+
 	mockArtifactRepo.AssertExpectations(t)
 }
 

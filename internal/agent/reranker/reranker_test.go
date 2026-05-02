@@ -1170,6 +1170,21 @@ func TestFormatArtifactCandidates_LongSummaryTruncation(t *testing.T) {
 	assert.Contains(t, result, "word")
 }
 
+// TestFormatArtifactCandidates_SessionMarker verifies session candidates render with
+// the (session) tag instead of cosine similarity.
+func TestFormatArtifactCandidates_SessionMarker(t *testing.T) {
+	candidates := []ArtifactCandidate{
+		{ArtifactID: 1197, IsSession: true, FileType: "image", OriginalName: "fresh.png", Summary: "freshly generated"},
+		{ArtifactID: 846, Score: 0.66, FileType: "image", OriginalName: "old.jpg", Summary: "archive entry"},
+	}
+
+	result := formatArtifactCandidates(candidates)
+
+	assert.Contains(t, result, "[Artifact:1197] (session) image: \"fresh.png\"")
+	assert.NotContains(t, result, "[Artifact:1197] (0.00)", "session marker must replace numeric score")
+	assert.Contains(t, result, "[Artifact:846] (0.66) image: \"old.jpg\"")
+}
+
 // Result Helper Methods Tests
 
 // TestResult_PeopleIDs returns people IDs from result.

@@ -773,6 +773,7 @@ func SetupDefaultMocks(s *MockStorage) {
 	s.On("GetUnprocessedMessages", mock.Anything).Return([]storage.Message{}, nil).Maybe()
 	s.On("GetRecentHistory", mock.Anything, mock.Anything).Return([]storage.Message{}, nil).Maybe()
 	s.On("GetRecentSessionMessages", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]storage.Message{}, nil).Maybe()
+	s.On("GetSessionArtifacts", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]storage.Artifact{}, nil).Maybe()
 	// v0.7.0 re-embed defaults are auto-installed by MockStorage itself on first call.
 }
 
@@ -830,6 +831,14 @@ func (m *MockStorage) RecoverArtifactStates(threshold time.Duration) error {
 
 func (m *MockStorage) GetArtifactsByIDs(userID int64, artifactIDs []int64) ([]storage.Artifact, error) {
 	args := m.Called(userID, artifactIDs)
+	if args.Get(0) == nil {
+		return []storage.Artifact{}, args.Error(1)
+	}
+	return args.Get(0).([]storage.Artifact), args.Error(1)
+}
+
+func (m *MockStorage) GetSessionArtifacts(ctx context.Context, userID int64, limit int, maxAge time.Duration) ([]storage.Artifact, error) {
+	args := m.Called(ctx, userID, limit, maxAge)
 	if args.Get(0) == nil {
 		return []storage.Artifact{}, args.Error(1)
 	}

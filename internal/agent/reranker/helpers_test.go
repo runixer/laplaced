@@ -37,9 +37,11 @@ func testConfig() *config.Config {
 					CandidatesLimit: 20,
 					Max:             3,
 				},
-				Artifacts: config.RerankerTypeConfig{
-					CandidatesLimit: 20,
-					Max:             3,
+				Artifacts: config.RerankerArtifactsConfig{
+					RerankerTypeConfig: config.RerankerTypeConfig{
+						CandidatesLimit: 20,
+						Max:             3,
+					},
 				},
 			},
 		},
