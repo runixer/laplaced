@@ -1,11 +1,13 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRecoverArtifactStates_TimestampCheck(t *testing.T) {
@@ -712,6 +714,176 @@ func setArtifactRetryCount(t *testing.T, store *SQLiteStore, artifactID int64, r
 	query := `UPDATE artifacts SET retry_count = ? WHERE id = ?`
 	_, err := store.db.Exec(query, retryCount, artifactID)
 	assert.NoError(t, err, "failed to set retry_count for testing")
+}
+
+// addSessionMessage inserts a history row for the given user and returns its id.
+// topicID==nil keeps it in active session (topic_id IS NULL).
+func addSessionMessage(t *testing.T, store *SQLiteStore, userID int64, topicID *int64) int64 {
+	t.Helper()
+	res, err := store.db.Exec(
+		"INSERT INTO history (user_id, role, content, topic_id) VALUES (?, ?, ?, ?)",
+		userID, "user", "test message", topicID,
+	)
+	require.NoError(t, err)
+	id, err := res.LastInsertId()
+	require.NoError(t, err)
+	return id
+}
+
+// TestGetSessionArtifacts verifies that session-active artifacts are returned correctly,
+// including filters for user isolation, message_id, state, age, and topic assignment.
+func TestGetSessionArtifacts(t *testing.T) {
+	store, cleanup := setupTestDB(t)
+	defer cleanup()
+	require.NoError(t, store.Init())
+
+	ctx := context.Background()
+	user1ID := int64(100)
+	user2ID := int64(200)
+
+	t.Run("returns only session-active artifacts of caller", func(t *testing.T) {
+		// user1 has a session message + ready artifact
+		msg1 := addSessionMessage(t, store, user1ID, nil)
+		a1, err := store.AddArtifact(Artifact{
+			UserID: user1ID, MessageID: msg1, FileType: "image",
+			FilePath: "/u1/a.png", FileSize: 100, MimeType: "image/png",
+			OriginalName: "a.png", ContentHash: "h_a", State: "ready",
+		})
+		require.NoError(t, err)
+
+		// user2 has its own session message + artifact
+		msg2 := addSessionMessage(t, store, user2ID, nil)
+		_, err = store.AddArtifact(Artifact{
+			UserID: user2ID, MessageID: msg2, FileType: "image",
+			FilePath: "/u2/b.png", FileSize: 100, MimeType: "image/png",
+			OriginalName: "b.png", ContentHash: "h_b", State: "ready",
+		})
+		require.NoError(t, err)
+
+		got, err := store.GetSessionArtifacts(ctx, user1ID, 10, 24*time.Hour)
+		require.NoError(t, err)
+		require.Len(t, got, 1, "user1 sees only its own session artifact")
+		assert.Equal(t, a1, got[0].ID)
+		assert.Equal(t, user1ID, got[0].UserID)
+	})
+
+	t.Run("excludes artifacts with message_id=0 (in-flight assignment)", func(t *testing.T) {
+		store, cleanup := setupTestDB(t)
+		defer cleanup()
+		require.NoError(t, store.Init())
+
+		_, err := store.AddArtifact(Artifact{
+			UserID: user1ID, MessageID: 0, FileType: "image",
+			FilePath: "/u1/inflight.png", FileSize: 100, MimeType: "image/png",
+			OriginalName: "inflight.png", ContentHash: "h_inflight", State: "ready",
+		})
+		require.NoError(t, err)
+
+		got, err := store.GetSessionArtifacts(ctx, user1ID, 10, 24*time.Hour)
+		require.NoError(t, err)
+		assert.Empty(t, got, "in-flight artifact (message_id=0) must be excluded")
+	})
+
+	t.Run("excludes artifacts whose message has been archived to a topic", func(t *testing.T) {
+		store, cleanup := setupTestDB(t)
+		defer cleanup()
+		require.NoError(t, store.Init())
+
+		topicID := int64(7)
+		msgArchived := addSessionMessage(t, store, user1ID, &topicID)
+		_, err := store.AddArtifact(Artifact{
+			UserID: user1ID, MessageID: msgArchived, FileType: "image",
+			FilePath: "/u1/archived.png", FileSize: 100, MimeType: "image/png",
+			OriginalName: "archived.png", ContentHash: "h_archived", State: "ready",
+		})
+		require.NoError(t, err)
+
+		got, err := store.GetSessionArtifacts(ctx, user1ID, 10, 24*time.Hour)
+		require.NoError(t, err)
+		assert.Empty(t, got, "archived artifact must not be returned as session")
+	})
+
+	t.Run("excludes pending and processing artifacts (state != ready)", func(t *testing.T) {
+		store, cleanup := setupTestDB(t)
+		defer cleanup()
+		require.NoError(t, store.Init())
+
+		msg := addSessionMessage(t, store, user1ID, nil)
+		_, err := store.AddArtifact(Artifact{
+			UserID: user1ID, MessageID: msg, FileType: "image",
+			FilePath: "/u1/pending.png", FileSize: 100, MimeType: "image/png",
+			OriginalName: "pending.png", ContentHash: "h_pending", State: "pending",
+		})
+		require.NoError(t, err)
+
+		got, err := store.GetSessionArtifacts(ctx, user1ID, 10, 24*time.Hour)
+		require.NoError(t, err)
+		assert.Empty(t, got, "pending artifact must not be returned")
+	})
+
+	t.Run("respects maxAge cutoff", func(t *testing.T) {
+		store, cleanup := setupTestDB(t)
+		defer cleanup()
+		require.NoError(t, store.Init())
+
+		msg := addSessionMessage(t, store, user1ID, nil)
+		stale, err := store.AddArtifact(Artifact{
+			UserID: user1ID, MessageID: msg, FileType: "image",
+			FilePath: "/u1/stale.png", FileSize: 100, MimeType: "image/png",
+			OriginalName: "stale.png", ContentHash: "h_stale", State: "ready",
+		})
+		require.NoError(t, err)
+		setArtifactCreatedAt(t, store, stale, -25*time.Hour)
+
+		got, err := store.GetSessionArtifacts(ctx, user1ID, 10, 24*time.Hour)
+		require.NoError(t, err)
+		assert.Empty(t, got, "artifact older than maxAge must be excluded")
+
+		// Same query with wider maxAge picks it up.
+		got, err = store.GetSessionArtifacts(ctx, user1ID, 10, 48*time.Hour)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.Equal(t, stale, got[0].ID)
+	})
+
+	t.Run("orders by created_at DESC and respects limit", func(t *testing.T) {
+		store, cleanup := setupTestDB(t)
+		defer cleanup()
+		require.NoError(t, store.Init())
+
+		var ids []int64
+		for i := 0; i < 4; i++ {
+			msg := addSessionMessage(t, store, user1ID, nil)
+			id, err := store.AddArtifact(Artifact{
+				UserID: user1ID, MessageID: msg, FileType: "image",
+				FilePath: fmt.Sprintf("/u1/order%d.png", i), FileSize: 100,
+				MimeType: "image/png", OriginalName: fmt.Sprintf("order%d.png", i),
+				ContentHash: fmt.Sprintf("h_order_%d", i), State: "ready",
+			})
+			require.NoError(t, err)
+			ids = append(ids, id)
+			setArtifactCreatedAt(t, store, id, -time.Duration(i)*time.Minute)
+		}
+
+		got, err := store.GetSessionArtifacts(ctx, user1ID, 2, 24*time.Hour)
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+		// Newest two: ids[0] and ids[1] (offsets 0, -1m) — DESC order returns newest first.
+		assert.Equal(t, ids[0], got[0].ID, "newest first")
+		assert.Equal(t, ids[1], got[1].ID)
+	})
+
+	t.Run("rejects empty userID", func(t *testing.T) {
+		_, err := store.GetSessionArtifacts(ctx, 0, 10, 24*time.Hour)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "UserID required")
+	})
+
+	t.Run("non-positive limit returns nil", func(t *testing.T) {
+		got, err := store.GetSessionArtifacts(ctx, user1ID, 0, 24*time.Hour)
+		require.NoError(t, err)
+		assert.Nil(t, got)
+	})
 }
 
 // TestArtifactUserIsolation tests comprehensive user isolation for artifacts.

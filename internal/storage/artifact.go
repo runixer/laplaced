@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -513,6 +514,69 @@ func (s *SQLiteStore) IncrementContextLoadCount(userID int64, artifactIDs []int6
 	}
 
 	return nil
+}
+
+// GetSessionArtifacts returns artifacts attached to messages still in the active session
+// (history rows with topic_id IS NULL). Used to ensure freshly-created files are exposed
+// to the reranker even when their summary embedding doesn't match the next user query.
+//
+// Filters:
+//   - state = 'ready' (only artifacts with summary/embedding/file are useful as candidates)
+//   - message_id > 0 (skip in-flight rows where assistant-side message_id assignment hasn't completed)
+//   - created_at within maxAge window (safety cap for stalled sessions)
+//
+// Double user_id filter (a.user_id AND h.user_id) is intentional defense-in-depth per the
+// project's user-isolation invariants — session-aware queries with JOIN must enforce isolation
+// on every joined table.
+func (s *SQLiteStore) GetSessionArtifacts(ctx context.Context, userID int64, limit int, maxAge time.Duration) ([]Artifact, error) {
+	if userID == 0 {
+		return nil, fmt.Errorf("UserID required for GetSessionArtifacts")
+	}
+	if limit <= 0 {
+		return nil, nil
+	}
+
+	cutoff := time.Now().Add(-maxAge).UTC().Format("2006-01-02 15:04:05.999")
+
+	query := `
+		SELECT a.id, a.user_id, a.message_id, a.file_type, a.file_path, a.file_size,
+			a.mime_type, a.original_name, a.content_hash, a.state, a.error_message,
+			a.retry_count, a.last_failed_at,
+			a.summary, a.keywords, a.entities, a.rag_hints, a.embedding,
+			a.created_at, a.processed_at,
+			a.context_load_count, a.last_loaded_at, a.user_context
+		FROM artifacts a
+		JOIN history h ON a.message_id = h.id
+		WHERE a.user_id = ?
+		  AND h.user_id = ?
+		  AND h.topic_id IS NULL
+		  AND a.message_id > 0
+		  AND a.state = 'ready'
+		  AND a.created_at > ?
+		ORDER BY a.created_at DESC
+		LIMIT ?
+	`
+
+	rows, err := s.db.QueryContext(ctx, query, userID, userID, cutoff, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session artifacts: %w", err)
+	}
+	defer rows.Close()
+
+	var artifacts []Artifact
+	for rows.Next() {
+		artifact, err := scanArtifactRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan session artifact: %w", err)
+		}
+		artifacts = append(artifacts, *artifact)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating session artifacts: %w", err)
+	}
+
+	return artifacts, nil
 }
 
 // UpdateMessageID links an artifact to a history message.

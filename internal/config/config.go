@@ -46,6 +46,44 @@ type RerankerTypeConfig struct {
 	MaxContextBytes int `yaml:"max_context_bytes,omitempty" env:"LAPLACED_RERANKER_TOPICS_MAX_CONTEXT_BYTES"` // For artifacts only (v0.6.0)
 }
 
+// RerankerArtifactsSessionConfig governs how many session-active artifacts are
+// injected into the reranker candidate pool and how old they may be.
+type RerankerArtifactsSessionConfig struct {
+	Max    int    `yaml:"max" env:"LAPLACED_RERANKER_ARTIFACTS_SESSION_MAX"`
+	MaxAge string `yaml:"max_age" env:"LAPLACED_RERANKER_ARTIFACTS_SESSION_MAX_AGE"`
+}
+
+// IsEnabled reports whether session-aware artifact injection is configured.
+// Disabled (zero) by default — the operator must opt in via configs/default.yaml
+// or env var. Tests using testutil.TestConfig() therefore won't trigger the
+// new storage path unless they explicitly configure it.
+func (c RerankerArtifactsSessionConfig) IsEnabled() bool {
+	return c.Max > 0
+}
+
+// GetMaxAge returns the session age cap. Defaults to 24h when session is enabled
+// but max_age is missing or invalid; returns 0 when session is disabled.
+func (c RerankerArtifactsSessionConfig) GetMaxAge() time.Duration {
+	if !c.IsEnabled() {
+		return 0
+	}
+	if c.MaxAge == "" {
+		return 24 * time.Hour
+	}
+	d, err := time.ParseDuration(c.MaxAge)
+	if err != nil || d <= 0 {
+		return 24 * time.Hour
+	}
+	return d
+}
+
+// RerankerArtifactsConfig extends per-type limits with session-aware injection
+// (artifacts attached to messages still in the active session, topic_id IS NULL).
+type RerankerArtifactsConfig struct {
+	RerankerTypeConfig `yaml:",inline"`
+	Session            RerankerArtifactsSessionConfig `yaml:"session"`
+}
+
 // RerankerAgentConfig extends AgentConfig with reranker-specific settings.
 type RerankerAgentConfig struct {
 	AgentConfig        `yaml:",inline"`
@@ -57,9 +95,9 @@ type RerankerAgentConfig struct {
 	TargetContextChars int    `yaml:"target_context_chars" env:"LAPLACED_RERANKER_TARGET_CONTEXT_CHARS"`
 
 	// Per-type limits (v0.6.0)
-	Topics    RerankerTypeConfig `yaml:"topics"`
-	People    RerankerTypeConfig `yaml:"people"`
-	Artifacts RerankerTypeConfig `yaml:"artifacts"`
+	Topics    RerankerTypeConfig      `yaml:"topics"`
+	People    RerankerTypeConfig      `yaml:"people"`
+	Artifacts RerankerArtifactsConfig `yaml:"artifacts"`
 
 	// Legacy fields (deprecated, kept for migration)
 	Candidates int `yaml:"candidates" env:"LAPLACED_RERANKER_CANDIDATES"`

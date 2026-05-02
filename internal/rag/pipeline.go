@@ -2,6 +2,7 @@ package rag
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,26 @@ import (
 	"github.com/runixer/laplaced/internal/agent/reranker"
 	"github.com/runixer/laplaced/internal/storage"
 )
+
+// derefString returns the pointed-to value or "" if nil.
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// parseJSONStringArray decodes a JSON-encoded ["a","b"] string into a slice.
+// Returns nil on parse error or nil pointer; artifact metadata fields are
+// best-effort and shouldn't propagate decode errors up the stack.
+func parseJSONStringArray(s *string) []string {
+	if s == nil || *s == "" {
+		return nil
+	}
+	var out []string
+	_ = json.Unmarshal([]byte(*s), &out)
+	return out
+}
 
 // topicCandidate represents a topic match with score and optional reranker reason.
 type topicCandidate struct {
@@ -324,27 +345,113 @@ func (s *Service) searchPeopleAndArtifacts(ctx context.Context, userID int64, em
 	}
 
 	var artifactCandidates []reranker.ArtifactCandidate
-	if s.cfg.Artifacts.Enabled && s.cfg.RAG.Enabled && s.cfg.Agents.Reranker.Enabled && len(s.artifactVectors) > 0 {
-		artifacts, err := s.SearchArtifactsBySummary(ctx, userID, embedding, threshold)
-		if err != nil {
-			s.logger.Warn("artifact summary search failed", "error", err)
-		} else {
-			for _, ar := range artifacts {
-				artifactCandidates = append(artifactCandidates, reranker.ArtifactCandidate{
-					ArtifactID:   ar.ArtifactID,
-					Score:        ar.Score,
-					FileType:     ar.FileType,
-					OriginalName: ar.OriginalName,
-					Summary:      ar.Summary,
-					Keywords:     ar.Keywords,
-					Entities:     ar.Entities,
-					RAGHints:     ar.RAGHints,
-				})
+	if s.cfg.Artifacts.Enabled && s.cfg.RAG.Enabled && s.cfg.Agents.Reranker.Enabled {
+		// Vector-search candidates (skip when index is empty to save the round-trip).
+		if len(s.artifactVectors) > 0 {
+			artifacts, err := s.SearchArtifactsBySummary(ctx, userID, embedding, threshold)
+			if err != nil {
+				s.logger.Warn("artifact summary search failed", "error", err)
+			} else {
+				for _, ar := range artifacts {
+					artifactCandidates = append(artifactCandidates, reranker.ArtifactCandidate{
+						ArtifactID:   ar.ArtifactID,
+						Score:        ar.Score,
+						FileType:     ar.FileType,
+						OriginalName: ar.OriginalName,
+						Summary:      ar.Summary,
+						Keywords:     ar.Keywords,
+						Entities:     ar.Entities,
+						RAGHints:     ar.RAGHints,
+					})
+				}
 			}
 		}
+
+		// Session-aware injection: artifacts on messages still in the active session
+		// are surfaced as priority candidates with the (session) tag, regardless of
+		// whether vector search would have picked them up. The reranker still decides
+		// whether to use them, but the candidate pool no longer hides freshly created
+		// files that the user is likely to ask about next.
+		artifactCandidates = s.mergeSessionArtifactCandidates(ctx, userID, artifactCandidates)
 	}
 
 	return personCandidates, artifactCandidates
+}
+
+// mergeSessionArtifactCandidates fetches session-active artifacts via the storage layer
+// and prepends them to the candidate slice. Session candidates are deduped against
+// vector-search results (the session record wins so the (session) tag is preserved).
+// The returned slice is truncated to the configured candidates_limit.
+func (s *Service) mergeSessionArtifactCandidates(
+	ctx context.Context,
+	userID int64,
+	vectorCandidates []reranker.ArtifactCandidate,
+) []reranker.ArtifactCandidate {
+	if s.artifactRepo == nil {
+		return vectorCandidates
+	}
+
+	sessionCfg := s.cfg.Agents.Reranker.Artifacts.Session
+	if !sessionCfg.IsEnabled() {
+		return vectorCandidates
+	}
+
+	sessionArtifacts, err := s.artifactRepo.GetSessionArtifacts(ctx, userID, sessionCfg.Max, sessionCfg.GetMaxAge())
+	if err != nil {
+		s.logger.Warn("failed to fetch session artifacts; continuing with vector-only pool",
+			"user_id", userID, "error", err)
+		return vectorCandidates
+	}
+	if len(sessionArtifacts) == 0 {
+		return vectorCandidates
+	}
+
+	// Build session candidates with the IsSession marker.
+	sessionCandidates := make([]reranker.ArtifactCandidate, 0, len(sessionArtifacts))
+	seen := make(map[int64]bool, len(sessionArtifacts))
+	for _, a := range sessionArtifacts {
+		seen[a.ID] = true
+		sessionCandidates = append(sessionCandidates, reranker.ArtifactCandidate{
+			ArtifactID:   a.ID,
+			IsSession:    true,
+			FileType:     a.FileType,
+			OriginalName: a.OriginalName,
+			Summary:      derefString(a.Summary),
+			Keywords:     parseJSONStringArray(a.Keywords),
+			Entities:     parseJSONStringArray(a.Entities),
+			RAGHints:     parseJSONStringArray(a.RAGHints),
+		})
+	}
+
+	// Drop duplicates from vector results (session record wins).
+	deduped := make([]reranker.ArtifactCandidate, 0, len(vectorCandidates))
+	for _, vc := range vectorCandidates {
+		if !seen[vc.ArtifactID] {
+			deduped = append(deduped, vc)
+		}
+	}
+
+	merged := make([]reranker.ArtifactCandidate, 0, len(sessionCandidates)+len(deduped))
+	merged = append(merged, sessionCandidates...)
+	merged = append(merged, deduped...)
+
+	// Respect the configured candidate cap (defaults to 20).
+	if limit := s.cfg.Agents.Reranker.Artifacts.CandidatesLimit; limit > 0 && len(merged) > limit {
+		merged = merged[:limit]
+	}
+
+	// TODO(otel-migration cherry-pick): mirror these fields as span attributes:
+	//   reranker.candidates_in.artifacts.session = len(sessionCandidates)
+	//   reranker.candidates_in.artifacts.vector  = len(deduped)
+	// Once OpenTelemetry is on main, replace the slog call with span.SetAttributes().
+	s.logger.Info("session artifact candidates merged",
+		"user_id", userID,
+		"session_count", len(sessionCandidates),
+		"vector_after_dedup", len(deduped),
+		"merged_count", len(merged),
+	)
+
+	return merged
 }
 
 // limitMatches limits topic candidates to maxCandidates.

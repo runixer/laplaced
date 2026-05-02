@@ -228,6 +228,9 @@ type ArtifactRepository interface {
 	UpdateArtifact(artifact Artifact) error
 	RecoverArtifactStates(threshold time.Duration) error
 	GetArtifactsByIDs(userID int64, artifactIDs []int64) ([]Artifact, error)
+	// GetSessionArtifacts returns artifacts on messages still in active session (topic_id IS NULL).
+	// Used to inject freshly-created artifacts as priority candidates for the reranker.
+	GetSessionArtifacts(ctx context.Context, userID int64, limit int, maxAge time.Duration) ([]Artifact, error)
 	// IncrementContextLoadCount tracks usage when artifacts are loaded into LLM context (v0.6.0)
 	IncrementContextLoadCount(userID int64, artifactIDs []int64) error
 	// UpdateMessageID links artifact to history message (called after message is saved)

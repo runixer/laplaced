@@ -24,6 +24,8 @@ func formatCandidatesForReranker(candidates []Candidate) string {
 
 // formatArtifactCandidates formats artifact candidates for the LLM prompt (v0.6.0).
 // Format: [Artifact:ID] (score) type: "name" | keywords | Entities: entities | summary
+// Session candidates render "(session)" instead of cosine similarity to signal that the
+// file is part of the active conversation and should be prioritized.
 func formatArtifactCandidates(candidates []ArtifactCandidate) string {
 	if len(candidates) == 0 {
 		return ""
@@ -47,8 +49,13 @@ func formatArtifactCandidates(candidates []ArtifactCandidate) string {
 			extrasStr = " | " + strings.Join(parts, " | ")
 		}
 
-		fmt.Fprintf(&sb, "[Artifact:%d] (%.2f) %s: \"%s\"%s | %s\n",
-			c.ArtifactID, c.Score, c.FileType, c.OriginalName, extrasStr, c.Summary)
+		scoreTag := fmt.Sprintf("(%.2f)", c.Score)
+		if c.IsSession {
+			scoreTag = "(session)"
+		}
+
+		fmt.Fprintf(&sb, "[Artifact:%d] %s %s: \"%s\"%s | %s\n",
+			c.ArtifactID, scoreTag, c.FileType, c.OriginalName, extrasStr, c.Summary)
 	}
 	return sb.String()
 }

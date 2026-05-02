@@ -96,6 +96,12 @@ agents:
       candidates_limit: 20
       max: 10                # Max artifacts in final selection (also used as max_context_artifacts)
       max_context_bytes: 52428800  # 50MB cumulative limit for artifact content
+      # Session-aware injection: artifacts attached to messages still in the active
+      # session (topic_id IS NULL) are added to the candidate pool with a (session) tag,
+      # bypassing vector search. The reranker decides whether to actually pick them.
+      session:
+        max: 5
+        max_age: "24h"
 
     # Legacy fields (deprecated, for migration only)
     candidates: 50

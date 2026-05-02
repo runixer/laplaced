@@ -159,9 +159,17 @@ type PersonCandidate struct {
 }
 
 // ArtifactCandidate is an artifact candidate for reranking (v0.6.0).
+//
+// IsSession marks the candidate as belonging to the active user session
+// (its source message has topic_id IS NULL). Such candidates are added by
+// the pipeline regardless of vector-search rank, so freshly created files
+// stay addressable even when their summary embedding doesn't match the
+// next user query. Score is meaningless for session candidates and the
+// formatter renders "(session)" in place of cosine similarity.
 type ArtifactCandidate struct {
 	ArtifactID   int64
 	Score        float32
+	IsSession    bool
 	FileType     string
 	OriginalName string
 	Summary      string
