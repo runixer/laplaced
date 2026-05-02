@@ -545,9 +545,15 @@ func formatArtifactResults(artifacts []rag.ArtifactResult, query string) string 
 	content.WriteString("\">\n")
 
 	for _, artifactRes := range artifacts {
+		// Mirror the "memory_<id>_" anchor that loadArtifactFullContent puts on the
+		// FilePart filename and the inline 📄 text marker, so the summary block agrees
+		// on the same disambiguating token. Without this, an artifact_context entry
+		// for a Telegram photo reads `type="image (photo.jpg)"` while the actual
+		// FilePart is `memory_<id>_photo.jpg`, which leaves a reasoning-mode model
+		// no anchor to map summary → bytes when a live "photo.jpg" is also present.
 		fileType := artifactRes.FileType
 		if artifactRes.OriginalName != "" {
-			fileType = fmt.Sprintf("%s (%s)", fileType, artifactRes.OriginalName)
+			fileType = fmt.Sprintf("%s (memory_%d_%s)", fileType, artifactRes.ArtifactID, artifactRes.OriginalName)
 		}
 
 		content.WriteString("  <artifact id=\"")
