@@ -440,10 +440,10 @@ func (s *Service) mergeSessionArtifactCandidates(
 		merged = merged[:limit]
 	}
 
-	// TODO(otel-migration cherry-pick): mirror these fields as span attributes:
-	//   reranker.candidates_in.artifacts.session = len(sessionCandidates)
-	//   reranker.candidates_in.artifacts.vector  = len(deduped)
-	// Once OpenTelemetry is on main, replace the slog call with span.SetAttributes().
+	// Reranker.Execute emits its own span with reranker.candidates_in.artifacts.session
+	// once it processes this slice (see internal/agent/reranker/reranker.go). We keep
+	// the structured log for Loki and for the reranker-disabled fallback path
+	// (pipeline.go's "select top-N by vector score" branch) where no reranker span fires.
 	s.logger.Info("session artifact candidates merged",
 		"user_id", userID,
 		"session_count", len(sessionCandidates),

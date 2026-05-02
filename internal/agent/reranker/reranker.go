@@ -143,6 +143,15 @@ func (r *Reranker) rerank(
 		ctx, "reranker.Execute",
 		oteltrace.WithAttributes(attribute.Int64("user.id", userID)),
 	)
+	// Pre-compute the session-input count before the main loop so even
+	// fallback paths (timeout, disabled, all-empty shortcut) emit it.
+	sessionInputCount := 0
+	for _, c := range artifactCandidates {
+		if c.IsSession {
+			sessionInputCount++
+		}
+	}
+
 	defer func() {
 		reason := ""
 		var (
@@ -150,6 +159,7 @@ func (r *Reranker) rerank(
 			costUSD                               float64
 			rawTopics, rawPeople, rawArtifacts    int
 			keptTopics, keptPeople, keptArtifacts int
+			keptArtifactsSession                  int
 		)
 		if tr != nil {
 			reason = tr.fallbackReason
@@ -159,6 +169,7 @@ func (r *Reranker) rerank(
 			keptTopics = tr.modelKeptTopics
 			keptPeople = tr.modelKeptPeople
 			keptArtifacts = tr.modelKeptArtifacts
+			keptArtifactsSession = tr.modelKeptArtifactsSession
 			if tr.tracker != nil {
 				llmCalls = tr.tracker.TurnCount()
 				costUSD = tr.tracker.TotalCostValue()
@@ -171,6 +182,7 @@ func (r *Reranker) rerank(
 			attribute.Int("reranker.candidates_in.topics", len(candidates)),
 			attribute.Int("reranker.candidates_in.people", len(personCandidates)),
 			attribute.Int("reranker.candidates_in.artifacts", len(artifactCandidates)),
+			attribute.Int("reranker.candidates_in.artifacts.session", sessionInputCount),
 			attribute.Int("reranker.candidates_in.media", len(mediaParts)),
 			attribute.Int("reranker.model_raw_count.topics", rawTopics),
 			attribute.Int("reranker.model_raw_count.people", rawPeople),
@@ -178,6 +190,7 @@ func (r *Reranker) rerank(
 			attribute.Int("reranker.model_kept.topics", keptTopics),
 			attribute.Int("reranker.model_kept.people", keptPeople),
 			attribute.Int("reranker.model_kept.artifacts", keptArtifacts),
+			attribute.Int("reranker.model_kept.artifacts.session", keptArtifactsSession),
 			attribute.Float64("reranker.cost_usd", costUSD),
 		)
 		if obs.ContentEnabled() {
@@ -255,7 +268,8 @@ func (r *Reranker) rerank(
 
 	st := &state{}
 	tr = &trace{
-		tracker: agentlog.NewTurnTracker(),
+		tracker:                      agentlog.NewTurnTracker(),
+		candidatesInArtifactsSession: sessionInputCount,
 	}
 	startTime := time.Now()
 
@@ -572,6 +586,7 @@ func (r *Reranker) rerank(
 		tr.modelKeptTopics = len(result.Topics)
 		tr.modelKeptPeople = len(result.People)
 		tr.modelKeptArtifacts = len(result.Artifacts)
+		tr.modelKeptArtifactsSession = countSessionKept(result.Artifacts, artifactsMap)
 		if len(result.Topics) == 0 && len(result.People) == 0 && len(result.Artifacts) == 0 {
 			r.logger.Warn("reranker returned no valid results (all hallucinated)", "user_id", userID)
 			tr.fallbackReason = "all_hallucinated"

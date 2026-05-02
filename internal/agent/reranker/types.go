@@ -212,6 +212,14 @@ type trace struct {
 	modelKeptTopics    int
 	modelKeptPeople    int
 	modelKeptArtifacts int
+
+	// Session-injection telemetry: how many artifact candidates entered with the
+	// IsSession marker, and how many of those survived to the kept set. Lets us
+	// answer "did the reranker actually pick freshly-attached files?" without
+	// joining storage tables in Tempo. Computed regardless of whether the
+	// session feature is enabled (zeros when no session candidates were merged).
+	candidatesInArtifactsSession int
+	modelKeptArtifactsSession    int
 }
 
 // response is the expected JSON response from Flash.

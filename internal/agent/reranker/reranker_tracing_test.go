@@ -31,10 +31,12 @@ func TestReranker_RecordsSpan_EarlyFallback(t *testing.T) {
 				Enabled: false,
 				Topics:  config.RerankerTypeConfig{Max: 5, CandidatesLimit: 50},
 				People:  config.RerankerTypeConfig{Max: 5, CandidatesLimit: 20},
-				Artifacts: config.RerankerTypeConfig{
-					Max:             5,
-					CandidatesLimit: 20,
-					MaxContextBytes: 1024,
+				Artifacts: config.RerankerArtifactsConfig{
+					RerankerTypeConfig: config.RerankerTypeConfig{
+						Max:             5,
+						CandidatesLimit: 20,
+						MaxContextBytes: 1024,
+					},
 				},
 				MaxToolCalls: 3,
 			},
@@ -173,4 +175,75 @@ func TestReranker_RecordsModelRawCounts_EmptyResponse(t *testing.T) {
 	assert.True(t, foundToolCallEvent, "reranker.tool_call event must be emitted per iteration")
 
 	mockClient.AssertExpectations(t)
+}
+
+// TestReranker_RecordsSessionInputCount verifies that artifact candidates with
+// IsSession=true are counted into the dedicated span attribute
+// reranker.candidates_in.artifacts.session, even when the early-fallback path
+// fires (reranker disabled / empty topic+people). This is the metric we'll
+// watch in Tempo to confirm session-injection is reaching the agent.
+func TestReranker_RecordsSessionInputCount(t *testing.T) {
+	getSpans := testutil.WithTracingCapture(t)
+
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Reranker: config.RerankerAgentConfig{
+				Enabled: false, // bail fast — we only care about pre-loop counters
+				Topics:  config.RerankerTypeConfig{Max: 5, CandidatesLimit: 50},
+				People:  config.RerankerTypeConfig{Max: 5, CandidatesLimit: 20},
+				Artifacts: config.RerankerArtifactsConfig{
+					RerankerTypeConfig: config.RerankerTypeConfig{
+						Max:             5,
+						CandidatesLimit: 20,
+						MaxContextBytes: 1024,
+					},
+				},
+				MaxToolCalls: 3,
+			},
+			Default: config.AgentConfig{Model: "test-model"},
+		},
+	}
+	mockClient := new(testutil.MockOpenRouterClient)
+	mockStore := new(testutil.MockStorage)
+	translator := testutil.TestTranslator(t)
+
+	r := New(mockClient, cfg, logger, translator, mockStore, nil)
+
+	artifacts := []ArtifactCandidate{
+		{ArtifactID: 1197, IsSession: true, FileType: "image", OriginalName: "fresh.png", Summary: "freshly generated"},
+		{ArtifactID: 1198, IsSession: true, FileType: "image", OriginalName: "fresh2.png", Summary: "another session file"},
+		{ArtifactID: 846, Score: 0.66, FileType: "image", OriginalName: "vector.jpg", Summary: "found via cosine"},
+	}
+
+	req := &agent.Request{
+		Params: map[string]any{
+			ParamCandidates:          []Candidate{},
+			ParamPersonCandidates:    []PersonCandidate{},
+			ParamArtifactCandidates:  artifacts,
+			ParamContextualizedQuery: "ctx",
+			ParamOriginalQuery:       "orig",
+			ParamCurrentMessages:     "msgs",
+			"user_id":                int64(7777),
+		},
+	}
+
+	_, err := r.Execute(context.Background(), req)
+	require.NoError(t, err)
+
+	spans := getSpans()
+	require.Len(t, spans, 1)
+	span := spans[0]
+
+	attrs := map[attribute.Key]attribute.Value{}
+	for _, kv := range span.Attributes {
+		attrs[kv.Key] = kv.Value
+	}
+
+	assert.Equal(t, int64(3), attrs["reranker.candidates_in.artifacts"].AsInt64(),
+		"all three artifact candidates accounted for")
+	assert.Equal(t, int64(2), attrs["reranker.candidates_in.artifacts.session"].AsInt64(),
+		"two of the three were session-injected")
+	assert.Equal(t, int64(0), attrs["reranker.model_kept.artifacts.session"].AsInt64(),
+		"early-fallback path doesn't run filtering — session kept count stays 0")
 }
