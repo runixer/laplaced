@@ -193,17 +193,14 @@ func TestPerformImageGeneration_ArtifactIDsResolvedAndUserIsolated(t *testing.T)
 	assert.Contains(t, gen.lastRequest.InputImages[0].File.FileData, "data:image/png;base64,")
 }
 
-// Regression: when the LLM sends BOTH a current-turn photo AND references an
-// older artifact by ID ("mix this new photo with that one from memory"), the
-// tool must pass BOTH images to the model — not just one or the other.
-// Regression: when the image model rejects the request (safety / bad input /
-// upstream 400), performImageGeneration must NOT return an error. Returning
-// an error causes laplace.executeToolCalls to emit "Tool execution failed: …",
-// which the LLM interprets as "try a different prompt" and kicks off a retry
-// storm (we've seen 6+ consecutive failing calls burning ~$0.50 per turn).
-// Instead we return a normal Result whose Content explicitly tells the LLM
-// to stop and apologize.
-func TestPerformImageGeneration_UpstreamErrorReturnsStopRetryResult(t *testing.T) {
+// Regression: when the image model rejects the request (untyped fallback —
+// e.g. legacy mock or non-imagegen error path), performImageGeneration must
+// NOT return an error. Returning an error causes laplace.executeToolCalls
+// to emit "Tool execution failed: …", which the LLM interprets as "try a
+// different prompt" and kicks off a retry storm (we've seen 6+ consecutive
+// failing calls burning ~$0.50 per turn). Instead we return a normal Result
+// whose Content explicitly tells the LLM to stop and apologize.
+func TestPerformImageGeneration_UntypedErrorReturnsStopRetryResult(t *testing.T) {
 	exec, gen, _, _ := newImageTestExecutor(t)
 	gen.err = errors.New("openrouter API error: 400 Bad Request")
 
@@ -214,30 +211,94 @@ func TestPerformImageGeneration_UpstreamErrorReturnsStopRetryResult(t *testing.T
 	require.NoError(t, err, "tool must return result, not error, so LLM doesn't retry")
 	require.NotNil(t, result)
 	assert.Contains(t, result.Content, "Do NOT call generate_image again")
-	assert.Contains(t, result.Content, "Apologize")
 	assert.Empty(t, result.GeneratedArtifactIDs)
 }
 
-// Safety-filter path: model returns choice[0].Message with empty Images but
-// non-empty Content explaining why. Same anti-retry behavior expected.
-func TestPerformImageGeneration_SafetyRefusalReturnsStopRetryResult(t *testing.T) {
-	exec, gen, _, _ := newImageTestExecutor(t)
-	gen.response = &ImageGenResponse{
-		Images:      nil,
-		TextContent: "I cannot generate images of real public figures.",
+// Five typed-failure paths, each with its own tailored instruction (2) so
+// the LLM stops parroting "safety filter / invalid input / temporary API
+// issue" regardless of the actual cause.
+func TestPerformImageGeneration_FailureKindWording(t *testing.T) {
+	tests := []struct {
+		name              string
+		failure           *ImageGenFailure
+		mustContain       []string // substrings the tool message must have
+		mustNotContain    []string
+		mustQuoteRefusal  string // for KindTextRefusal
+		expectGuardPhrase bool   // every kind must keep "Do NOT call generate_image again"
+	}{
+		{
+			name:              "timeout",
+			failure:           &ImageGenFailure{Kind: ImageGenKindTimeout, Cause: context.DeadlineExceeded},
+			mustContain:       []string{"didn't respond in time", "try again later"},
+			mustNotContain:    []string{"safety filter", "content-policy"},
+			expectGuardPhrase: true,
+		},
+		{
+			name:              "upstream_error",
+			failure:           &ImageGenFailure{Kind: ImageGenKindUpstreamError, Cause: errors.New("502 bad gateway")},
+			mustContain:       []string{"transient API error", "try again"},
+			mustNotContain:    []string{"safety filter", "content-policy"},
+			expectGuardPhrase: true,
+		},
+		{
+			name: "text_refusal_quotes_model_text",
+			failure: &ImageGenFailure{
+				Kind:     ImageGenKindTextRefusal,
+				Text:     "I cannot generate images of real public figures.",
+				Provider: "Google",
+			},
+			mustContain:       []string{"refused", "Quote its reason verbatim"},
+			mustQuoteRefusal:  "real public figures",
+			mustNotContain:    []string{"safety filter,"}, // generic phrase must be gone
+			expectGuardPhrase: true,
+		},
+		{
+			name: "silent_block_oai_names_oai",
+			failure: &ImageGenFailure{
+				Kind:     ImageGenKindSilentBlockOAI,
+				Provider: "OpenAI",
+			},
+			mustContain:       []string{"OpenAI", "content-policy", "rephrase", "input image"},
+			expectGuardPhrase: true,
+		},
+		{
+			name:              "unknown_no_images_is_honest",
+			failure:           &ImageGenFailure{Kind: ImageGenKindUnknownNoImages},
+			mustContain:       []string{"no specific reason", "didn't work"},
+			mustNotContain:    []string{"safety filter,", "content-policy"},
+			expectGuardPhrase: true,
+		},
 	}
 
-	result, err := exec.performImageGeneration(context.Background(),
-		CallContext{UserID: 1},
-		map[string]interface{}{"prompt": "draw X"},
-	)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	assert.Contains(t, result.Content, "no images")
-	assert.Contains(t, result.Content, "Do NOT call generate_image again")
-	assert.Contains(t, result.Content, "Apologize")
-	// Model's own refusal text should be surfaced for the user-facing reply.
-	assert.Contains(t, result.Content, "real public figures")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exec, gen, _, _ := newImageTestExecutor(t)
+			gen.err = tt.failure
+
+			result, err := exec.performImageGeneration(context.Background(),
+				CallContext{UserID: 1},
+				map[string]interface{}{"prompt": "x"},
+			)
+			require.NoError(t, err, "tool must not return error — that triggers LLM retry storm")
+			require.NotNil(t, result)
+			assert.Empty(t, result.GeneratedArtifactIDs)
+
+			for _, s := range tt.mustContain {
+				assert.Contains(t, result.Content, s, "wording for %s should contain %q", tt.name, s)
+			}
+			for _, s := range tt.mustNotContain {
+				assert.NotContains(t, result.Content, s, "wording for %s must NOT contain %q (regression)", tt.name, s)
+			}
+			if tt.mustQuoteRefusal != "" {
+				assert.Contains(t, result.Content, tt.mustQuoteRefusal,
+					"text_refusal must quote model's own words")
+			}
+			if tt.expectGuardPhrase {
+				assert.Contains(t, result.Content, "Do NOT call generate_image again",
+					"every failure kind must keep the anti-retry guard")
+			}
+		})
+	}
 }
 
 func TestPerformImageGeneration_MergesCurrentMessageAndArtifactIDs(t *testing.T) {

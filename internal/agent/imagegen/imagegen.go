@@ -91,18 +91,27 @@ func (a *Agent) Generate(ctx context.Context, req Request) (*Response, error) {
 	resp, err := a.client.CreateChatCompletion(ctx, orReq)
 	duration := time.Since(start)
 	if err != nil {
-		return nil, fmt.Errorf("imagegen: chat completion failed: %w", err)
+		return nil, &ImagegenFailure{
+			Kind:  classifyFailure(err, openrouter.ResponseMessage{}, ""),
+			Cause: err,
+		}
 	}
 	if len(resp.Choices) == 0 {
-		return nil, fmt.Errorf("imagegen: model returned no choices")
+		return nil, &ImagegenFailure{Kind: KindUnknownNoImages, Provider: resp.Provider}
 	}
 
 	msg := resp.Choices[0].Message
 	if len(msg.Images) == 0 {
-		// Model chose to answer in text only — surface its text to the
-		// caller so it can be shown to the user as a graceful refusal.
-		return nil, fmt.Errorf("imagegen: model produced no images (text reply: %q)",
-			truncateForError(msg.Content, 200))
+		// Model chose to answer in text only (or returned silently). Surface
+		// the text to the caller via ImagegenFailure.Text so the tool wrapper
+		// can quote a Google-style refusal verbatim — and via Provider so the
+		// wrapper can distinguish OpenAI silent-blocks from generic empty
+		// responses.
+		return nil, &ImagegenFailure{
+			Kind:     classifyFailure(nil, msg, resp.Provider),
+			Text:     msg.Content,
+			Provider: resp.Provider,
+		}
 	}
 
 	decoded := make([]DecodedImage, 0, len(msg.Images))

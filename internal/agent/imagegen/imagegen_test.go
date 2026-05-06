@@ -173,28 +173,56 @@ func TestGenerate_PassesInputImagesAsContentParts(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestGenerate_NoImagesInResponseReturnsError(t *testing.T) {
+func TestGenerate_NoImagesInResponseReturnsTextRefusal(t *testing.T) {
 	mockOR := new(testutil.MockOpenRouterClient)
-	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(buildResponse("I cannot generate that kind of image."), nil)
+	resp := buildResponse("I cannot generate that kind of image.")
+	resp.Provider = "Google"
+	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(resp, nil)
 
 	agent := New(mockOR, testCfg(), testutil.TestLogger())
 	_, err := agent.Generate(context.Background(), Request{Prompt: "a cat"})
 
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "I cannot generate")
+	require.Error(t, err)
+	var failure *ImagegenFailure
+	require.True(t, errors.As(err, &failure), "expected *ImagegenFailure")
+	assert.Equal(t, KindTextRefusal, failure.Kind)
+	assert.Equal(t, "I cannot generate that kind of image.", failure.Text)
+	assert.Equal(t, "Google", failure.Provider)
 }
 
-func TestGenerate_UpstreamErrorIsWrapped(t *testing.T) {
+func TestGenerate_OpenAISilentEmptyReturnsSilentBlockOAI(t *testing.T) {
 	mockOR := new(testutil.MockOpenRouterClient)
+	// OpenAI safety-block shape: empty content, no images, provider="OpenAI".
+	resp := buildResponse("")
+	resp.Provider = "OpenAI"
+	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(resp, nil)
+
+	agent := New(mockOR, testCfg(), testutil.TestLogger())
+	_, err := agent.Generate(context.Background(), Request{Prompt: "x"})
+
+	require.Error(t, err)
+	var failure *ImagegenFailure
+	require.True(t, errors.As(err, &failure))
+	assert.Equal(t, KindSilentBlockOAI, failure.Kind)
+	assert.Equal(t, "OpenAI", failure.Provider)
+	assert.Empty(t, failure.Text)
+}
+
+func TestGenerate_UpstreamErrorReturnsTypedFailure(t *testing.T) {
+	mockOR := new(testutil.MockOpenRouterClient)
+	upstream := errors.New("rate limited")
 	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(openrouter.ChatCompletionResponse{}, errors.New("rate limited"))
+		Return(openrouter.ChatCompletionResponse{}, upstream)
 
 	agent := New(mockOR, testCfg(), testutil.TestLogger())
 	_, err := agent.Generate(context.Background(), Request{Prompt: "a cat"})
 
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "chat completion failed")
+	require.Error(t, err)
+	var failure *ImagegenFailure
+	require.True(t, errors.As(err, &failure))
+	assert.Equal(t, KindUpstreamError, failure.Kind)
+	// Cause must propagate so callers can errors.Is/As it.
+	assert.ErrorIs(t, err, upstream)
 }
 
 func TestGenerate_MultipleImagesAllReturned(t *testing.T) {
