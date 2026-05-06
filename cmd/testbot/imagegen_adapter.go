@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 
 	"github.com/runixer/laplaced/internal/agent/imagegen"
 	botTools "github.com/runixer/laplaced/internal/bot/tools"
@@ -20,7 +21,7 @@ func (a *testbotImageGenAdapter) Generate(ctx context.Context, req botTools.Imag
 		ImageSize:   req.ImageSize,
 	})
 	if err != nil {
-		return nil, err
+		return nil, mapImagegenFailureForTestbot(err)
 	}
 	imgs := make([]botTools.ImageGenImage, len(resp.Images))
 	for i, img := range resp.Images {
@@ -30,4 +31,37 @@ func (a *testbotImageGenAdapter) Generate(ctx context.Context, req botTools.Imag
 		Images:      imgs,
 		TextContent: resp.TextContent,
 	}, nil
+}
+
+// mapImagegenFailureForTestbot mirrors cmd/bot/main.go's mapImagegenFailure.
+// Duplicated rather than shared because the two callers live in different
+// main packages (no shared internal helper home).
+func mapImagegenFailureForTestbot(err error) error {
+	var f *imagegen.ImagegenFailure
+	if !errors.As(err, &f) {
+		return err
+	}
+	return &botTools.ImageGenFailure{
+		Kind:     toToolsImageGenKindForTestbot(f.Kind),
+		Text:     f.Text,
+		Provider: f.Provider,
+		Cause:    f.Cause,
+	}
+}
+
+func toToolsImageGenKindForTestbot(k imagegen.FailureKind) botTools.ImageGenFailureKind {
+	switch k {
+	case imagegen.KindTimeout:
+		return botTools.ImageGenKindTimeout
+	case imagegen.KindUpstreamError:
+		return botTools.ImageGenKindUpstreamError
+	case imagegen.KindTextRefusal:
+		return botTools.ImageGenKindTextRefusal
+	case imagegen.KindSilentBlockOAI:
+		return botTools.ImageGenKindSilentBlockOAI
+	case imagegen.KindUnknownNoImages:
+		return botTools.ImageGenKindUnknownNoImages
+	default:
+		return botTools.ImageGenKindUnknown
+	}
 }

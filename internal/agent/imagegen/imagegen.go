@@ -3,7 +3,6 @@ package imagegen
 import (
 	"context"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -20,18 +19,45 @@ import (
 
 // Outcome classifies the terminal state of a Generate call. It lives on
 // the imagegen.Generate span as imagegen.outcome and powers TraceQL queries
-// like {span.imagegen.outcome="provider_error"} for triage. New shapes
-// land in OutcomeUnknown — surfaces in error.upstream_message rather than
-// inventing a new bucket silently.
+// like {span.imagegen.outcome="silent_block_oai"} for triage. New shapes
+// land in OutcomeUnknownFailure — surfaces in error.upstream_message rather
+// than inventing a new bucket silently.
+//
+// Outcome values intentionally mirror FailureKind.String() so the same
+// vocabulary is used in tool messages, structured logs, and span attrs.
+// The mapping happens in outcomeFromKind below.
 const (
-	OutcomeSuccess        = "success"
-	OutcomeProviderError  = "provider_error"
-	OutcomeNoImages       = "no_images" // model returned text only or all decodes failed
-	OutcomeEmptyPrompt    = "empty_prompt"
-	OutcomeNoChoices      = "no_choices"
-	OutcomeTimeout        = "timeout" // local context deadline tripped before upstream replied
-	OutcomeUnknownFailure = "unknown"
+	OutcomeSuccess          = "success"
+	OutcomeProviderError    = "provider_error"    // KindUpstreamError
+	OutcomeTimeout          = "timeout"           // KindTimeout (local deadline)
+	OutcomeTextRefusal      = "text_refusal"      // KindTextRefusal (Google-style)
+	OutcomeSilentBlockOAI   = "silent_block_oai"  // KindSilentBlockOAI (output-side filter)
+	OutcomeUnknownNoImages  = "unknown_no_images" // KindUnknownNoImages
+	OutcomeEmptyPrompt      = "empty_prompt"
+	OutcomeNoChoices        = "no_choices"
+	OutcomeAllDecodesFailed = "all_decodes_failed" // model produced images but base64 unwrap failed
+	OutcomeUnknownFailure   = "unknown"
 )
+
+// outcomeFromKind maps the cross-package FailureKind onto the OTEL string
+// used in span.imagegen.outcome. KindUnknown shouldn't reach this point,
+// but if it does we want a stable bucket rather than the empty string.
+func outcomeFromKind(k FailureKind) string {
+	switch k {
+	case KindTimeout:
+		return OutcomeTimeout
+	case KindUpstreamError:
+		return OutcomeProviderError
+	case KindTextRefusal:
+		return OutcomeTextRefusal
+	case KindSilentBlockOAI:
+		return OutcomeSilentBlockOAI
+	case KindUnknownNoImages:
+		return OutcomeUnknownNoImages
+	default:
+		return OutcomeUnknownFailure
+	}
+}
 
 // Agent wraps an OpenRouter client and emits image-generation requests with
 // modalities=["image","text"] set.
@@ -158,37 +184,55 @@ func (a *Agent) Generate(ctx context.Context, req Request) (resp *Response, err 
 	orResp, callErr := a.client.CreateChatCompletion(ctx, orReq)
 	duration := time.Since(start)
 	if callErr != nil {
-		// Differentiate provider-side reject (most common: 4xx with body
-		// envelope) from local issues (timeout, transport). The OR client
-		// already wraps both as one error type; we use string match as the
-		// stable signal since openrouter.* package types are unexported.
-		if errors.Is(callErr, context.DeadlineExceeded) {
-			// Local deadline trip — distinct from upstream errors so dashboards
-			// can plot "timeout rate per model" and tell "openai needs >180s"
-			// apart from real provider failures.
-			outcome = OutcomeTimeout
-		} else {
-			outcome = OutcomeProviderError
+		// classifyFailure separates context.DeadlineExceeded from generic
+		// upstream errors so dashboards can plot "timeout rate per model"
+		// and tell "openai needs >180s" apart from real provider failures.
+		failure := &ImagegenFailure{
+			Kind:  classifyFailure(callErr, openrouter.ResponseMessage{}, ""),
+			Cause: callErr,
 		}
-		return nil, fmt.Errorf("imagegen: chat completion failed: %w", callErr)
+		outcome = outcomeFromKind(failure.Kind)
+		return nil, failure
 	}
 	// Resolved snapshot string (e.g. "openai/gpt-5.4-image-2-20260421") catches
 	// upstream model-version rotations that change behavior under us.
 	if orResp.Model != "" {
 		span.SetAttributes(attribute.String("imagegen.model_resolved", orResp.Model))
 	}
+	// Surface OpenRouter's own generation ID so on-call can dive from a span
+	// straight into /api/v1/generation?id=... for moderation_latency etc.
+	if orResp.ID != "" {
+		span.SetAttributes(attribute.String("imagegen.gen_id", orResp.ID))
+	}
+	if orResp.Provider != "" {
+		span.SetAttributes(attribute.String("imagegen.provider", orResp.Provider))
+	}
 	if len(orResp.Choices) == 0 {
 		outcome = OutcomeNoChoices
-		return nil, fmt.Errorf("imagegen: model returned no choices")
+		return nil, &ImagegenFailure{Kind: KindUnknownNoImages, Provider: orResp.Provider}
 	}
 
 	msg := orResp.Choices[0].Message
+	// finish_reason / text_chars are PII-safe span attrs that disambiguate
+	// the empty-response shape: text_refusal has chars > 0, silent_block_oai
+	// has chars == 0 + null finish_reason, success has chars == 0 + stop.
+	span.SetAttributes(
+		attribute.String("imagegen.finish_reason", orResp.Choices[0].FinishReason),
+		attribute.Int("imagegen.text_chars", len(msg.Content)),
+	)
 	if len(msg.Images) == 0 {
-		// Model chose to answer in text only — surface its text to the
-		// caller so it can be shown to the user as a graceful refusal.
-		outcome = OutcomeNoImages
-		return nil, fmt.Errorf("imagegen: model produced no images (text reply: %q)",
-			truncateForError(msg.Content, 200))
+		// Model chose to answer in text only (or returned silently). Surface
+		// the text to the caller via ImagegenFailure.Text so the tool wrapper
+		// can quote a Google-style refusal verbatim — and via Provider so the
+		// wrapper can distinguish OpenAI silent-blocks from generic empty
+		// responses.
+		failure := &ImagegenFailure{
+			Kind:     classifyFailure(nil, msg, orResp.Provider),
+			Text:     msg.Content,
+			Provider: orResp.Provider,
+		}
+		outcome = outcomeFromKind(failure.Kind)
+		return nil, failure
 	}
 
 	decoded := make([]DecodedImage, 0, len(msg.Images))
@@ -201,7 +245,7 @@ func (a *Agent) Generate(ctx context.Context, req Request) (resp *Response, err 
 		decoded = append(decoded, DecodedImage{MimeType: mime, Data: data})
 	}
 	if len(decoded) == 0 {
-		outcome = OutcomeNoImages
+		outcome = OutcomeAllDecodesFailed
 		return nil, fmt.Errorf("imagegen: all %d output images failed to decode", len(msg.Images))
 	}
 

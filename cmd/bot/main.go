@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -44,7 +45,7 @@ func (a *imageGenAdapter) Generate(ctx context.Context, req botTools.ImageGenReq
 		ImageSize:   req.ImageSize,
 	})
 	if err != nil {
-		return nil, err
+		return nil, mapImagegenFailure(err)
 	}
 	imgs := make([]botTools.ImageGenImage, len(resp.Images))
 	for i, img := range resp.Images {
@@ -54,6 +55,39 @@ func (a *imageGenAdapter) Generate(ctx context.Context, req botTools.ImageGenReq
 		Images:      imgs,
 		TextContent: resp.TextContent,
 	}, nil
+}
+
+// mapImagegenFailure translates the agent-side typed error into the tools-side
+// mirror so the tool wrapper can errors.As against its own type without
+// importing the agent package. Identity for non-typed errors.
+func mapImagegenFailure(err error) error {
+	var f *imagegen.ImagegenFailure
+	if !errors.As(err, &f) {
+		return err
+	}
+	return &botTools.ImageGenFailure{
+		Kind:     toToolsImageGenKind(f.Kind),
+		Text:     f.Text,
+		Provider: f.Provider,
+		Cause:    f.Cause,
+	}
+}
+
+func toToolsImageGenKind(k imagegen.FailureKind) botTools.ImageGenFailureKind {
+	switch k {
+	case imagegen.KindTimeout:
+		return botTools.ImageGenKindTimeout
+	case imagegen.KindUpstreamError:
+		return botTools.ImageGenKindUpstreamError
+	case imagegen.KindTextRefusal:
+		return botTools.ImageGenKindTextRefusal
+	case imagegen.KindSilentBlockOAI:
+		return botTools.ImageGenKindSilentBlockOAI
+	case imagegen.KindUnknownNoImages:
+		return botTools.ImageGenKindUnknownNoImages
+	default:
+		return botTools.ImageGenKindUnknown
+	}
 }
 
 var Version = "dev"

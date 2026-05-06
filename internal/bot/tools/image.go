@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime"
 	"os"
@@ -74,15 +75,23 @@ func (e *ToolExecutor) performImageGeneration(ctx context.Context, cc CallContex
 		ImageSize:   imageSize,
 	})
 	if err != nil {
-		e.logger.Warn("imagegen Generate failed — telling LLM not to retry",
+		var failure *ImageGenFailure
+		if errors.As(err, &failure) {
+			e.logger.Warn("imagegen Generate failed — telling LLM not to retry",
+				"user_id", cc.UserID,
+				"failure_kind", failure.Kind.String(),
+				"provider", failure.Provider,
+				"text_chars", len(failure.Text),
+				"err", err,
+			)
+			return stopRetryResultForFailure(failure), nil
+		}
+		// Untyped error — defensive fallback. Real Generate always returns
+		// *ImageGenFailure now, so this path mostly catches legacy/test
+		// mocks that pass plain errors.
+		e.logger.Warn("imagegen Generate failed (untyped) — telling LLM not to retry",
 			"user_id", cc.UserID, "err", err)
 		return stopRetryResult("the image-generation model rejected the request", "", err), nil
-	}
-	if len(genResp.Images) == 0 {
-		e.logger.Warn("imagegen returned zero images — telling LLM not to retry",
-			"user_id", cc.UserID, "model_text", truncate(genResp.TextContent, 200))
-		return stopRetryResult("the image-generation model returned no images (likely safety filter or content policy)",
-			genResp.TextContent, nil), nil
 	}
 
 	// Cap output images per configuration.
@@ -284,6 +293,54 @@ func extFromMime(mimeType string) string {
 
 func strPtr(s string) *string { return &s }
 
+// stopRetryResultForFailure is the kind-aware variant of stopRetryResult.
+// Same anti-retry guard, but instruction (2) is tailored to the actual
+// failure mode so the LLM stops parroting "safety filter / invalid input /
+// temporary API issue" when the cause is a timeout or a clear text refusal.
+//
+// The five wording variants correspond to the five failure modes the
+// classifier emits. KindTextRefusal additionally has the model's own
+// refusal text quoted verbatim — that string is the highest-signal hint
+// the user can act on.
+func stopRetryResultForFailure(f *ImageGenFailure) *Result {
+	var reason, instructionTwo string
+	switch f.Kind {
+	case ImageGenKindTimeout:
+		reason = "the image-generation server didn't respond in time"
+		instructionTwo = "Explain in one sentence that the image-generation server didn't respond in time and the user should try again later."
+	case ImageGenKindUpstreamError:
+		reason = "the image provider returned an API error"
+		instructionTwo = "Explain in one sentence that the image provider returned a transient API error and the user should try again shortly."
+	case ImageGenKindTextRefusal:
+		reason = "the model refused to generate this image and explained why"
+		instructionTwo = fmt.Sprintf(
+			"The model itself refused to generate this image and explained why in plain text. Quote its reason verbatim to the user (translate to their language if needed) so they understand exactly what to change. Refusal text: %q",
+			truncate(f.Text, 300),
+		)
+	case ImageGenKindSilentBlockOAI:
+		reason = "OpenAI's image model returned no image and no explanation"
+		instructionTwo = "OpenAI's image model returned no image and gave no explanation, which almost always means a content-policy block. Tell the user this looks like a content-policy issue and suggest they rephrase the prompt or change the input image — children's faces and recognizable public figures are typical triggers."
+	default: // ImageGenKindUnknownNoImages, ImageGenKindUnknown
+		reason = "the model returned an empty response with no explanation"
+		instructionTwo = "The model returned an empty response with no specific reason. Tell the user the generation didn't work and suggest they try again or rephrase — no specific reason is known."
+	}
+
+	var sb strings.Builder
+	sb.WriteString("IMAGE GENERATION FAILED. ")
+	sb.WriteString(reason)
+	sb.WriteString(". ")
+	if f.Cause != nil {
+		fmt.Fprintf(&sb, "Internal detail: %v. ", f.Cause)
+	}
+	sb.WriteString("IMPORTANT INSTRUCTIONS FOR YOU: ")
+	sb.WriteString("(1) Do NOT call generate_image again in this turn — further attempts will almost certainly fail the same way. ")
+	sb.WriteString("(2) ")
+	sb.WriteString(instructionTwo)
+	sb.WriteString(" ")
+	sb.WriteString("(3) If appropriate, suggest they try different wording or try again later — but do NOT attempt it yourself now.")
+	return &Result{Content: sb.String()}
+}
+
 // stopRetryResult builds a tool-result message designed to halt the LLM's
 // natural "try again with different wording" instinct after an image-gen
 // failure. The LLM sees this content and (per the explicit instruction)
@@ -294,6 +351,11 @@ func strPtr(s string) *string { return &s }
 // is optional text the model itself emitted (e.g. a safety-policy message);
 // underlying is the Go error, stringified for debugging. All three are
 // optional and any subset may be empty.
+//
+// Used for non-imagegen-failure cases (config not present, all output images
+// failed to persist) and as the defensive fallback when the imagegen agent
+// returns an untyped error (legacy mocks). Kind-aware imagegen failures go
+// through stopRetryResultForFailure.
 func stopRetryResult(reason, modelText string, underlying error) *Result {
 	var sb strings.Builder
 	sb.WriteString("IMAGE GENERATION FAILED. ")
