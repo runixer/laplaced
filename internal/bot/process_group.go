@@ -212,7 +212,12 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		span.End()
 	}()
 
-	logger := b.logger.With(
+	// Bind trace_id/span_id onto the per-turn logger so every downstream
+	// slog line carries the same correlation ids — Grafana's Tempo
+	// derived-fields config then renders one-click "open in Tempo" buttons
+	// on Loki log lines, removing the manual ts → user_id → trace_id
+	// detective work today's investigations need.
+	logger := obs.LoggerWithSpan(ctx, b.logger).With(
 		"user_id", user.ID,
 		"username", user.Username,
 		"first_name", user.FirstName,

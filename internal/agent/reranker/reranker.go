@@ -143,6 +143,11 @@ func (r *Reranker) rerank(
 		ctx, "reranker.Execute",
 		oteltrace.WithAttributes(attribute.Int64("user.id", userID)),
 	)
+	// Bind reranker's own trace/span ids onto the local logger so every
+	// downstream slog line in this method correlates to *this* span (not
+	// the bot's root span). The reranker creates its own span above, so
+	// re-deriving here gives the more specific scope.
+	logger := obs.LoggerWithSpan(ctx, r.logger)
 	// Pre-compute the session-input count before the main loop so even
 	// fallback paths (timeout, disabled, all-empty shortcut) emit it.
 	sessionInputCount := 0
@@ -243,7 +248,7 @@ func (r *Reranker) rerank(
 	// v0.6.0: Use LLM reranking if we have any candidates (topics, people, or artifacts)
 	// Only fallback immediately if ALL candidate lists are empty
 	if !cfg.Enabled || (len(candidates) == 0 && len(personCandidates) == 0 && len(artifactCandidates) == 0) {
-		return fallbackToVectorTop(r.cfg, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, r.logger), nil
+		return fallbackToVectorTop(r.cfg, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger), nil
 	}
 
 	// Parse timeouts
@@ -426,17 +431,17 @@ func (r *Reranker) rerank(
 			} else if turnCtx.Err() == context.DeadlineExceeded {
 				fallbackReason = "turn_timeout"
 			}
-			r.logger.Warn("reranker LLM call failed",
+			logger.Warn("reranker LLM call failed",
 				"error", err,
 				"tool_calls", iterations,
 				"reason", fallbackReason,
 			)
 			tr.fallbackReason = fallbackReason
-			result := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, r.logger)
+			result := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger)
 			tr.selectedTopics = result.Topics
 			tr.selectedPeople = result.People
 			tr.selectedArtifacts = result.Artifacts
-			saveTrace(ctx, r.agentLogger, r.logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
+			saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
 			return result, nil
 		}
 
@@ -449,13 +454,13 @@ func (r *Reranker) rerank(
 		)
 
 		if len(resp.Choices) == 0 {
-			r.logger.Warn("reranker got empty response")
+			logger.Warn("reranker got empty response")
 			tr.fallbackReason = "empty_response"
-			result := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, r.logger)
+			result := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger)
 			tr.selectedTopics = result.Topics
 			tr.selectedPeople = result.People
 			tr.selectedArtifacts = result.Artifacts
-			saveTrace(ctx, r.agentLogger, r.logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
+			saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
 			return result, nil
 		}
 
@@ -464,7 +469,7 @@ func (r *Reranker) rerank(
 		// Log and collect reasoning details
 		if choice.Message.ReasoningDetails != nil {
 			reasoningText := extractReasoningText(choice.Message.ReasoningDetails)
-			r.logger.Debug("reranker reasoning",
+			logger.Debug("reranker reasoning",
 				"user_id", userID,
 				"iteration", iterations+1,
 				"reasoning", openrouter.FilterReasoningForLog(choice.Message.ReasoningDetails),
@@ -488,7 +493,7 @@ func (r *Reranker) rerank(
 				if tc.Function.Name == "get_topics_content" {
 					ids, err := parseToolCallIDs(tc.Function.Arguments)
 					if err != nil {
-						r.logger.Warn("failed to parse tool call arguments", "error", err)
+						logger.Warn("failed to parse tool call arguments", "error", err)
 						continue
 					}
 
@@ -516,7 +521,7 @@ func (r *Reranker) rerank(
 						}
 					}
 
-					content := loadTopicsContent(ctx, userID, ids, candidateMap, r.msgRepo, r.logger, tr)
+					content := loadTopicsContent(ctx, userID, ids, candidateMap, r.msgRepo, logger, tr)
 					toolResults = append(toolResults, openrouter.Message{
 						Role:       "tool",
 						Content:    content,
@@ -549,28 +554,28 @@ func (r *Reranker) rerank(
 		// No tool calls - expect final JSON response
 		// v0.6.0: Exception: if no topic candidates, skipping tool call is expected
 		if iterations == 0 && len(candidates) > 0 {
-			r.logger.Warn("reranker protocol violation: no tool calls before final response",
+			logger.Warn("reranker protocol violation: no tool calls before final response",
 				"user_id", userID,
 				"content_preview", truncateForLog(choice.Message.Content, 200),
 			)
 			tr.fallbackReason = "protocol_violation"
-			fallbackResult := fallbackToVectorTop(r.cfg, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, r.logger)
+			fallbackResult := fallbackToVectorTop(r.cfg, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger)
 			tr.selectedTopics = fallbackResult.Topics
 			tr.selectedPeople = fallbackResult.People
 			tr.selectedArtifacts = fallbackResult.Artifacts
-			saveTrace(ctx, r.agentLogger, r.logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
+			saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
 			return fallbackResult, nil
 		}
 
-		result, err := parseResponse(choice.Message.Content, r.logger)
+		result, err := parseResponse(choice.Message.Content, logger)
 		if err != nil {
-			r.logger.Warn("failed to parse reranker response", "error", err, "content", choice.Message.Content)
+			logger.Warn("failed to parse reranker response", "error", err, "content", choice.Message.Content)
 			tr.fallbackReason = "parse_error"
-			fallbackResult := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, r.logger)
+			fallbackResult := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger)
 			tr.selectedTopics = fallbackResult.Topics
 			tr.selectedPeople = fallbackResult.People
 			tr.selectedArtifacts = fallbackResult.Artifacts
-			saveTrace(ctx, r.agentLogger, r.logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
+			saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
 			return fallbackResult, nil
 		}
 
@@ -583,9 +588,9 @@ func (r *Reranker) rerank(
 		rawCount := tr.modelRawTopics + tr.modelRawPeople + tr.modelRawArtifacts
 
 		// Validate topics and people
-		result = filterValidTopics(userID, result, candidateMap, r.logger)
-		result = filterValidPeople(userID, result, peopleMap, r.logger)
-		result = filterValidArtifacts(userID, result, artifactsMap, r.logger)
+		result = filterValidTopics(userID, result, candidateMap, logger)
+		result = filterValidPeople(userID, result, peopleMap, logger)
+		result = filterValidArtifacts(userID, result, artifactsMap, logger)
 
 		tr.modelKeptTopics = len(result.Topics)
 		tr.modelKeptPeople = len(result.People)
@@ -597,10 +602,10 @@ func (r *Reranker) rerank(
 			// with vector-top — otherwise we leak top-N artifacts/people by
 			// raw cosine into the chat prompt despite the model's decision.
 			if rawCount == 0 {
-				r.logger.Info("reranker returned empty selection", "user_id", userID)
+				logger.Info("reranker returned empty selection", "user_id", userID)
 				tr.fallbackReason = "model_empty"
 			} else {
-				r.logger.Warn("reranker returned no valid results (all hallucinated)",
+				logger.Warn("reranker returned no valid results (all hallucinated)",
 					"user_id", userID, "raw_count", rawCount)
 				tr.fallbackReason = "all_hallucinated"
 			}
@@ -608,11 +613,11 @@ func (r *Reranker) rerank(
 			tr.selectedTopics = emptyResult.Topics
 			tr.selectedPeople = emptyResult.People
 			tr.selectedArtifacts = emptyResult.Artifacts
-			saveTrace(ctx, r.agentLogger, r.logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
+			saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
 			return emptyResult, nil
 		}
 
-		r.logger.Info("reranker completed",
+		logger.Info("reranker completed",
 			"user_id", userID,
 			"topic_candidates_in", len(candidates),
 			"topics_out", len(result.Topics),
@@ -628,18 +633,18 @@ func (r *Reranker) rerank(
 		tr.selectedTopics = result.Topics
 		tr.selectedPeople = result.People
 		tr.selectedArtifacts = result.Artifacts
-		saveTrace(ctx, r.agentLogger, r.logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
+		saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
 
 		return result, nil
 	}
 
 	// Max tool calls reached
-	r.logger.Warn("reranker max tool calls reached", "max", cfg.MaxToolCalls)
+	logger.Warn("reranker max tool calls reached", "max", cfg.MaxToolCalls)
 	tr.fallbackReason = "max_tool_calls"
-	result := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, r.logger)
+	result := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger)
 	tr.selectedTopics = result.Topics
 	tr.selectedPeople = result.People
 	tr.selectedArtifacts = result.Artifacts
-	saveTrace(ctx, r.agentLogger, r.logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
+	saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
 	return result, nil
 }
