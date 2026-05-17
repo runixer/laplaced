@@ -74,6 +74,16 @@ type Response struct {
 	// Debug info
 	Messages          []openrouter.Message // Full conversation for logging
 	ConversationTurns *agentlog.ConversationTurns
+
+	// Anomaly signals for the orchestrator to surface as bot.anomaly.*
+	// span attributes on bot.processMessageGroup. WasEmpty marks an
+	// originally-empty completion that was replaced with the localized
+	// fallback. WasSanitized marks a completion that had hallucination
+	// artifacts stripped; OriginalContent then carries the pre-strip text
+	// for triage (recorded as a span event when content tracing is on).
+	WasEmpty        bool
+	WasSanitized    bool
+	OriginalContent string
 }
 
 // ToolCallContext carries execution context for a tool call: the owning user
@@ -82,6 +92,11 @@ type Response struct {
 type ToolCallContext struct {
 	UserID               int64
 	CurrentMessageImages []openrouter.FilePart
+	// Iteration is the 1-based tool-loop iteration this dispatch belongs
+	// to. Recorded on the tool_executor span as tool.iteration so traces
+	// can answer "which turn dispatched this tool" without matching by
+	// timestamp. Zero/unset is acceptable for non-laplace callers.
+	Iteration int
 }
 
 // ToolResult is the richer return type for tool execution. Content is what

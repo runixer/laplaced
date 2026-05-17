@@ -3,7 +3,6 @@
 package testutil
 
 import (
-	"context"
 	"log/slog"
 	"os"
 	"path/filepath"

@@ -2,16 +2,22 @@ package reranker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"log/slog"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	oteltrace "go.opentelemetry.io/otel/trace"
 
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -125,10 +131,124 @@ func (r *Reranker) rerank(
 	mediaParts []interface{},
 ) (*Result, error) {
 	cfg := r.cfg.Agents.Reranker
+
+	// Tracing-observable state hoisted here so the deferred End() sees the
+	// right values regardless of which internal return fires. tr stays nil
+	// if we bail out via the "disabled or empty candidates" shortcut.
+	var (
+		iterations int
+		tr         *trace
+	)
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/reranker").Start(
+		ctx, "reranker.Execute",
+		oteltrace.WithAttributes(attribute.Int64("user.id", userID)),
+	)
+	// Bind reranker's own trace/span ids onto the local logger so every
+	// downstream slog line in this method correlates to *this* span (not
+	// the bot's root span). The reranker creates its own span above, so
+	// re-deriving here gives the more specific scope.
+	logger := obs.LoggerWithSpan(ctx, r.logger)
+	// Pre-compute the session-input count before the main loop so even
+	// fallback paths (timeout, disabled, all-empty shortcut) emit it.
+	sessionInputCount := 0
+	for _, c := range artifactCandidates {
+		if c.IsSession {
+			sessionInputCount++
+		}
+	}
+
+	defer func() {
+		reason := ""
+		var (
+			llmCalls                              int
+			costUSD                               float64
+			rawTopics, rawPeople, rawArtifacts    int
+			keptTopics, keptPeople, keptArtifacts int
+			keptArtifactsSession                  int
+		)
+		if tr != nil {
+			reason = tr.fallbackReason
+			rawTopics = tr.modelRawTopics
+			rawPeople = tr.modelRawPeople
+			rawArtifacts = tr.modelRawArtifacts
+			keptTopics = tr.modelKeptTopics
+			keptPeople = tr.modelKeptPeople
+			keptArtifacts = tr.modelKeptArtifacts
+			keptArtifactsSession = tr.modelKeptArtifactsSession
+			if tr.tracker != nil {
+				llmCalls = tr.tracker.TurnCount()
+				costUSD = tr.tracker.TotalCostValue()
+			}
+		}
+		span.SetAttributes(
+			attribute.Int("reranker.tool_calls", iterations),
+			attribute.Int("reranker.llm_calls", llmCalls),
+			attribute.String("reranker.fallback_reason", reason),
+			attribute.Int("reranker.candidates_in.topics", len(candidates)),
+			attribute.Int("reranker.candidates_in.people", len(personCandidates)),
+			attribute.Int("reranker.candidates_in.artifacts", len(artifactCandidates)),
+			attribute.Int("reranker.candidates_in.artifacts.session", sessionInputCount),
+			attribute.Int("reranker.candidates_in.media", len(mediaParts)),
+			attribute.Int("reranker.model_raw_count.topics", rawTopics),
+			attribute.Int("reranker.model_raw_count.people", rawPeople),
+			attribute.Int("reranker.model_raw_count.artifacts", rawArtifacts),
+			attribute.Int("reranker.model_kept.topics", keptTopics),
+			attribute.Int("reranker.model_kept.people", keptPeople),
+			attribute.Int("reranker.model_kept.artifacts", keptArtifacts),
+			attribute.Int("reranker.model_kept.artifacts.session", keptArtifactsSession),
+			attribute.Float64("reranker.cost_usd", costUSD),
+		)
+		if obs.ContentEnabled() {
+			if originalQuery != "" {
+				obs.RecordContent(span, "reranker.raw_query", originalQuery)
+			}
+			if contextualizedQuery != "" {
+				obs.RecordContent(span, "reranker.enriched_query", contextualizedQuery)
+			}
+			// Shared context that lands in the system prompt — captured so a
+			// faithful replay can reconstruct the exact reranker input without
+			// drifting through the live DB at replay time.
+			if userProfile != "" {
+				obs.RecordContent(span, "reranker.user_profile", userProfile)
+			}
+			if recentTopics != "" {
+				obs.RecordContent(span, "reranker.recent_topics", recentTopics)
+			}
+			if len(candidates) > 0 {
+				obs.RecordContent(span, "reranker.candidates_input",
+					formatCandidatesForReranker(candidates))
+			}
+			if len(personCandidates) > 0 {
+				obs.RecordContent(span, "reranker.people_candidates_input",
+					FormatPeopleForReranker(personCandidates))
+			}
+			if len(artifactCandidates) > 0 {
+				obs.RecordContent(span, "reranker.artifacts_candidates_input",
+					formatArtifactCandidates(artifactCandidates))
+			}
+			// Multimodal inputs (images, voice, PDFs). Recorded as metadata +
+			// content_hash so a faithful replay can re-fetch the file from
+			// artifact storage by hash without the trace carrying base64.
+			if len(mediaParts) > 0 {
+				if body := agent.FormatMediaParts(mediaParts, ""); body != "" {
+					obs.RecordContent(span, "reranker.media_parts", body)
+				}
+			}
+			if tr != nil && len(tr.selectedTopics) > 0 {
+				if body, err := json.Marshal(tr.selectedTopics); err == nil {
+					obs.RecordContent(span, "reranker.selection_reasons", string(body))
+				}
+			}
+		}
+		// Reranker NEVER surfaces as span Error: it always returns a result
+		// (LLM failures are reflected via fallback_reason). No ObserveErr.
+		span.End()
+	}()
+
 	// v0.6.0: Use LLM reranking if we have any candidates (topics, people, or artifacts)
 	// Only fallback immediately if ALL candidate lists are empty
 	if !cfg.Enabled || (len(candidates) == 0 && len(personCandidates) == 0 && len(artifactCandidates) == 0) {
-		return fallbackToVectorTop(r.cfg, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, r.logger), nil
+		return fallbackToVectorTop(r.cfg, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger), nil
 	}
 
 	// Parse timeouts
@@ -152,8 +272,9 @@ func (r *Reranker) rerank(
 	defer cancel()
 
 	st := &state{}
-	tr := &trace{
-		tracker: agentlog.NewTurnTracker(),
+	tr = &trace{
+		tracker:                      agentlog.NewTurnTracker(),
+		candidatesInArtifactsSession: sessionInputCount,
 	}
 	startTime := time.Now()
 
@@ -261,14 +382,14 @@ func (r *Reranker) rerank(
 	}
 
 	// Agentic loop
-	toolCallCount := 0
+	iterations = 0
 
-	for toolCallCount < cfg.MaxToolCalls {
+	for iterations < cfg.MaxToolCalls {
 		var toolChoice any
 		var responseFormat interface{}
 
 		// v0.6.0: If no topic candidates (only artifacts/people), skip tool call and go directly to JSON
-		if toolCallCount == 0 && len(candidates) > 0 {
+		if iterations == 0 && len(candidates) > 0 {
 			toolChoice = map[string]any{
 				"type": "function",
 				"function": map[string]any{
@@ -310,17 +431,17 @@ func (r *Reranker) rerank(
 			} else if turnCtx.Err() == context.DeadlineExceeded {
 				fallbackReason = "turn_timeout"
 			}
-			r.logger.Warn("reranker LLM call failed",
+			logger.Warn("reranker LLM call failed",
 				"error", err,
-				"tool_calls", toolCallCount,
+				"tool_calls", iterations,
 				"reason", fallbackReason,
 			)
 			tr.fallbackReason = fallbackReason
-			result := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, r.logger)
+			result := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger)
 			tr.selectedTopics = result.Topics
 			tr.selectedPeople = result.People
 			tr.selectedArtifacts = result.Artifacts
-			saveTrace(ctx, r.agentLogger, r.logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
+			saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
 			return result, nil
 		}
 
@@ -333,13 +454,13 @@ func (r *Reranker) rerank(
 		)
 
 		if len(resp.Choices) == 0 {
-			r.logger.Warn("reranker got empty response")
+			logger.Warn("reranker got empty response")
 			tr.fallbackReason = "empty_response"
-			result := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, r.logger)
+			result := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger)
 			tr.selectedTopics = result.Topics
 			tr.selectedPeople = result.People
 			tr.selectedArtifacts = result.Artifacts
-			saveTrace(ctx, r.agentLogger, r.logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
+			saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
 			return result, nil
 		}
 
@@ -348,14 +469,14 @@ func (r *Reranker) rerank(
 		// Log and collect reasoning details
 		if choice.Message.ReasoningDetails != nil {
 			reasoningText := extractReasoningText(choice.Message.ReasoningDetails)
-			r.logger.Debug("reranker reasoning",
+			logger.Debug("reranker reasoning",
 				"user_id", userID,
-				"iteration", toolCallCount+1,
+				"iteration", iterations+1,
 				"reasoning", openrouter.FilterReasoningForLog(choice.Message.ReasoningDetails),
 			)
 			if reasoningText != "" {
 				tr.reasoning = append(tr.reasoning, ReasoningEntry{
-					Iteration: toolCallCount + 1,
+					Iteration: iterations + 1,
 					Text:      reasoningText,
 				})
 			}
@@ -363,16 +484,16 @@ func (r *Reranker) rerank(
 
 		// Check for tool calls
 		if len(choice.Message.ToolCalls) > 0 {
-			toolCallCount++
+			iterations++
 
 			var toolResults []openrouter.Message
-			toolCall := storage.RerankerToolCall{Iteration: toolCallCount}
+			toolCall := storage.RerankerToolCall{Iteration: iterations}
 
 			for _, tc := range choice.Message.ToolCalls {
 				if tc.Function.Name == "get_topics_content" {
 					ids, err := parseToolCallIDs(tc.Function.Arguments)
 					if err != nil {
-						r.logger.Warn("failed to parse tool call arguments", "error", err)
+						logger.Warn("failed to parse tool call arguments", "error", err)
 						continue
 					}
 
@@ -400,7 +521,7 @@ func (r *Reranker) rerank(
 						}
 					}
 
-					content := loadTopicsContent(ctx, userID, ids, candidateMap, r.msgRepo, r.logger, tr)
+					content := loadTopicsContent(ctx, userID, ids, candidateMap, r.msgRepo, logger, tr)
 					toolResults = append(toolResults, openrouter.Message{
 						Role:       "tool",
 						Content:    content,
@@ -410,6 +531,15 @@ func (r *Reranker) rerank(
 			}
 
 			tr.toolCalls = append(tr.toolCalls, toolCall)
+
+			span.AddEvent("reranker.tool_call",
+				oteltrace.WithAttributes(
+					attribute.Int("iteration", iterations),
+					attribute.Int64Slice("requested_ids", toolCall.TopicIDs),
+					attribute.Int("requested_count", len(toolCall.TopicIDs)),
+					attribute.Int("valid_count", len(toolCall.Topics)),
+				),
+			)
 
 			messages = append(messages, openrouter.Message{
 				Role:             "assistant",
@@ -423,51 +553,87 @@ func (r *Reranker) rerank(
 
 		// No tool calls - expect final JSON response
 		// v0.6.0: Exception: if no topic candidates, skipping tool call is expected
-		if toolCallCount == 0 && len(candidates) > 0 {
-			r.logger.Warn("reranker protocol violation: no tool calls before final response",
+		if iterations == 0 && len(candidates) > 0 {
+			logger.Warn("reranker protocol violation: no tool calls before final response",
 				"user_id", userID,
 				"content_preview", truncateForLog(choice.Message.Content, 200),
 			)
 			tr.fallbackReason = "protocol_violation"
-			fallbackResult := fallbackToVectorTop(r.cfg, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, r.logger)
+			fallbackResult := fallbackToVectorTop(r.cfg, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger)
 			tr.selectedTopics = fallbackResult.Topics
 			tr.selectedPeople = fallbackResult.People
 			tr.selectedArtifacts = fallbackResult.Artifacts
-			saveTrace(ctx, r.agentLogger, r.logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
+			saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
 			return fallbackResult, nil
 		}
 
-		result, err := parseResponse(choice.Message.Content, r.logger)
+		result, err := parseResponse(choice.Message.Content, logger)
 		if err != nil {
-			r.logger.Warn("failed to parse reranker response", "error", err, "content", choice.Message.Content)
+			logger.Warn("failed to parse reranker response", "error", err, "content", choice.Message.Content)
 			tr.fallbackReason = "parse_error"
-			fallbackResult := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, r.logger)
+			fallbackResult := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger)
 			tr.selectedTopics = fallbackResult.Topics
 			tr.selectedPeople = fallbackResult.People
 			tr.selectedArtifacts = fallbackResult.Artifacts
-			saveTrace(ctx, r.agentLogger, r.logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
+			saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
 			return fallbackResult, nil
 		}
 
 		// Track raw counts BEFORE filtering to distinguish "model explicitly
 		// returned empty arrays" (legitimate "nothing relevant") from "model
 		// returned IDs that don't match any candidate" (true hallucination).
-		rawCount := len(result.Topics) + len(result.People) + len(result.Artifacts)
+		tr.modelRawTopics = len(result.Topics)
+		tr.modelRawPeople = len(result.People)
+		tr.modelRawArtifacts = len(result.Artifacts)
+		rawCount := tr.modelRawTopics + tr.modelRawPeople + tr.modelRawArtifacts
+
+		// Capture the raw IDs the model returned BEFORE filtering, so the
+		// span event below can show the kept-vs-hallucinated split per type.
+		rawTopicIDs := collectIDs(result.Topics, func(t TopicSelection) string { return t.ID }, parseTopicID)
+		rawPeopleIDs := collectIDs(result.People, func(p PersonSelection) string { return p.ID }, parsePersonID)
+		rawArtifactIDs := collectIDs(result.Artifacts, func(a ArtifactSelection) string { return a.ID }, parseArtifactID)
 
 		// Validate topics and people
-		result = filterValidTopics(userID, result, candidateMap, r.logger)
-		result = filterValidPeople(userID, result, peopleMap, r.logger)
-		result = filterValidArtifacts(userID, result, artifactsMap, r.logger)
+		result = filterValidTopics(userID, result, candidateMap, logger)
+		result = filterValidPeople(userID, result, peopleMap, logger)
+		result = filterValidArtifacts(userID, result, artifactsMap, logger)
+
+		tr.modelKeptTopics = len(result.Topics)
+		tr.modelKeptPeople = len(result.People)
+		tr.modelKeptArtifacts = len(result.Artifacts)
+		tr.modelKeptArtifactsSession = countSessionKept(result.Artifacts, artifactsMap)
+
+		keptTopicIDs := collectIDs(result.Topics, func(t TopicSelection) string { return t.ID }, parseTopicID)
+		keptPeopleIDs := collectIDs(result.People, func(p PersonSelection) string { return p.ID }, parsePersonID)
+		keptArtifactIDs := collectIDs(result.Artifacts, func(a ArtifactSelection) string { return a.ID }, parseArtifactID)
+
+		// Unconditional span event with the raw/kept/hallucinated split per
+		// type. IDs are autoincrement integers — no PII — so this event runs
+		// outside the content-recording toggle. It makes the
+		// model_empty-vs-all_hallucinated distinction inspectable in Tempo
+		// without dropping into SQLite on prod (the workflow that took ~20
+		// minutes during the 2026-05-17 investigation).
+		span.AddEvent("reranker.model_response", oteltrace.WithAttributes(
+			attribute.Int64Slice("raw.topics", rawTopicIDs),
+			attribute.Int64Slice("raw.people", rawPeopleIDs),
+			attribute.Int64Slice("raw.artifacts", rawArtifactIDs),
+			attribute.Int64Slice("kept.topics", keptTopicIDs),
+			attribute.Int64Slice("kept.people", keptPeopleIDs),
+			attribute.Int64Slice("kept.artifacts", keptArtifactIDs),
+			attribute.Int64Slice("hallucinated.topics", diffIDs(rawTopicIDs, keptTopicIDs)),
+			attribute.Int64Slice("hallucinated.people", diffIDs(rawPeopleIDs, keptPeopleIDs)),
+			attribute.Int64Slice("hallucinated.artifacts", diffIDs(rawArtifactIDs, keptArtifactIDs)),
+		))
 		if len(result.Topics) == 0 && len(result.People) == 0 && len(result.Artifacts) == 0 {
 			// The model gave us a clear "nothing here" answer (either empty
 			// arrays or only invalid IDs). Respect it instead of overriding
 			// with vector-top — otherwise we leak top-N artifacts/people by
 			// raw cosine into the chat prompt despite the model's decision.
 			if rawCount == 0 {
-				r.logger.Info("reranker returned empty selection", "user_id", userID)
+				logger.Info("reranker returned empty selection", "user_id", userID)
 				tr.fallbackReason = "model_empty"
 			} else {
-				r.logger.Warn("reranker returned no valid results (all hallucinated)",
+				logger.Warn("reranker returned no valid results (all hallucinated)",
 					"user_id", userID, "raw_count", rawCount)
 				tr.fallbackReason = "all_hallucinated"
 			}
@@ -475,11 +641,11 @@ func (r *Reranker) rerank(
 			tr.selectedTopics = emptyResult.Topics
 			tr.selectedPeople = emptyResult.People
 			tr.selectedArtifacts = emptyResult.Artifacts
-			saveTrace(ctx, r.agentLogger, r.logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
+			saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
 			return emptyResult, nil
 		}
 
-		r.logger.Info("reranker completed",
+		logger.Info("reranker completed",
 			"user_id", userID,
 			"topic_candidates_in", len(candidates),
 			"topics_out", len(result.Topics),
@@ -487,7 +653,7 @@ func (r *Reranker) rerank(
 			"people_out", len(result.People),
 			"artifacts_candidates_in", len(artifactCandidates),
 			"artifacts_out", len(result.Artifacts),
-			"tool_calls", toolCallCount,
+			"tool_calls", iterations,
 			"duration_ms", int(time.Since(startTime).Milliseconds()),
 			"cost_usd", tr.tracker.TotalCostValue(),
 		)
@@ -495,18 +661,18 @@ func (r *Reranker) rerank(
 		tr.selectedTopics = result.Topics
 		tr.selectedPeople = result.People
 		tr.selectedArtifacts = result.Artifacts
-		saveTrace(ctx, r.agentLogger, r.logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
+		saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
 
 		return result, nil
 	}
 
 	// Max tool calls reached
-	r.logger.Warn("reranker max tool calls reached", "max", cfg.MaxToolCalls)
+	logger.Warn("reranker max tool calls reached", "max", cfg.MaxToolCalls)
 	tr.fallbackReason = "max_tool_calls"
-	result := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, r.logger)
+	result := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger)
 	tr.selectedTopics = result.Topics
 	tr.selectedPeople = result.People
 	tr.selectedArtifacts = result.Artifacts
-	saveTrace(ctx, r.agentLogger, r.logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
+	saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
 	return result, nil
 }

@@ -574,6 +574,7 @@ func (h *botToolHandler) ExecuteToolCall(ctx context.Context, tcc laplace.ToolCa
 	cc := tools.CallContext{
 		UserID:               h.userID,
 		CurrentMessageImages: tcc.CurrentMessageImages,
+		Iteration:            tcc.Iteration,
 	}
 	result, err := h.bot.toolExecutor.ExecuteToolCall(ctx, cc, toolName, arguments)
 	if err != nil {

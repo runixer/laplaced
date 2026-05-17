@@ -1,0 +1,128 @@
+package obs
+
+import (
+	"bytes"
+	"context"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+)
+
+func TestInitTracing_Disabled_ReturnsNoopShutdown(t *testing.T) {
+	// An unreachable endpoint would surface as an error if Init actually
+	// tried to build an exporter. Disabled path must bypass that entirely.
+	cfg := TracingConfig{
+		Enabled:      false,
+		OTLPEndpoint: "192.0.2.1:4317", // TEST-NET-1, guaranteed unreachable
+	}
+
+	shutdown, err := InitTracing(context.Background(), cfg, "test-version")
+	require.NoError(t, err)
+	require.NotNil(t, shutdown)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	assert.NoError(t, shutdown(ctx))
+}
+
+func TestInitTracing_Enabled_EmptyEndpoint_ReturnsError(t *testing.T) {
+	cfg := TracingConfig{
+		Enabled:      true,
+		OTLPEndpoint: "",
+	}
+
+	shutdown, err := InitTracing(context.Background(), cfg, "test-version")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "OTLPEndpoint is required")
+	// Even on error, the returned ShutdownFunc must be non-nil and safe to call.
+	require.NotNil(t, shutdown)
+	assert.NoError(t, shutdown(context.Background()))
+}
+
+func TestInitTracing_StdoutExporter_NoEndpointRequired(t *testing.T) {
+	cfg := TracingConfig{
+		Enabled:  true,
+		Exporter: ExporterStdout,
+	}
+
+	shutdown, err := InitTracing(context.Background(), cfg, "test-version")
+	require.NoError(t, err)
+	require.NotNil(t, shutdown)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+	assert.NoError(t, shutdown(ctx))
+}
+
+func TestInitTracing_StdoutExporter_EmitsSpanJSON(t *testing.T) {
+	// End-to-end smoke: init with stdout exporter, produce a span, and
+	// verify span content actually lands on stderr. Guards against a
+	// silent exporter no-op regression.
+	origStderr := os.Stderr
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stderr = w
+	t.Cleanup(func() { os.Stderr = origStderr })
+
+	shutdown, err := InitTracing(context.Background(), TracingConfig{
+		Enabled:     true,
+		Exporter:    ExporterStdout,
+		ServiceName: "obs-smoke",
+	}, "v-smoke")
+	require.NoError(t, err)
+
+	_, sp := otel.Tracer("obs-smoke").Start(context.Background(), "smoke.op")
+	sp.End()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	require.NoError(t, shutdown(ctx))
+	require.NoError(t, w.Close())
+
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(r)
+	out := buf.String()
+	assert.Contains(t, out, "smoke.op", "stdout exporter should emit span name")
+	assert.Contains(t, out, "obs-smoke", "stdout exporter should emit service name")
+}
+
+func TestInitTracing_UnknownExporter_ReturnsError(t *testing.T) {
+	cfg := TracingConfig{
+		Enabled:  true,
+		Exporter: "jaeger",
+	}
+
+	shutdown, err := InitTracing(context.Background(), cfg, "test-version")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown exporter")
+	require.NotNil(t, shutdown)
+	assert.NoError(t, shutdown(context.Background()))
+}
+
+func TestInitTracing_Enabled_UnreachableEndpoint_StillInits(t *testing.T) {
+	// The OTLP/gRPC exporter uses non-blocking connect by default — pointing
+	// at an unreachable address must not fail init, spans just buffer and
+	// drop on shutdown. This guards the "collector down" degradation path.
+	cfg := TracingConfig{
+		Enabled:      true,
+		OTLPEndpoint: "127.0.0.1:1", // port 1, nothing there
+		ServiceName:  "laplaced-test",
+	}
+
+	shutdown, err := InitTracing(context.Background(), cfg, "test-version")
+	require.NoError(t, err)
+	require.NotNil(t, shutdown)
+
+	// Shutdown with a short timeout — we expect it to return promptly, not
+	// hang trying to flush to the dead endpoint.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	// Error or not is fine (the exporter may report the inability to
+	// connect). We only assert it returned within the deadline.
+	_ = shutdown(ctx)
+	assert.NoError(t, ctx.Err(), "shutdown must return before context deadline")
+}

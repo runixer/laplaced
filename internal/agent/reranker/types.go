@@ -201,6 +201,25 @@ type trace struct {
 	systemPrompt      string                // Full system prompt for debug UI
 	userPrompt        string                // Full user prompt for debug UI
 	tracker           *agentlog.TurnTracker // Unified turn tracking for multi-turn visualization
+
+	// Counts from the model's final JSON response, captured before validation.
+	// Distinguishes "model explicitly returned empty arrays" (raw == 0) from
+	// "model returned IDs but all were filtered as hallucinated" (raw > 0, kept == 0).
+	modelRawTopics    int
+	modelRawPeople    int
+	modelRawArtifacts int
+	// Counts after filterValid* — what survived ID validation against candidates.
+	modelKeptTopics    int
+	modelKeptPeople    int
+	modelKeptArtifacts int
+
+	// Session-injection telemetry: how many artifact candidates entered with the
+	// IsSession marker, and how many of those survived to the kept set. Lets us
+	// answer "did the reranker actually pick freshly-attached files?" without
+	// joining storage tables in Tempo. Computed regardless of whether the
+	// session feature is enabled (zeros when no session candidates were merged).
+	candidatesInArtifactsSession int
+	modelKeptArtifactsSession    int
 }
 
 // response is the expected JSON response from Flash.

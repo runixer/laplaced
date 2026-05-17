@@ -8,6 +8,11 @@ import (
 	"sort"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -57,12 +62,56 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		opts = &RetrievalOptions{}
 	}
 
+	// Root-for-RAG span. Structural attrs (counts, reranker, selected IDs)
+	// are filled in via closure-captured locals so the deferred End() sees
+	// final values regardless of which error path we take. Content events
+	// (raw_query, enriched_query) are noops when trace_content is off.
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/rag").Start(
+		ctx, "rag.Retrieve",
+		trace.WithAttributes(
+			attribute.Int64("user.id", userID),
+			attribute.String("rag.source", opts.Source),
+		),
+	)
+	var (
+		candidatesIn        int
+		candidatesOut       int
+		usedReranker        bool
+		selectedTopicIDs    []int64
+		selectedArtifactIDs []int64
+		spanErr             error
+	)
+	defer func() {
+		span.SetAttributes(
+			attribute.Int("rag.candidates_in", candidatesIn),
+			attribute.Int("rag.candidates_out", candidatesOut),
+			attribute.Bool("rag.used_reranker", usedReranker),
+		)
+		if len(selectedTopicIDs) > 0 {
+			span.SetAttributes(attribute.Int64Slice("rag.selected_topic_ids", selectedTopicIDs))
+		}
+		if len(selectedArtifactIDs) > 0 {
+			// Symmetric to selected_topic_ids — same "why was this retrieved"
+			// signal for artifacts. Lets a TraceQL query line up the live
+			// FilePart hashes from bot.current_media against the historical
+			// artifact IDs the reranker chose for the same prompt window.
+			span.SetAttributes(attribute.Int64Slice("rag.selected_artifact_ids", selectedArtifactIDs))
+		}
+		obs.RecordContent(span, "rag.raw_query", query)
+		if debugInfo.EnrichedQuery != "" && debugInfo.EnrichedQuery != query {
+			obs.RecordContent(span, "rag.enriched_query", debugInfo.EnrichedQuery)
+		}
+		_ = obs.ObserveErr(span, spanErr)
+		span.End()
+	}()
+
 	// 1. Enrich query if enabled
 	enrichedQuery := s.enrichQueryIfEnabled(ctx, userID, query, opts, debugInfo)
 
 	// 2. Create embedding
 	embedding, err := s.createEmbedding(ctx, userID, enrichedQuery)
 	if err != nil {
+		spanErr = err
 		return nil, debugInfo, err
 	}
 
@@ -81,15 +130,18 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 
 	// 5. Determine if reranker should be used
 	useReranker := s.shouldUseReranker(len(matches), len(personCandidates), len(artifactCandidates))
+	usedReranker = useReranker
 	maxCandidates := s.getMaxCandidates(useReranker)
 
 	// 6. Limit candidates
 	matches = limitMatches(matches, maxCandidates)
+	candidatesIn = len(matches)
 
 	// 7. Load topic map
 	topicMap, err := s.loadTopicMap(ctx, userID, matches)
 	if err != nil {
 		s.logger.Error("failed to load topics for retrieval", "error", err)
+		spanErr = err
 		return nil, debugInfo, err
 	}
 
@@ -121,8 +173,14 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 		if err != nil {
 			s.logger.Warn("reranker failed, using vector search results", "error", err)
 			RecordRerankerFallback(userID, "error")
+			// Reranker fallback is graceful — flip the span attr to reflect
+			// that the final result did not honor reranker selection.
+			usedReranker = false
 		} else {
-			// Filter matches by reranker selection
+			// Capture selected IDs BEFORE filter for trace visibility; the
+			// filter drops matches but the IDs chosen by the reranker are
+			// the single most useful "why was this retrieved" signal.
+			selectedTopicIDs = append(selectedTopicIDs, rerankerOut.selectedTopicIDs...)
 			matches = filterMatchesByReranker(matches, rerankerOut.selectedTopicIDs, rerankerOut.topicReasons)
 		}
 	} else {
@@ -139,8 +197,11 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 	// 9. Build final result
 	result, err := s.buildRetrievalResult(ctx, userID, matches, topicMap, rerankerOut, artifactCandidates, useReranker)
 	if err != nil {
+		spanErr = err
 		return nil, debugInfo, err
 	}
+	candidatesOut = len(result.Topics)
+	selectedArtifactIDs = append(selectedArtifactIDs, result.SelectedArtifactIDs...)
 
 	// 10. Record metrics
 	debugInfo.Results = result.Topics

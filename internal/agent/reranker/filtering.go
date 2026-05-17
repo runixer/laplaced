@@ -142,3 +142,21 @@ func filterValidArtifacts(
 		Artifacts: validArtifacts,
 	}
 }
+
+// countSessionKept returns how many of the given artifact selections originated
+// from session-injection (IsSession=true on the input candidate). Used to emit
+// reranker.model_kept.artifacts.session as a separate span attribute alongside
+// model_kept.artifacts so operators can see "of N kept files, K were session".
+func countSessionKept(selections []ArtifactSelection, artifactsMap map[int64]ArtifactCandidate) int {
+	n := 0
+	for _, sel := range selections {
+		id, err := parseArtifactID(sel.ID)
+		if err != nil {
+			continue
+		}
+		if c, ok := artifactsMap[id]; ok && c.IsSession {
+			n++
+		}
+	}
+	return n
+}

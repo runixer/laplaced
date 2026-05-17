@@ -125,23 +125,3 @@ func TestConstants(t *testing.T) {
 	assert.Equal(t, "topics", ContextSourceTopics)
 	assert.Equal(t, "session", ContextSourceSession)
 }
-
-func TestRecordLLMAnomaly(t *testing.T) {
-	tests := []struct {
-		name        string
-		userID      int64
-		anomalyType string
-	}{
-		{"empty response", 123, "empty_response"},
-		{"sanitized", 456, "sanitized"},
-		{"retry success", 789, "retry_success"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.NotPanics(t, func() {
-				RecordLLMAnomaly(tt.userID, tt.anomalyType)
-			})
-		})
-	}
-}
