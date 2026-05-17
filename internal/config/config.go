@@ -18,10 +18,53 @@ import (
 var defaultConfig []byte
 
 type BotConfig struct {
-	Language          string  `yaml:"language" env:"LAPLACED_BOT_LANGUAGE"`
-	AllowedUserIDs    []int64 `yaml:"allowed_user_ids" env:"LAPLACED_ALLOWED_USER_IDS"`
-	SystemPromptExtra string  `yaml:"system_prompt_extra"`
-	TurnWaitDuration  string  `yaml:"turn_wait_duration"`
+	Language          string          `yaml:"language" env:"LAPLACED_BOT_LANGUAGE"`
+	AllowedUserIDs    []int64         `yaml:"allowed_user_ids" env:"LAPLACED_ALLOWED_USER_IDS"`
+	SystemPromptExtra string          `yaml:"system_prompt_extra"`
+	TurnWaitDuration  string          `yaml:"turn_wait_duration"`
+	Streaming         StreamingConfig `yaml:"streaming"`
+}
+
+// StreamingConfig controls progressive bot replies via editMessageText.
+//
+// When Enabled, the bot sends a placeholder message immediately, edits it with
+// tool-execution status during the agent's tool loop, and then progressively
+// reveals the LLM's content as SSE deltas arrive. EditThrottleMs / EditMinChars
+// throttle edits to keep under Telegram's edit rate limit. MaxBufferChars caps
+// in-bubble streaming — past that the response falls back to the existing
+// finalize+sendResponses path (separate messages).
+type StreamingConfig struct {
+	Enabled        bool `yaml:"enabled" env:"LAPLACED_BOT_STREAMING_ENABLED"`
+	EditThrottleMs int  `yaml:"edit_throttle_ms" env:"LAPLACED_BOT_STREAMING_EDIT_THROTTLE_MS"`
+	EditMinChars   int  `yaml:"edit_min_chars" env:"LAPLACED_BOT_STREAMING_EDIT_MIN_CHARS"`
+	MaxBufferChars int  `yaml:"max_buffer_chars" env:"LAPLACED_BOT_STREAMING_MAX_BUFFER_CHARS"`
+}
+
+// GetEditThrottle returns the configured throttle as a Duration. Defaults to
+// 1s when unset or non-positive.
+func (s StreamingConfig) GetEditThrottle() time.Duration {
+	if s.EditThrottleMs <= 0 {
+		return time.Second
+	}
+	return time.Duration(s.EditThrottleMs) * time.Millisecond
+}
+
+// GetEditMinChars returns the minimum new-character threshold for an early
+// edit (before the throttle elapses). Defaults to 80 when unset.
+func (s StreamingConfig) GetEditMinChars() int {
+	if s.EditMinChars <= 0 {
+		return 80
+	}
+	return s.EditMinChars
+}
+
+// GetMaxBufferChars returns the in-bubble streaming cap. Defaults to 3400 — a
+// safety margin under Telegram's 4096 UTF-16 limit accounting for HTML expansion.
+func (s StreamingConfig) GetMaxBufferChars() int {
+	if s.MaxBufferChars <= 0 {
+		return 3400
+	}
+	return s.MaxBufferChars
 }
 
 // AgentConfig defines configuration for a single agent.

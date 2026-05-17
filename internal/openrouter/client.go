@@ -28,6 +28,7 @@ const (
 
 type Client interface {
 	CreateChatCompletion(ctx context.Context, req ChatCompletionRequest) (ChatCompletionResponse, error)
+	CreateChatCompletionStream(ctx context.Context, req ChatCompletionRequest) (<-chan StreamEvent, error)
 	CreateEmbeddings(ctx context.Context, req EmbeddingRequest) (EmbeddingResponse, error)
 }
 
@@ -291,6 +292,11 @@ type ChatCompletionRequest struct {
 	// Provider overrides OpenRouter's provider routing for this request.
 	// When nil, the client-level default (if any) is applied before sending.
 	Provider *ProviderRouting `json:"provider,omitempty"`
+
+	// Stream switches the request to SSE streaming. Set internally by
+	// CreateChatCompletionStream; callers leave this false and use the
+	// dedicated streaming method.
+	Stream bool `json:"stream,omitempty"`
 
 	// UserID is used for metrics tracking only, not sent to API
 	UserID int64 `json:"-"`

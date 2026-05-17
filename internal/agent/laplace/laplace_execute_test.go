@@ -587,19 +587,22 @@ func TestLogExecution(t *testing.T) {
 	_ = translator
 }
 
-// TestExecute_WithToolTypingAction tests the typing action callback during tool execution.
-func TestExecute_WithToolTypingAction(t *testing.T) {
+// TestExecute_WithToolStart tests the per-tool start callback during tool execution.
+func TestExecute_WithToolStart(t *testing.T) {
 	cfg, translator, agent, mockStore, mockORClient, handler := setupExecuteTest(t)
 
 	userID := int64(123)
 	typingCallCount := 0
+	var seenToolNames []string
 	req := &Request{
 		UserID:              userID,
 		RawQuery:            "search",
 		HistoryContent:      "search",
 		CurrentMessageParts: []interface{}{openrouter.TextPart{Type: "text", Text: "search"}},
-		OnTypingAction: func() {
+		OnToolStart: func(toolName, arguments string) {
 			typingCallCount++
+			seenToolNames = append(seenToolNames, toolName)
+			_ = arguments
 		},
 	}
 
@@ -621,7 +624,8 @@ func TestExecute_WithToolTypingAction(t *testing.T) {
 
 	resp, err := agent.Execute(context.Background(), req, handler)
 	require.NoError(t, err)
-	assert.Equal(t, 1, typingCallCount, "typing action should be called once per tool execution")
+	assert.Equal(t, 1, typingCallCount, "OnToolStart should be called once per tool execution")
+	assert.Equal(t, []string{"search_web"}, seenToolNames, "OnToolStart should receive the tool name")
 	assert.Equal(t, "Final", resp.Content)
 
 	mockStore.AssertExpectations(t)

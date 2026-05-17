@@ -65,6 +65,11 @@ func (n *noOpBotAPI) SendMessage(ctx context.Context, req telegram.SendMessageRe
 	return &telegram.Message{MessageID: 1}, nil
 }
 
+// EditMessageText is a no-op for testbot.
+func (n *noOpBotAPI) EditMessageText(ctx context.Context, req telegram.EditMessageTextRequest) (*telegram.Message, error) {
+	return &telegram.Message{MessageID: req.MessageID}, nil
+}
+
 // SendPhoto is a no-op for testbot.
 func (n *noOpBotAPI) SendPhoto(ctx context.Context, req telegram.SendPhotoRequest) (*telegram.Message, error) {
 	return &telegram.Message{MessageID: 1}, nil

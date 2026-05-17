@@ -95,6 +95,12 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 	if contextData.RAGInfo != nil {
 		enrichedQuery = contextData.RAGInfo.EnrichedQuery
 	}
+	// Surface the enriched query to the caller (e.g. streaming sink shows
+	// it as a transient status before the first LLM token arrives). Skipped
+	// when enrichment was disabled or returned an empty string.
+	if enrichedQuery != "" && req.OnRAGEnriched != nil {
+		req.OnRAGEnriched(enrichedQuery)
+	}
 	orMessages := l.BuildMessages(ctx, contextData, req.HistoryContent, req.CurrentMessageParts, enrichedQuery)
 
 	// Extract image FileParts from current message for tools that operate
@@ -134,6 +140,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 
 	var totalLLMDuration time.Duration
 	var totalToolDuration time.Duration
+	var firstContentDelay time.Duration
 
 	for {
 		if toolIterations >= maxToolIterations {
@@ -153,7 +160,10 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 
 		tracker.StartTurn()
 		llmStart := time.Now()
-		resp, err := l.orClient.CreateChatCompletion(ctx, orReq)
+
+		// Adapter: streaming and buffered paths produce a uniform
+		// `turnOutcome` so the rest of the loop body is path-agnostic.
+		outcome, err := l.runChatTurn(ctx, orReq, req, logger)
 		llmDuration := time.Since(llmStart)
 		totalLLMDuration += llmDuration
 
@@ -162,30 +172,24 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 			return nil, fmt.Errorf("LLM call failed: %w", err)
 		}
 
-		if len(resp.Choices) == 0 {
-			logger.Warn("empty choices from OpenRouter",
-				"model", resp.Model,
-				"prompt_tokens", resp.Usage.PromptTokens,
-				"completion_tokens", resp.Usage.CompletionTokens,
-			)
-			return nil, errors.New("empty response from LLM")
+		// Capture TTFT from the first iteration that produced content (stream mode only).
+		if firstContentDelay == 0 && outcome.firstContentDelay > 0 {
+			firstContentDelay = outcome.firstContentDelay
 		}
 
 		tracker.EndTurn(
-			resp.DebugRequestBody,
-			resp.DebugResponseBody,
-			resp.Usage.PromptTokens,
-			resp.Usage.CompletionTokens,
-			resp.Usage.Cost,
+			outcome.debugRequestBody,
+			outcome.debugResponseBody,
+			outcome.promptTokens,
+			outcome.completionTokens,
+			outcome.cost,
 		)
 
-		choice := resp.Choices[0]
-
 		// Check for empty response (no content and no tool calls) - retry
-		if strings.TrimSpace(choice.Message.Content) == "" && len(choice.Message.ToolCalls) == 0 {
+		if strings.TrimSpace(outcome.content) == "" && len(outcome.toolCalls) == 0 {
 			logger.Warn("empty LLM response (no content, no tools)",
-				"finish_reason", choice.FinishReason,
-				"model", resp.Model,
+				"finish_reason", outcome.finishReason,
+				"model", outcome.model,
 				"retry_attempt", emptyRetries+1,
 			)
 
@@ -218,6 +222,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 				LLMDuration:       totalLLMDuration,
 				ToolDuration:      totalToolDuration,
 				TotalTurns:        tracker.TurnCount(),
+				FirstContentDelay: firstContentDelay,
 				RAGInfo:           contextData.RAGInfo,
 				Messages:          orMessages,
 				ConversationTurns: tracker.Build(),
@@ -231,31 +236,35 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 		}
 
 		// Handle tool calls
-		if len(choice.Message.ToolCalls) > 0 {
-			logger.Info("Model requested tool calls", "count", len(choice.Message.ToolCalls))
+		if len(outcome.toolCalls) > 0 {
+			logger.Info("Model requested tool calls", "count", len(outcome.toolCalls))
 
-			// Send intermediate message if present
-			if choice.Message.Content != "" && strings.TrimSpace(choice.Message.Content) != "" {
+			// Send intermediate message if present.
+			// In stream mode the buffered content was NOT forwarded to
+			// OnContentDelta (forwarding halts on the first tool-call delta);
+			// surface it here as a separate message so the user-visible
+			// behavior matches the buffered path.
+			if outcome.content != "" && strings.TrimSpace(outcome.content) != "" {
 				if req.OnIntermediateMessage != nil {
-					req.OnIntermediateMessage(choice.Message.Content)
+					req.OnIntermediateMessage(outcome.content)
 				}
 			}
 
 			// Add assistant message with tool calls
-			var content interface{} = choice.Message.Content
-			if choice.Message.Content == "" {
+			var content interface{} = outcome.content
+			if outcome.content == "" {
 				content = nil
 			}
 			orMessages = append(orMessages, openrouter.Message{
 				Role:             "assistant",
 				Content:          content,
-				ToolCalls:        choice.Message.ToolCalls,
-				ReasoningDetails: choice.Message.ReasoningDetails,
+				ToolCalls:        outcome.toolCalls,
+				ReasoningDetails: outcome.reasoningDetails,
 			})
 
 			// Execute tools
 			toolStart := time.Now()
-			toolMessages, toolArtifactIDs := l.executeToolCalls(ctx, toolHandler, tcc, choice.Message.ToolCalls, req.OnTypingAction, logger)
+			toolMessages, toolArtifactIDs := l.executeToolCalls(ctx, toolHandler, tcc, outcome.toolCalls, req.OnToolStart, logger)
 			totalToolDuration += time.Since(toolStart)
 
 			generatedArtifactIDs = append(generatedArtifactIDs, toolArtifactIDs...)
@@ -264,7 +273,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 		}
 
 		// Final response
-		finalResponse = choice.Message.Content
+		finalResponse = outcome.content
 		break
 	}
 
@@ -290,28 +299,97 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 		LLMDuration:          totalLLMDuration,
 		ToolDuration:         totalToolDuration,
 		TotalTurns:           tracker.TurnCount(),
+		FirstContentDelay:    firstContentDelay,
 		RAGInfo:              contextData.RAGInfo,
 		Messages:             orMessages,
 		ConversationTurns:    tracker.Build(),
 	}, nil
 }
 
+// turnOutcome is the unified shape produced by both the buffered
+// CreateChatCompletion path and the SSE streaming path. It carries just the
+// fields the tool loop in Execute reads after each iteration.
+type turnOutcome struct {
+	content           string
+	toolCalls         []openrouter.ToolCall
+	reasoningDetails  interface{}
+	finishReason      string
+	model             string
+	promptTokens      int
+	completionTokens  int
+	cost              *float64
+	debugRequestBody  string
+	debugResponseBody string
+	firstContentDelay time.Duration // set only when stream mode forwarded content
+}
+
+// runChatTurn dispatches one LLM turn through either the buffered or
+// streaming OpenRouter API based on req.UseStreaming.
+func (l *Laplace) runChatTurn(
+	ctx context.Context,
+	orReq openrouter.ChatCompletionRequest,
+	req *Request,
+	logger *slog.Logger,
+) (*turnOutcome, error) {
+	if req.UseStreaming {
+		stream, err := l.runStreamingTurn(ctx, orReq, req.OnContentDelta, logger)
+		if err != nil {
+			return nil, err
+		}
+		return &turnOutcome{
+			content:           stream.Content,
+			toolCalls:         stream.ToolCalls,
+			reasoningDetails:  stream.ReasoningDetails,
+			finishReason:      stream.FinishReason,
+			model:             stream.Model,
+			promptTokens:      stream.PromptTokens,
+			completionTokens:  stream.CompletionTokens,
+			cost:              stream.Cost,
+			debugResponseBody: stream.DebugResponseBody,
+			firstContentDelay: stream.FirstContentDelay,
+		}, nil
+	}
+
+	resp, err := l.orClient.CreateChatCompletion(ctx, orReq)
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.Choices) == 0 {
+		return nil, errors.New("empty response from LLM")
+	}
+	choice := resp.Choices[0]
+	return &turnOutcome{
+		content:           choice.Message.Content,
+		toolCalls:         choice.Message.ToolCalls,
+		reasoningDetails:  choice.Message.ReasoningDetails,
+		finishReason:      choice.FinishReason,
+		model:             resp.Model,
+		promptTokens:      resp.Usage.PromptTokens,
+		completionTokens:  resp.Usage.CompletionTokens,
+		cost:              resp.Usage.Cost,
+		debugRequestBody:  resp.DebugRequestBody,
+		debugResponseBody: resp.DebugResponseBody,
+	}, nil
+}
+
 // executeToolCalls executes tool calls and returns (tool result messages,
-// accumulated generated artifact IDs).
+// accumulated generated artifact IDs). onToolStart receives the tool name
+// and raw arguments JSON so the bot wiring can show a localized status with
+// the tool's primary argument (e.g. the search query or image prompt).
 func (l *Laplace) executeToolCalls(
 	ctx context.Context,
 	handler ToolHandler,
 	tcc ToolCallContext,
 	toolCalls []openrouter.ToolCall,
-	onTypingAction func(),
+	onToolStart func(toolName, arguments string),
 	logger *slog.Logger,
 ) ([]openrouter.Message, []int64) {
 	var toolMessages []openrouter.Message
 	var artifactIDs []int64
 
 	for _, toolCall := range toolCalls {
-		if onTypingAction != nil {
-			onTypingAction()
+		if onToolStart != nil {
+			onToolStart(toolCall.Function.Name, toolCall.Function.Arguments)
 		}
 
 		result, err := handler.ExecuteToolCall(ctx, tcc, toolCall.Function.Name, toolCall.Function.Arguments)

@@ -27,6 +27,14 @@ func (m *MockBotAPI) SendMessage(ctx context.Context, req telegram.SendMessageRe
 	return args.Get(0).(*telegram.Message), args.Error(1)
 }
 
+func (m *MockBotAPI) EditMessageText(ctx context.Context, req telegram.EditMessageTextRequest) (*telegram.Message, error) {
+	args := m.Called(ctx, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*telegram.Message), args.Error(1)
+}
+
 func (m *MockBotAPI) SendPhoto(ctx context.Context, req telegram.SendPhotoRequest) (*telegram.Message, error) {
 	args := m.Called(ctx, req)
 	if args.Get(0) == nil {
@@ -687,6 +695,31 @@ func (m *MockOpenRouterClient) CreateChatCompletion(ctx context.Context, req ope
 		return *resp, args.Error(1)
 	}
 	return args.Get(0).(openrouter.ChatCompletionResponse), args.Error(1)
+}
+
+// CreateChatCompletionStream returns the channel registered on the mock under
+// the call's first return value. Tests should pre-build a channel of
+// openrouter.StreamEvent values and Return(ch, nil). For convenience the
+// helper StreamEventsFromChunks(chunks...) builds such a channel.
+func (m *MockOpenRouterClient) CreateChatCompletionStream(ctx context.Context, req openrouter.ChatCompletionRequest) (<-chan openrouter.StreamEvent, error) {
+	args := m.Called(ctx, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(<-chan openrouter.StreamEvent), args.Error(1)
+}
+
+// StreamEventsFromChunks builds a closed channel of StreamEvents from a list
+// of chunks. Useful in unit tests as Return value for CreateChatCompletionStream.
+// The channel is buffered enough for all events plus closes synchronously so
+// consumers get full data on first read attempt.
+func StreamEventsFromChunks(chunks ...openrouter.ChatCompletionChunk) <-chan openrouter.StreamEvent {
+	ch := make(chan openrouter.StreamEvent, len(chunks))
+	for i := range chunks {
+		ch <- openrouter.StreamEvent{Chunk: &chunks[i]}
+	}
+	close(ch)
+	return ch
 }
 
 func (m *MockOpenRouterClient) CreateEmbeddings(ctx context.Context, req openrouter.EmbeddingRequest) (openrouter.EmbeddingResponse, error) {

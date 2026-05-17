@@ -24,9 +24,18 @@ type Request struct {
 	MessageThreadID int
 	ReplyToMsgID    int
 
+	// UseStreaming switches the agent to SSE streaming mode. When true, the
+	// final iteration's content is delivered via OnContentDelta as deltas
+	// arrive (instead of returned as a single buffered string). The non-final
+	// (tool-call) iterations still buffer normally and route any pre-tool
+	// content via OnIntermediateMessage.
+	UseStreaming bool
+
 	// Callbacks for Telegram actions
-	OnIntermediateMessage func(text string) // Called when tool call has intermediate text
-	OnTypingAction        func()            // Called before tool execution
+	OnIntermediateMessage func(text string)                // Called when tool call has intermediate text
+	OnContentDelta        func(text string)                // Streaming: called for each user-visible content fragment in the final iteration
+	OnToolStart           func(toolName, arguments string) // Called before each tool execution; receives the tool name and raw arguments JSON so callers can show a localized status
+	OnRAGEnriched         func(enrichedQuery string)       // Called once after context loading completes, when the enricher produced a non-empty rephrased query
 }
 
 // Response contains the result of Laplace agent execution.
@@ -52,6 +61,12 @@ type Response struct {
 	LLMDuration  time.Duration
 	ToolDuration time.Duration
 	TotalTurns   int
+
+	// FirstContentDelay is the time from the start of the final-iteration
+	// LLM call to the first user-visible content delta. Set only when
+	// streaming was used and the final iteration produced content.
+	// Zero in non-streaming mode and when the response was content-empty.
+	FirstContentDelay time.Duration
 
 	// RAG info for logging
 	RAGInfo *rag.RetrievalDebugInfo

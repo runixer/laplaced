@@ -227,6 +227,15 @@ tools:
 bot:
   language: "en"
   turn_wait_duration: "2s"
+  # Progressive (streaming) replies via editMessageText. The bot sends a
+  # placeholder immediately, edits it with tool-execution status, and reveals
+  # LLM content as SSE deltas arrive. Telegram clients animate the edits.
+  # Set LAPLACED_BOT_STREAMING_ENABLED=false to fall back to one-shot replies.
+  streaming:
+    enabled: true
+    edit_throttle_ms: 1000   # min interval between edits to the same bubble
+    edit_min_chars: 80       # earlier edit allowed once this many new chars accumulate
+    max_buffer_chars: 3400   # past this, finalize first bubble and switch to multi-message send
 
 # Database Configuration
 database:

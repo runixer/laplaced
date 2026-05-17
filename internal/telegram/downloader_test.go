@@ -23,6 +23,10 @@ func (m *mockBotAPI) SendMessage(ctx context.Context, req SendMessageRequest) (*
 	return nil, nil
 }
 
+func (m *mockBotAPI) EditMessageText(ctx context.Context, req EditMessageTextRequest) (*Message, error) {
+	return nil, nil
+}
+
 func (m *mockBotAPI) SendPhoto(ctx context.Context, req SendPhotoRequest) (*Message, error) {
 	return nil, nil
 }

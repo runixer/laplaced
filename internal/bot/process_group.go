@@ -183,6 +183,21 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	// Create tool handler
 	toolHandler := b.newBotToolHandler(userID, logger)
 
+	// Streaming sink: when enabled, this owns the in-flight reply bubble
+	// (placeholder → tool status → progressive content → final HTML).
+	// On error/empty paths we route through sink.Finalize so the placeholder
+	// never gets orphaned.
+	var sink *streamSink
+	if b.cfg.Bot.Streaming.Enabled {
+		sink = newStreamSink(
+			shutdownSafeCtx, b.api, b.translator, b.cfg.Bot.Language,
+			b.cfg.Bot.Streaming, chatID, lastMsg.MessageThreadID, lastMsg.MessageID,
+			logger,
+		)
+		// Account for the placeholder send in Telegram metrics.
+		telegramCallCount++
+	}
+
 	// Build request
 	req := &laplace.Request{
 		UserID:              userID,
@@ -192,6 +207,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		ChatID:              chatID,
 		MessageThreadID:     lastMsg.MessageThreadID,
 		ReplyToMsgID:        lastMsg.MessageID,
+		UseStreaming:        sink != nil,
 		OnIntermediateMessage: func(text string) {
 			responses, err := b.finalizeResponse(chatID, lastMsg.MessageThreadID, userID, 0, text, logger)
 			if err != nil {
@@ -203,9 +219,16 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 			totalTelegramDuration += time.Since(tgStart)
 			telegramCallCount += len(responses)
 		},
-		OnTypingAction: func() {
+		OnToolStart: func(toolName, arguments string) {
+			if sink != nil {
+				sink.Status(toolName, arguments)
+			}
 			b.sendAction(shutdownSafeCtx, chatID, lastMsg.MessageThreadID, "typing")
 		},
+	}
+	if sink != nil {
+		req.OnContentDelta = sink.Delta
+		req.OnRAGEnriched = sink.RAG
 	}
 
 	// Execute
@@ -213,20 +236,30 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	if err != nil {
 		// Fatal error (not a partial execution failure)
 		logger.Error("laplace execution fatal error", "error", err)
+		errText := b.translator.Get(b.cfg.Bot.Language, "bot.api_error")
 		tgStart := time.Now()
-		b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
+		if sink != nil {
+			sink.Finalize(finalizeArgs{UserID: userID, HadError: true, ErrorText: errText}, b.streamFinalizeCallback(chatID, lastMsg.MessageThreadID, userID, logger))
+		} else {
+			b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: errText}}, logger)
+			telegramCallCount++
+		}
 		totalTelegramDuration += time.Since(tgStart)
-		telegramCallCount++
 		return
 	}
 
 	// Check for partial execution error (e.g., max retries reached)
 	if resp.Error != nil {
 		logger.Error("laplace execution failed", "error", resp.Error, "total_turns", resp.TotalTurns)
+		errText := b.translator.Get(b.cfg.Bot.Language, "bot.api_error")
 		tgStart := time.Now()
-		b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
+		if sink != nil {
+			sink.Finalize(finalizeArgs{UserID: userID, HadError: true, ErrorText: errText}, b.streamFinalizeCallback(chatID, lastMsg.MessageThreadID, userID, logger))
+		} else {
+			b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: errText}}, logger)
+			telegramCallCount++
+		}
 		totalTelegramDuration += time.Since(tgStart)
-		telegramCallCount++
 
 		// Log partial execution for debugging
 		var cost float64
@@ -274,9 +307,21 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		"cost_usd", stat.CostUSD,
 	)
 
+	// Record TTFT (stream mode only — non-streaming path leaves it zero).
+	if resp.FirstContentDelay > 0 {
+		RecordMessageLLMFirstToken(userID, resp.FirstContentDelay.Seconds())
+	}
+
 	// Branch: if the turn produced generated images, route through the
 	// media-aware reply path. Otherwise keep the text-only path.
 	if len(resp.GeneratedArtifactIDs) > 0 {
+		// Image generation isn't streaming-aware in v1; if a sink was opened,
+		// finalize it with the response text so the placeholder doesn't
+		// linger. The media path then sends images and any follow-up text.
+		if sink != nil {
+			sink.Finalize(finalizeArgs{UserID: userID, FullText: resp.Content}, b.streamFinalizeCallback(chatID, lastMsg.MessageThreadID, userID, logger))
+			RecordMessageTelegramEditCount(userID, sink.editCount)
+		}
 		mediaDur, sentCount := b.sendResponseWithGeneratedImages(
 			shutdownSafeCtx, userID, chatID, lastMsg.MessageThreadID, lastMsg.MessageID,
 			resp.Content, resp.GeneratedArtifactIDs, logger,
@@ -287,15 +332,34 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		return
 	}
 
-	// Finalize text-only response
-	responses, err := b.finalizeResponse(chatID, lastMsg.MessageThreadID, userID, lastMsg.MessageID, resp.Content, logger)
-	if err != nil {
-		logger.Error("failed to finalize response", "error", err)
-	}
-
 	// Save assistant response to history
 	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "assistant", Content: resp.Content}); err != nil {
 		logger.Error("failed to add assistant message to history", "error", err)
+	}
+
+	// Finalize: streaming path goes through sink (which edits the bubble and
+	// returns any overflow chunks to send as new messages); buffered path
+	// uses the existing finalizeResponse + sendResponses pipeline.
+	if sink != nil {
+		extra, edits := sink.Finalize(
+			finalizeArgs{UserID: userID, FullText: resp.Content},
+			b.streamFinalizeCallback(chatID, lastMsg.MessageThreadID, userID, logger),
+		)
+		RecordMessageTelegramEditCount(userID, edits)
+		if len(extra) > 0 {
+			tgStart := time.Now()
+			b.sendResponses(shutdownSafeCtx, chatID, extra, logger)
+			totalTelegramDuration += time.Since(tgStart)
+			telegramCallCount += len(extra)
+		}
+		success = true
+		return
+	}
+
+	// Non-streaming path (escape hatch).
+	responses, err := b.finalizeResponse(chatID, lastMsg.MessageThreadID, userID, lastMsg.MessageID, resp.Content, logger)
+	if err != nil {
+		logger.Error("failed to finalize response", "error", err)
 	}
 
 	// Send response
@@ -305,6 +369,18 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	telegramCallCount += len(responses)
 
 	success = true
+}
+
+// streamFinalizeCallback returns a finalizeResponse adapter for the
+// streaming sink. The sink doesn't know about chatID/threadID/userID/logger,
+// so we close over them here. Returned function is the second arg to
+// streamSink.Finalize.
+func (b *Bot) streamFinalizeCallback(chatID int64, threadID int, userID int64, logger *slog.Logger) func(string) ([]telegram.SendMessageRequest, error) {
+	return func(text string) ([]telegram.SendMessageRequest, error) {
+		// replyToMsgID=0: only the placeholder (which we edit) had the reply
+		// link; overflow chunks are plain follow-up sends.
+		return b.finalizeResponse(chatID, threadID, userID, 0, text, logger)
+	}
 }
 
 func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logger *slog.Logger) (string, string, []interface{}, []*files.ProcessedFile, error) {

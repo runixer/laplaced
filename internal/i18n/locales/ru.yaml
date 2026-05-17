@@ -18,6 +18,25 @@ bot:
   voice_recognition_prefix: "(Распознано из аудио):"
   voice_recognition_disabled: "Распознавание голосовых сообщений отключено."
   voice_message_marker: "[Голосовое сообщение]"
+  streaming:
+    thinking: "💭 Думаю…"
+    # rag_searching is shown after the enricher reformulates the user's query,
+    # right before the first LLM call. %s is the enriched query.
+    rag_searching: "🔎 Ищу в памяти: <i>%s</i>"
+    # Per-tool statuses. The "_arg" variants take the tool's primary argument
+    # (query / prompt) as %s; the bare variants are used when the arg is empty
+    # or absent from the arguments JSON.
+    tool_internet_search: "🌐 Ищу в интернете…"
+    tool_internet_search_arg: "🌐 Ищу в интернете: <i>%s</i>"
+    tool_search_history: "🔍 Вспоминаю…"
+    tool_search_history_arg: "🔍 Вспоминаю: <i>%s</i>"
+    tool_manage_memory: "💾 Обновляю память…"
+    tool_search_people: "👥 Ищу человека…"
+    tool_search_people_arg: "👥 Ищу человека: <i>%s</i>"
+    tool_manage_people: "👥 Обновляю контакты…"
+    tool_generate_image: "🎨 Рисую…"
+    tool_generate_image_arg: "🎨 Рисую: <i>%s</i>"
+    tool_generic: "⚙️ Выполняю инструмент…"
   voice_instruction: |
     Это голосовое сообщение. ОБЯЗАТЕЛЬНО:
     1. Процитируй ПОЛНЫЙ текст (очищенный от мычаний, пауз, слов-паразитов) в формате:

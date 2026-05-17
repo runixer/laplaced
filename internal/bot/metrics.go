@@ -203,6 +203,40 @@ var (
 		},
 		[]string{"user_id", "type"},
 	)
+
+	// messageLLMFirstTokenDuration measures time-to-first-content in stream
+	// mode: from the moment the agent begins the final-iteration LLM call to
+	// the first user-visible delta.content (reasoning chunks don't count).
+	// Only recorded when streaming is enabled and the final iteration emits
+	// at least one content delta.
+	// Labels:
+	//   - user_id: user identifier
+	messageLLMFirstTokenDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: metricsNamespace,
+			Subsystem: "bot",
+			Name:      "message_llm_first_token_seconds",
+			Help:      "Time from final-iteration LLM call start to first user-visible content delta (stream mode)",
+			Buckets:   []float64{0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30, 45, 60},
+		},
+		[]string{"user_id"},
+	)
+
+	// messageTelegramEditCount counts the number of editMessageText calls
+	// the streaming sink issued per message. Useful for monitoring whether
+	// throttle settings keep us under Telegram's edit rate limit.
+	// Labels:
+	//   - user_id: user identifier
+	messageTelegramEditCount = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: metricsNamespace,
+			Subsystem: "bot",
+			Name:      "message_telegram_edit_count",
+			Help:      "Number of editMessageText calls per message (stream mode)",
+			Buckets:   []float64{0, 1, 2, 3, 5, 8, 12, 20, 30, 50},
+		},
+		[]string{"user_id"},
+	)
 )
 
 const (
@@ -305,4 +339,19 @@ func RecordMessageReaction(userID int64, duration float64) {
 func RecordLLMAnomaly(userID int64, anomalyType string) {
 	uid := formatUserID(userID)
 	llmAnomaliesTotal.WithLabelValues(uid, anomalyType).Inc()
+}
+
+// RecordMessageLLMFirstToken records time-to-first-content in stream mode.
+// Only call when streaming actually produced at least one content delta;
+// reasoning-only or empty responses should not be observed here.
+func RecordMessageLLMFirstToken(userID int64, durationSeconds float64) {
+	uid := formatUserID(userID)
+	messageLLMFirstTokenDuration.WithLabelValues(uid).Observe(durationSeconds)
+}
+
+// RecordMessageTelegramEditCount records the number of editMessageText calls
+// the streaming sink issued for a single message turn.
+func RecordMessageTelegramEditCount(userID int64, count int) {
+	uid := formatUserID(userID)
+	messageTelegramEditCount.WithLabelValues(uid).Observe(float64(count))
 }

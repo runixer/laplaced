@@ -109,6 +109,16 @@ type MessageOrigin struct {
 	AuthorSignature string `json:"author_signature,omitempty"`
 }
 
+// EditMessageTextRequest represents the parameters for the editMessageText method.
+// MessageThreadID is not editable (Telegram derives it from MessageID), so it is
+// omitted here. Used by the streaming sink to update an in-flight reply.
+type EditMessageTextRequest struct {
+	ChatID    int64  `json:"chat_id"`
+	MessageID int    `json:"message_id"`
+	Text      string `json:"text"`
+	ParseMode string `json:"parse_mode,omitempty"`
+}
+
 // SendMessageRequest represents the parameters for the sendMessage method.
 //
 // ВАЖНО: MessageThreadID использует *int вместо int, чтобы omitempty корректно

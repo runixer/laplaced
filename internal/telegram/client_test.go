@@ -93,6 +93,91 @@ func TestSendMessage(t *testing.T) {
 	assert.Equal(t, 1, msg.MessageID)
 }
 
+func TestEditMessageText(t *testing.T) {
+	t.Run("success returns edited message", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "/botfake-token/editMessageText", r.URL.Path)
+			var req EditMessageTextRequest
+			err := json.NewDecoder(r.Body).Decode(&req)
+			assert.NoError(t, err)
+			assert.Equal(t, int64(123), req.ChatID)
+			assert.Equal(t, 42, req.MessageID)
+			assert.Equal(t, "<b>updated</b>", req.Text)
+			assert.Equal(t, "HTML", req.ParseMode)
+
+			resp := APIResponse{
+				Ok:     true,
+				Result: json.RawMessage(`{"message_id": 42, "chat": {"id": 123, "type": "private"}, "text": "updated"}`),
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+		}))
+		defer server.Close()
+
+		client := &Client{
+			token:      "fake-token",
+			httpClient: server.Client(),
+			apiURL:     server.URL + "/botfake-token",
+		}
+		msg, err := client.EditMessageText(context.Background(), EditMessageTextRequest{
+			ChatID:    123,
+			MessageID: 42,
+			Text:      "<b>updated</b>",
+			ParseMode: "HTML",
+		})
+		assert.NoError(t, err)
+		require.NotNil(t, msg)
+		assert.Equal(t, 42, msg.MessageID)
+	})
+
+	t.Run("message-not-modified returns sentinel error", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			resp := APIResponse{
+				Ok:          false,
+				Description: "Bad Request: message is not modified: specified new message content and reply markup are exactly the same",
+				ErrorCode:   400,
+			}
+			w.WriteHeader(http.StatusOK) // Telegram returns 200 with ok:false
+			_ = json.NewEncoder(w).Encode(resp)
+		}))
+		defer server.Close()
+
+		client := &Client{
+			token:      "fake-token",
+			httpClient: server.Client(),
+			apiURL:     server.URL + "/botfake-token",
+		}
+		_, err := client.EditMessageText(context.Background(), EditMessageTextRequest{
+			ChatID: 1, MessageID: 1, Text: "x",
+		})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrMessageNotModified, "edit must surface ErrMessageNotModified for the not-modified case")
+	})
+
+	t.Run("other API error propagates", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			resp := APIResponse{
+				Ok:          false,
+				Description: "Bad Request: chat not found",
+				ErrorCode:   400,
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+		}))
+		defer server.Close()
+
+		client := &Client{
+			token:      "fake-token",
+			httpClient: server.Client(),
+			apiURL:     server.URL + "/botfake-token",
+		}
+		_, err := client.EditMessageText(context.Background(), EditMessageTextRequest{
+			ChatID: 1, MessageID: 1, Text: "x",
+		})
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, ErrMessageNotModified)
+		assert.Contains(t, err.Error(), "chat not found")
+	})
+}
+
 func TestSetMyCommands(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/botfake-token/setMyCommands", r.URL.Path)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 // This allows for easier mocking in tests.
 type BotAPI interface {
 	SendMessage(ctx context.Context, req SendMessageRequest) (*Message, error)
+	EditMessageText(ctx context.Context, req EditMessageTextRequest) (*Message, error)
 	SendPhoto(ctx context.Context, req SendPhotoRequest) (*Message, error)
 	SendDocument(ctx context.Context, req SendDocumentRequest) (*Message, error)
 	SendMediaGroup(ctx context.Context, req SendMediaGroupRequest) ([]Message, error)
@@ -28,6 +30,11 @@ type BotAPI interface {
 	GetUpdates(ctx context.Context, req GetUpdatesRequest) ([]Update, error)
 	GetToken() string
 }
+
+// ErrMessageNotModified is returned by EditMessageText when Telegram rejects an
+// edit because the new text and entities are identical to the current message.
+// Callers should treat this as a successful no-op.
+var ErrMessageNotModified = errors.New("telegram: message is not modified")
 
 // Client is a client for the Telegram Bot API.
 //
@@ -259,6 +266,33 @@ func (c *Client) SendMessage(ctx context.Context, req SendMessageRequest) (*Mess
 		return nil, fmt.Errorf("failed to unmarshal message: %w", err)
 	}
 
+	return &msg, nil
+}
+
+// EditMessageText edits the text of a message. Used by the streaming sink to
+// progressively reveal the bot's reply.
+//
+// Special-case error: when Telegram rejects the edit because the new text
+// equals the existing one (HTTP 400 "message is not modified"), this method
+// returns the typed sentinel ErrMessageNotModified so callers can ignore it
+// without string-matching API descriptions.
+func (c *Client) EditMessageText(ctx context.Context, req EditMessageTextRequest) (*Message, error) {
+	resp, err := c.makeRequest(ctx, "editMessageText", req)
+	if err != nil {
+		// Telegram returns "Bad Request: message is not modified" when the new
+		// content matches the existing message exactly. Surface as a typed error.
+		if strings.Contains(err.Error(), "message is not modified") {
+			return nil, ErrMessageNotModified
+		}
+		return nil, err
+	}
+
+	// editMessageText returns the edited Message on success when the bot
+	// authored the message (it does for our use case). Decode as Message.
+	var msg Message
+	if err := json.Unmarshal(resp.Result, &msg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal message: %w", err)
+	}
 	return &msg, nil
 }
 

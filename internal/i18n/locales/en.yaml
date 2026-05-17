@@ -18,6 +18,25 @@ bot:
   voice_recognition_prefix: "(Recognized from audio):"
   voice_recognition_disabled: "Voice recognition is disabled."
   voice_message_marker: "[Voice message]"
+  streaming:
+    thinking: "💭 Thinking…"
+    # rag_searching is shown after the enricher reformulates the user's query,
+    # right before the first LLM call. %s is the enriched query.
+    rag_searching: "🔎 Searching memory: <i>%s</i>"
+    # Per-tool statuses. The "_arg" variants take the tool's primary argument
+    # (query / prompt) as %s; the bare variants are used when the arg is empty
+    # or absent from the arguments JSON.
+    tool_internet_search: "🌐 Searching the web…"
+    tool_internet_search_arg: "🌐 Searching the web: <i>%s</i>"
+    tool_search_history: "🔍 Recalling…"
+    tool_search_history_arg: "🔍 Recalling: <i>%s</i>"
+    tool_manage_memory: "💾 Updating memory…"
+    tool_search_people: "👥 Looking up someone…"
+    tool_search_people_arg: "👥 Looking up: <i>%s</i>"
+    tool_manage_people: "👥 Updating contacts…"
+    tool_generate_image: "🎨 Drawing…"
+    tool_generate_image_arg: "🎨 Drawing: <i>%s</i>"
+    tool_generic: "⚙️ Running tool…"
   voice_instruction: |
     This is a voice message. MANDATORY:
     1. Quote the FULL text (cleaned of filler words, pauses) in this format:
