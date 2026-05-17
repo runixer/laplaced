@@ -255,6 +255,13 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	go b.sendTypingActionLoop(typingCtx, chatID, lastMsg.MessageThreadID)
 
 	historyContent, rawQuery, currentUserMessageContent, allProcessedFiles, err := b.prepareUserMessage(shutdownSafeCtx, group, logger)
+	if rawQuery != "" {
+		queryPreview, queryHash := obs.TextPreview(rawQuery, obs.DefaultPreviewLen)
+		span.SetAttributes(
+			attribute.String("bot.user_query_preview", queryPreview),
+			attribute.String("bot.user_query_hash", queryHash),
+		)
+	}
 	if err != nil {
 		// Check for file validation errors (unsupported format, too large)
 		var unsupported *files.UnsupportedFormatError
@@ -482,6 +489,21 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		"total_tokens", stat.TokensUsed,
 		"cost_usd", stat.CostUSD,
 	)
+
+	// Always-on, short preview of what the bot is about to send. Unlike
+	// obs.RecordContent (which records the full body as a span event under
+	// the content toggle), this is a single attribute that lives in the
+	// Tempo index — usable directly in TraceQL like
+	// `{span.bot.reply_preview =~ ".*Isotonic.*"}` to locate a turn by its
+	// reply text without ssh/docker logs. The paired hash lets you join the
+	// same reply across spans even after truncation.
+	if resp.Content != "" {
+		replyPreview, replyHash := obs.TextPreview(resp.Content, obs.DefaultPreviewLen)
+		span.SetAttributes(
+			attribute.String("bot.reply_preview", replyPreview),
+			attribute.String("bot.reply_hash", replyHash),
+		)
+	}
 
 	// Branch: if the turn produced generated images, route through the
 	// media-aware reply path. Otherwise keep the text-only path.
