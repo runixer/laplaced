@@ -587,6 +587,12 @@ func (r *Reranker) rerank(
 		tr.modelRawArtifacts = len(result.Artifacts)
 		rawCount := tr.modelRawTopics + tr.modelRawPeople + tr.modelRawArtifacts
 
+		// Capture the raw IDs the model returned BEFORE filtering, so the
+		// span event below can show the kept-vs-hallucinated split per type.
+		rawTopicIDs := collectIDs(result.Topics, func(t TopicSelection) string { return t.ID }, parseTopicID)
+		rawPeopleIDs := collectIDs(result.People, func(p PersonSelection) string { return p.ID }, parsePersonID)
+		rawArtifactIDs := collectIDs(result.Artifacts, func(a ArtifactSelection) string { return a.ID }, parseArtifactID)
+
 		// Validate topics and people
 		result = filterValidTopics(userID, result, candidateMap, logger)
 		result = filterValidPeople(userID, result, peopleMap, logger)
@@ -596,6 +602,28 @@ func (r *Reranker) rerank(
 		tr.modelKeptPeople = len(result.People)
 		tr.modelKeptArtifacts = len(result.Artifacts)
 		tr.modelKeptArtifactsSession = countSessionKept(result.Artifacts, artifactsMap)
+
+		keptTopicIDs := collectIDs(result.Topics, func(t TopicSelection) string { return t.ID }, parseTopicID)
+		keptPeopleIDs := collectIDs(result.People, func(p PersonSelection) string { return p.ID }, parsePersonID)
+		keptArtifactIDs := collectIDs(result.Artifacts, func(a ArtifactSelection) string { return a.ID }, parseArtifactID)
+
+		// Unconditional span event with the raw/kept/hallucinated split per
+		// type. IDs are autoincrement integers — no PII — so this event runs
+		// outside the content-recording toggle. It makes the
+		// model_empty-vs-all_hallucinated distinction inspectable in Tempo
+		// without dropping into SQLite on prod (the workflow that took ~20
+		// minutes during the 2026-05-17 investigation).
+		span.AddEvent("reranker.model_response", oteltrace.WithAttributes(
+			attribute.Int64Slice("raw.topics", rawTopicIDs),
+			attribute.Int64Slice("raw.people", rawPeopleIDs),
+			attribute.Int64Slice("raw.artifacts", rawArtifactIDs),
+			attribute.Int64Slice("kept.topics", keptTopicIDs),
+			attribute.Int64Slice("kept.people", keptPeopleIDs),
+			attribute.Int64Slice("kept.artifacts", keptArtifactIDs),
+			attribute.Int64Slice("hallucinated.topics", diffIDs(rawTopicIDs, keptTopicIDs)),
+			attribute.Int64Slice("hallucinated.people", diffIDs(rawPeopleIDs, keptPeopleIDs)),
+			attribute.Int64Slice("hallucinated.artifacts", diffIDs(rawArtifactIDs, keptArtifactIDs)),
+		))
 		if len(result.Topics) == 0 && len(result.People) == 0 && len(result.Artifacts) == 0 {
 			// The model gave us a clear "nothing here" answer (either empty
 			// arrays or only invalid IDs). Respect it instead of overriding

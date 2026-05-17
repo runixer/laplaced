@@ -155,7 +155,7 @@ func TestReranker_RecordsModelRawCounts_EmptyResponse(t *testing.T) {
 	assert.Equal(t, int64(1), attrs["reranker.candidates_in.topics"].AsInt64())
 	assert.Equal(t, "model_empty", attrs["reranker.fallback_reason"].AsString())
 
-	var foundToolCallEvent bool
+	var foundToolCallEvent, foundModelResponseEvent bool
 	for _, ev := range span.Events {
 		if ev.Name == "reranker.tool_call" {
 			foundToolCallEvent = true
@@ -168,10 +168,93 @@ func TestReranker_RecordsModelRawCounts_EmptyResponse(t *testing.T) {
 			assert.Equal(t, int64(1), eventAttrs["valid_count"].AsInt64())
 			assert.Equal(t, []int64{1}, eventAttrs["requested_ids"].AsInt64Slice())
 		}
+		if ev.Name == "reranker.model_response" {
+			foundModelResponseEvent = true
+			eventAttrs := map[attribute.Key]attribute.Value{}
+			for _, kv := range ev.Attributes {
+				eventAttrs[kv.Key] = kv.Value
+			}
+			// Empty model response → raw/kept/hallucinated all empty.
+			assert.Empty(t, eventAttrs["raw.topics"].AsInt64Slice())
+			assert.Empty(t, eventAttrs["kept.topics"].AsInt64Slice())
+			assert.Empty(t, eventAttrs["hallucinated.topics"].AsInt64Slice())
+		}
 	}
 	assert.True(t, foundToolCallEvent, "reranker.tool_call event must be emitted per iteration")
+	assert.True(t, foundModelResponseEvent, "reranker.model_response event must surface raw/kept/hallucinated IDs")
 
 	mockClient.AssertExpectations(t)
+}
+
+// TestReranker_RecordsModelResponseEvent_Hallucination verifies that when the
+// model returns IDs that don't match any candidate, the model_response event
+// surfaces them under hallucinated.* — the signal an investigator needs to
+// distinguish a true model error from a legitimate "nothing relevant".
+func TestReranker_RecordsModelResponseEvent_Hallucination(t *testing.T) {
+	getSpans := testutil.WithTracingCapture(t)
+
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	cfg := testConfig()
+	mockClient := &testutil.MockOpenRouterClient{}
+	mockStorage := &testutil.MockStorage{}
+	translator := testutil.TestTranslator(t)
+
+	r := New(mockClient, cfg, logger, translator, mockStorage, nil)
+
+	candidates := []Candidate{
+		{TopicID: 1, Score: 0.9, Topic: mockTopic(1, "Topic 1")},
+	}
+
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(makeToolCallResponse("get_topics_content", `{"topic_ids": [1]}`), nil).Once()
+	mockStorage.On("GetMessagesByTopicID", mock.Anything, int64(1)).
+		Return(mockMessagesForTopic(1), nil).Once()
+	// Model returns IDs that DON'T match any candidate.
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(makeFinalJSONResponse(`{"topic_ids": [{"id": "Topic:999", "reason": "fake"}, {"id": "Topic:888", "reason": "fake"}]}`), nil).Once()
+
+	req := &agent.Request{
+		Params: map[string]any{
+			ParamCandidates:          candidates,
+			ParamPersonCandidates:    []PersonCandidate{},
+			ParamArtifactCandidates:  []ArtifactCandidate{},
+			ParamContextualizedQuery: "ctx",
+			ParamOriginalQuery:       "orig",
+			ParamCurrentMessages:     "msgs",
+			"user_id":                int64(8889),
+		},
+	}
+
+	_, err := r.Execute(context.Background(), req)
+	require.NoError(t, err)
+
+	spans := getSpans()
+	require.Len(t, spans, 1)
+	span := spans[0]
+
+	attrs := map[attribute.Key]attribute.Value{}
+	for _, kv := range span.Attributes {
+		attrs[kv.Key] = kv.Value
+	}
+	assert.Equal(t, "all_hallucinated", attrs["reranker.fallback_reason"].AsString())
+
+	var foundModelResponseEvent bool
+	for _, ev := range span.Events {
+		if ev.Name == "reranker.model_response" {
+			foundModelResponseEvent = true
+			eventAttrs := map[attribute.Key]attribute.Value{}
+			for _, kv := range ev.Attributes {
+				eventAttrs[kv.Key] = kv.Value
+			}
+			assert.Equal(t, []int64{999, 888}, eventAttrs["raw.topics"].AsInt64Slice(),
+				"raw IDs from the model are recorded verbatim, in order")
+			assert.Empty(t, eventAttrs["kept.topics"].AsInt64Slice(),
+				"none should be kept since neither matches a candidate")
+			assert.Equal(t, []int64{999, 888}, eventAttrs["hallucinated.topics"].AsInt64Slice(),
+				"hallucinated set = raw \\ kept")
+		}
+	}
+	assert.True(t, foundModelResponseEvent)
 }
 
 // TestReranker_RecordsSessionInputCount verifies that artifact candidates with
