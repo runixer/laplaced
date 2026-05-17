@@ -91,10 +91,9 @@ func TestReranker_RecordsSpan_EarlyFallback(t *testing.T) {
 // TestReranker_RecordsModelRawCounts_EmptyResponse verifies that when the
 // model finalises with empty arrays after inspecting candidate content,
 // the span captures model_raw_count.* = 0 and model_kept.* = 0 alongside
-// the tool_call event for the inspection round-trip. This is the signal
-// downstream consumers need to distinguish "model explicitly refused"
-// from "model returned IDs but all were hallucinated" — the current code
-// labels both as all_hallucinated, which is the bug to fix on main.
+// the tool_call event for the inspection round-trip, and the fallback_reason
+// is "model_empty" (distinct from "all_hallucinated" where the model
+// returned IDs but none survived candidate validation).
 func TestReranker_RecordsModelRawCounts_EmptyResponse(t *testing.T) {
 	getSpans := testutil.WithTracingCapture(t)
 
@@ -154,9 +153,7 @@ func TestReranker_RecordsModelRawCounts_EmptyResponse(t *testing.T) {
 	assert.Equal(t, int64(0), attrs["reranker.model_raw_count.artifacts"].AsInt64())
 	assert.Equal(t, int64(0), attrs["reranker.model_kept.topics"].AsInt64())
 	assert.Equal(t, int64(1), attrs["reranker.candidates_in.topics"].AsInt64())
-	// Current behaviour: empty response triggers all_hallucinated fallback. The
-	// behavioural fix (treating raw == 0 as no_relevant_results) lands on main.
-	assert.Equal(t, "all_hallucinated", attrs["reranker.fallback_reason"].AsString())
+	assert.Equal(t, "model_empty", attrs["reranker.fallback_reason"].AsString())
 
 	var foundToolCallEvent bool
 	for _, ev := range span.Events {
