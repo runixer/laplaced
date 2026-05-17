@@ -449,19 +449,34 @@ func (r *Reranker) rerank(
 			return fallbackResult, nil
 		}
 
+		// Track raw counts BEFORE filtering to distinguish "model explicitly
+		// returned empty arrays" (legitimate "nothing relevant") from "model
+		// returned IDs that don't match any candidate" (true hallucination).
+		rawCount := len(result.Topics) + len(result.People) + len(result.Artifacts)
+
 		// Validate topics and people
 		result = filterValidTopics(userID, result, candidateMap, r.logger)
 		result = filterValidPeople(userID, result, peopleMap, r.logger)
 		result = filterValidArtifacts(userID, result, artifactsMap, r.logger)
 		if len(result.Topics) == 0 && len(result.People) == 0 && len(result.Artifacts) == 0 {
-			r.logger.Warn("reranker returned no valid results (all hallucinated)", "user_id", userID)
-			tr.fallbackReason = "all_hallucinated"
-			fallbackResult := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, r.logger)
-			tr.selectedTopics = fallbackResult.Topics
-			tr.selectedPeople = fallbackResult.People
-			tr.selectedArtifacts = fallbackResult.Artifacts
+			// The model gave us a clear "nothing here" answer (either empty
+			// arrays or only invalid IDs). Respect it instead of overriding
+			// with vector-top — otherwise we leak top-N artifacts/people by
+			// raw cosine into the chat prompt despite the model's decision.
+			if rawCount == 0 {
+				r.logger.Info("reranker returned empty selection", "user_id", userID)
+				tr.fallbackReason = "model_empty"
+			} else {
+				r.logger.Warn("reranker returned no valid results (all hallucinated)",
+					"user_id", userID, "raw_count", rawCount)
+				tr.fallbackReason = "all_hallucinated"
+			}
+			emptyResult := &Result{}
+			tr.selectedTopics = emptyResult.Topics
+			tr.selectedPeople = emptyResult.People
+			tr.selectedArtifacts = emptyResult.Artifacts
 			saveTrace(ctx, r.agentLogger, r.logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
-			return fallbackResult, nil
+			return emptyResult, nil
 		}
 
 		r.logger.Info("reranker completed",

@@ -861,9 +861,11 @@ func TestRerank_ParseError_InvalidJSON(t *testing.T) {
 	assert.Equal(t, []int64{1}, result.TopicIDs())
 }
 
-// TestRerank_AllHallucinated_ReturnsFallback verifies fallback when
-// all returned IDs are hallucinated (not in candidates).
-func TestRerank_AllHallucinated_ReturnsFallback(t *testing.T) {
+// TestRerank_AllHallucinated_ReturnsEmpty verifies that when the model
+// returns IDs that don't match any candidate, the reranker returns an
+// empty selection rather than overriding the model's decision with
+// vector-top.
+func TestRerank_AllHallucinated_ReturnsEmpty(t *testing.T) {
 	mockClient := &testutil.MockOpenRouterClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
@@ -897,8 +899,63 @@ func TestRerank_AllHallucinated_ReturnsFallback(t *testing.T) {
 
 	require.NoError(t, err)
 	result := resp.Structured.(*Result)
-	// Should fallback to requested IDs (1)
-	assert.Equal(t, []int64{1}, result.TopicIDs())
+	assert.Empty(t, result.TopicIDs())
+	assert.Empty(t, result.People)
+	assert.Empty(t, result.Artifacts)
+}
+
+// TestRerank_ModelEmpty_ReturnsEmpty verifies that when the model explicitly
+// returns empty arrays (legitimate "nothing relevant"), the reranker respects
+// it instead of overriding with vector-top.
+func TestRerank_ModelEmpty_ReturnsEmpty(t *testing.T) {
+	mockClient := &testutil.MockOpenRouterClient{}
+	mockStorage := &testutil.MockStorage{}
+	translator := testutil.TestTranslator(t)
+
+	cfg := testConfig()
+	reranker := New(mockClient, cfg, testutil.TestLogger(), translator, mockStorage, nil)
+
+	// Plenty of candidates of every type — none of which the model finds relevant.
+	candidates := []Candidate{
+		{TopicID: 1, Score: 0.9, Topic: mockTopic(1, "Topic 1")},
+		{TopicID: 2, Score: 0.8, Topic: mockTopic(2, "Topic 2")},
+	}
+	personCandidates := []PersonCandidate{
+		{PersonID: 10, Score: 0.7},
+		{PersonID: 11, Score: 0.6},
+	}
+	artifactCandidates := []ArtifactCandidate{
+		{ArtifactID: 100, Score: 0.7},
+		{ArtifactID: 101, Score: 0.6},
+	}
+
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(makeToolCallResponse("get_topics_content", `{"topic_ids": [1]}`), nil).Once()
+	mockStorage.On("GetMessagesByTopicID", mock.Anything, int64(1)).
+		Return(mockMessagesForTopic(1), nil).Once()
+	// Model explicitly says nothing matches.
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(makeFinalJSONResponse(`{"topic_ids": [], "people_ids": [], "artifact_ids": []}`), nil).Once()
+
+	req := &agent.Request{
+		Params: map[string]any{
+			ParamCandidates:          candidates,
+			ParamPersonCandidates:    personCandidates,
+			ParamArtifactCandidates:  artifactCandidates,
+			ParamContextualizedQuery: "test query",
+			ParamOriginalQuery:       "original",
+			ParamCurrentMessages:     "recent messages",
+		},
+		Shared: &agent.SharedContext{UserID: 123},
+	}
+
+	resp, err := reranker.Execute(context.Background(), req)
+
+	require.NoError(t, err)
+	result := resp.Structured.(*Result)
+	assert.Empty(t, result.TopicIDs(), "topics should be empty when model explicitly returns empty")
+	assert.Empty(t, result.People, "people should not leak in via vector-top fallback")
+	assert.Empty(t, result.Artifacts, "artifacts should not leak in via vector-top fallback")
 }
 
 // TestRerank_Fallback_UsesRequestedIDs verifies that fallback uses
