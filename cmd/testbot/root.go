@@ -72,6 +72,13 @@ var rootCmd = &cobra.Command{
 without running the full Telegram integration. It supports sending messages,
 checking database state, and processing sessions for fact extraction.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Some subcommands (e.g. snapshot tools) don't need a full bot setup —
+		// no DB store, no RAG vectors, no embedding migration. They opt out
+		// with the "skip-bot-setup" annotation and run with just .env loaded.
+		if cmd.Annotations["skip-bot-setup"] == "true" {
+			_ = app.LoadEnv()
+			return nil
+		}
 		// Parse flags into options struct
 		opts := &testbotOptions{
 			cfgFile:   cmd.Flags().Lookup("config").Value.String(),
