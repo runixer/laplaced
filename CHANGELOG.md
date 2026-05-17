@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-05-18
+
 ### Fixed
 - **Reranker no longer overrides "nothing relevant" with ten unrelated files.** When the reranker decided no memory was relevant to a question, its fallback used to dump the top-10 artifacts and top-10 people by raw similarity into the chat prompt anyway, inflating prompt size and cost on a small percentage of turns. The reranker now respects an empty selection from the model and returns nothing; operational failure paths (timeout, parse error, max tool calls) keep the previous safety net.
 - **Image-generation failures now report the actual cause instead of guessing.** When `generate_image` failed, the bot used to relay one of three causes ("safety filter, invalid input, or temporary API issue") to the user — picked semi-randomly, almost always landing on "safety filter" even when the real cause was a server-side timeout or a clear written refusal from the model itself. The bot now distinguishes five distinct failure modes: a server-side timeout is reported as a timeout, an upstream API error as such, a model that refused with a written explanation has that explanation quoted verbatim (translated to the user's language), a silent OpenAI safety-pipeline block (no image and no model text) is described as a likely policy issue with a hint to rephrase or change the input image, and unknown empty responses are reported honestly as "no specific reason known". Refusal text from Google's image model — previously discarded by the failure path — is now surfaced to the user.
@@ -527,7 +529,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-language support (en, ru)
 - Docker deployment
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/runixer/laplaced/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/runixer/laplaced/compare/v0.7.2...v0.8.0
 [0.7.2]: https://github.com/runixer/laplaced/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/runixer/laplaced/compare/v0.7.0...v0.7.1
