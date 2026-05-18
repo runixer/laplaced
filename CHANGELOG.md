@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-05-18
+
 ### Fixed
 - **Reply no longer lists ten unrelated files when the reranker fails to finish thinking.** The previous release closed one path into this bug; the same dump-by-cosine fallback was still reachable through other failure modes — most often when the reranker exhausted its tool-call budget on a query that surfaced a dense cluster of near-duplicate candidates. All reranker fallback paths now collapse to topics-only; people and artifacts the model never selected are dropped entirely.
 
@@ -532,7 +534,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-language support (en, ru)
 - Docker deployment
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/runixer/laplaced/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/runixer/laplaced/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/runixer/laplaced/compare/v0.7.2...v0.8.0
 [0.7.2]: https://github.com/runixer/laplaced/compare/v0.7.1...v0.7.2
