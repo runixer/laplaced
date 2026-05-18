@@ -644,6 +644,10 @@ func TestRerank_MultipleToolCalls(t *testing.T) {
 }
 
 // TestRerank_MaxToolCallsReached verifies behavior when max tool calls is reached.
+// Also serves as the regression test for the fallback no-leak invariant:
+// when reranker fails to produce a model selection, people and artifacts
+// must NOT be added by vector-top — the model never chose them and dumping
+// 10 unrelated files by cosine into the chat prompt is what we're fixing.
 func TestRerank_MaxToolCallsReached(t *testing.T) {
 	mockClient := &testutil.MockOpenRouterClient{}
 	mockStorage := &testutil.MockStorage{}
@@ -656,6 +660,17 @@ func TestRerank_MaxToolCallsReached(t *testing.T) {
 	candidates := []Candidate{
 		{TopicID: 1, Score: 0.9, Topic: mockTopic(1, "Topic 1")},
 	}
+	// Provide people and artifact candidates with high cosine scores — these
+	// are precisely the values the old fallback would have dumped (top-N by
+	// score) into the result. The new fallback must drop them entirely.
+	personCandidates := []PersonCandidate{
+		{PersonID: 10, Score: 0.9},
+		{PersonID: 11, Score: 0.8},
+	}
+	artifactCandidates := []ArtifactCandidate{
+		{ArtifactID: 100, Score: 0.9},
+		{ArtifactID: 101, Score: 0.8},
+	}
 
 	// Tool call
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
@@ -666,6 +681,8 @@ func TestRerank_MaxToolCallsReached(t *testing.T) {
 	req := &agent.Request{
 		Params: map[string]any{
 			ParamCandidates:          candidates,
+			ParamPersonCandidates:    personCandidates,
+			ParamArtifactCandidates:  artifactCandidates,
 			ParamContextualizedQuery: "test query",
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
@@ -676,9 +693,10 @@ func TestRerank_MaxToolCallsReached(t *testing.T) {
 	resp, err := reranker.Execute(context.Background(), req)
 
 	require.NoError(t, err)
-	// Should fallback to requested IDs (1)
 	result := resp.Structured.(*Result)
-	assert.Equal(t, []int64{1}, result.TopicIDs())
+	assert.Equal(t, []int64{1}, result.TopicIDs(), "topics from requestedIDs are the model's interest signal — keep them")
+	assert.Empty(t, result.People, "people must NOT leak in via vector-top fallback")
+	assert.Empty(t, result.Artifacts, "artifacts must NOT leak in via vector-top fallback")
 }
 
 // Fallback Scenarios Tests

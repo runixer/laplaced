@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Reply no longer lists ten unrelated files when the reranker fails to finish thinking.** The previous release closed one path into this bug; the same dump-by-cosine fallback was still reachable through other failure modes — most often when the reranker exhausted its tool-call budget on a query that surfaced a dense cluster of near-duplicate candidates. All reranker fallback paths now collapse to topics-only; people and artifacts the model never selected are dropped entirely.
+
 ## [0.9.0] - 2026-05-18
 
 ### Fixed
