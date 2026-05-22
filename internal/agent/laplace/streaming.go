@@ -31,9 +31,16 @@ type streamTurnResult struct {
 	// (e.g. the iteration was a pure tool-call iteration or empty response).
 	FirstContentDelay time.Duration
 
+	// DebugRequestBody is the raw JSON request body sent to OpenRouter.
+	// Captured from openrouter.ChatCompletionStream so the agentlog turn
+	// tracker mirrors what the buffered path records.
+	DebugRequestBody string
+
 	// DebugResponseBody is a synthetic JSON serialization of the synthesized
-	// turn, kept for the agentlog turn tracker. Tagged "(stream-reconstructed)"
+	// turn, kept for the agentlog turn tracker. Tagged "stream-reconstructed"
 	// so debug viewers can tell it apart from a real provider response body.
+	// Shape matches the OpenRouter buffered response (choices[0].message.*)
+	// so the web log UI can render it without special-casing.
 	DebugResponseBody string
 }
 
@@ -56,12 +63,13 @@ func (l *Laplace) runStreamingTurn(
 ) (*streamTurnResult, error) {
 	llmStart := time.Now()
 
-	events, err := l.orClient.CreateChatCompletionStream(ctx, orReq)
+	stream, err := l.orClient.CreateChatCompletionStream(ctx, orReq)
 	if err != nil {
 		return nil, fmt.Errorf("open stream: %w", err)
 	}
+	events := stream.Events
 
-	out := &streamTurnResult{}
+	out := &streamTurnResult{DebugRequestBody: stream.DebugRequestBody}
 	// Reasoning details merge: providers emit reasoning_details as a JSON
 	// array per delta. We collect the entries and combine into a single slice
 	// (kept as []interface{} to mirror the buffered response shape).
@@ -190,15 +198,30 @@ func (l *Laplace) runStreamingTurn(
 		out.ReasoningDetails = mergedReasoning
 	}
 
-	// Build a synthetic response body for agentlog. Mark it explicitly so
-	// debug consumers know it isn't the raw provider payload.
+	// Build a synthetic response body for agentlog. Shape mirrors the
+	// buffered OpenRouter response (choices[0].message.*) so the web log UI
+	// renders it through the same path. The "_synthetic" marker lets debug
+	// consumers tell this apart from a real provider payload.
+	message := map[string]interface{}{
+		"role":    "assistant",
+		"content": out.Content,
+	}
+	if len(out.ToolCalls) > 0 {
+		message["tool_calls"] = out.ToolCalls
+	}
+	if out.ReasoningDetails != nil {
+		message["reasoning_details"] = out.ReasoningDetails
+	}
 	debugBody, _ := json.Marshal(map[string]interface{}{
-		"_synthetic":        "stream-reconstructed",
-		"model":             out.Model,
-		"finish_reason":     out.FinishReason,
-		"content":           out.Content,
-		"tool_calls":        out.ToolCalls,
-		"reasoning_details": out.ReasoningDetails,
+		"_synthetic": "stream-reconstructed",
+		"model":      out.Model,
+		"choices": []map[string]interface{}{
+			{
+				"index":         0,
+				"message":       message,
+				"finish_reason": out.FinishReason,
+			},
+		},
 		"usage": map[string]interface{}{
 			"prompt_tokens":     out.PromptTokens,
 			"completion_tokens": out.CompletionTokens,

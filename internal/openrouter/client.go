@@ -35,7 +35,7 @@ const (
 
 type Client interface {
 	CreateChatCompletion(ctx context.Context, req ChatCompletionRequest) (ChatCompletionResponse, error)
-	CreateChatCompletionStream(ctx context.Context, req ChatCompletionRequest) (<-chan StreamEvent, error)
+	CreateChatCompletionStream(ctx context.Context, req ChatCompletionRequest) (*ChatCompletionStream, error)
 	CreateEmbeddings(ctx context.Context, req EmbeddingRequest) (EmbeddingResponse, error)
 }
 

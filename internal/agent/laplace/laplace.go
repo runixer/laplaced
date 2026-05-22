@@ -403,6 +403,7 @@ func (l *Laplace) runChatTurn(
 			promptTokens:      stream.PromptTokens,
 			completionTokens:  stream.CompletionTokens,
 			cost:              stream.Cost,
+			debugRequestBody:  stream.DebugRequestBody,
 			debugResponseBody: stream.DebugResponseBody,
 			firstContentDelay: stream.FirstContentDelay,
 		}, nil

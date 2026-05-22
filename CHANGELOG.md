@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Agent Logs page now renders streamed chat turns instead of two error placeholders.** Since streaming replies landed, every Laplace turn in the web dashboard showed `Invalid JSON: unexpected end of data` in the Request column and `No choices in response` in the Response column — the underlying chat worked fine, only the inspector was blind. The streaming path now records the raw OpenRouter request body alongside the response (matching what the non-streaming path always did), and reconstructs the response into the standard `choices[0].message.{content,tool_calls,reasoning_details}` shape the viewer expects (with a `"_synthetic": "stream-reconstructed"` marker preserved for debugging). Historical log rows from before this fix stay as they were — no migration; only new turns are affected.
+
 ## [0.9.1] - 2026-05-18
 
 ### Fixed

@@ -87,13 +87,13 @@ func TestStream_BasicContentDeltas(t *testing.T) {
 	}
 	_, client := newStreamTestClient(t, sseHandler(t, frames))
 
-	ch, err := client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{
+	stream, err := client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{
 		Model:    "m",
 		Messages: []Message{{Role: "user", Content: "hi"}},
 	})
 	require.NoError(t, err)
 
-	chunks, err := collectChunks(t, ch, 2*time.Second)
+	chunks, err := collectChunks(t, stream.Events, 2*time.Second)
 	require.NoError(t, err)
 	require.Len(t, chunks, 3)
 
@@ -122,10 +122,10 @@ func TestStream_ReasoningDeltasFirstThenContent(t *testing.T) {
 	}
 	_, client := newStreamTestClient(t, sseHandler(t, frames))
 
-	ch, err := client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}})
+	stream, err := client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}})
 	require.NoError(t, err)
 
-	chunks, err := collectChunks(t, ch, 2*time.Second)
+	chunks, err := collectChunks(t, stream.Events, 2*time.Second)
 	require.NoError(t, err)
 	require.Len(t, chunks, 4)
 
@@ -150,10 +150,10 @@ func TestStream_ToolCallDeltasByIndex(t *testing.T) {
 	}
 	_, client := newStreamTestClient(t, sseHandler(t, frames))
 
-	ch, err := client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}})
+	stream, err := client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}})
 	require.NoError(t, err)
 
-	chunks, err := collectChunks(t, ch, 2*time.Second)
+	chunks, err := collectChunks(t, stream.Events, 2*time.Second)
 	require.NoError(t, err)
 	require.Len(t, chunks, 4)
 
@@ -177,10 +177,10 @@ func TestStream_StreamEndedWithoutDONE(t *testing.T) {
 	}
 	_, client := newStreamTestClient(t, sseHandler(t, frames))
 
-	ch, err := client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}})
+	stream, err := client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}})
 	require.NoError(t, err)
 
-	chunks, err := collectChunks(t, ch, 2*time.Second)
+	chunks, err := collectChunks(t, stream.Events, 2*time.Second)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "[DONE]")
 	require.Len(t, chunks, 1)
@@ -194,10 +194,10 @@ func TestStream_DecodeError(t *testing.T) {
 	}
 	_, client := newStreamTestClient(t, sseHandler(t, frames))
 
-	ch, err := client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}})
+	stream, err := client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}})
 	require.NoError(t, err)
 
-	_, err = collectChunks(t, ch, 2*time.Second)
+	_, err = collectChunks(t, stream.Events, 2*time.Second)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "decode SSE chunk")
 }
@@ -219,12 +219,12 @@ func TestStream_ContextCancellation(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	ch, err := client.CreateChatCompletionStream(ctx, ChatCompletionRequest{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}})
+	stream, err := client.CreateChatCompletionStream(ctx, ChatCompletionRequest{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}})
 	require.NoError(t, err)
 
 	// Read first event then cancel.
 	select {
-	case ev := <-ch:
+	case ev := <-stream.Events:
 		require.NotNil(t, ev.Chunk)
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for first chunk")
@@ -235,7 +235,7 @@ func TestStream_ContextCancellation(t *testing.T) {
 	deadline := time.After(2 * time.Second)
 	for {
 		select {
-		case _, ok := <-ch:
+		case _, ok := <-stream.Events:
 			if !ok {
 				return // closed; good.
 			}
@@ -280,9 +280,9 @@ func TestStream_RetriesOn5xx(t *testing.T) {
 	client, err := NewClientWithBaseURL(logger, "k", "", server.URL+"/api/v1", nil)
 	require.NoError(t, err)
 
-	ch, err := client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}})
+	stream, err := client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}})
 	require.NoError(t, err)
-	chunks, err := collectChunks(t, ch, 5*time.Second)
+	chunks, err := collectChunks(t, stream.Events, 5*time.Second)
 	require.NoError(t, err)
 	require.Len(t, chunks, 1)
 	assert.Equal(t, "ok", chunks[0].Choices[0].Delta.Content)

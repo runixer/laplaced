@@ -697,16 +697,26 @@ func (m *MockOpenRouterClient) CreateChatCompletion(ctx context.Context, req ope
 	return args.Get(0).(openrouter.ChatCompletionResponse), args.Error(1)
 }
 
-// CreateChatCompletionStream returns the channel registered on the mock under
-// the call's first return value. Tests should pre-build a channel of
-// openrouter.StreamEvent values and Return(ch, nil). For convenience the
-// helper StreamEventsFromChunks(chunks...) builds such a channel.
-func (m *MockOpenRouterClient) CreateChatCompletionStream(ctx context.Context, req openrouter.ChatCompletionRequest) (<-chan openrouter.StreamEvent, error) {
+// CreateChatCompletionStream returns the stream registered on the mock under
+// the call's first return value. Tests can Return either a
+// *openrouter.ChatCompletionStream or, for convenience, a bare
+// <-chan openrouter.StreamEvent (auto-wrapped with an empty DebugRequestBody).
+// The helper StreamEventsFromChunks(chunks...) builds such a channel.
+func (m *MockOpenRouterClient) CreateChatCompletionStream(ctx context.Context, req openrouter.ChatCompletionRequest) (*openrouter.ChatCompletionStream, error) {
 	args := m.Called(ctx, req)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(<-chan openrouter.StreamEvent), args.Error(1)
+	switch v := args.Get(0).(type) {
+	case *openrouter.ChatCompletionStream:
+		return v, args.Error(1)
+	case <-chan openrouter.StreamEvent:
+		return &openrouter.ChatCompletionStream{Events: v}, args.Error(1)
+	case chan openrouter.StreamEvent:
+		return &openrouter.ChatCompletionStream{Events: v}, args.Error(1)
+	default:
+		return args.Get(0).(*openrouter.ChatCompletionStream), args.Error(1)
+	}
 }
 
 // StreamEventsFromChunks builds a closed channel of StreamEvents from a list

@@ -74,6 +74,15 @@ type StreamEvent struct {
 	Err   error
 }
 
+// ChatCompletionStream is the result of opening a streaming /chat/completions
+// request. Events delivers the SSE deltas; DebugRequestBody mirrors the
+// buffered ChatCompletionResponse field so callers can record the raw JSON
+// request body alongside the synthesized response.
+type ChatCompletionStream struct {
+	Events           <-chan StreamEvent
+	DebugRequestBody string
+}
+
 // CreateChatCompletionStream issues a streaming /chat/completions request and
 // returns a channel of decoded events. The channel is closed when the upstream
 // emits `data: [DONE]` or when context is cancelled. Any I/O or decode error
@@ -82,7 +91,7 @@ type StreamEvent struct {
 // Retries: only pre-stream errors (connect, non-2xx, body-error JSON) are
 // retried. Once the SSE body starts flowing we never reconnect — partial
 // streams produce an Err event and the consumer decides what to do.
-func (c *clientImpl) CreateChatCompletionStream(ctx context.Context, req ChatCompletionRequest) (<-chan StreamEvent, error) {
+func (c *clientImpl) CreateChatCompletionStream(ctx context.Context, req ChatCompletionRequest) (*ChatCompletionStream, error) {
 	startTime := time.Now()
 	jt := jobtype.FromContext(ctx).String()
 
@@ -115,7 +124,10 @@ func (c *clientImpl) CreateChatCompletionStream(ctx context.Context, req ChatCom
 
 	events := make(chan StreamEvent, 16)
 	go c.pumpStream(ctx, httpResp.Body, events)
-	return events, nil
+	return &ChatCompletionStream{
+		Events:           events,
+		DebugRequestBody: string(body),
+	}, nil
 }
 
 // openStream performs the POST with retry on connect/early errors. Returns the

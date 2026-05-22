@@ -2,6 +2,7 @@ package laplace
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/runixer/laplaced/internal/openrouter"
@@ -327,4 +328,71 @@ func TestStreaming_OnToolStartReceivesToolName(t *testing.T) {
 	mockStore.AssertExpectations(t)
 	mockOR.AssertExpectations(t)
 	handler.AssertExpectations(t)
+}
+
+// TestStreaming_DebugBodiesShapeForAgentLog locks down the contract the web
+// agent-log UI relies on: each ConversationTurn must carry the raw request
+// body and a synthetic response shaped like the buffered OpenRouter payload
+// (choices[0].message.content). Regression guard for the two display bugs
+// where the streaming path left Request="" and Response in a flat shape with
+// no "choices" array.
+func TestStreaming_DebugBodiesShapeForAgentLog(t *testing.T) {
+	cfg, _, agent, mockStore, mockOR, handler := setupExecuteTest(t)
+	_ = cfg
+	_ = handler
+	userID := int64(123)
+
+	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
+	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
+
+	const debugReq = `{"model":"test-model","messages":[{"role":"user","content":"hi"}],"stream":true}`
+	events := testutil.StreamEventsFromChunks(
+		contentChunk("Hello", ""),
+		contentChunk(" world", "stop"),
+		usageChunk(7, 2),
+	)
+	mockOR.On("CreateChatCompletionStream", mock.Anything, mock.Anything).Return(
+		&openrouter.ChatCompletionStream{Events: events, DebugRequestBody: debugReq},
+		nil,
+	).Once()
+
+	req := &Request{
+		UserID:              userID,
+		RawQuery:            "hi",
+		HistoryContent:      "hi",
+		CurrentMessageParts: []interface{}{openrouter.TextPart{Type: "text", Text: "hi"}},
+		UseStreaming:        true,
+	}
+
+	resp, err := agent.Execute(context.Background(), req, handler)
+	require.NoError(t, err)
+	require.NotNil(t, resp.ConversationTurns)
+	require.Len(t, resp.ConversationTurns.Turns, 1)
+
+	turn := resp.ConversationTurns.Turns[0]
+
+	reqStr, ok := turn.Request.(string)
+	require.True(t, ok, "Turn.Request should be a string for the agentlog turn tracker")
+	assert.Equal(t, debugReq, reqStr, "DebugRequestBody must be plumbed verbatim from the stream client")
+
+	respStr, ok := turn.Response.(string)
+	require.True(t, ok, "Turn.Response should be a string for the agentlog turn tracker")
+
+	var respObj map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(respStr), &respObj), "synthetic response must be valid JSON")
+	assert.Equal(t, "stream-reconstructed", respObj["_synthetic"], "synthetic marker preserved")
+
+	choices, ok := respObj["choices"].([]interface{})
+	require.True(t, ok, "synthetic response must have a choices array (OpenRouter buffered shape)")
+	require.Len(t, choices, 1)
+	choice, ok := choices[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "stop", choice["finish_reason"])
+	message, ok := choice["message"].(map[string]interface{})
+	require.True(t, ok, "choices[0].message must be present")
+	assert.Equal(t, "assistant", message["role"])
+	assert.Equal(t, "Hello world", message["content"])
+
+	mockStore.AssertExpectations(t)
+	mockOR.AssertExpectations(t)
 }
