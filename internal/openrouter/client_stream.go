@@ -13,7 +13,12 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/runixer/laplaced/internal/jobtype"
+	"github.com/runixer/laplaced/internal/obs"
 )
 
 // ChatCompletionChunk is one SSE delta from /chat/completions in stream mode.
@@ -91,19 +96,61 @@ type ChatCompletionStream struct {
 // Retries: only pre-stream errors (connect, non-2xx, body-error JSON) are
 // retried. Once the SSE body starts flowing we never reconnect — partial
 // streams produce an Err event and the consumer decides what to do.
-func (c *clientImpl) CreateChatCompletionStream(ctx context.Context, req ChatCompletionRequest) (*ChatCompletionStream, error) {
+//
+// Tracing: emits an openrouter.CreateChatCompletionStream span with the same
+// gen_ai.* / llm.* attribute surface as CreateChatCompletion. The span's
+// lifetime spans the entire operation — when openStream returns a usable HTTP
+// response, span ownership is handed to pumpStream, which sets the response
+// model / usage / cost as chunks arrive and ends the span when the SSE body
+// terminates (success, decode error, or context cancellation).
+func (c *clientImpl) CreateChatCompletionStream(ctx context.Context, req ChatCompletionRequest) (stream *ChatCompletionStream, err error) {
 	startTime := time.Now()
 	jt := jobtype.FromContext(ctx).String()
+
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/openrouter").Start(
+		ctx, "openrouter.CreateChatCompletionStream",
+		trace.WithAttributes(
+			attribute.String("gen_ai.system", "openrouter"),
+			attribute.String("gen_ai.request.model", req.Model),
+			attribute.Int64("user.id", req.UserID),
+			attribute.String("job.type", jt),
+			attribute.Int("prompt.media.filename_collisions", countFilenameCollisions(req.Messages)),
+		),
+	)
+	var (
+		attempts        int
+		retryDelays     []int64
+		transferredPump bool
+	)
+	defer func() {
+		if transferredPump {
+			return
+		}
+		span.SetAttributes(attribute.Int("llm.attempts", attempts))
+		if len(retryDelays) > 0 {
+			span.SetAttributes(attribute.Int64Slice("llm.retry_delays_ms", retryDelays))
+		}
+		_ = obs.ObserveErr(span, err)
+		span.End()
+	}()
 
 	if req.Provider == nil && c.defaultProvider != nil {
 		req.Provider = c.defaultProvider
 	}
 	req.Stream = true
+	// Link OR-emitted Broadcast spans to our local trace. Same call as in
+	// CreateChatCompletion; previously missing on the streaming path so
+	// OR-side spans for stream requests floated unattached.
+	req.Trace, req.User = withBroadcastFields(ctx, req.Trace, req.User, req.UserID)
 
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("marshal stream request: %w", err)
 	}
+
+	// Redact base64 multimodal payloads before they hit the span. Same trace-size
+	// concern as CreateChatCompletion (see obs.RedactBase64Payloads).
+	obs.RecordContent(span, "llm.request", obs.RedactBase64Payloads(string(body)))
 
 	endpoint, err := url.JoinPath(c.apiEndpoint, "chat/completions")
 	if err != nil {
@@ -117,13 +164,23 @@ func (c *clientImpl) CreateChatCompletionStream(ctx context.Context, req ChatCom
 	)
 
 	//nolint:bodyclose // body is closed by pumpStream's defer once the stream finishes; bodyclose can't follow `go pumpStream(...)`.
-	httpResp, err := c.openStream(ctx, endpoint, body, req.Model, req.UserID, jt, startTime)
+	httpResp, openAttempts, openRetryDelays, err := c.openStream(ctx, span, endpoint, body, req.Model, req.UserID, jt, startTime)
+	attempts = openAttempts
+	retryDelays = openRetryDelays
 	if err != nil {
 		return nil, err
 	}
 
+	// Hand the span over to pumpStream — it owns lifecycle from here, including
+	// final attribute writes and span.End().
+	span.SetAttributes(attribute.Int("llm.attempts", attempts))
+	if len(retryDelays) > 0 {
+		span.SetAttributes(attribute.Int64Slice("llm.retry_delays_ms", retryDelays))
+	}
+	transferredPump = true
+
 	events := make(chan StreamEvent, 16)
-	go c.pumpStream(ctx, httpResp.Body, events)
+	go c.pumpStream(ctx, span, req, httpResp.Body, events, startTime, jt)
 	return &ChatCompletionStream{
 		Events:           events,
 		DebugRequestBody: string(body),
@@ -132,20 +189,31 @@ func (c *clientImpl) CreateChatCompletionStream(ctx context.Context, req ChatCom
 
 // openStream performs the POST with retry on connect/early errors. Returns the
 // open HTTP response (caller takes ownership of Body) on success.
+//
+// Records one "attempt" span event per HTTP attempt and, on terminal failure,
+// lifts the OR error envelope onto the span via recordOpenRouterError — the
+// same instrumentation surface CreateChatCompletion uses for its retry loop.
 func (c *clientImpl) openStream(
 	ctx context.Context,
+	span trace.Span,
 	endpoint string,
 	body []byte,
 	model string,
 	userID int64,
 	jt string,
 	startTime time.Time,
-) (*http.Response, error) {
-	var lastErr error
+) (*http.Response, int, []int64, error) {
+	var (
+		lastErr     error
+		attempts    int
+		retryDelays []int64
+	)
 	for attempt := 0; attempt <= maxRetries; attempt++ {
+		attempts = attempt + 1
 		if attempt > 0 {
 			RecordLLMRetry(model)
 			delay := calculateBackoff(attempt - 1)
+			retryDelays = append(retryDelays, delay.Milliseconds())
 			c.logger.Warn("Retrying OpenRouter stream open",
 				"attempt", attempt,
 				"max_retries", maxRetries,
@@ -154,37 +222,41 @@ func (c *clientImpl) openStream(
 			)
 			select {
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				return nil, attempts, retryDelays, ctx.Err()
 			case <-time.After(delay):
 			}
 		}
 
 		httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(body))
 		if err != nil {
-			return nil, err
+			return nil, attempts, retryDelays, err
 		}
 		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Accept", "text/event-stream")
 		httpReq.Header.Set("User-Agent", "laplaced/1.0")
 
+		attemptStart := time.Now()
 		resp, err := c.httpClient.Do(httpReq)
 		if err != nil {
+			recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{err: err})
 			if isRetryableError(err) && attempt < maxRetries {
 				lastErr = err
 				continue
 			}
 			RecordLLMRequest(userID, model, time.Since(startTime).Seconds(), false, 0, 0, nil, jt)
-			return nil, err
+			return nil, attempts, retryDelays, err
 		}
 
 		if resp.StatusCode == http.StatusOK {
-			return resp, nil
+			recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode})
+			return resp, attempts, retryDelays, nil
 		}
 
 		// Non-200: read body for error detection (it's small for errors).
 		errBody, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode, body: errBody})
 
 		// 200-with-error pattern doesn't apply here (we got non-200), but the
 		// upstream sometimes returns retryable codes — match the non-stream
@@ -197,20 +269,67 @@ func (c *clientImpl) openStream(
 		c.logger.Error("OpenRouter stream returned non-OK status",
 			"status", resp.Status, "body", truncateForLog(string(errBody), 500))
 		RecordLLMRequest(userID, model, time.Since(startTime).Seconds(), false, 0, 0, nil, jt)
-		return nil, fmt.Errorf("openrouter API error: %s: %s", resp.Status, truncateForLog(string(errBody), 500))
+		recordOpenRouterError(span, errBody, resp.StatusCode)
+		return nil, attempts, retryDelays, fmt.Errorf("openrouter API error: %s: %s", resp.Status, truncateForLog(string(errBody), 500))
 	}
 
 	if lastErr != nil {
-		return nil, lastErr
+		return nil, attempts, retryDelays, lastErr
 	}
-	return nil, errors.New("openrouter stream open: exhausted retries")
+	return nil, attempts, retryDelays, errors.New("openrouter stream open: exhausted retries")
 }
 
 // pumpStream reads SSE frames from body and emits StreamEvents. Closes events
 // channel on termination. Always closes body.
-func (c *clientImpl) pumpStream(ctx context.Context, body io.ReadCloser, events chan<- StreamEvent) {
+//
+// Owns span lifecycle from the point CreateChatCompletionStream handed off: on
+// termination it sets gen_ai.response.model, gen_ai.usage.*, and llm.cost_usd
+// from the final usage chunk, observes any terminal error, records the
+// Prometheus llm_request metric, and ends the span.
+func (c *clientImpl) pumpStream(
+	ctx context.Context,
+	span trace.Span,
+	req ChatCompletionRequest,
+	body io.ReadCloser,
+	events chan<- StreamEvent,
+	startTime time.Time,
+	jt string,
+) {
 	defer body.Close()
 	defer close(events)
+
+	var (
+		responseModel string
+		finalUsage    *ChunkUsage
+		streamErr     error
+	)
+	defer func() {
+		if responseModel != "" {
+			span.SetAttributes(attribute.String("gen_ai.response.model", responseModel))
+		}
+		if finalUsage != nil {
+			if finalUsage.PromptTokens > 0 || finalUsage.CompletionTokens > 0 {
+				span.SetAttributes(
+					attribute.Int("gen_ai.usage.input_tokens", finalUsage.PromptTokens),
+					attribute.Int("gen_ai.usage.output_tokens", finalUsage.CompletionTokens),
+				)
+			}
+			if finalUsage.Cost != nil {
+				span.SetAttributes(attribute.Float64("llm.cost_usd", *finalUsage.Cost))
+			}
+		}
+		success := streamErr == nil
+		var promptTokens, completionTokens int
+		var cost *float64
+		if finalUsage != nil {
+			promptTokens = finalUsage.PromptTokens
+			completionTokens = finalUsage.CompletionTokens
+			cost = finalUsage.Cost
+		}
+		RecordLLMRequest(req.UserID, req.Model, time.Since(startTime).Seconds(), success, promptTokens, completionTokens, cost, jt)
+		_ = obs.ObserveErr(span, streamErr)
+		span.End()
+	}()
 
 	scanner := bufio.NewScanner(body)
 	// SSE frames can be larger than the default 64KB scanner buffer when
@@ -249,31 +368,44 @@ func (c *clientImpl) pumpStream(ctx context.Context, body io.ReadCloser, events 
 
 		var chunk ChatCompletionChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			streamErr = fmt.Errorf("decode SSE chunk: %w (payload=%s)", err, truncateForLog(payload, 200))
 			select {
-			case events <- StreamEvent{Err: fmt.Errorf("decode SSE chunk: %w (payload=%s)", err, truncateForLog(payload, 200))}:
+			case events <- StreamEvent{Err: streamErr}:
 			case <-ctx.Done():
 			}
 			return
 		}
 
+		// Accumulate identity / usage as chunks arrive. Most chunks carry
+		// chunk.Model; only the final pre-[DONE] chunk carries chunk.Usage.
+		if chunk.Model != "" {
+			responseModel = chunk.Model
+		}
+		if chunk.Usage != nil {
+			finalUsage = chunk.Usage
+		}
+
 		select {
 		case events <- StreamEvent{Chunk: &chunk}:
 		case <-ctx.Done():
+			streamErr = ctx.Err()
 			return
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
+		streamErr = fmt.Errorf("read SSE stream: %w", err)
 		select {
-		case events <- StreamEvent{Err: fmt.Errorf("read SSE stream: %w", err)}:
+		case events <- StreamEvent{Err: streamErr}:
 		case <-ctx.Done():
 		}
 		return
 	}
 	// Stream closed without [DONE] — surface as error so caller doesn't treat
 	// this as a clean finish and emit a half-baked response.
+	streamErr = errors.New("openrouter stream ended without [DONE] sentinel")
 	select {
-	case events <- StreamEvent{Err: errors.New("openrouter stream ended without [DONE] sentinel")}:
+	case events <- StreamEvent{Err: streamErr}:
 	case <-ctx.Done():
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -798,6 +799,194 @@ func TestCreateChatCompletion_AttemptEvent_RetryThenSucceed(t *testing.T) {
 	assert.Equal(t, int64(1), events[1]["attempt.idx"].AsInt64())
 	assert.Equal(t, int64(200), events[1]["http.response.status_code"].AsInt64())
 	assert.Equal(t, "none", events[1]["error.class"].AsString())
+}
+
+// drainStream reads from a stream channel until it is closed, discarding all
+// events. Needed in tests that assert on span attributes: pumpStream runs in
+// its own goroutine and writes the final span attributes + span.End() in a
+// defer that fires *before* close(events). Returning at the first Err event
+// without draining races the goroutine's defers, so spans may not be exported
+// by the time the test calls getSpans(). Drain to channel close to synchronize.
+func drainStream(ch <-chan StreamEvent, deadline time.Duration) {
+	timer := time.NewTimer(deadline)
+	defer timer.Stop()
+	for {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				return
+			}
+		case <-timer.C:
+			return
+		}
+	}
+}
+
+// TestCreateChatCompletionStream_RecordsSpan mirrors the non-stream span test:
+// happy path emits a single span named openrouter.CreateChatCompletionStream
+// with the same gen_ai.* / llm.* attribute surface. Without this, streaming
+// requests (used by the main chat agent) are invisible in Tempo and TraceQL
+// queries like {span.gen_ai.request.model = "google/gemini-3.5-flash"} match
+// nothing for the model that handles every user turn.
+func TestCreateChatCompletionStream_RecordsSpan(t *testing.T) {
+	getSpans := withTracingCapture(t)
+
+	frames := []string{
+		`data: {"id":"g1","object":"chat.completion.chunk","model":"resolved-model","choices":[{"index":0,"delta":{"role":"assistant","content":"hi"}}]}`,
+		`data: {"id":"g1","object":"chat.completion.chunk","model":"resolved-model","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":2,"total_tokens":9}}`,
+		`data: [DONE]`,
+	}
+	_, client := newStreamTestClient(t, sseHandler(t, frames))
+
+	stream, err := client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{
+		Model:    "requested-model",
+		UserID:   42,
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+
+	// Drain to channel close so pumpStream's defers (which set final attrs
+	// and call span.End()) are guaranteed to have run before getSpans().
+	drainStream(stream.Events, 2*time.Second)
+
+	spans := getSpans()
+	require.Len(t, spans, 1)
+	span := spans[0]
+	assert.Equal(t, "openrouter.CreateChatCompletionStream", span.Name)
+
+	attrs := map[attribute.Key]attribute.Value{}
+	for _, kv := range span.Attributes {
+		attrs[kv.Key] = kv.Value
+	}
+	assert.Equal(t, "openrouter", attrs["gen_ai.system"].AsString())
+	assert.Equal(t, "requested-model", attrs["gen_ai.request.model"].AsString())
+	assert.Equal(t, "resolved-model", attrs["gen_ai.response.model"].AsString())
+	assert.Equal(t, int64(7), attrs["gen_ai.usage.input_tokens"].AsInt64())
+	assert.Equal(t, int64(2), attrs["gen_ai.usage.output_tokens"].AsInt64())
+	assert.Equal(t, int64(42), attrs["user.id"].AsInt64())
+	assert.Equal(t, int64(1), attrs["llm.attempts"].AsInt64(), "single successful open attempt")
+	assert.Equal(t, sdkcodes.Unset, span.Status.Code)
+}
+
+// TestCreateChatCompletionStream_Cost lifts cost from the terminal usage chunk
+// onto the span as llm.cost_usd. Without this, per-stream cost can't be summed
+// in TraceQL — the only alternative was scraping the bot's parent span, which
+// aggregates cost across every LLM call in a turn.
+func TestCreateChatCompletionStream_Cost(t *testing.T) {
+	getSpans := withTracingCapture(t)
+
+	frames := []string{
+		`data: {"id":"g","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15,"cost":0.000123}}`,
+		`data: [DONE]`,
+	}
+	_, client := newStreamTestClient(t, sseHandler(t, frames))
+
+	stream, err := client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{
+		Model:    "m",
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+	drainStream(stream.Events, 2*time.Second)
+
+	spans := getSpans()
+	require.Len(t, spans, 1)
+	attrs := map[attribute.Key]attribute.Value{}
+	for _, kv := range spans[0].Attributes {
+		attrs[kv.Key] = kv.Value
+	}
+	assert.InDelta(t, 0.000123, attrs["llm.cost_usd"].AsFloat64(), 1e-9)
+}
+
+// TestCreateChatCompletionStream_TerminalError_SetsErrorStatus covers the
+// pre-stream failure path: a non-retryable 401 must terminate with span status
+// Error and http.response.status_code set, matching the non-stream behavior.
+func TestCreateChatCompletionStream_TerminalError_SetsErrorStatus(t *testing.T) {
+	getSpans := withTracingCapture(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":{"message":"bad key"}}`)
+	}))
+	defer server.Close()
+	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "k", "", server.URL+"/api/v1", nil)
+	require.NoError(t, err)
+
+	_, err = client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{
+		Model:    "m",
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	require.Error(t, err)
+
+	spans := getSpans()
+	require.Len(t, spans, 1)
+	span := spans[0]
+	assert.Equal(t, sdkcodes.Error, span.Status.Code)
+	attrs := map[attribute.Key]attribute.Value{}
+	for _, kv := range span.Attributes {
+		attrs[kv.Key] = kv.Value
+	}
+	assert.Equal(t, int64(401), attrs["http.response.status_code"].AsInt64())
+}
+
+// TestCreateChatCompletionStream_NoDONESentinel_SetsErrorStatus pins the
+// "stream ended without [DONE]" path: pumpStream owns span lifecycle once the
+// body is open, so the final attribute writes and error status must happen
+// inside its defer.
+func TestCreateChatCompletionStream_NoDONESentinel_SetsErrorStatus(t *testing.T) {
+	getSpans := withTracingCapture(t)
+
+	frames := []string{
+		`data: {"id":"g","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"content":"partial"}}]}`,
+	}
+	_, client := newStreamTestClient(t, sseHandler(t, frames))
+
+	stream, err := client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{
+		Model:    "m",
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+	// Drain to close so pumpStream's defers (span.End + Error status) run.
+	drainStream(stream.Events, 2*time.Second)
+
+	spans := getSpans()
+	require.Len(t, spans, 1)
+	assert.Equal(t, sdkcodes.Error, spans[0].Status.Code)
+}
+
+// TestCreateChatCompletionStream_PopulatesBroadcastFields asserts the stream
+// path also nests OR-emitted Broadcast spans under our local trace. Previously
+// missing — streaming requests' OR-side spans floated unattached.
+func TestCreateChatCompletionStream_PopulatesBroadcastFields(t *testing.T) {
+	_ = withTracingCapture(t)
+
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		_, _ = io.WriteString(w, `data: {"id":"g","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	defer server.Close()
+	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "k", "", server.URL+"/api/v1", nil)
+	require.NoError(t, err)
+
+	stream, err := client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{
+		Model:    "m",
+		UserID:   314,
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+	drainStream(stream.Events, 2*time.Second)
+
+	require.NotNil(t, gotBody, "server should have received a request body")
+	assert.Equal(t, "314", gotBody["user"], "user field must be stringified UserID on streams")
+	trc, ok := gotBody["trace"].(map[string]any)
+	require.True(t, ok, "trace field must be a map")
+	assert.NotEmpty(t, trc["trace_id"], "trace.trace_id must be populated from ctx")
+	assert.NotEmpty(t, trc["parent_span_id"], "trace.parent_span_id must be populated from ctx")
 }
 
 // TestClassifyAttemptOutcome pins the class buckets used by attempt events.

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Background tasks (topic creation, fact extraction, file processing) now appear in the trace dashboard, so silent failures are visible without raising log level.
+- Streaming chat requests now emit the same OpenTelemetry spans as buffered ones, so the main chat agent is visible in Tempo by model, tokens, and cost.
 
 ### Fixed
 - Agent Logs page now shows streamed chat turns instead of two error placeholders.
