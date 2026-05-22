@@ -7,6 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/merger"
 	"github.com/runixer/laplaced/internal/config"
@@ -49,55 +53,85 @@ func (s *Service) processConsolidation(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		s.processConsolidationForUser(ctx, userID)
+	}
+}
 
-		candidates, err := s.findMergeCandidates(userID)
+// processConsolidationForUser handles consolidation for one user under a single
+// rag.processConsolidation span. Extracted so the span deferred-closure pattern
+// fits cleanly without affecting the outer loop's user iteration.
+func (s *Service) processConsolidationForUser(ctx context.Context, userID int64) {
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/rag").Start(
+		ctx, "rag.processConsolidation",
+		trace.WithAttributes(
+			attribute.Int64("user.id", userID),
+			attribute.String("job.type", jobtype.Background.String()),
+		),
+	)
+	var (
+		candidateCount int
+		mergedCount    int
+	)
+	defer func() {
+		span.SetAttributes(
+			attribute.Int("consolidation.candidate_count", candidateCount),
+			attribute.Int("consolidation.merged_count", mergedCount),
+		)
+		span.End()
+	}()
+
+	candidates, err := s.findMergeCandidates(userID)
+	if err != nil {
+		span.SetAttributes(attribute.String("consolidation.error_kind", "find_candidates"))
+		s.logger.Error("failed to find merge candidates", "user_id", userID, "error", err)
+		return
+	}
+	candidateCount = len(candidates)
+
+	for _, candidate := range candidates {
+		if ctx.Err() != nil {
+			return
+		}
+
+		// Verify with LLM
+		shouldMerge, newSummary, _, err := s.verifyMerge(ctx, candidate)
 		if err != nil {
-			s.logger.Error("failed to find merge candidates", "user_id", userID, "error", err)
+			span.SetAttributes(attribute.String("consolidation.error_kind", "verify_merge"))
+			s.logger.Error("failed to verify merge", "error", err)
 			continue
 		}
 
-		for _, candidate := range candidates {
-			if ctx.Err() != nil {
-				return
-			}
-
-			// Verify with LLM
-			shouldMerge, newSummary, _, err := s.verifyMerge(ctx, candidate)
-			if err != nil {
-				s.logger.Error("failed to verify merge", "error", err)
-				continue
-			}
-
-			if shouldMerge {
-				if newTopicID, _, err := s.mergeTopics(ctx, candidate, newSummary); err != nil {
-					s.logger.Error("failed to merge topics", "error", err)
-				} else {
-					s.logger.Info("Merged topics", "t1", candidate.Topic1.ID, "t2", candidate.Topic2.ID, "new_topic_id", newTopicID, "new_summary", newSummary)
-					// Reload vectors after successful merge
-					s.wg.Add(1)
-					go func() {
-						defer s.wg.Done()
-						if err := s.ReloadVectors(); err != nil {
-							s.logger.Error("failed to reload vectors after merge", "error", err)
-						}
-					}()
-					// Trigger new consolidation to handle the new state
-					s.TriggerConsolidation()
-					// Break to refresh candidates
-					break
-				}
+		if shouldMerge {
+			if newTopicID, _, err := s.mergeTopics(ctx, candidate, newSummary); err != nil {
+				span.SetAttributes(attribute.String("consolidation.error_kind", "merge_topics"))
+				s.logger.Error("failed to merge topics", "error", err)
 			} else {
-				// Mark T1 as checked
-				if err := s.topicRepo.SetTopicConsolidationChecked(candidate.Topic1.UserID, candidate.Topic1.ID, true); err != nil {
-					s.logger.Error("failed to mark topic checked", "id", candidate.Topic1.ID, "error", err)
-				}
+				mergedCount++
+				s.logger.Info("Merged topics", "t1", candidate.Topic1.ID, "t2", candidate.Topic2.ID, "new_topic_id", newTopicID, "new_summary", newSummary)
+				// Reload vectors after successful merge
+				s.wg.Add(1)
+				go func() {
+					defer s.wg.Done()
+					if err := s.ReloadVectors(); err != nil {
+						s.logger.Error("failed to reload vectors after merge", "error", err)
+					}
+				}()
+				// Trigger new consolidation to handle the new state
+				s.TriggerConsolidation()
+				// Break to refresh candidates
+				break
+			}
+		} else {
+			// Mark T1 as checked
+			if err := s.topicRepo.SetTopicConsolidationChecked(candidate.Topic1.UserID, candidate.Topic1.ID, true); err != nil {
+				s.logger.Error("failed to mark topic checked", "id", candidate.Topic1.ID, "error", err)
 			}
 		}
-
-		// Mark orphan topics (no potential merge partner) as checked
-		// This unblocks fact extraction for topics at the end of the queue
-		s.markOrphanTopicsChecked(userID)
 	}
+
+	// Mark orphan topics (no potential merge partner) as checked
+	// This unblocks fact extraction for topics at the end of the queue
+	s.markOrphanTopicsChecked(userID)
 }
 
 // markOrphanTopicsChecked marks topics that have no potential merge partner as consolidation-checked.

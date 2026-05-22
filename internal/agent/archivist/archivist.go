@@ -12,11 +12,16 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -299,7 +304,7 @@ func (a *Archivist) Description() string {
 }
 
 // Execute runs the archivist with the given request.
-func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (*agent.Response, error) {
+func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (response *agent.Response, err error) {
 	// Extract parameters
 	messages := a.getMessages(req)
 	if len(messages) == 0 {
@@ -333,6 +338,35 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (*agent.Res
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+
+	// Span boundary for the archivist call. Child openrouter span(s) attach
+	// here; deferred closure captures fact/people extraction counts and routes
+	// terminal err through obs.ObserveErr. See plan: ticklish-giggling-hearth.md.
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/archivist").Start(
+		ctx, "archivist.Execute",
+		trace.WithAttributes(
+			attribute.Int64("user.id", userID),
+			attribute.Int("archivist.input_count", len(messages)),
+		),
+	)
+	var (
+		turns            int
+		factsExtracted   int
+		peopleExtracted  int
+		archivistCostUSD float64
+		parseError       bool
+	)
+	defer func() {
+		span.SetAttributes(
+			attribute.Int("archivist.turns", turns),
+			attribute.Int("archivist.facts_extracted", factsExtracted),
+			attribute.Int("archivist.people_extracted", peopleExtracted),
+			attribute.Float64("archivist.cost_usd", archivistCostUSD),
+			attribute.Bool("archivist.parse_error", parseError),
+		)
+		_ = obs.ObserveErr(span, err)
+		span.End()
+	}()
 
 	startTime := time.Now()
 	tracker := agentlog.NewTurnTracker()
@@ -400,6 +434,7 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (*agent.Res
 	}
 
 	resp, err := a.executor.Client().CreateChatCompletion(ctx, llmReq)
+	turns++
 
 	// Retry with reasoning disabled if response is empty (Gemini 3 quirk)
 	if err == nil && len(resp.Choices) > 0 && resp.Choices[0].Message.Content == "" {
@@ -407,6 +442,7 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (*agent.Res
 			"model", model, "thinking_level", thinkingLevel)
 		llmReq.Reasoning = nil
 		resp, err = a.executor.Client().CreateChatCompletion(ctx, llmReq)
+		turns++
 	}
 
 	tracker.EndTurn(
@@ -433,9 +469,15 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (*agent.Res
 	content := choice.Message.Content
 	result, err := a.parseResponse(content)
 	if err != nil {
+		parseError = true
 		a.logger.Warn("failed to parse archivist response", "error", err, "content_preview", truncate(content, 500))
 		a.saveTrace(userID, conversation, tracker, startTime, false, "parse_error: "+err.Error())
 		return nil, fmt.Errorf("json parse error: %w, content: %s", err, content)
+	}
+	factsExtracted = len(result.Facts.Added) + len(result.Facts.Updated)
+	peopleExtracted = len(result.People.Added) + len(result.People.Updated) + len(result.People.Merged)
+	if c := tracker.TotalCost(); c != nil {
+		archivistCostUSD = *c
 	}
 
 	duration := time.Since(startTime)

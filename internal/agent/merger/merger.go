@@ -8,10 +8,15 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -64,7 +69,7 @@ func (m *Merger) Type() agent.AgentType {
 }
 
 // Execute runs the merger with the given request.
-func (m *Merger) Execute(ctx context.Context, req *agent.Request) (*agent.Response, error) {
+func (m *Merger) Execute(ctx context.Context, req *agent.Request) (response *agent.Response, err error) {
 	// Extract topic summaries
 	topic1Summary, topic2Summary := m.getTopicSummaries(req)
 	if topic1Summary == "" || topic2Summary == "" {
@@ -78,6 +83,30 @@ func (m *Merger) Execute(ctx context.Context, req *agent.Request) (*agent.Respon
 
 	// Get profile and recent topics
 	userID := m.getUserID(req)
+
+	// Span boundary so the child openrouter span lands under merger.Execute
+	// and merge decisions become queryable via `{ span.merger.should_merge = false }`.
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/merger").Start(
+		ctx, "merger.Execute",
+		trace.WithAttributes(
+			attribute.Int64("user.id", userID),
+			attribute.Int("merger.topic1_size_chars", len(topic1Summary)),
+			attribute.Int("merger.topic2_size_chars", len(topic2Summary)),
+		),
+	)
+	var (
+		shouldMerge bool
+		parseError  bool
+	)
+	defer func() {
+		span.SetAttributes(
+			attribute.Bool("merger.should_merge", shouldMerge),
+			attribute.Bool("merger.parse_error", parseError),
+		)
+		_ = obs.ObserveErr(span, err)
+		span.End()
+	}()
+
 	profile, recentTopics := m.getContext(ctx, req, userID)
 
 	// Build system prompt
@@ -123,9 +152,11 @@ func (m *Merger) Execute(ctx context.Context, req *agent.Request) (*agent.Respon
 
 	// Parse JSON response
 	var result Result
-	if err := json.Unmarshal([]byte(content), &result); err != nil {
+	if err = json.Unmarshal([]byte(content), &result); err != nil {
+		parseError = true
 		return nil, fmt.Errorf("json parse error: %w, content: %s", err, content)
 	}
+	shouldMerge = result.ShouldMerge
 
 	return &agent.Response{
 		Content:    content,

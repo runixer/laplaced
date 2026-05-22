@@ -2,14 +2,86 @@ package rag
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
+
+// maxStragglerIDsInTrace caps the straggler ID slice and content event so a
+// pathological chunk can't blow up the trace size.
+const maxStragglerIDsInTrace = 50
+
+// recordCoverage attaches splitter coverage diagnostics to the active span
+// (rag.processChunk). Shared by both processChunk variants so the
+// `{ span.splitter.coverage_ok = false }` TraceQL query catches either path.
+//
+// When stragglers > 0 and trace_content is on, also emits a content event with
+// the actual message bodies so a debugger can see which texts the LLM dropped
+// without bumping log level or hitting the DB.
+func recordCoverage(ctx context.Context, chunk []storage.Message, stragglerIDs []int64) {
+	span := trace.SpanFromContext(ctx)
+	if !span.SpanContext().IsValid() {
+		return
+	}
+	total := len(chunk)
+	stragglers := len(stragglerIDs)
+	covered := total - stragglers
+	coveragePct := 1.0
+	if total > 0 {
+		coveragePct = float64(covered) / float64(total)
+	}
+	attrs := []attribute.KeyValue{
+		attribute.Bool("splitter.coverage_ok", stragglers == 0),
+		attribute.Int("splitter.straggler_count", stragglers),
+		attribute.Float64("splitter.coverage_pct", coveragePct),
+	}
+	if stragglers > 0 {
+		capped := stragglerIDs
+		if len(capped) > maxStragglerIDsInTrace {
+			capped = capped[:maxStragglerIDsInTrace]
+		}
+		attrs = append(attrs, attribute.Int64Slice("splitter.straggler_ids", capped))
+	}
+	span.SetAttributes(attrs...)
+
+	if stragglers == 0 || !obs.ContentEnabled() {
+		return
+	}
+	// Build a compact JSON of straggler bodies. Preview-trim each to keep the
+	// event bounded; the chunk-context retrievable from the DB if more detail
+	// is ever needed.
+	type stragglerItem struct {
+		ID      int64  `json:"id"`
+		Role    string `json:"role"`
+		Preview string `json:"preview"`
+	}
+	items := make([]stragglerItem, 0, len(stragglerIDs))
+	for _, id := range stragglerIDs {
+		if len(items) >= maxStragglerIDsInTrace {
+			break
+		}
+		for _, m := range chunk {
+			if m.ID != id {
+				continue
+			}
+			preview, _ := obs.TextPreview(m.Content, obs.DefaultPreviewLen)
+			items = append(items, stragglerItem{ID: m.ID, Role: m.Role, Preview: preview})
+			break
+		}
+	}
+	if body, err := json.Marshal(items); err == nil {
+		obs.RecordContent(span, "splitter.stragglers", string(body))
+	}
+}
 
 // findChunkBounds returns the min and max message IDs in a chunk.
 func findChunkBounds(chunk []storage.Message) (minID, maxID int64) {
@@ -53,6 +125,8 @@ func (s *Service) processChunk(ctx context.Context, userID int64, chunk []storag
 		return nil
 	}
 	s.logger.Info("Processing chunk", "user_id", userID, "count", len(chunk), "start", chunk[0].ID, "end", chunk[len(chunk)-1].ID)
+
+	var topicsSaved int
 
 	// 1. Extract Topics (Wait for completion)
 	topics, _, err := s.extractTopics(ctx, userID, chunk)
@@ -100,6 +174,7 @@ func (s *Service) processChunk(ctx context.Context, userID int64, chunk []storag
 
 	// Check for stragglers (messages not covered by any topic)
 	stragglerIDs := findStragglers(chunk, validTopics)
+	recordCoverage(ctx, chunk, stragglerIDs)
 	if len(stragglerIDs) > 0 {
 		s.logger.Warn("Topic extraction incomplete: stragglers detected", "count", len(stragglerIDs), "ids", stragglerIDs)
 		// Log received topics for debug
@@ -181,7 +256,11 @@ func (s *Service) processChunk(ctx context.Context, userID int64, chunk []storag
 				s.logger.Error("failed to save topic", "error", err)
 				continue
 			}
+			topicsSaved++
 		}
+	}
+	if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
+		span.SetAttributes(attribute.Int("chunk.topics_saved", topicsSaved))
 	}
 
 	// Load new vectors (incremental)
@@ -245,6 +324,7 @@ func (s *Service) processChunkWithStats(ctx context.Context, userID int64, chunk
 	}
 
 	stragglerIDs := findStragglers(chunk, validTopics)
+	recordCoverage(ctx, chunk, stragglerIDs)
 	if len(stragglerIDs) > 0 {
 		return nil, fmt.Errorf("topic extraction incomplete: %d messages not covered", len(stragglerIDs))
 	}

@@ -2,13 +2,48 @@ package rag
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/extractor"
+	"github.com/runixer/laplaced/internal/jobtype"
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/storage"
 )
+
+// classifyExtractionErr returns a low-cardinality label for the extraction
+// failure mode so `{ span.extractor.error_kind = "parse" }` works in TraceQL.
+// Anything unrecognized falls into "other"; refine as new shapes appear.
+func classifyExtractionErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "parse"):
+		return "parse"
+	case strings.Contains(msg, "embedding"):
+		return "embedding"
+	case strings.Contains(msg, "429") || strings.Contains(msg, "resource_exhausted"):
+		return "rate_limit"
+	case strings.Contains(msg, "too large"):
+		return "file_too_large"
+	case strings.Contains(msg, "empty"):
+		return "empty_file"
+	case strings.Contains(msg, "timeout") || strings.Contains(msg, "context deadline"):
+		return "timeout"
+	case strings.Contains(msg, "llm"):
+		return "llm"
+	default:
+		return "other"
+	}
+}
 
 // artifactExtractionLoop is the background loop for artifact processing (v0.6.0).
 // Polls at configured interval for pending artifacts and processes them with rate limiting.
@@ -154,6 +189,32 @@ func (s *Service) processSingleArtifact(ctx context.Context, artifact storage.Ar
 		"file_type", artifact.FileType,
 	)
 
+	// Root span for one artifact extraction so the extractor + openrouter
+	// spans nest under a queryable parent. The JSON parse failure we saw
+	// on artifact 1768 was visible only in logs without this.
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/rag").Start(
+		ctx, "rag.processArtifactExtraction",
+		trace.WithAttributes(
+			attribute.Int64("user.id", userID),
+			attribute.Int64("artifact.id", artifactID),
+			attribute.String("artifact.file_type", artifact.FileType),
+			attribute.Int64("artifact.file_size_bytes", artifact.FileSize),
+			attribute.String("job.type", jobtype.Background.String()),
+			attribute.Int("extractor.retry_count", artifact.RetryCount),
+		),
+	)
+	var extractionErr error
+	defer func() {
+		span.SetAttributes(
+			attribute.Int64("extractor.duration_ms", time.Since(startTime).Milliseconds()),
+		)
+		if extractionErr != nil {
+			span.SetAttributes(attribute.String("extractor.error_kind", classifyExtractionErr(extractionErr)))
+		}
+		_ = obs.ObserveErr(span, extractionErr)
+		span.End()
+	}()
+
 	// Load user context for personalized extraction
 	var shared *agent.SharedContext
 	if s.contextService != nil {
@@ -177,6 +238,7 @@ func (s *Service) processSingleArtifact(ctx context.Context, artifact storage.Ar
 	RecordArtifactExtraction(userID, duration.Seconds(), success)
 
 	if err != nil {
+		extractionErr = err
 		s.logger.Error("artifact extraction failed",
 			"user_id", userID,
 			"artifact_id", artifactID,

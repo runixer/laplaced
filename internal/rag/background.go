@@ -4,8 +4,13 @@ import (
 	"context"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/jobtype"
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -108,8 +113,24 @@ func (s *Service) runChunkWithBreaker(_ context.Context, userID int64, chunk []s
 		return true
 	}
 	startID := chunk[0].ID
+	endID := chunk[len(chunk)-1].ID
 
 	if remaining := s.chunkBreaker.cooldownRemaining(userID, startID); remaining > 0 {
+		// Short-lived span so cooldown skips are countable in TraceQL via
+		// `{ span.chunk.circuit_breaker = true }` instead of grep through WARN
+		// logs. The skip is the only signal the loop emits during cooldown.
+		_, skipSpan := otel.Tracer("github.com/runixer/laplaced/internal/rag").Start(
+			context.Background(), "rag.processChunk.cooldown",
+			trace.WithAttributes(
+				attribute.Int64("user.id", userID),
+				attribute.Int64("chunk.start_id", startID),
+				attribute.String("chunk.kind", kind),
+				attribute.String("job.type", jobtype.Background.String()),
+				attribute.Bool("chunk.circuit_breaker", true),
+				attribute.Int64("chunk.cooldown_remaining_ms", remaining.Milliseconds()),
+			),
+		)
+		skipSpan.End()
 		s.logger.Warn("chunk in circuit-breaker cooldown, skipping",
 			"kind", kind, "user_id", userID, "start_msg_id", startID, "cooldown_remaining", remaining)
 		return false
@@ -117,8 +138,26 @@ func (s *Service) runChunkWithBreaker(_ context.Context, userID int64, chunk []s
 
 	runCtx := jobtype.WithJobType(context.Background(), jobtype.Background)
 	runCtx, cancel := context.WithTimeout(runCtx, config.DefaultChunkProcessingTimeout)
+	defer cancel()
+
+	// Root span for the background chunk pipeline. Without this, splitter +
+	// openrouter calls appeared as orphan roots in Tempo with no chunk/user
+	// context — see plan: ticklish-giggling-hearth.md. The deferred closure
+	// routes terminal err through obs.ObserveErr and span.End.
+	runCtx, span := otel.Tracer("github.com/runixer/laplaced/internal/rag").Start(
+		runCtx, "rag.processChunk",
+		trace.WithAttributes(
+			attribute.Int64("user.id", userID),
+			attribute.Int64("chunk.start_id", startID),
+			attribute.Int64("chunk.end_id", endID),
+			attribute.Int("chunk.message_count", len(chunk)),
+			attribute.String("chunk.kind", kind),
+			attribute.String("job.type", jobtype.Background.String()),
+		),
+	)
 	err := s.processChunk(runCtx, userID, chunk)
-	cancel()
+	_ = obs.ObserveErr(span, err)
+	span.End()
 
 	if err != nil {
 		cooldown := s.chunkBreaker.recordFailure(userID, startID)

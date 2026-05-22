@@ -6,12 +6,17 @@ import (
 	"log/slog"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/archivist"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/jobtype"
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -137,13 +142,38 @@ func (s *Service) ProcessSession(ctx context.Context, userID int64, messages []s
 }
 
 // ProcessSessionWithStats processes a session and returns statistics about fact changes.
-func (s *Service) ProcessSessionWithStats(ctx context.Context, userID int64, messages []storage.Message, referenceDate time.Time, topicID int64) (FactStats, error) {
+func (s *Service) ProcessSessionWithStats(ctx context.Context, userID int64, messages []storage.Message, referenceDate time.Time, topicID int64) (stats FactStats, err error) {
 	// Mark as background job for metrics (archiver is a maintenance task)
 	ctx = jobtype.WithJobType(ctx, jobtype.Background)
 
 	// Set a timeout to prevent hanging indefinitely if the model is slow or unresponsive
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
+
+	// Root span for the background fact-extraction call. Without this the
+	// archivist + openrouter spans were orphan roots in Tempo. See plan:
+	// ticklish-giggling-hearth.md.
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/memory").Start(
+		ctx, "memory.ProcessSession",
+		trace.WithAttributes(
+			attribute.Int64("user.id", userID),
+			attribute.Int64("memory.topic_id", topicID),
+			attribute.Int("memory.message_count", len(messages)),
+			attribute.String("job.type", jobtype.Background.String()),
+		),
+	)
+	defer func() {
+		span.SetAttributes(
+			attribute.Int("memory.facts_added", stats.Created),
+			attribute.Int("memory.facts_updated", stats.Updated),
+			attribute.Int("memory.facts_removed", stats.Deleted),
+			attribute.Int("memory.people_added", stats.PeopleAdded),
+			attribute.Int("memory.people_updated", stats.PeopleUpdated),
+			attribute.Int("memory.people_merged", stats.PeopleMerged),
+		)
+		_ = obs.ObserveErr(span, err)
+		span.End()
+	}()
 
 	s.logger.Info("Processing session for memory update", "user_id", userID, "msg_count", len(messages), "topic_id", topicID, "topic_date", referenceDate.Format(time.RFC3339))
 
@@ -185,7 +215,7 @@ func (s *Service) ProcessSessionWithStats(ctx context.Context, userID int64, mes
 
 	// 3. Apply fact updates and collect stats
 	update := convertArchivistResult(archivistResult)
-	stats, err := s.applyUpdateWithStats(ctx, userID, update, facts, referenceDate, topicID, requestInput)
+	stats, err = s.applyUpdateWithStats(ctx, userID, update, facts, referenceDate, topicID, requestInput)
 	if err != nil {
 		return FactStats{}, fmt.Errorf("failed to apply memory update: %w", err)
 	}

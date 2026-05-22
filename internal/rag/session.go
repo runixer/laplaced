@@ -5,7 +5,12 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/runixer/laplaced/internal/jobtype"
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -78,7 +83,7 @@ func (s *Service) ForceProcessUser(ctx context.Context, userID int64) (int, erro
 	for _, msg := range messages {
 		currentChunk = append(currentChunk, msg)
 		if len(currentChunk) >= maxChunkSize {
-			if err := s.processChunk(ctx, userID, currentChunk); err != nil {
+			if err := s.processChunkWithSpan(ctx, userID, currentChunk, "forced"); err != nil {
 				return processedCount, fmt.Errorf("failed to process chunk: %w", err)
 			}
 			processedCount += len(currentChunk)
@@ -88,13 +93,38 @@ func (s *Service) ForceProcessUser(ctx context.Context, userID int64) (int, erro
 
 	// Process remaining messages
 	if len(currentChunk) > 0 {
-		if err := s.processChunk(ctx, userID, currentChunk); err != nil {
+		if err := s.processChunkWithSpan(ctx, userID, currentChunk, "forced-final"); err != nil {
 			return processedCount, fmt.Errorf("failed to process final chunk: %w", err)
 		}
 		processedCount += len(currentChunk)
 	}
 
 	return processedCount, nil
+}
+
+// processChunkWithSpan wraps processChunk in a rag.processChunk span so the
+// forced-process path (testbot send --process-session, /forceclose) emits the
+// same tracing shape as the background loop. The kind attribute distinguishes
+// "background chunk" vs "forced" in TraceQL filters.
+func (s *Service) processChunkWithSpan(ctx context.Context, userID int64, chunk []storage.Message, kind string) error {
+	if len(chunk) == 0 {
+		return nil
+	}
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/rag").Start(
+		ctx, "rag.processChunk",
+		trace.WithAttributes(
+			attribute.Int64("user.id", userID),
+			attribute.Int64("chunk.start_id", chunk[0].ID),
+			attribute.Int64("chunk.end_id", chunk[len(chunk)-1].ID),
+			attribute.Int("chunk.message_count", len(chunk)),
+			attribute.String("chunk.kind", kind),
+			attribute.String("job.type", jobtype.Background.String()),
+		),
+	)
+	err := s.processChunk(ctx, userID, chunk)
+	_ = obs.ObserveErr(span, err)
+	span.End()
+	return err
 }
 
 // ForceProcessUserWithProgress processes all unprocessed messages for a user with progress reporting.
@@ -131,7 +161,25 @@ func (s *Service) ForceProcessUserWithProgress(ctx context.Context, userID int64
 		Message: "Extracting topics from messages...",
 	})
 
-	topicIDs, err := s.processChunkWithStats(ctx, userID, messages, stats)
+	// Root span for the forced-process path so splitter coverage diagnostics
+	// (via recordCoverage in processChunkWithStats) and the child openrouter
+	// span have a queryable parent. Uses the same `rag.processChunk` name as
+	// the background loop; chunk.kind distinguishes the two flows.
+	chunkCtx, span := otel.Tracer("github.com/runixer/laplaced/internal/rag").Start(
+		ctx, "rag.processChunk",
+		trace.WithAttributes(
+			attribute.Int64("user.id", userID),
+			attribute.Int64("chunk.start_id", messages[0].ID),
+			attribute.Int64("chunk.end_id", messages[len(messages)-1].ID),
+			attribute.Int("chunk.message_count", len(messages)),
+			attribute.String("chunk.kind", "forced-with-stats"),
+			attribute.String("job.type", jobtype.Background.String()),
+		),
+	)
+	topicIDs, err := s.processChunkWithStats(chunkCtx, userID, messages, stats)
+	span.SetAttributes(attribute.Int("chunk.topics_saved", len(topicIDs)))
+	_ = obs.ObserveErr(span, err)
+	span.End()
 	if err != nil {
 		return stats, fmt.Errorf("failed to extract topics: %w", err)
 	}

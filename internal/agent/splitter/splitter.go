@@ -8,10 +8,15 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -70,7 +75,7 @@ func (s *Splitter) Type() agent.AgentType {
 }
 
 // Execute runs the splitter with the given request.
-func (s *Splitter) Execute(ctx context.Context, req *agent.Request) (*agent.Response, error) {
+func (s *Splitter) Execute(ctx context.Context, req *agent.Request) (response *agent.Response, err error) {
 	messages := s.getMessages(req)
 	if len(messages) == 0 {
 		return &agent.Response{
@@ -83,8 +88,37 @@ func (s *Splitter) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 		return nil, fmt.Errorf("no model configured for splitter")
 	}
 
-	// Get profile and recent topics
+	// Span boundary for the splitter call so the child openrouter span attaches
+	// here and coverage diagnostics on rag.processChunk can reference these
+	// inputs. Named returns let the deferred closure route terminal err via
+	// obs.ObserveErr. See plan: ticklish-giggling-hearth.md.
 	userID := s.getUserID(req)
+	inputTotalChars := 0
+	for _, m := range messages {
+		inputTotalChars += len(m.Content)
+	}
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/splitter").Start(
+		ctx, "splitter.Execute",
+		trace.WithAttributes(
+			attribute.Int64("user.id", userID),
+			attribute.Int("splitter.input_count", len(messages)),
+			attribute.Int("splitter.input_total_chars", inputTotalChars),
+		),
+	)
+	var (
+		topicsReturned int
+		parseError     bool
+	)
+	defer func() {
+		span.SetAttributes(
+			attribute.Int("splitter.topics_returned", topicsReturned),
+			attribute.Bool("splitter.parse_error", parseError),
+		)
+		_ = obs.ObserveErr(span, err)
+		span.End()
+	}()
+
+	// Get profile and recent topics
 	profile, recentTopics := s.getContext(ctx, req, userID)
 
 	// Get optional goal parameter
@@ -138,8 +172,19 @@ func (s *Splitter) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 	var result struct {
 		Topics []ExtractedTopic `json:"topics"`
 	}
-	if err := json.Unmarshal([]byte(content), &result); err != nil {
+	if err = json.Unmarshal([]byte(content), &result); err != nil {
+		parseError = true
 		return nil, fmt.Errorf("json parse error: %w, content: %s", err, content)
+	}
+	topicsReturned = len(result.Topics)
+
+	// Content-gated event with the parsed topic ranges — lets us see at a
+	// glance whether the LLM left a gap between t.EndMsgID and the next
+	// t.StartMsgID, before rag.processChunk computes stragglers.
+	if obs.ContentEnabled() && len(result.Topics) > 0 {
+		if body, mErr := json.Marshal(result.Topics); mErr == nil {
+			obs.RecordContent(span, "splitter.topics_output", string(body))
+		}
 	}
 
 	return &agent.Response{

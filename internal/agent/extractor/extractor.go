@@ -10,11 +10,16 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -98,7 +103,7 @@ func (ex *Extractor) Description() string {
 }
 
 // Execute runs the extractor with the given request.
-func (ex *Extractor) Execute(ctx context.Context, req *agent.Request) (*agent.Response, error) {
+func (ex *Extractor) Execute(ctx context.Context, req *agent.Request) (response *agent.Response, err error) {
 	// Extract artifact from request
 	artifact := ex.getArtifact(req)
 	if artifact == nil {
@@ -114,6 +119,31 @@ func (ex *Extractor) Execute(ctx context.Context, req *agent.Request) (*agent.Re
 		"file_type", artifact.FileType,
 		"size", artifact.FileSize,
 	)
+
+	// Span boundary so artifact extraction failures (the JSON parse case we
+	// saw on artifact 1768 is invisible today) become queryable via
+	// `{ span.extractor.parse_error = true }`.
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/extractor").Start(
+		ctx, "extractor.Execute",
+		trace.WithAttributes(
+			attribute.Int64("user.id", userID),
+			attribute.Int64("extractor.artifact_id", artifactID),
+			attribute.String("extractor.file_type", artifact.FileType),
+			attribute.Int64("extractor.file_size_bytes", artifact.FileSize),
+		),
+	)
+	var (
+		parseError      bool
+		embeddingFailed bool
+	)
+	defer func() {
+		span.SetAttributes(
+			attribute.Bool("extractor.parse_error", parseError),
+			attribute.Bool("extractor.embedding_failed", embeddingFailed),
+		)
+		_ = obs.ObserveErr(span, err)
+		span.End()
+	}()
 
 	startTime := time.Now()
 
@@ -176,8 +206,9 @@ func (ex *Extractor) Execute(ctx context.Context, req *agent.Request) (*agent.Re
 
 	// Step 6: Parse extraction result (metadata only)
 	var extraction ExtractionResult
-	if err := json.Unmarshal([]byte(llmResp.Content), &extraction); err != nil {
-		err := fmt.Errorf("failed to parse extraction JSON: %w", err)
+	if err = json.Unmarshal([]byte(llmResp.Content), &extraction); err != nil {
+		parseError = true
+		err = fmt.Errorf("failed to parse extraction JSON: %w", err)
 		ex.markFailed(artifact, err.Error())
 		return nil, err
 	}
@@ -185,7 +216,8 @@ func (ex *Extractor) Execute(ctx context.Context, req *agent.Request) (*agent.Re
 	// Step 7: Generate embedding for summary only (for vector search)
 	summaryEmbedding, err := ex.generateSummaryEmbedding(ctx, userID, extraction.Summary)
 	if err != nil {
-		err := fmt.Errorf("failed to generate summary embedding: %w", err)
+		embeddingFailed = true
+		err = fmt.Errorf("failed to generate summary embedding: %w", err)
 		ex.markFailed(artifact, err.Error())
 		return nil, err
 	}

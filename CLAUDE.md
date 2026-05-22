@@ -524,14 +524,18 @@ This project uses [Keep a Changelog](https://keepachangelog.com/) format.
 
 **Changelog is for users, not developers.** Write what changed from user's perspective, not implementation details.
 
-**Good:**
+**Keep entries to ONE sentence by default.** No multi-paragraph "простыни". The CHANGELOG is scanned, not read — detail belongs in the PR description and commit message. Reserve longer entries only for breaking changes that genuinely need migration guidance.
+
+**Good (short, plain language):**
 ```markdown
-- Per-message latency breakdown — track LLM, tools, Telegram timing separately
-- Voice messages now use native Gemini audio understanding
+- Background tasks now appear in the trace dashboard when they fail.
+- Per-message latency breakdown — track LLM, tools, Telegram timing separately.
+- Voice messages now use native Gemini audio understanding.
 ```
 
-**Bad (too technical):**
+**Bad (too long, too technical):**
 ```markdown
+- **Every background pipeline call (splitter, archivist, merger, extractor) now emits OpenTelemetry spans with diagnostic attributes...** [three more paragraphs of detail that belong in the PR]
 - `laplaced_bot_message_llm_duration_seconds{user_id}` — total LLM time per message
 - Added `job_type` label with values "interactive" and "background"
 ```

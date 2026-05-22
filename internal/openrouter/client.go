@@ -779,6 +779,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 			attribute.String("gen_ai.system", "openrouter"),
 			attribute.String("gen_ai.request.model", req.Model),
 			attribute.Int64("user.id", req.UserID),
+			attribute.String("job.type", jt),
 		),
 	)
 	var (
@@ -1049,6 +1050,7 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 	for _, s := range req.Input {
 		totalChars += len(s)
 	}
+	jt := jobtype.FromContext(ctx).String()
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/openrouter").Start(
 		ctx, "openrouter.CreateEmbeddings",
 		trace.WithAttributes(
@@ -1057,6 +1059,7 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 			attribute.Int("emb.dimensions", req.Dimensions),
 			attribute.Int("emb.input_count", len(req.Input)),
 			attribute.Int("emb.total_chars", totalChars),
+			attribute.String("job.type", jt),
 		),
 	)
 	defer func() {
