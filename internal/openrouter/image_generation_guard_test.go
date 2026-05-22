@@ -17,7 +17,8 @@ import (
 var imageGenModelPattern = regexp.MustCompile(
 	`"(google/gemini-[0-9]+\.?[0-9]*-(?:flash|pro)-image[a-z0-9\-]*|` +
 		`black-forest-labs/flux[a-z0-9\.\-]*|` +
-		`sourceful/riverflow[a-z0-9\-]*)"`)
+		`sourceful/riverflow[a-z0-9\-]*|` +
+		`openai/gpt-[0-9]+\.?[0-9]*-image[a-z0-9\-]*)"`)
 
 // TestAllImageGenerationRequestsSetModalities walks the tree for every
 // openrouter.ChatCompletionRequest{...} literal that targets an image-output

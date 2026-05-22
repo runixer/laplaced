@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Background tasks (topic creation, fact extraction, file processing) now appear in the trace dashboard, so silent failures are visible without raising log level.
 - Streaming chat requests now emit the same OpenTelemetry spans as buffered ones, so the main chat agent is traceable by model, tokens, and cost.
 
+### Changed
+- Default chat model is now `google/gemini-3.5-flash` (was `gemini-3.1-pro-preview`) and default image-generation model is now `openai/gpt-5.4-image-2` (was `gemini-3.1-flash-image-preview`); the previous models stay available as commented alternatives in `default.yaml`.
+
 ### Fixed
 - Agent Logs page now shows streamed chat turns instead of two error placeholders.
 
