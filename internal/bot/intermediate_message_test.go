@@ -183,7 +183,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 
 	// Execute
 	group := &MessageGroup{
-		Messages: messages,
+		Messages: tgIncomings(bot, messages...),
 		UserID:   userID,
 	}
 	bot.processMessageGroup(context.Background(), group)

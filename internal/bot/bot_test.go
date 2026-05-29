@@ -136,7 +136,7 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 
 	// Execute
 	group := &MessageGroup{
-		Messages: messages,
+		Messages: tgIncomings(bot, messages...),
 		UserID:   userID,
 	}
 	bot.processMessageGroup(context.Background(), group)
@@ -270,7 +270,7 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 
 	// Execute
 	group := &MessageGroup{
-		Messages: messages,
+		Messages: tgIncomings(bot, messages...),
 		UserID:   userID,
 	}
 	bot.processMessageGroup(context.Background(), group)
@@ -409,7 +409,7 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 
 	// Execute
 	group := &MessageGroup{
-		Messages: messages,
+		Messages: tgIncomings(bot, messages...),
 		UserID:   userID,
 	}
 	bot.processMessageGroup(context.Background(), group)
@@ -549,7 +549,7 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 
 	// Execute
 	group := &MessageGroup{
-		Messages: messages,
+		Messages: tgIncomings(bot, messages...),
 		UserID:   userID,
 	}
 	bot.processMessageGroup(context.Background(), group)
@@ -701,7 +701,7 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 
 	// Execute
 	group := &MessageGroup{
-		Messages: messages,
+		Messages: tgIncomings(bot, messages...),
 		UserID:   userID,
 	}
 	bot.processMessageGroup(context.Background(), group)
@@ -833,7 +833,7 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 
 	// Execute - voice messages now go through processMessageGroup
 	group := &MessageGroup{
-		Messages: []*telegram.Message{msg},
+		Messages: tgIncomings(bot, msg),
 		UserID:   userID,
 	}
 	bot.processMessageGroup(context.Background(), group)
@@ -1124,7 +1124,7 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 
 	// --- Execution ---
 	group := &MessageGroup{
-		Messages: []*telegram.Message{newMessage},
+		Messages: tgIncomings(bot, newMessage),
 		UserID:   userID,
 	}
 	bot.processMessageGroup(context.Background(), group)
@@ -1649,23 +1649,18 @@ func TestPrepareUserMessage_UnsupportedFormat(t *testing.T) {
 	chatID := int64(456)
 
 	// Create message group with unsupported file format (.docx)
-	group := &MessageGroup{
-		UserID: userID,
-		Messages: []*telegram.Message{
-			{
-				MessageID: 1,
-				From:      &telegram.User{ID: userID, FirstName: "Test", LastName: "User"},
-				Chat:      &telegram.Chat{ID: chatID},
-				Date:      int(time.Now().Unix()),
-				Document: &telegram.Document{
-					FileID:   "doc-123",
-					FileName: "document.docx",
-					MimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-					FileSize: 1000,
-				},
-			},
+	group := tgGroup(bot, userID, &telegram.Message{
+		MessageID: 1,
+		From:      &telegram.User{ID: userID, FirstName: "Test", LastName: "User"},
+		Chat:      &telegram.Chat{ID: chatID},
+		Date:      int(time.Now().Unix()),
+		Document: &telegram.Document{
+			FileID:   "doc-123",
+			FileName: "document.docx",
+			MimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+			FileSize: 1000,
 		},
-	}
+	})
 
 	// Mock storage calls
 	mockStore.On("GetRecentSessionMessages", userID, mock.Anything, mock.Anything).Return([]storage.Message{}, nil)
@@ -1711,23 +1706,18 @@ func TestPrepareUserMessage_FileTooLarge(t *testing.T) {
 	chatID := int64(456)
 
 	// Create message group with oversized file (25MB > 20MB limit)
-	group := &MessageGroup{
-		UserID: userID,
-		Messages: []*telegram.Message{
-			{
-				MessageID: 1,
-				From:      &telegram.User{ID: userID, FirstName: "Test", LastName: "User"},
-				Chat:      &telegram.Chat{ID: chatID},
-				Date:      int(time.Now().Unix()),
-				Document: &telegram.Document{
-					FileID:   "doc-large",
-					FileName: "large.pdf",
-					MimeType: "application/pdf",
-					FileSize: 25 * 1024 * 1024, // 25 MB
-				},
-			},
+	group := tgGroup(bot, userID, &telegram.Message{
+		MessageID: 1,
+		From:      &telegram.User{ID: userID, FirstName: "Test", LastName: "User"},
+		Chat:      &telegram.Chat{ID: chatID},
+		Date:      int(time.Now().Unix()),
+		Document: &telegram.Document{
+			FileID:   "doc-large",
+			FileName: "large.pdf",
+			MimeType: "application/pdf",
+			FileSize: 25 * 1024 * 1024, // 25 MB
 		},
-	}
+	})
 
 	// Mock storage calls
 	mockStore.On("GetRecentSessionMessages", userID, mock.Anything, mock.Anything).Return([]storage.Message{}, nil)

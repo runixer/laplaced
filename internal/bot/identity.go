@@ -37,3 +37,13 @@ func resolveScopeID(scopes storage.ScopeRepository, kind, nativeID string) (int6
 	}
 	return scopes.ResolveScope(kind, "user", nativeID)
 }
+
+// scopeNativeID centralizes the scope-selection policy: a DM is scoped to its
+// sender, a channel to the conversation. v0.10 only exercises the DM/sender
+// branch; the channel branch is forward-design for Phase 6 channel RAG.
+func scopeNativeID(im IncomingMessage) string {
+	if im.IsDirect {
+		return im.SenderID
+	}
+	return im.ConversationID
+}

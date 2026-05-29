@@ -96,7 +96,7 @@ func TestExtractForwardedPeople_NewPerson(t *testing.T) {
 	})).Return(int64(1), nil).Once()
 
 	// Execute
-	bot.extractForwardedPeople(context.Background(), userID, messages, logger)
+	bot.extractForwardedPeople(context.Background(), userID, tgIncomings(bot, messages...), logger)
 
 	// Verify
 	mockStore.AssertExpectations(t)
@@ -143,7 +143,7 @@ func TestExtractForwardedPeople_UpdateExistingPerson(t *testing.T) {
 	})).Return(nil).Once()
 
 	// Execute
-	bot.extractForwardedPeople(context.Background(), userID, messages, logger)
+	bot.extractForwardedPeople(context.Background(), userID, tgIncomings(bot, messages...), logger)
 
 	// Verify
 	mockStore.AssertExpectations(t)
@@ -175,7 +175,7 @@ func TestExtractForwardedPeople_SkipBots(t *testing.T) {
 	}
 
 	// Execute - should skip bot
-	bot.extractForwardedPeople(context.Background(), userID, messages, logger)
+	bot.extractForwardedPeople(context.Background(), userID, tgIncomings(bot, messages...), logger)
 
 	// Verify: no calls to peopleRepo
 	mockStore.AssertNotCalled(t, "FindPersonByTelegramID", mock.Anything, mock.Anything)
@@ -204,7 +204,7 @@ func TestExtractForwardedPeople_SkipSelf(t *testing.T) {
 	}
 
 	// Execute - should skip self
-	bot.extractForwardedPeople(context.Background(), userID, messages, logger)
+	bot.extractForwardedPeople(context.Background(), userID, tgIncomings(bot, messages...), logger)
 
 	// Verify: no calls to peopleRepo
 	mockStore.AssertNotCalled(t, "FindPersonByTelegramID", mock.Anything, mock.Anything)
@@ -232,7 +232,7 @@ func TestExtractForwardedPeople_SkipNonUserForwards(t *testing.T) {
 	}
 
 	// Execute - should skip non-user forwards
-	bot.extractForwardedPeople(context.Background(), userID, messages, logger)
+	bot.extractForwardedPeople(context.Background(), userID, tgIncomings(bot, messages...), logger)
 
 	// Verify: no calls to peopleRepo
 	mockStore.AssertNotCalled(t, "FindPersonByTelegramID", mock.Anything, mock.Anything)
@@ -287,7 +287,7 @@ func TestExtractForwardedPeople_UpdatePersonByUsername(t *testing.T) {
 	})).Return(nil).Once()
 
 	// Execute
-	bot.extractForwardedPeople(context.Background(), userID, messages, logger)
+	bot.extractForwardedPeople(context.Background(), userID, tgIncomings(bot, messages...), logger)
 
 	// Verify
 	mockStore.AssertExpectations(t)
@@ -320,7 +320,7 @@ func TestExtractForwardedPeople_NilPeopleRepo(t *testing.T) {
 	}
 
 	// Execute - should return early without panic
-	bot.extractForwardedPeople(context.Background(), userID, messages, logger)
+	bot.extractForwardedPeople(context.Background(), userID, tgIncomings(bot, messages...), logger)
 
 	// Verify: no calls to store (since we return early)
 	// No assertions needed - just no panic

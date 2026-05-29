@@ -94,7 +94,7 @@ func TestProcessMessageGroup_RecordsRootSpan(t *testing.T) {
 	}, nil)
 
 	b.processMessageGroup(context.Background(), &MessageGroup{
-		Messages: messages,
+		Messages: tgIncomings(b, messages...),
 		UserID:   userID,
 	})
 
@@ -207,7 +207,7 @@ func runAnomalyTraceCase(t *testing.T, userText, llmContent string) map[attribut
 	}, nil)
 
 	b.processMessageGroup(context.Background(), &MessageGroup{
-		Messages: messages,
+		Messages: tgIncomings(b, messages...),
 		UserID:   userID,
 	})
 

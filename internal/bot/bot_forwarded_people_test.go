@@ -92,7 +92,7 @@ func TestExtractForwardedPeople_NewPerson_CreatesPerson(t *testing.T) {
 			p.MentionCount == 1
 	})).Return(int64(1), nil)
 
-	bot.extractForwardedPeople(context.Background(), userID, messages, testutil.TestLogger())
+	bot.extractForwardedPeople(context.Background(), userID, tgIncomings(bot, messages...), testutil.TestLogger())
 
 	mockStore.AssertExpectations(t)
 }
@@ -142,7 +142,7 @@ func TestExtractForwardedPeople_ExistingPersonByTelegramID_UpdatesPerson(t *test
 			p.Username != nil && *p.Username == "fwd_user"
 	})).Return(nil)
 
-	bot.extractForwardedPeople(context.Background(), userID, messages, testutil.TestLogger())
+	bot.extractForwardedPeople(context.Background(), userID, tgIncomings(bot, messages...), testutil.TestLogger())
 
 	mockStore.AssertExpectations(t)
 }
@@ -194,7 +194,7 @@ func TestExtractForwardedPerson_ExistingPersonByUsername_AddsTelegramID(t *testi
 			p.MentionCount == 1
 	})).Return(nil)
 
-	bot.extractForwardedPeople(context.Background(), userID, messages, testutil.TestLogger())
+	bot.extractForwardedPeople(context.Background(), userID, tgIncomings(bot, messages...), testutil.TestLogger())
 
 	mockStore.AssertExpectations(t)
 }
@@ -248,7 +248,7 @@ func TestExtractForwardedPerson_ExistingPersonByName_AddsTelegramID(t *testing.T
 			p.TelegramID != nil && *p.TelegramID == forwarderID
 	})).Return(nil)
 
-	bot.extractForwardedPeople(context.Background(), userID, messages, testutil.TestLogger())
+	bot.extractForwardedPeople(context.Background(), userID, tgIncomings(bot, messages...), testutil.TestLogger())
 
 	mockStore.AssertExpectations(t)
 }
@@ -279,7 +279,7 @@ func TestExtractForwardedPeople_ChannelForward_Ignored(t *testing.T) {
 	}
 
 	// No repo calls should be made
-	bot.extractForwardedPeople(context.Background(), userID, messages, testutil.TestLogger())
+	bot.extractForwardedPeople(context.Background(), userID, tgIncomings(bot, messages...), testutil.TestLogger())
 
 	// Assert no calls were made
 	mockStore.AssertNotCalled(t, "FindPersonByTelegramID", mock.Anything, mock.Anything)
@@ -314,7 +314,7 @@ func TestExtractForwardedPeople_BotForward_Ignored(t *testing.T) {
 	}
 
 	// No repo calls should be made
-	bot.extractForwardedPeople(context.Background(), userID, messages, testutil.TestLogger())
+	bot.extractForwardedPeople(context.Background(), userID, tgIncomings(bot, messages...), testutil.TestLogger())
 
 	mockStore.AssertNotCalled(t, "FindPersonByTelegramID", mock.Anything, mock.Anything)
 	mockStore.AssertNotCalled(t, "AddPerson", mock.Anything)
@@ -346,7 +346,7 @@ func TestExtractForwardedPeople_SelfForward_Ignored(t *testing.T) {
 	}
 
 	// No repo calls should be made
-	bot.extractForwardedPeople(context.Background(), userID, messages, testutil.TestLogger())
+	bot.extractForwardedPeople(context.Background(), userID, tgIncomings(bot, messages...), testutil.TestLogger())
 
 	mockStore.AssertNotCalled(t, "FindPersonByTelegramID", mock.Anything, mock.Anything)
 	mockStore.AssertNotCalled(t, "AddPerson", mock.Anything)
@@ -372,7 +372,7 @@ func TestExtractForwardedPeople_NoForwardOrigin_Skips(t *testing.T) {
 	}
 
 	// No repo calls should be made
-	bot.extractForwardedPeople(context.Background(), userID, messages, testutil.TestLogger())
+	bot.extractForwardedPeople(context.Background(), userID, tgIncomings(bot, messages...), testutil.TestLogger())
 
 	mockStore.AssertNotCalled(t, "FindPersonByTelegramID", mock.Anything, mock.Anything)
 	mockStore.AssertNotCalled(t, "AddPerson", mock.Anything)
@@ -419,7 +419,7 @@ func TestExtractForwardedPeople_NilPeopleRepo_DoesNothing(t *testing.T) {
 
 	// Should not panic
 	assert.NotPanics(t, func() {
-		bot.extractForwardedPeople(context.Background(), userID, messages, logger)
+		bot.extractForwardedPeople(context.Background(), userID, tgIncomings(bot, messages...), logger)
 	})
 }
 
@@ -459,7 +459,7 @@ func TestExtractForwardedPeople_DisplayNameFromUsername(t *testing.T) {
 		return p.DisplayName == forwarderUsername
 	})).Return(int64(1), nil)
 
-	bot.extractForwardedPeople(context.Background(), userID, messages, testutil.TestLogger())
+	bot.extractForwardedPeople(context.Background(), userID, tgIncomings(bot, messages...), testutil.TestLogger())
 
 	mockStore.AssertExpectations(t)
 }
@@ -519,7 +519,7 @@ func TestExtractForwardedPeople_MultipleMessages_ProcessesAll(t *testing.T) {
 		return p.DisplayName == "Second"
 	})).Return(int64(2), nil)
 
-	bot.extractForwardedPeople(context.Background(), userID, messages, testutil.TestLogger())
+	bot.extractForwardedPeople(context.Background(), userID, tgIncomings(bot, messages...), testutil.TestLogger())
 
 	mockStore.AssertExpectations(t)
 }
@@ -580,7 +580,7 @@ func TestExtractForwardedPeople_DuplicateForwards_Deduplicates(t *testing.T) {
 	mockStore.On("FindPersonByTelegramID", userID, forwarderID).Return(existingPerson, nil).Once()
 	mockStore.On("UpdatePerson", mock.Anything).Return(nil).Once()
 
-	bot.extractForwardedPeople(context.Background(), userID, messages, testutil.TestLogger())
+	bot.extractForwardedPeople(context.Background(), userID, tgIncomings(bot, messages...), testutil.TestLogger())
 
 	mockStore.AssertExpectations(t)
 }
@@ -622,7 +622,7 @@ func TestExtractForwardedPeople_UpdateError_Continues(t *testing.T) {
 
 	// Should not panic
 	assert.NotPanics(t, func() {
-		bot.extractForwardedPeople(context.Background(), userID, messages, testutil.TestLogger())
+		bot.extractForwardedPeople(context.Background(), userID, tgIncomings(bot, messages...), testutil.TestLogger())
 	})
 
 	mockStore.AssertExpectations(t)

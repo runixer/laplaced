@@ -5,8 +5,6 @@ import (
 	"log/slog"
 	"sync"
 	"time"
-
-	"github.com/runixer/laplaced/internal/telegram"
 )
 
 // SessionInfo represents information about an active message grouping session.
@@ -17,9 +15,11 @@ type SessionInfo struct {
 	LastMessage  time.Time
 }
 
-// MessageGroup represents a collection of messages from a single user that are processed together.
+// MessageGroup represents a collection of messages from a single scope that are
+// processed together. UserID is the resolved internal scope id (the storage
+// partition key) — for Telegram this equals the sender id (passthrough).
 type MessageGroup struct {
-	Messages   []*telegram.Message
+	Messages   []IncomingMessage
 	Timer      *time.Timer
 	CancelFunc context.CancelFunc
 	UserID     int64
@@ -126,18 +126,20 @@ func (mg *MessageGrouper) Stop() {
 	mg.logger.Info("Message grouper stopped")
 }
 
-// AddMessage adds a new message to a user's group.
-func (mg *MessageGrouper) AddMessage(msg *telegram.Message) {
+// AddMessage adds a new message to a scope's group. scopeID is the resolved
+// internal scope id (storage partition key); for Telegram it equals the sender
+// id, so home grouping/FIFO keying is unchanged.
+func (mg *MessageGrouper) AddMessage(scopeID int64, im IncomingMessage) {
 	mg.mu.Lock()
 	defer mg.mu.Unlock()
 
-	userID := msg.From.ID
+	userID := scopeID
 
 	group, ok := mg.groups[userID]
 	if !ok {
 		// Create a new group if one doesn't exist
 		group = &MessageGroup{
-			Messages:  []*telegram.Message{},
+			Messages:  []IncomingMessage{},
 			UserID:    userID,
 			StartedAt: time.Now(),
 		}
@@ -160,8 +162,8 @@ func (mg *MessageGrouper) AddMessage(msg *telegram.Message) {
 		}
 	}
 
-	group.Messages = append(group.Messages, msg)
-	mg.logger.Debug("added message to group", slog.Int64("user_id", userID), slog.Int("message_id", msg.MessageID))
+	group.Messages = append(group.Messages, im)
+	mg.logger.Debug("added message to group", slog.Int64("user_id", userID), slog.String("message_id", im.MessageID))
 
 	// Create a new context derived from parent context.
 	// This ensures child contexts are cancelled when Stop() is called.
@@ -200,11 +202,11 @@ func (mg *MessageGrouper) processGroup(ctx context.Context, userID int64) {
 	}
 
 	// Take a snapshot of the messages to process.
-	messagesToProcess := make([]*telegram.Message, len(group.Messages))
+	messagesToProcess := make([]IncomingMessage, len(group.Messages))
 	copy(messagesToProcess, group.Messages)
 
 	// Clear the group's message list for the next batch.
-	group.Messages = []*telegram.Message{}
+	group.Messages = []IncomingMessage{}
 	group.Timer = nil
 	// The CancelFunc is for the context we are currently in. A new one will be made
 	// when a new message arrives.
@@ -251,7 +253,7 @@ func (mg *MessageGrouper) GetActiveSessions() []SessionInfo {
 
 		// Get the timestamp of the last message
 		lastMsg := group.Messages[len(group.Messages)-1]
-		lastMsgTime := time.Unix(int64(lastMsg.Date), 0)
+		lastMsgTime := lastMsg.SentAt
 
 		sessions = append(sessions, SessionInfo{
 			UserID:       group.UserID,
@@ -285,7 +287,7 @@ func (mg *MessageGrouper) ForceCloseSession(userID int64) bool {
 	}
 
 	// Take ownership of messages
-	messagesToProcess := make([]*telegram.Message, len(group.Messages))
+	messagesToProcess := make([]IncomingMessage, len(group.Messages))
 	copy(messagesToProcess, group.Messages)
 
 	// Clear the group
