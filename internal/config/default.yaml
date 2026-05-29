@@ -20,6 +20,7 @@ telegram:
 # OpenRouter API Configuration
 openrouter:
   api_key: ""
+  base_url: "https://openrouter.ai/api/v1"  # OpenAI-compatible endpoint; override for self-hosted (litellm/vLLM)
   proxy_url: ""
   pdf_parser_engine: "native"
   request_cost: 0.0

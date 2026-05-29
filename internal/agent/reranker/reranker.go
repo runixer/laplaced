@@ -388,14 +388,12 @@ func (r *Reranker) rerank(
 		var toolChoice any
 		var responseFormat interface{}
 
-		// v0.6.0: If no topic candidates (only artifacts/people), skip tool call and go directly to JSON
+		// v0.6.0: If no topic candidates (only artifacts/people), skip tool call and go directly to JSON.
+		// Phase 1: tool_choice "auto" instead of forcing get_topics_content — forced selection
+		// (named/required) is flaky through litellm+thinking; "auto" reliably calls the tool given
+		// an explicit prompt, and the existing fallback (no tool call → vector top-5) covers the rest.
 		if iterations == 0 && len(candidates) > 0 {
-			toolChoice = map[string]any{
-				"type": "function",
-				"function": map[string]any{
-					"name": "get_topics_content",
-				},
-			}
+			toolChoice = "auto"
 		} else {
 			responseFormat = openrouter.ResponseFormat{Type: "json_object"}
 		}
