@@ -235,6 +235,23 @@ func (s *SQLiteStore) FindPersonByTelegramID(userID, telegramID int64) (*Person,
 	return person, err
 }
 
+// FindPersonByExternalID finds a person by their transport-neutral external id
+// (transport, native_id). Introduced in v0.10; existing Telegram people are
+// backfilled to ('telegram', telegram_id) by migration 011.
+func (s *SQLiteStore) FindPersonByExternalID(userID int64, transport, nativeID string) (*Person, error) {
+	query := `
+		SELECT id, user_id, display_name, aliases, telegram_id, username, circle, bio, embedding, first_seen, last_seen, mention_count
+		FROM people
+		WHERE user_id = ? AND external_transport = ? AND external_id = ?
+	`
+	row := s.db.QueryRow(query, userID, transport, nativeID)
+	person, err := s.scanPerson(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return person, err
+}
+
 // FindPersonByUsername finds a person by their @username (without @).
 func (s *SQLiteStore) FindPersonByUsername(userID int64, username string) (*Person, error) {
 	query := `

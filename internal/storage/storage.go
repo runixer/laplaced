@@ -19,6 +19,13 @@ type Message struct {
 	Content   string
 	TopicID   *int64 // Nullable
 	CreatedAt time.Time
+
+	// Multi-transport attribution (v0.10, migration 012). Nullable; unused on
+	// the single-user Telegram/Mattermost DM paths. Populated only by
+	// multi-participant transports for channel attribution / edits / reactions.
+	Author         *string // author display/handle within the scope
+	MessageID      *string // transport-native message/post id
+	ConversationID *string // transport-native chat/channel id
 }
 
 type User struct {

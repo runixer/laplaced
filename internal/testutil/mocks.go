@@ -633,6 +633,27 @@ func (m *MockStorage) FindPersonByTelegramID(userID, telegramID int64) (*storage
 	return args.Get(0).(*storage.Person), args.Error(1)
 }
 
+func (m *MockStorage) FindPersonByExternalID(userID int64, transport, nativeID string) (*storage.Person, error) {
+	args := m.Called(userID, transport, nativeID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*storage.Person), args.Error(1)
+}
+
+func (m *MockStorage) GetScope(transport, nativeID string) (*storage.Scope, error) {
+	args := m.Called(transport, nativeID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*storage.Scope), args.Error(1)
+}
+
+func (m *MockStorage) ResolveScope(transport, scopeType, nativeID string) (int64, error) {
+	args := m.Called(transport, scopeType, nativeID)
+	return args.Get(0).(int64), args.Error(1)
+}
+
 func (m *MockStorage) FindPersonByUsername(userID int64, username string) (*storage.Person, error) {
 	args := m.Called(userID, username)
 	if args.Get(0) == nil {

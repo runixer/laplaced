@@ -54,6 +54,15 @@ type UserRepository interface {
 	ResetUserData(userID int64) error
 }
 
+// ScopeRepository maps transport-native identities to internal int64 scope ids
+// (the storage partition key). Telegram resolution is identity passthrough and
+// never touches this repository; non-int64 transports (Mattermost/Time) mint a
+// surrogate via ResolveScope. See migration 010 and internal/bot/identity.go.
+type ScopeRepository interface {
+	GetScope(transport, nativeID string) (*Scope, error)
+	ResolveScope(transport, scopeType, nativeID string) (int64, error)
+}
+
 // TopicRepository handles topic operations.
 //
 // Topics are compressed summaries of conversation chunks created after
@@ -189,6 +198,10 @@ type PeopleRepository interface {
 
 	// Direct matching (fast path for @username and name lookup)
 	FindPersonByTelegramID(userID, telegramID int64) (*Person, error)
+	// FindPersonByExternalID matches on the transport-neutral external id
+	// (transport, native_id) introduced in v0.10. For Telegram this is
+	// equivalent to FindPersonByTelegramID via the backfilled ('telegram', id).
+	FindPersonByExternalID(userID int64, transport, nativeID string) (*Person, error)
 	FindPersonByUsername(userID int64, username string) (*Person, error)
 	FindPersonByAlias(userID int64, alias string) ([]Person, error)
 	FindPersonByName(userID int64, name string) (*Person, error)
