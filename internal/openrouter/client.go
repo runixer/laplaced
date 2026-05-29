@@ -688,10 +688,17 @@ type EmbeddingResponse struct {
 	} `json:"usage"`
 }
 
+// NewClient builds a client pointed at the public OpenRouter API. It is a
+// convenience wrapper kept for tests and callers that don't override the host;
+// production wiring uses NewClientWithBaseURL with the configured base_url.
 func NewClient(logger *slog.Logger, apiKey, proxyURL string, defaultProvider *ProviderRouting) (Client, error) {
 	return NewClientWithBaseURL(logger, apiKey, proxyURL, "https://openrouter.ai/api/v1", defaultProvider)
 }
 
+// NewClientWithBaseURL builds a client against any OpenAI-compatible chat/embeddings
+// endpoint (OpenRouter, litellm, vLLM, …) given by baseURL. OpenRouter-specific
+// extensions (provider routing, plugins, usage-based cost) are sent regardless;
+// compatible backends simply ignore the fields they don't recognise.
 func NewClientWithBaseURL(logger *slog.Logger, apiKey, proxyURL, baseURL string, defaultProvider *ProviderRouting) (Client, error) {
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,

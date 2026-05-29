@@ -346,7 +346,11 @@ type ToolConfig struct {
 }
 
 type OpenRouterConfig struct {
-	APIKey          string                `yaml:"api_key" env:"LAPLACED_OPENROUTER_API_KEY"`
+	APIKey string `yaml:"api_key" env:"LAPLACED_OPENROUTER_API_KEY"`
+	// BaseURL is the OpenAI-compatible endpoint the LLM client talks to.
+	// Defaults to the public OpenRouter API; override to point at a self-hosted
+	// OpenAI-compatible backend (litellm, vLLM, …).
+	BaseURL         string                `yaml:"base_url" env:"LAPLACED_OPENROUTER_BASE_URL"`
 	ProxyURL        string                `yaml:"proxy_url" env:"LAPLACED_OPENROUTER_PROXY_URL"`
 	PDFParserEngine string                `yaml:"pdf_parser_engine"`
 	RequestCost     float64               `yaml:"request_cost"`

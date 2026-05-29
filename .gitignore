@@ -33,6 +33,7 @@ go.work.sum
 
 data/
 configs/config.yaml
+configs/dev.yaml
 *.Zone.Identifier
 .DS_Store
 .idea/
