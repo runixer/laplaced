@@ -30,6 +30,7 @@ type SplitterParams struct {
 	Profile      string // Formatted <user_profile> block
 	RecentTopics string // Formatted <recent_topics> block
 	Goal         string // Optional goal section (e.g., topic_extraction_goal_split for large topics)
+	IsChannel    bool   // Channel scope: topics summarise multi-participant discussion (Phase 6)
 }
 
 // MergerParams for rag.topic_consolidation_system_prompt template.
@@ -78,6 +79,7 @@ type ArchivistParams struct {
 	UserFacts      string // Formatted existing facts about user
 	Conversation   string // Conversation to analyze
 	KnownPeople    string // Formatted known people names for dedup (v0.5.1)
+	IsChannel      bool   // Channel scope: facts are about the channel + participants (Phase 6)
 }
 
 // LaplaceParams for bot.system_prompt template.
@@ -86,6 +88,7 @@ type LaplaceParams struct {
 	BotName   string // Bot's name (e.g., "Laplaced")
 	Platform  string // Chat platform shown to the model (e.g., "Telegram", "Time")
 	KatexMath bool   // platform renders LaTeX via KaTeX → emit math-formatting rules
+	IsChannel bool   // multi-participant channel scope → emit channel-context framing (Phase 6)
 }
 
 // ExtractorParams for extractor.system_prompt template.

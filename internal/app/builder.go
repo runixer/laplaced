@@ -90,6 +90,7 @@ func SetupServices(
 	// Create context service for shared user context across agents
 	services.ContextService = agent.NewContextService(store, store, cfg, logger)
 	services.ContextService.SetPeopleRepository(store)
+	services.ContextService.SetScopeRepository(store)
 
 	// Create agent executor for LLM calls
 	services.AgentExecutor = agent.NewExecutor(client, services.AgentLogger, logger)
@@ -117,6 +118,7 @@ func SetupServices(
 	services.MemoryService.SetAgentLogger(services.AgentLogger)
 	services.MemoryService.SetArchivistAgent(services.ArchivistAgent)
 	services.MemoryService.SetPeopleRepository(store)
+	services.MemoryService.SetScopeRepository(store)
 	services.ArchivistAgent.SetPeopleRepository(store)
 
 	// Create RAG service using fluent builder API
@@ -142,6 +144,7 @@ func SetupServices(
 		WithPeopleRepository(store).
 		WithArtifactRepository(store).
 		WithUserRepository(store).
+		WithScopeRepository(store).
 		// Optional services
 		WithAgentLogger(services.AgentLogger).
 		WithContextService(services.ContextService).

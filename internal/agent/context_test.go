@@ -106,6 +106,48 @@ func TestContextService_Load(t *testing.T) {
 	}
 }
 
+func TestContextService_Load_Channel(t *testing.T) {
+	cfg := testutil.TestConfig()
+	cfg.RAG.Enabled = false
+
+	t.Run("channel scope frames profile and participants", func(t *testing.T) {
+		mockStore := &testutil.MockStorage{}
+		mockStore.On("IsChannelScope", testutil.TestUserID).Return(true, nil)
+		mockStore.On("GetFacts", testutil.TestUserID).Return(testutil.TestFacts(), nil)
+		mockStore.On("GetPeople", testutil.TestUserID).Return(testutil.TestPeople(), nil)
+
+		svc := NewContextService(mockStore, mockStore, cfg, testutil.TestLogger())
+		svc.SetPeopleRepository(mockStore)
+		svc.SetScopeRepository(mockStore)
+
+		shared := svc.Load(context.Background(), testutil.TestUserID)
+
+		assert.Contains(t, shared.Profile, "<channel_profile>")
+		assert.NotContains(t, shared.Profile, "<user_profile>")
+		assert.Contains(t, shared.InnerCircle, "<channel_participants>")
+		assert.NotContains(t, shared.InnerCircle, "<inner_circle>")
+		mockStore.AssertExpectations(t)
+	})
+
+	t.Run("DM scope keeps user framing", func(t *testing.T) {
+		mockStore := &testutil.MockStorage{}
+		mockStore.On("IsChannelScope", testutil.TestUserID).Return(false, nil)
+		mockStore.On("GetFacts", testutil.TestUserID).Return(testutil.TestFacts(), nil)
+		mockStore.On("GetPeople", testutil.TestUserID).Return(testutil.TestPeople(), nil)
+
+		svc := NewContextService(mockStore, mockStore, cfg, testutil.TestLogger())
+		svc.SetPeopleRepository(mockStore)
+		svc.SetScopeRepository(mockStore)
+
+		shared := svc.Load(context.Background(), testutil.TestUserID)
+
+		assert.Contains(t, shared.Profile, "<user_profile>")
+		assert.NotContains(t, shared.Profile, "<channel_profile>")
+		assert.Contains(t, shared.InnerCircle, "<inner_circle>")
+		mockStore.AssertExpectations(t)
+	})
+}
+
 func TestWithContext_FromContext(t *testing.T) {
 	shared := &SharedContext{
 		UserID:   123,

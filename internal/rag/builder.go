@@ -49,6 +49,7 @@ type ServiceBuilder struct {
 	peopleRepo     storage.PeopleRepository
 	artifactRepo   storage.ArtifactRepository
 	userRepo       storage.UserRepository
+	scopeRepo      storage.ScopeRepository
 	contextService *agent.ContextService
 
 	// Validation errors accumulated during building
@@ -214,6 +215,14 @@ func (b *ServiceBuilder) WithUserRepository(r storage.UserRepository) *ServiceBu
 	return b
 }
 
+// WithScopeRepository sets the optional scope repository, used by background
+// loops to detect channel scopes (Phase 6) for channel-framed prompts. Absent
+// on the home/Telegram path, where every scope is a DM.
+func (b *ServiceBuilder) WithScopeRepository(r storage.ScopeRepository) *ServiceBuilder {
+	b.scopeRepo = r
+	return b
+}
+
 // Build validates all dependencies and creates the RAG Service.
 // Returns an error if any required dependency is missing.
 func (b *ServiceBuilder) Build() (*Service, error) {
@@ -266,6 +275,7 @@ func (b *ServiceBuilder) Build() (*Service, error) {
 		peopleRepo:           b.peopleRepo,
 		artifactRepo:         b.artifactRepo,
 		userRepo:             b.userRepo,
+		scopeRepo:            b.scopeRepo,
 		client:               b.client,
 		memoryService:        b.memoryService,
 		translator:           b.translator,

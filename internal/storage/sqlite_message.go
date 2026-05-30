@@ -9,11 +9,12 @@ func (s *SQLiteStore) AddMessageToHistory(userID int64, message Message) error {
 	if message.CreatedAt.IsZero() {
 		message.CreatedAt = time.Now()
 	}
-	// author/message_id/conversation_id (migration 012) are nullable transport
-	// attribution; they stay NULL when the caller leaves them unset.
-	query := "INSERT INTO history (user_id, role, content, topic_id, created_at, author, message_id, conversation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+	// author/message_id/conversation_id (migration 012) and thread_root (013) are
+	// nullable transport attribution; they stay NULL when the caller leaves them
+	// unset (DM/Telegram path).
+	query := "INSERT INTO history (user_id, role, content, topic_id, created_at, author, message_id, conversation_id, thread_root) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
 	_, err := s.db.Exec(query, userID, message.Role, message.Content, message.TopicID, message.CreatedAt.UTC().Format("2006-01-02 15:04:05.999"),
-		message.Author, message.MessageID, message.ConversationID)
+		message.Author, message.MessageID, message.ConversationID, message.ThreadRoot)
 	return err
 }
 

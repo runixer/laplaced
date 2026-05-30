@@ -9,6 +9,35 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestPerson_ExternalIDRoundTrip(t *testing.T) {
+	store, cleanup := setupTestDB(t)
+	defer cleanup()
+	require.NoError(t, store.Init())
+
+	scope := int64(2)
+	tr, ext := "time", "u26charstring"
+	id, err := store.AddPerson(Person{
+		UserID: scope, DisplayName: "Alice (@alice)", Circle: "Other",
+		ExternalTransport: &tr, ExternalID: &ext,
+	})
+	require.NoError(t, err)
+	require.Greater(t, id, int64(0))
+
+	// AddPerson persisted the external id → FindPersonByExternalID matches it.
+	p, err := store.FindPersonByExternalID(scope, "time", "u26charstring")
+	require.NoError(t, err)
+	require.NotNil(t, p)
+	assert.Equal(t, "Alice (@alice)", p.DisplayName)
+
+	// Scope isolation and wrong id both miss.
+	other, err := store.FindPersonByExternalID(int64(99), "time", "u26charstring")
+	require.NoError(t, err)
+	assert.Nil(t, other)
+	miss, err := store.FindPersonByExternalID(scope, "time", "nobody")
+	require.NoError(t, err)
+	assert.Nil(t, miss)
+}
+
 func TestPersonCRUD(t *testing.T) {
 	store, cleanup := setupTestDB(t)
 	defer cleanup()

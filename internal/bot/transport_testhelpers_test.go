@@ -1,11 +1,27 @@
 package bot
 
 import (
+	"context"
 	"strconv"
 	"time"
 
 	"github.com/runixer/laplaced/internal/telegram"
 )
+
+// stubTransport is a minimal Transport for tests that need a non-Telegram kind
+// or a controllable allowlist without standing up a real Mattermost client.
+type stubTransport struct {
+	kind    string
+	allowed map[string]bool
+}
+
+func (s *stubTransport) SendText(context.Context, OutgoingResponse) (string, error) { return "", nil }
+func (s *stubTransport) SendMedia(context.Context, OutgoingMedia) (string, error)   { return "", nil }
+func (s *stubTransport) SendTyping(context.Context, string) error                   { return nil }
+func (s *stubTransport) SetReaction(context.Context, string, string) error          { return nil }
+func (s *stubTransport) Kind() string                                               { return s.kind }
+func (s *stubTransport) Capabilities() Capabilities                                 { return Capabilities{} }
+func (s *stubTransport) IsAllowed(id string) bool                                   { return s.allowed[id] }
 
 // grpIncoming maps a Telegram message to (scopeID, IncomingMessage) for the
 // bot-free message-grouper tests, carrying only the fields the grouper keys on.

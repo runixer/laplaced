@@ -159,10 +159,12 @@ func (l *Laplace) LoadContextData(
 	}
 
 	// Load profile, recent topics, and inner circle from SharedContext if available
+	isChannel := false
 	if shared := agent.FromContext(ctx); shared != nil {
 		data.ProfileFacts = shared.Profile
 		data.RecentTopics = shared.RecentTopics
 		data.InnerCircle = shared.InnerCircle
+		isChannel = shared.IsChannel
 	} else {
 		// Fallback: load directly
 		allFacts, err := l.factRepo.GetFacts(userID)
@@ -203,6 +205,7 @@ func (l *Laplace) LoadContextData(
 		BotName:   botName,
 		Platform:  platformName(l.cfg.Transport),
 		KatexMath: l.cfg.Transport == "time", // Time renders LaTeX via KaTeX; Telegram does not
+		IsChannel: isChannel,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to build system prompt: %w", err)

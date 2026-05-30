@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"log/slog"
+	"sort"
 	"time"
 
 	"github.com/runixer/laplaced/internal/config"
@@ -25,7 +26,11 @@ type SharedContext struct {
 	RecentTopics string // Formatted <recent_topics>
 
 	// Social Graph (v0.5.1)
-	InnerCircle string // Formatted <inner_circle> (Work_Inner + Family)
+	InnerCircle string // Formatted <inner_circle> (Work_Inner + Family), or <channel_participants> for channels
+
+	// IsChannel marks the scope as a multi-participant channel (Phase 6). Agents
+	// use it to select channel-framed prompts; false for DMs.
+	IsChannel bool
 
 	// Session Context (v0.5 - nil until implemented)
 	// LastSummary *storage.SessionSummary
@@ -35,11 +40,17 @@ type SharedContext struct {
 	LoadedAt time.Time
 }
 
+// maxChannelParticipantsInContext caps how many channel members are injected
+// into the system prompt (most recently active first), keeping the context
+// bounded on busy channels.
+const maxChannelParticipantsInContext = 20
+
 // ContextService loads and manages SharedContext.
 type ContextService struct {
 	factRepo   storage.FactRepository
 	topicRepo  storage.TopicRepository
 	peopleRepo storage.PeopleRepository
+	scopeRepo  storage.ScopeRepository // channel-scope detection (Phase 6); nil on home
 	cfg        *config.Config
 	logger     *slog.Logger
 }
@@ -64,6 +75,26 @@ func (c *ContextService) SetPeopleRepository(repo storage.PeopleRepository) {
 	c.peopleRepo = repo
 }
 
+// SetScopeRepository sets the scope repository used to detect channel scopes
+// (Phase 6). When nil, every scope is treated as a DM.
+func (c *ContextService) SetScopeRepository(repo storage.ScopeRepository) {
+	c.scopeRepo = repo
+}
+
+// isChannelScope reports whether userID is a channel scope, defaulting to false
+// (DM) when the repo is absent or the lookup fails.
+func (c *ContextService) isChannelScope(userID int64) bool {
+	if c.scopeRepo == nil {
+		return false
+	}
+	isCh, err := c.scopeRepo.IsChannelScope(userID)
+	if err != nil {
+		c.logger.Warn("channel-scope lookup failed", "user_id", userID, "error", err)
+		return false
+	}
+	return isCh
+}
+
 // Load creates SharedContext for a user.
 // Call once per request at the beginning of processing.
 func (c *ContextService) Load(ctx context.Context, userID int64) *SharedContext {
@@ -73,13 +104,27 @@ func (c *ContextService) Load(ctx context.Context, userID int64) *SharedContext 
 		LoadedAt: time.Now(),
 	}
 
+	// A channel scope frames its profile/participants around the channel rather
+	// than a single person (Phase 6). DMs (and the Telegram home path) keep the
+	// user-centric framing unchanged.
+	isChannel := c.isChannelScope(userID)
+	shared.IsChannel = isChannel
+
 	// Load profile facts
 	if facts, err := c.factRepo.GetFacts(userID); err == nil {
 		shared.ProfileFacts = storage.FilterProfileFacts(facts)
-		shared.Profile = storage.FormatUserProfile(shared.ProfileFacts)
+		if isChannel {
+			shared.Profile = storage.FormatChannelProfile(shared.ProfileFacts)
+		} else {
+			shared.Profile = storage.FormatUserProfile(shared.ProfileFacts)
+		}
 	} else {
 		c.logger.Warn("failed to load facts", "user_id", userID, "error", err)
-		shared.Profile = "<user_profile>\n</user_profile>"
+		if isChannel {
+			shared.Profile = "<channel_profile>\n</channel_profile>"
+		} else {
+			shared.Profile = "<user_profile>\n</user_profile>"
+		}
 	}
 
 	// Load recent topics
@@ -99,21 +144,51 @@ func (c *ContextService) Load(ctx context.Context, userID int64) *SharedContext 
 		shared.RecentTopics = "<recent_topics>\n</recent_topics>"
 	}
 
-	// Load inner circle people (v0.5.1)
+	// Load people for the system prompt. In a channel the relevant set is the
+	// active participants (the channel's members); in a DM it's the user's inner
+	// circle (Work_Inner + Family). Both reuse the InnerCircle slot, tagged
+	// distinctly so the model can tell them apart.
 	if c.peopleRepo != nil {
-		people, err := c.getInnerCirclePeople(userID)
-		if err != nil {
-			c.logger.Warn("failed to load inner circle people", "user_id", userID, "error", err)
-		} else if len(people) > 0 {
-			shared.InnerCircle = storage.FormatPeople(people, storage.TagInnerCircle)
+		if isChannel {
+			if people, err := c.getChannelParticipants(userID); err != nil {
+				c.logger.Warn("failed to load channel participants", "user_id", userID, "error", err)
+			} else if len(people) > 0 {
+				shared.InnerCircle = storage.FormatPeople(people, storage.TagChannelParticipants)
+			}
+		} else {
+			if people, err := c.getInnerCirclePeople(userID); err != nil {
+				c.logger.Warn("failed to load inner circle people", "user_id", userID, "error", err)
+			} else if len(people) > 0 {
+				shared.InnerCircle = storage.FormatPeople(people, storage.TagInnerCircle)
+			}
 		}
 	}
 
 	if shared.InnerCircle == "" {
-		shared.InnerCircle = "<inner_circle>\n</inner_circle>"
+		if isChannel {
+			shared.InnerCircle = "<channel_participants>\n</channel_participants>"
+		} else {
+			shared.InnerCircle = "<inner_circle>\n</inner_circle>"
+		}
 	}
 
 	return shared
+}
+
+// getChannelParticipants returns the channel's most recently active members
+// (People in the scope), newest first, capped at maxChannelParticipantsInContext.
+func (c *ContextService) getChannelParticipants(userID int64) ([]storage.Person, error) {
+	people, err := c.peopleRepo.GetPeople(userID)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(people, func(i, j int) bool {
+		return people[i].LastSeen.After(people[j].LastSeen)
+	})
+	if len(people) > maxChannelParticipantsInContext {
+		people = people[:maxChannelParticipantsInContext]
+	}
+	return people, nil
 }
 
 // getInnerCirclePeople returns people from Work_Inner and Family circles.

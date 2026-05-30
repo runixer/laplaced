@@ -226,6 +226,47 @@ func TestIncomingFromMattermost_Mapping(t *testing.T) {
 			t.Errorf("SenderDisplay = %q, want raw id \"ghost\" on fetch failure", im.SenderDisplay)
 		}
 	})
+
+	t.Run("ReplyToBot set when the post quotes a bot message", func(t *testing.T) {
+		quotesBot := mattermost.Post{ID: "q1", UserID: "user2", ChannelID: "chan2", Message: "what about this?"}
+		quotesBot.Metadata.Embeds = []mattermost.Embed{{Type: "quote"}}
+		quotesBot.Metadata.Embeds[0].Data.Post.UserID = "botid"
+		if im := b.incomingFromMattermost(client, mattermost.PostedEvent{Post: quotesBot, ChannelType: "O"}); !im.ReplyToBot {
+			t.Error("ReplyToBot should be true when the quoted post is the bot's")
+		}
+
+		quotesUser := mattermost.Post{ID: "q2", UserID: "user2", ChannelID: "chan2", Message: "@user1 see this"}
+		quotesUser.Metadata.Embeds = []mattermost.Embed{{Type: "quote"}}
+		quotesUser.Metadata.Embeds[0].Data.Post.UserID = "user1"
+		if im := b.incomingFromMattermost(client, mattermost.PostedEvent{Post: quotesUser, ChannelType: "O"}); im.ReplyToBot {
+			t.Error("ReplyToBot should be false when the quoted post is another user's")
+		}
+
+		plain := mattermost.Post{ID: "q3", UserID: "user2", ChannelID: "chan2", Message: "just chatting"}
+		if im := b.incomingFromMattermost(client, mattermost.PostedEvent{Post: plain, ChannelType: "O"}); im.ReplyToBot {
+			t.Error("ReplyToBot should be false for a non-quoting post")
+		}
+	})
+
+	t.Run("Mention set when bot id is among mentions", func(t *testing.T) {
+		mentioned := mattermost.PostedEvent{
+			Post:        mattermost.Post{ID: "p4", UserID: "user2", ChannelID: "chan2", Message: "@laplaced ?"},
+			ChannelType: "O",
+			Mentions:    []string{"someone", "botid"},
+		}
+		if im := b.incomingFromMattermost(client, mentioned); !im.Mention {
+			t.Error("Mention should be true when botid is in mentions")
+		}
+
+		notMentioned := mattermost.PostedEvent{
+			Post:        mattermost.Post{ID: "p5", UserID: "user2", ChannelID: "chan2", Message: "chatter"},
+			ChannelType: "O",
+			Mentions:    []string{"someone"},
+		}
+		if im := b.incomingFromMattermost(client, notMentioned); im.Mention {
+			t.Error("Mention should be false when botid is absent from mentions")
+		}
+	})
 }
 
 func TestMMShouldProcess(t *testing.T) {
@@ -233,20 +274,26 @@ func TestMMShouldProcess(t *testing.T) {
 	allowNone := func(string) bool { return false }
 
 	tests := []struct {
-		name    string
-		post    mattermost.Post
-		botID   string
-		allowed func(string) bool
-		want    bool
+		name        string
+		post        mattermost.Post
+		botID       string
+		channelType string
+		allowed     func(string) bool
+		want        bool
 	}{
-		{"normal allowed user post", mattermost.Post{UserID: "u1", Type: ""}, "bot", allowAll, true},
-		{"own post ignored", mattermost.Post{UserID: "bot", Type: ""}, "bot", allowAll, false},
-		{"system post ignored", mattermost.Post{UserID: "u1", Type: "system_join_channel"}, "bot", allowAll, false},
-		{"non-allowed user rejected", mattermost.Post{UserID: "u1", Type: ""}, "bot", allowNone, false},
+		// Own/system posts are dropped regardless of channel type.
+		{"own post ignored", mattermost.Post{UserID: "bot", Type: ""}, "bot", "D", allowAll, false},
+		{"system post ignored", mattermost.Post{UserID: "u1", Type: "system_join_channel"}, "bot", "O", allowAll, false},
+		// DM: allowlist enforced here (no passive listen in DMs).
+		{"DM allowed user", mattermost.Post{UserID: "u1", Type: ""}, "bot", "D", allowAll, true},
+		{"DM non-allowed user rejected", mattermost.Post{UserID: "u1", Type: ""}, "bot", "D", allowNone, false},
+		// Channel: every post admitted (passive listen); reply gated downstream.
+		{"channel allowed user admitted", mattermost.Post{UserID: "u1", Type: ""}, "bot", "O", allowAll, true},
+		{"channel non-allowed user still admitted for passive store", mattermost.Post{UserID: "u1", Type: ""}, "bot", "P", allowNone, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := mmShouldProcess(tt.post, tt.botID, tt.allowed); got != tt.want {
+			if got := mmShouldProcess(tt.post, tt.botID, tt.channelType, tt.allowed); got != tt.want {
 				t.Errorf("mmShouldProcess = %v, want %v", got, tt.want)
 			}
 		})

@@ -12,7 +12,7 @@ import (
 func TestResolveScopeID_TelegramPassthrough(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 
-	id, err := resolveScopeID(mockStore, transportTelegram, "123456")
+	id, err := resolveScopeID(mockStore, transportTelegram, IncomingMessage{SenderID: "123456", IsDirect: true})
 	require.NoError(t, err)
 	assert.Equal(t, int64(123456), id)
 
@@ -23,16 +23,36 @@ func TestResolveScopeID_TelegramPassthrough(t *testing.T) {
 
 func TestResolveScopeID_TelegramInvalid(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	_, err := resolveScopeID(mockStore, transportTelegram, "not-an-int")
+	_, err := resolveScopeID(mockStore, transportTelegram, IncomingMessage{SenderID: "not-an-int", IsDirect: true})
 	assert.Error(t, err)
 }
 
-func TestResolveScopeID_TimeMintsSurrogate(t *testing.T) {
+func TestResolveScopeID_TimeDMMintsUserScope(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
+	// A DM is scoped to its sender, tagged 'user'.
 	mockStore.On("ResolveScope", transportTime, "user", "u26charstring").Return(int64(7), nil)
 
-	id, err := resolveScopeID(mockStore, transportTime, "u26charstring")
+	id, err := resolveScopeID(mockStore, transportTime, IncomingMessage{
+		SenderID:       "u26charstring",
+		ConversationID: "dm26charchannel",
+		IsDirect:       true,
+	})
 	require.NoError(t, err)
 	assert.Equal(t, int64(7), id)
+	mockStore.AssertExpectations(t)
+}
+
+func TestResolveScopeID_TimeChannelMintsChannelScope(t *testing.T) {
+	mockStore := new(testutil.MockStorage)
+	// A channel is scoped to the conversation, tagged 'channel'.
+	mockStore.On("ResolveScope", transportTime, "channel", "chan26charchannel").Return(int64(42), nil)
+
+	id, err := resolveScopeID(mockStore, transportTime, IncomingMessage{
+		SenderID:       "u26charstring",
+		ConversationID: "chan26charchannel",
+		IsDirect:       false,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(42), id)
 	mockStore.AssertExpectations(t)
 }

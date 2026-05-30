@@ -31,6 +31,42 @@ func TestParsePosted_BadInnerJSON(t *testing.T) {
 	}
 }
 
+func TestParsePosted_Mentions(t *testing.T) {
+	c := &Client{logger: testLogger()}
+	inner := Post{ID: "p1", UserID: "u1", ChannelID: "c1", Message: "@bot hi", Type: ""}
+	innerJSON, _ := json.Marshal(inner)
+
+	// MM canon: data.mentions is a JSON-encoded *string* holding a user-id array.
+	data, _ := json.Marshal(postedData{
+		Post:        string(innerJSON),
+		ChannelType: "O",
+		Mentions:    `["botid26char","u2"]`,
+	})
+	ev, ok := c.parsePosted(data)
+	if !ok {
+		t.Fatal("parsePosted returned ok=false")
+	}
+	if len(ev.Mentions) != 2 || ev.Mentions[0] != "botid26char" {
+		t.Errorf("mentions = %v, want [botid26char u2]", ev.Mentions)
+	}
+}
+
+func TestParsePosted_NoMentions(t *testing.T) {
+	c := &Client{logger: testLogger()}
+	inner := Post{ID: "p1", UserID: "u1", ChannelID: "c1", Message: "plain", Type: ""}
+	innerJSON, _ := json.Marshal(inner)
+
+	// Absent mentions field (the common channel-chatter case) → nil, ok=true.
+	data, _ := json.Marshal(postedData{Post: string(innerJSON), ChannelType: "O"})
+	ev, ok := c.parsePosted(data)
+	if !ok {
+		t.Fatal("parsePosted returned ok=false")
+	}
+	if len(ev.Mentions) != 0 {
+		t.Errorf("mentions = %v, want empty", ev.Mentions)
+	}
+}
+
 func TestWSURLFromServer(t *testing.T) {
 	tests := []struct {
 		in, want string

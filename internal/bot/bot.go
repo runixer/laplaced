@@ -314,7 +314,7 @@ func (b *Bot) ensureTransport() {
 // converge here.
 func (b *Bot) HandleIncoming(im IncomingMessage) {
 	b.ensureTransport()
-	scopeID, err := resolveScopeID(b.scopeRepo, b.transport.Kind(), scopeNativeID(im))
+	scopeID, err := resolveScopeID(b.scopeRepo, b.transport.Kind(), im)
 	if err != nil {
 		b.logger.Error("failed to resolve scope", "error", err, "transport", b.transport.Kind())
 		return
@@ -328,7 +328,99 @@ func (b *Bot) HandleIncoming(im IncomingMessage) {
 			b.logger.Warn("failed to upsert scope user", "scope_id", scopeID, "error", err)
 		}
 	}
-	b.messageGrouper.AddMessage(scopeID, im)
+
+	// Channel scopes (Time O/P/G) listen passively: every participant's post is
+	// stored so the conversation is available as context, but the bot only
+	// generates a reply when addressed. DMs — and Telegram, which is always
+	// IsDirect — always reply, so the home/DM path is unchanged (it never
+	// passive-stores).
+	if shouldReply(im, b.transport.IsAllowed(im.SenderID)) {
+		b.messageGrouper.AddMessage(scopeID, im)
+		return
+	}
+	b.storePassiveChannelMessage(scopeID, im)
+}
+
+// shouldReply decides whether an incoming message warrants a generated reply.
+// DMs always do (the per-transport allowlist is enforced before ingestion
+// reaches here). In a channel the bot replies only when addressed by an
+// allowlisted sender: an @mention, or a reply that quotes one of the bot's own
+// messages. A plain post in a thread the bot merely spoke in does NOT qualify —
+// Mattermost threads are flat, so "reply to the bot" is detected via the post's
+// quote (ReplyToBot), not by thread membership. Other channel posts are stored
+// passively for context.
+func shouldReply(im IncomingMessage, senderAllowed bool) bool {
+	if im.IsDirect {
+		return true
+	}
+	return senderAllowed && (im.Mention || im.ReplyToBot)
+}
+
+// storePassiveChannelMessage records a channel post the bot is not replying to,
+// attributing the author, so the surrounding conversation is available as
+// context (and to background topic/fact extraction) when the bot is later
+// mentioned. Text-only: attachments on passive posts are not run through the
+// artifact pipeline — only reply-triggering messages take that path.
+func (b *Bot) storePassiveChannelMessage(scopeID int64, im IncomingMessage) {
+	content := b.incomingContent(im)
+	if content == "" {
+		return
+	}
+	msg := storage.Message{
+		Role:           "user",
+		Content:        content,
+		Author:         strPtrOrNil(im.SenderDisplay),
+		MessageID:      strPtrOrNil(im.MessageID),
+		ConversationID: strPtrOrNil(im.ConversationID),
+		ThreadRoot:     strPtrOrNil(im.ThreadRoot),
+	}
+	if err := b.msgRepo.AddMessageToHistory(scopeID, msg); err != nil {
+		b.logger.Error("failed to store passive channel message", "scope_id", scopeID, "error", err)
+	}
+	b.upsertChannelParticipant(scopeID, im)
+}
+
+// upsertChannelParticipant records the sender of a channel message as a Person
+// within the channel scope, keyed by the transport-neutral external id
+// (transport, sender id). Participants accrue into the People graph and feed
+// context/@mention resolution. No-op for DMs (the scope is the person) and when
+// the people repo is absent. Failures are logged, never fatal.
+func (b *Bot) upsertChannelParticipant(scopeID int64, im IncomingMessage) {
+	if b.peopleRepo == nil || im.IsDirect || im.SenderID == "" {
+		return
+	}
+	kind := b.transport.Kind()
+	existing, err := b.peopleRepo.FindPersonByExternalID(scopeID, kind, im.SenderID)
+	if err != nil {
+		b.logger.Warn("channel participant lookup failed", "scope_id", scopeID, "error", err)
+		return
+	}
+	now := time.Now()
+	if existing != nil {
+		existing.LastSeen = now
+		existing.MentionCount++
+		if err := b.peopleRepo.UpdatePerson(*existing); err != nil {
+			b.logger.Warn("failed to touch channel participant", "person_id", existing.ID, "error", err)
+		}
+		return
+	}
+	name := im.SenderDisplay
+	if name == "" {
+		name = im.SenderID
+	}
+	transport, externalID := kind, im.SenderID
+	if _, err := b.peopleRepo.AddPerson(storage.Person{
+		UserID:            scopeID,
+		DisplayName:       name,
+		Circle:            "Other",
+		ExternalTransport: &transport,
+		ExternalID:        &externalID,
+		FirstSeen:         now,
+		LastSeen:          now,
+		MentionCount:      1,
+	}); err != nil {
+		b.logger.Warn("failed to create channel participant", "scope_id", scopeID, "external_id", im.SenderID, "error", err)
+	}
 }
 
 // SetTransport swaps the output/identity transport (used to install the

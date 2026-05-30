@@ -49,6 +49,31 @@ func (s *SQLiteStore) GetScope(transport, nativeID string) (*Scope, error) {
 	return &sc, nil
 }
 
+// IsChannelScope reports whether internalID names a channel scope
+// (scope_type='channel'). A scope's type is immutable after minting, so the
+// result is memoized for the process lifetime. Absence of a row means a DM
+// (Telegram passthrough writes no row; Mattermost DMs are scope_type='user'),
+// so it returns false.
+func (s *SQLiteStore) IsChannelScope(internalID int64) (bool, error) {
+	if v, ok := s.scopeTypeCache.Load(internalID); ok {
+		return v.(bool), nil
+	}
+	var scopeType string
+	err := s.db.QueryRow(
+		`SELECT scope_type FROM scopes WHERE internal_id = ? LIMIT 1`, internalID,
+	).Scan(&scopeType)
+	if errors.Is(err, sql.ErrNoRows) {
+		s.scopeTypeCache.Store(internalID, false)
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to read scope_type for %d: %w", internalID, err)
+	}
+	isChannel := scopeType == "channel"
+	s.scopeTypeCache.Store(internalID, isChannel)
+	return isChannel, nil
+}
+
 // ResolveScope returns the internal scope id for (transport, nativeID), minting
 // a new surrogate on first sight. The surrogate is the row's own autoincrement
 // id, so ids are stable and unique within the DB. Concurrency-safe: a racing

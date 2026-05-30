@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -15,9 +16,10 @@ type SessionInfo struct {
 	LastMessage  time.Time
 }
 
-// MessageGroup represents a collection of messages from a single scope that are
-// processed together. UserID is the resolved internal scope id (the storage
-// partition key) — for Telegram this equals the sender id (passthrough).
+// MessageGroup represents a collection of messages processed together as one
+// turn. UserID is the resolved internal scope id (the storage partition key) —
+// for Telegram it equals the sender id (passthrough); for a channel it is the
+// channel's scope id, shared by all participants.
 type MessageGroup struct {
 	Messages   []IncomingMessage
 	Timer      *time.Timer
@@ -26,17 +28,30 @@ type MessageGroup struct {
 	StartedAt  time.Time // When the first message in this group was received
 }
 
-// userProcessingLock tracks a per-user mutex and its last usage time for cleanup.
+// groupKeyFor computes the grouping key for an incoming message. Grouping is
+// per-conversation in a DM (key = scope id) but per-participant in a channel
+// (key = scope id + sender), so two people @mentioning the bot within turnWait
+// get separate replies instead of being merged into one turn. The storage scope
+// (MessageGroup.UserID) stays the scope id in both cases.
+func groupKeyFor(scopeID int64, im IncomingMessage) string {
+	key := strconv.FormatInt(scopeID, 10)
+	if im.IsDirect {
+		return key
+	}
+	return key + ":" + im.SenderID
+}
+
+// userProcessingLock tracks a per-key mutex and its last usage time for cleanup.
 type userProcessingLock struct {
 	mu       sync.Mutex
 	lastUsed time.Time
 }
 
-// MessageGrouper handles the grouping of incoming messages from users.
+// MessageGrouper handles the grouping of incoming messages.
 type MessageGrouper struct {
 	mu           sync.Mutex
 	wg           sync.WaitGroup // tracks active processGroup operations
-	groups       map[int64]*MessageGroup
+	groups       map[string]*MessageGroup
 	bot          *Bot
 	logger       *slog.Logger
 	turnWait     time.Duration
@@ -44,9 +59,9 @@ type MessageGrouper struct {
 	parentCtx    context.Context
 	parentCancel context.CancelFunc
 
-	// Per-user processing locks ensure strict FIFO ordering.
-	// A user's next message group won't start processing until the previous one completes.
-	processingLocks   map[int64]*userProcessingLock
+	// Per-key processing locks ensure strict FIFO ordering. A key's next message
+	// group won't start processing until the previous one completes.
+	processingLocks   map[string]*userProcessingLock
 	processingLocksMu sync.Mutex
 }
 
@@ -55,14 +70,14 @@ func NewMessageGrouper(b *Bot, logger *slog.Logger, turnWait time.Duration, onGr
 	// cancel is stored as parentCancel and invoked from Stop().
 	ctx, cancel := context.WithCancel(context.Background()) // #nosec G118 -- cancel persisted in struct, invoked in Stop
 	return &MessageGrouper{
-		groups:          make(map[int64]*MessageGroup),
+		groups:          make(map[string]*MessageGroup),
 		bot:             b,
 		logger:          logger.With(slog.String("component", "message_grouper")),
 		turnWait:        turnWait,
 		onGroupReady:    onGroupReady,
 		parentCtx:       ctx,
 		parentCancel:    cancel,
-		processingLocks: make(map[int64]*userProcessingLock),
+		processingLocks: make(map[string]*userProcessingLock),
 	}
 }
 
@@ -74,35 +89,35 @@ func (mg *MessageGrouper) Stop() {
 	// Don't cancel parent context yet - we want pending groups to be processed
 
 	mg.mu.Lock()
-	// Collect groups that need immediate processing
-	var pendingGroups []*MessageGroup
-	for userID, group := range mg.groups {
+	// Collect groups that need immediate processing, keyed for FIFO locking.
+	pendingGroups := make(map[string]*MessageGroup)
+	for key, group := range mg.groups {
 		if group.Timer != nil {
 			// Timer.Stop returns true if the timer was stopped before firing
 			if group.Timer.Stop() {
 				// Timer was stopped before firing - we need to process this group
-				mg.logger.Debug("processing pending group on shutdown", slog.Int64("user_id", userID))
-				pendingGroups = append(pendingGroups, group)
+				mg.logger.Debug("processing pending group on shutdown", slog.String("group", key))
+				pendingGroups[key] = group
 			} else {
 				// Timer already fired - callback is running or will run
-				mg.logger.Debug("timer already fired for user", slog.Int64("user_id", userID))
+				mg.logger.Debug("timer already fired", slog.String("group", key))
 			}
 		}
 		// Don't cancel the context - let processing complete
 	}
 
 	// Clear the groups map
-	mg.groups = make(map[int64]*MessageGroup)
+	mg.groups = make(map[string]*MessageGroup)
 	mg.mu.Unlock()
 
 	// Process pending groups immediately with non-cancellable context
-	for _, group := range pendingGroups {
+	for key, group := range pendingGroups {
 		// The wg.Add(1) was already called in AddMessage, wg.Done() will be called after processing
-		go func(g *MessageGroup) {
+		go func(key string, g *MessageGroup) {
 			defer mg.wg.Done()
 
-			// Acquire per-user lock to ensure FIFO ordering during shutdown
-			userLock := mg.getProcessingLock(g.UserID)
+			// Acquire per-key lock to ensure FIFO ordering during shutdown
+			userLock := mg.getProcessingLock(key)
 			userLock.mu.Lock()
 			defer func() {
 				userLock.lastUsed = time.Now()
@@ -114,7 +129,7 @@ func (mg *MessageGrouper) Stop() {
 				slog.Int("message_count", len(g.Messages)))
 			// Use background context since we're shutting down
 			mg.onGroupReady(context.Background(), g)
-		}(group)
+		}(key, group)
 	}
 
 	// Wait for all active processGroup operations to complete
@@ -126,25 +141,25 @@ func (mg *MessageGrouper) Stop() {
 	mg.logger.Info("Message grouper stopped")
 }
 
-// AddMessage adds a new message to a scope's group. scopeID is the resolved
-// internal scope id (storage partition key); for Telegram it equals the sender
-// id, so home grouping/FIFO keying is unchanged.
+// AddMessage adds a new message to its group. scopeID is the resolved internal
+// scope id (storage partition key); the grouping key is derived from it and the
+// message (per-sender in channels — see groupKeyFor).
 func (mg *MessageGrouper) AddMessage(scopeID int64, im IncomingMessage) {
 	mg.mu.Lock()
 	defer mg.mu.Unlock()
 
-	userID := scopeID
+	key := groupKeyFor(scopeID, im)
 
-	group, ok := mg.groups[userID]
+	group, ok := mg.groups[key]
 	if !ok {
 		// Create a new group if one doesn't exist
 		group = &MessageGroup{
 			Messages:  []IncomingMessage{},
-			UserID:    userID,
+			UserID:    scopeID,
 			StartedAt: time.Now(),
 		}
-		mg.groups[userID] = group
-		mg.logger.Debug("created new message group", slog.Int64("user_id", userID))
+		mg.groups[key] = group
+		mg.logger.Debug("created new message group", slog.String("group", key))
 	}
 
 	if ok {
@@ -158,12 +173,12 @@ func (mg *MessageGrouper) AddMessage(scopeID int64, im IncomingMessage) {
 		}
 		if group.CancelFunc != nil {
 			group.CancelFunc()
-			mg.logger.Debug("cancelled previous processing", slog.Int64("user_id", userID))
+			mg.logger.Debug("cancelled previous processing", slog.String("group", key))
 		}
 	}
 
 	group.Messages = append(group.Messages, im)
-	mg.logger.Debug("added message to group", slog.Int64("user_id", userID), slog.String("message_id", im.MessageID))
+	mg.logger.Debug("added message to group", slog.String("group", key), slog.String("message_id", im.MessageID))
 
 	// Create a new context derived from parent context.
 	// This ensures child contexts are cancelled when Stop() is called.
@@ -176,26 +191,26 @@ func (mg *MessageGrouper) AddMessage(scopeID int64, im IncomingMessage) {
 	group.Timer = time.AfterFunc(mg.turnWait, func() {
 		defer mg.wg.Done()
 		defer cancel() // release ctx when processing completes; idempotent if AddMessage already preempted
-		mg.processGroup(ctx, userID)
+		mg.processGroup(ctx, key)
 	})
 }
 
-// getProcessingLock returns the processing lock for a user, creating one if needed.
-func (mg *MessageGrouper) getProcessingLock(userID int64) *userProcessingLock {
+// getProcessingLock returns the processing lock for a key, creating one if needed.
+func (mg *MessageGrouper) getProcessingLock(key string) *userProcessingLock {
 	mg.processingLocksMu.Lock()
 	defer mg.processingLocksMu.Unlock()
 
-	lock, ok := mg.processingLocks[userID]
+	lock, ok := mg.processingLocks[key]
 	if !ok {
 		lock = &userProcessingLock{}
-		mg.processingLocks[userID] = lock
+		mg.processingLocks[key] = lock
 	}
 	return lock
 }
 
-func (mg *MessageGrouper) processGroup(ctx context.Context, userID int64) {
+func (mg *MessageGrouper) processGroup(ctx context.Context, key string) {
 	mg.mu.Lock()
-	group, ok := mg.groups[userID]
+	group, ok := mg.groups[key]
 	if !ok {
 		mg.mu.Unlock()
 		return
@@ -221,13 +236,13 @@ func (mg *MessageGrouper) processGroup(ctx context.Context, userID int64) {
 	// accidentally modify the original group's state.
 	processingGroup := &MessageGroup{
 		Messages:  messagesToProcess,
-		UserID:    userID,
+		UserID:    group.UserID,
 		StartedAt: group.StartedAt,
 	}
 
-	// Acquire per-user processing lock to ensure FIFO ordering.
-	// This blocks until any previous message group for this user finishes processing.
-	userLock := mg.getProcessingLock(userID)
+	// Acquire per-key processing lock to ensure FIFO ordering.
+	// This blocks until any previous message group for this key finishes processing.
+	userLock := mg.getProcessingLock(key)
 	userLock.mu.Lock()
 	defer func() {
 		userLock.lastUsed = time.Now()
@@ -266,60 +281,59 @@ func (mg *MessageGrouper) GetActiveSessions() []SessionInfo {
 	return sessions
 }
 
-// ForceCloseSession immediately processes and closes a session for the given user.
-// Returns true if a session was found and closed, false otherwise.
-func (mg *MessageGrouper) ForceCloseSession(userID int64) bool {
+// ForceCloseSession immediately processes and closes any active groups for the
+// given scope id. Returns true if at least one group was found and closed. In a
+// channel a scope may have several per-sender groups; all are closed.
+func (mg *MessageGrouper) ForceCloseSession(scopeID int64) bool {
 	mg.mu.Lock()
 
-	group, ok := mg.groups[userID]
-	if !ok || len(group.Messages) == 0 {
-		mg.mu.Unlock()
+	type pending struct {
+		key   string
+		group *MessageGroup
+	}
+	var toProcess []pending
+	for key, group := range mg.groups {
+		if group.UserID != scopeID || len(group.Messages) == 0 {
+			continue
+		}
+		if group.Timer != nil {
+			if group.Timer.Stop() {
+				// Timer stopped before firing — we process it ourselves, so the
+				// callback won't run; balance the wg.Add from AddMessage.
+				mg.wg.Done()
+			}
+		}
+		messagesToProcess := make([]IncomingMessage, len(group.Messages))
+		copy(messagesToProcess, group.Messages)
+		toProcess = append(toProcess, pending{key: key, group: &MessageGroup{
+			Messages:  messagesToProcess,
+			UserID:    group.UserID,
+			StartedAt: group.StartedAt,
+		}})
+		delete(mg.groups, key)
+	}
+	mg.mu.Unlock()
+
+	if len(toProcess) == 0 {
 		return false
 	}
 
-	// Stop the timer if it's running
-	if group.Timer != nil {
-		if group.Timer.Stop() {
-			// Timer was stopped before firing, we need to call wg.Done() since
-			// we're going to process it ourselves
-			mg.wg.Done()
-		}
+	for _, p := range toProcess {
+		mg.logger.Info("force closing session",
+			slog.String("group", p.key),
+			slog.Int("message_count", len(p.group.Messages)))
+		mg.wg.Add(1)
+		go func(key string, g *MessageGroup) {
+			defer mg.wg.Done()
+			userLock := mg.getProcessingLock(key)
+			userLock.mu.Lock()
+			defer func() {
+				userLock.lastUsed = time.Now()
+				userLock.mu.Unlock()
+			}()
+			mg.onGroupReady(context.Background(), g)
+		}(p.key, p.group)
 	}
-
-	// Take ownership of messages
-	messagesToProcess := make([]IncomingMessage, len(group.Messages))
-	copy(messagesToProcess, group.Messages)
-
-	// Clear the group
-	delete(mg.groups, userID)
-	mg.mu.Unlock()
-
-	mg.logger.Info("force closing session",
-		slog.Int64("user_id", userID),
-		slog.Int("message_count", len(messagesToProcess)))
-
-	// Process the group immediately
-	processingGroup := &MessageGroup{
-		Messages:  messagesToProcess,
-		UserID:    userID,
-		StartedAt: group.StartedAt,
-	}
-
-	// Track this in WaitGroup and process
-	mg.wg.Add(1)
-	go func() {
-		defer mg.wg.Done()
-
-		// Acquire per-user lock to ensure FIFO ordering
-		userLock := mg.getProcessingLock(processingGroup.UserID)
-		userLock.mu.Lock()
-		defer func() {
-			userLock.lastUsed = time.Now()
-			userLock.mu.Unlock()
-		}()
-
-		mg.onGroupReady(context.Background(), processingGroup)
-	}()
 
 	return true
 }

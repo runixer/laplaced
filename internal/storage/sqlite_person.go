@@ -46,8 +46,8 @@ func (s *SQLiteStore) AddPerson(person Person) (int64, error) {
 	}
 
 	query := `
-		INSERT INTO people (user_id, display_name, aliases, telegram_id, username, circle, bio, embedding, first_seen, last_seen, mention_count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO people (user_id, display_name, aliases, telegram_id, username, circle, bio, embedding, first_seen, last_seen, mention_count, external_transport, external_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	result, err := s.db.Exec(query,
 		person.UserID,
@@ -61,6 +61,8 @@ func (s *SQLiteStore) AddPerson(person Person) (int64, error) {
 		person.FirstSeen.UTC().Format("2006-01-02 15:04:05.999"),
 		person.LastSeen.UTC().Format("2006-01-02 15:04:05.999"),
 		person.MentionCount,
+		person.ExternalTransport,
+		person.ExternalID,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("failed to insert person: %w", err)

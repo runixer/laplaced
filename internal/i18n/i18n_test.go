@@ -130,6 +130,46 @@ func TestGet(t *testing.T) {
 	}
 }
 
+// TestChannelPromptBranches renders the real splitter/archivist prompts for both
+// the channel and DM branches in both languages, asserting the conditional
+// switches and leaves no unrendered template directives.
+func TestChannelPromptBranches(t *testing.T) {
+	tr, err := NewTranslator("en")
+	require.NoError(t, err)
+
+	// channelMarker is a substring that must appear ONLY in the channel branch
+	// (en and ru variants). The DM branch must not contain it; both branches must
+	// render with no leftover template directives.
+	cases := []struct {
+		key      string
+		markerEn string
+		markerRu string
+	}{
+		{"rag.topic_extraction_prompt", "multi-participant channel", "мультиучастниковый канал"},
+		{"memory.system_prompt", "CHANNEL PARTICIPANTS", "УЧАСТНИКИ КАНАЛА"},
+		{"bot.system_prompt", "<channel_context>", "<channel_context>"},
+	}
+
+	for _, lang := range []string{"en", "ru"} {
+		for _, c := range cases {
+			ch, err := tr.GetTemplate(lang, c.key, map[string]any{"IsChannel": true})
+			require.NoError(t, err)
+			dm, err := tr.GetTemplate(lang, c.key, map[string]any{"IsChannel": false})
+			require.NoError(t, err)
+
+			marker := c.markerEn
+			if lang == "ru" {
+				marker = c.markerRu
+			}
+			assert.NotEqual(t, ch, dm, "%s/%s: channel and DM branches must differ", lang, c.key)
+			assert.NotContains(t, ch, "{{", "%s/%s channel: unrendered template directive", lang, c.key)
+			assert.NotContains(t, dm, "{{", "%s/%s dm: unrendered template directive", lang, c.key)
+			assert.Contains(t, ch, marker, "%s/%s channel branch missing marker", lang, c.key)
+			assert.NotContains(t, dm, marker, "%s/%s DM branch must not contain channel marker", lang, c.key)
+		}
+	}
+}
+
 func TestGetTemplate(t *testing.T) {
 	// Create a test filesystem with template strings
 	testFS := &testMapFS{

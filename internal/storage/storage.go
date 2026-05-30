@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -26,6 +27,13 @@ type Message struct {
 	Author         *string // author display/handle within the scope
 	MessageID      *string // transport-native message/post id
 	ConversationID *string // transport-native chat/channel id
+
+	// ThreadRoot is the transport thread this message belongs to (migration
+	// 013), recorded on channel messages and the bot's channel replies. Reply
+	// gating uses the post's quote (ReplyToBot), not thread membership; this
+	// column is kept as thread-membership metadata for thread-scoped context.
+	// NULL in DMs.
+	ThreadRoot *string
 }
 
 type User struct {
@@ -216,6 +224,12 @@ type Person struct {
 	FirstSeen    time.Time `json:"first_seen"`
 	LastSeen     time.Time `json:"last_seen"`
 	MentionCount int       `json:"mention_count"`
+
+	// External identity (migration 011): transport-neutral (transport, native_id)
+	// for non-Telegram participants such as channel members. Telegram people are
+	// backfilled to ('telegram', telegram_id). Nil when unset.
+	ExternalTransport *string `json:"external_transport,omitempty"`
+	ExternalID        *string `json:"external_id,omitempty"`
 }
 
 // PersonFilter for filtering people queries.
@@ -293,6 +307,11 @@ type SQLiteStore struct {
 	db     *sql.DB
 	logger *slog.Logger
 	dbPath string // Original path without query params, for file size check
+
+	// scopeTypeCache memoizes IsChannelScope lookups. A scope's type is fixed at
+	// mint time and never changes, so entries are valid for the process lifetime.
+	// Keyed by internal scope id, value is bool (true=channel).
+	scopeTypeCache sync.Map
 }
 
 func NewSQLiteStore(logger *slog.Logger, path string) (*SQLiteStore, error) {

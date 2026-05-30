@@ -25,8 +25,23 @@ func (s *Service) extractTopics(ctx context.Context, userID int64, chunk []stora
 }
 
 // extractTopicsViaAgent delegates topic extraction to the Splitter agent.
+// isChannelScope reports whether userID is a channel scope, defaulting to false
+// (DM) when the scope repo is absent or the lookup fails.
+func (s *Service) isChannelScope(userID int64) bool {
+	if s.scopeRepo == nil {
+		return false
+	}
+	isCh, err := s.scopeRepo.IsChannelScope(userID)
+	if err != nil {
+		s.logger.Warn("channel-scope lookup failed", "user_id", userID, "error", err)
+		return false
+	}
+	return isCh
+}
+
 func (s *Service) extractTopicsViaAgent(ctx context.Context, userID int64, chunk []storage.Message) ([]ExtractedTopic, UsageInfo, error) {
 	req := &agent.Request{
+		IsChannel: s.isChannelScope(userID),
 		Params: map[string]any{
 			splitter.ParamMessages: chunk,
 			"user_id":              userID,

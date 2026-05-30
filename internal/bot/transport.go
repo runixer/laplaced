@@ -21,6 +21,7 @@ type IncomingMessage struct {
 	ThreadRoot     string // Telegram MessageThreadID (forum) | Mattermost root_id; "" = top level
 	IsDirect       bool   // DM (Telegram private chat | Mattermost channel_type==D)
 	Mention        bool   // bot mentioned (for channels); always acted on in DMs
+	ReplyToBot     bool   // message replies to / quotes a bot message (channel reply-gating)
 	SentAt         time.Time
 	Files          []files.IncomingFile
 	Forward        *ForwardInfo // Telegram-only forwarded-sender info; nil otherwise
