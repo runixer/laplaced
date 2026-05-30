@@ -63,12 +63,9 @@ type ChunkToolCall struct {
 	Function ChunkToolCallFunction `json:"function,omitempty"`
 }
 
-type ChunkUsage struct {
-	PromptTokens     int      `json:"prompt_tokens"`
-	CompletionTokens int      `json:"completion_tokens"`
-	TotalTokens      int      `json:"total_tokens"`
-	Cost             *float64 `json:"cost,omitempty"`
-}
+// ChunkUsage is the usage block on a streaming chunk. It aliases Usage so the
+// streaming and non-streaming paths share the same polymorphic-cost decoding.
+type ChunkUsage = Usage
 
 // StreamEvent carries either a decoded chunk or a terminal error.
 // When Err != nil the channel is about to close; callers should treat this as

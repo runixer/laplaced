@@ -126,6 +126,15 @@ func (t *TelegramTransport) SetReaction(ctx context.Context, conversationID, mes
 	})
 }
 
+// strPtrOrNil returns a pointer to s, or nil when s is empty — for nullable
+// string columns (history attribution) that should stay NULL when unset.
+func strPtrOrNil(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 // atoiOrZero parses a string id to int, returning 0 on empty/invalid input
 // (so intPtrOrNil drops it from the request).
 func atoiOrZero(s string) int {

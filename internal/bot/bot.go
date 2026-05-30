@@ -108,8 +108,12 @@ func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRe
 
 	b.messageGrouper = NewMessageGrouper(b, botLogger, turnWait, b.processMessageGroup)
 
-	if err := b.setCommands(); err != nil {
-		return nil, fmt.Errorf("failed to set bot commands: %w", err)
+	// setCommands hits the live Telegram API; skip it for non-Telegram transports
+	// (the Time/Mattermost instance has no Telegram token).
+	if cfg.Transport != transportTime {
+		if err := b.setCommands(); err != nil {
+			return nil, fmt.Errorf("failed to set bot commands: %w", err)
+		}
 	}
 
 	// Warn if no users are allowed - bot will reject all messages

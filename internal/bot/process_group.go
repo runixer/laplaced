@@ -314,7 +314,12 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		shutdownSafeCtx = agent.WithContext(shutdownSafeCtx, shared)
 	}
 
-	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "user", Content: historyContent}); err != nil {
+	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{
+		Role:           "user",
+		Content:        historyContent,
+		MessageID:      strPtrOrNil(lastMsg.MessageID),
+		ConversationID: strPtrOrNil(convID),
+	}); err != nil {
 		logger.Error("failed to add message to history", "error", err)
 		return
 	}
@@ -558,8 +563,14 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		return
 	}
 
-	// Save assistant response to history
-	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "assistant", Content: resp.Content}); err != nil {
+	// Save assistant response to history. ConversationID is attributed; the bot's
+	// own post id is not captured here (it requires the post-send id, unavailable
+	// before the send/streaming-finalize step), so MessageID stays NULL.
+	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{
+		Role:           "assistant",
+		Content:        resp.Content,
+		ConversationID: strPtrOrNil(convID),
+	}); err != nil {
 		logger.Error("failed to add assistant message to history", "error", err)
 	}
 

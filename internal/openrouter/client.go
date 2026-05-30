@@ -636,17 +636,65 @@ type ResponseChoice struct {
 	Index        int             `json:"index"`
 }
 
+// Usage is the token/cost accounting block on a completion or embedding
+// response. Cost is kept as *float64 (nil when absent), but populated via a
+// custom UnmarshalJSON because backends disagree on its wire shape: OpenRouter
+// and most litellm models return a bare number, while litellm returns an object
+// (e.g. {"total_cost": 0.006, ...}) for some providers such as Perplexity.
+type Usage struct {
+	PromptTokens     int      `json:"prompt_tokens"`
+	CompletionTokens int      `json:"completion_tokens"`
+	TotalTokens      int      `json:"total_tokens"`
+	Cost             *float64 `json:"-"`
+}
+
+func (u *Usage) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		PromptTokens     int             `json:"prompt_tokens"`
+		CompletionTokens int             `json:"completion_tokens"`
+		TotalTokens      int             `json:"total_tokens"`
+		Cost             json.RawMessage `json:"cost"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	u.PromptTokens = raw.PromptTokens
+	u.CompletionTokens = raw.CompletionTokens
+	u.TotalTokens = raw.TotalTokens
+	u.Cost = parseCost(raw.Cost)
+	return nil
+}
+
+// parseCost extracts a USD cost from the polymorphic `cost` field: a bare number,
+// or an object with a total_cost key (litellm/Perplexity). Returns nil on null,
+// absence, or any shape it can't interpret (cost is best-effort accounting).
+func parseCost(raw json.RawMessage) *float64 {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	if raw[0] == '{' {
+		var obj struct {
+			TotalCost float64 `json:"total_cost"`
+		}
+		if err := json.Unmarshal(raw, &obj); err != nil {
+			return nil
+		}
+		return &obj.TotalCost
+	}
+	var f float64
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return nil
+	}
+	return &f
+}
+
 type ChatCompletionResponse struct {
 	ID       string           `json:"id"`
 	Model    string           `json:"model"`
 	Provider string           `json:"provider,omitempty"` // Actual provider that served the request (e.g. "Google", "Google AI Studio")
 	Choices  []ResponseChoice `json:"choices"`
-	Usage    struct {
-		PromptTokens     int      `json:"prompt_tokens"`
-		CompletionTokens int      `json:"completion_tokens"`
-		TotalTokens      int      `json:"total_tokens"`
-		Cost             *float64 `json:"cost,omitempty"` // Cost in USD from OpenRouter
-	} `json:"usage"`
+	Usage    Usage            `json:"usage"`
 
 	// DebugRequestBody contains the raw JSON request body sent to OpenRouter.
 	// Not part of API response - populated by client for debugging purposes.
@@ -681,11 +729,7 @@ type EmbeddingResponse struct {
 	Object string            `json:"object"`
 	Data   []EmbeddingObject `json:"data"`
 	Model  string            `json:"model"`
-	Usage  struct {
-		PromptTokens int      `json:"prompt_tokens"`
-		TotalTokens  int      `json:"total_tokens"`
-		Cost         *float64 `json:"cost,omitempty"` // Cost in USD from OpenRouter
-	} `json:"usage"`
+	Usage  Usage             `json:"usage"`
 }
 
 // NewClient builds a client pointed at the public OpenRouter API. It is a

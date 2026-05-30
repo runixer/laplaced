@@ -51,12 +51,7 @@ func makeChatResponse(content string, opts ...HelperOption) openrouter.ChatCompl
 		ID:      "test-response-id",
 		Model:   "test-model",
 		Choices: []openrouter.ResponseChoice{newChoice("assistant", content)},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{
+		Usage: openrouter.Usage{
 			PromptTokens:     10,
 			CompletionTokens: 20,
 			TotalTokens:      30,
@@ -90,12 +85,7 @@ func makeToolCallResponse(toolName, args string, opts ...HelperOption) openroute
 		ID:      "test-response-id",
 		Model:   "test-model",
 		Choices: []openrouter.ResponseChoice{choice},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{
+		Usage: openrouter.Usage{
 			PromptTokens:     10,
 			CompletionTokens: 20,
 			TotalTokens:      30,
@@ -122,12 +112,7 @@ func makeEmptyResponse(opts ...HelperOption) openrouter.ChatCompletionResponse {
 				FinishReason: "stop",
 			},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{
+		Usage: openrouter.Usage{
 			PromptTokens:     10,
 			CompletionTokens: 0,
 			TotalTokens:      10,
@@ -162,12 +147,7 @@ func makeToolCallWithContentResponse(content, toolName, args string, toolCallID 
 		ID:      "test-response-id",
 		Model:   "test-model",
 		Choices: []openrouter.ResponseChoice{choice},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{
+		Usage: openrouter.Usage{
 			PromptTokens:     10,
 			CompletionTokens: 20,
 			TotalTokens:      30,

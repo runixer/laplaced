@@ -25,6 +25,7 @@ import (
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/mattermost"
 	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
@@ -320,8 +321,9 @@ func run() int {
 	// Set artifact repository for linking artifacts to messages (v0.6.0)
 	b.SetArtifactRepo(store)
 
-	// Wire image generation (v0.8.0) — requires artifacts subsystem.
-	if cfg.Artifacts.Enabled && cfg.Agents.ImageGenerator.Model != "" {
+	// Wire image generation (v0.8.0) — requires artifacts subsystem. Telegram-only:
+	// the Mattermost/Time PoC is text-only, so skip it entirely there.
+	if cfg.Transport != "time" && cfg.Artifacts.Enabled && cfg.Agents.ImageGenerator.Model != "" {
 		imgGen := imagegen.New(openrouterClient, &cfg.Agents.ImageGenerator, logger)
 		b.SetImageGenerator(&imageGenAdapter{agent: imgGen})
 		b.SetFileStorage(fileStorage)
@@ -382,8 +384,41 @@ func run() int {
 
 	logger.Info("Starting Laplaced", "version", Version)
 
-	// Channel to wait for polling goroutine (only used in long polling mode)
-	pollingDone := make(chan struct{})
+	// ingestionDone is closed when the active transport's ingestion loop stops
+	// (Telegram polling goroutine, or Mattermost WS goroutine).
+	ingestionDone := make(chan struct{})
+
+	if cfg.Transport == "time" {
+		mmClient, err := mattermost.NewClient(ctx, mattermost.Config{
+			ServerURL: cfg.Mattermost.ServerURL,
+			BotToken:  cfg.Mattermost.BotToken,
+			ProxyURL:  cfg.Mattermost.ProxyURL,
+		}, logger)
+		if err != nil {
+			logger.Error("failed to create mattermost client", "error", err)
+			return 1
+		}
+		b.SetScopeRepository(store)
+		b.SetTransport(bot.NewMattermostTransport(mmClient, cfg, logger))
+		b.SetRenderer(bot.NewMattermostRenderer(mmClient.MaxPostSize(), logger))
+		logger.Info("Mattermost/Time transport active", "server", cfg.Mattermost.ServerURL)
+
+		// WS loop closes mmClient.Events() on ctx cancel; ingestion ranges over it
+		// and returns, then we close ingestionDone.
+		go mmClient.Run(ctx)
+		go func() {
+			defer close(ingestionDone)
+			b.StartMattermostIngestion(mmClient)
+		}()
+
+		<-ctx.Done()
+		logger.Info("Shutting down...")
+		<-ingestionDone
+		logger.Info("Mattermost ingestion stopped")
+		<-srvDone
+		logger.Info("Web server stopped")
+		return 0
+	}
 
 	if cfg.Telegram.WebhookURL != "" {
 		// WebhookPath and WebhookSecret were already computed above (before web server start)
@@ -394,7 +429,7 @@ func run() int {
 			return 1
 		}
 		logger.Info("Webhook set", "url", cfg.Telegram.WebhookURL)
-		close(pollingDone) // No polling, close immediately
+		close(ingestionDone) // No polling, close immediately
 	} else {
 		logger.Info("Webhook not set, using long polling.")
 
@@ -404,7 +439,7 @@ func run() int {
 		}
 
 		go func() {
-			defer close(pollingDone)
+			defer close(ingestionDone)
 			offset := 0
 			for {
 				select {
@@ -443,7 +478,7 @@ func run() int {
 	logger.Info("Shutting down...")
 
 	// Wait for polling goroutine to stop
-	<-pollingDone
+	<-ingestionDone
 	logger.Info("Polling stopped")
 
 	// Wait for web server to stop

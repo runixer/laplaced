@@ -345,6 +345,16 @@ type ToolConfig struct {
 	ParameterDescription string `yaml:"parameter_description"`
 }
 
+// MattermostConfig configures the Mattermost/Time transport (used when
+// transport == "time"). The proxy is per-client (corp proxy); never set a
+// process-wide HTTP_PROXY, which would also route the litellm/openrouter client.
+type MattermostConfig struct {
+	ServerURL      string   `yaml:"server_url" env:"LAPLACED_MATTERMOST_SERVER_URL"`
+	BotToken       string   `yaml:"bot_token" env:"LAPLACED_MATTERMOST_BOT_TOKEN"`
+	ProxyURL       string   `yaml:"proxy_url" env:"LAPLACED_MATTERMOST_PROXY_URL"`
+	AllowedUserIDs []string `yaml:"allowed_user_ids" env:"LAPLACED_MATTERMOST_ALLOWED_USER_IDS" env-separator:","`
+}
+
 type OpenRouterConfig struct {
 	APIKey string `yaml:"api_key" env:"LAPLACED_OPENROUTER_API_KEY"`
 	// BaseURL is the OpenAI-compatible endpoint the LLM client talks to.
@@ -558,13 +568,16 @@ type Config struct {
 			Password string `yaml:"password" env:"LAPLACED_AUTH_PASSWORD"`
 		} `yaml:"auth"`
 	} `yaml:"server"`
-	Telegram struct {
+	// Transport selects the chat backend: "telegram" (default) | "time" (Mattermost).
+	Transport string `yaml:"transport" env:"LAPLACED_TRANSPORT"`
+	Telegram  struct {
 		Token         string `yaml:"token" env:"LAPLACED_TELEGRAM_TOKEN"`
 		WebhookURL    string `yaml:"webhook_url" env:"LAPLACED_TELEGRAM_WEBHOOK_URL"`
 		WebhookPath   string // Auto-generated from token hash (not configurable)
 		WebhookSecret string // Auto-generated from token hash (not configurable)
 		ProxyURL      string `yaml:"proxy_url" env:"LAPLACED_TELEGRAM_PROXY_URL"`
 	} `yaml:"telegram"`
+	Mattermost MattermostConfig `yaml:"mattermost"`
 	OpenRouter OpenRouterConfig `yaml:"openrouter"`
 	Agents     AgentsConfig     `yaml:"agents"`
 	Embedding  EmbeddingConfig  `yaml:"embedding"`
@@ -642,8 +655,15 @@ func DefaultConfigBytes() []byte {
 func (c *Config) Validate() error {
 	var errs []error
 
-	// Required fields
-	if c.Telegram.Token == "" {
+	// Required fields — transport-specific.
+	if c.Transport == "time" {
+		if c.Mattermost.ServerURL == "" {
+			errs = append(errs, errors.New("mattermost.server_url is required when transport is \"time\""))
+		}
+		if c.Mattermost.BotToken == "" {
+			errs = append(errs, errors.New("mattermost.bot_token is required when transport is \"time\""))
+		}
+	} else if c.Telegram.Token == "" {
 		errs = append(errs, errors.New("telegram.token is required"))
 	}
 	if c.OpenRouter.APIKey == "" {

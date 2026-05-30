@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - The LLM backend is now configurable — point the bot at any OpenAI-compatible endpoint (litellm, vLLM, a self-hosted gateway) via `openrouter.base_url` or `LAPLACED_OPENROUTER_BASE_URL`; defaults to the public OpenRouter API.
+- Mattermost/Time transport — run the bot on a Mattermost-compatible server instead of Telegram by setting `transport: "time"` and the `mattermost.*` config (text-only DMs in this release).
+
+### Fixed
+- Web search (`internet_search`) no longer fails when the backend reports `usage.cost` as an object instead of a number — affected Perplexity via litellm.
 
 ## [0.9.2] - 2026-05-22
 

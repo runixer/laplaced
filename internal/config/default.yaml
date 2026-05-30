@@ -11,11 +11,23 @@ server:
     username: "admin"
     password: ""
 
+# Transport: chat backend. "telegram" (default) | "time" (Mattermost/Time).
+transport: "telegram"
+
 # Telegram Bot Configuration
 telegram:
   token: ""
   webhook_url: ""
   proxy_url: ""
+
+# Mattermost/Time Configuration (used when transport: "time")
+# server_url/bot_token/allowed_user_ids come from the work overlay + env.
+# proxy_url is the corp proxy (per-client only — never a global HTTP_PROXY).
+mattermost:
+  server_url: ""
+  bot_token: ""
+  proxy_url: ""
+  allowed_user_ids: []
 
 # OpenRouter API Configuration
 openrouter:

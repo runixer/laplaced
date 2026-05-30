@@ -85,12 +85,7 @@ func TestProcessMessageGroup_RecordsRootSpan(t *testing.T) {
 		Choices: []openrouter.ResponseChoice{
 			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "ok"}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{TotalTokens: 5},
+		Usage: openrouter.Usage{TotalTokens: 5},
 	}, nil)
 
 	b.processMessageGroup(context.Background(), &MessageGroup{
@@ -198,12 +193,7 @@ func runAnomalyTraceCase(t *testing.T, userText, llmContent string) map[attribut
 		Choices: []openrouter.ResponseChoice{
 			{Message: openrouter.ResponseMessage{Role: "assistant", Content: llmContent}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{TotalTokens: 5},
+		Usage: openrouter.Usage{TotalTokens: 5},
 	}, nil)
 
 	b.processMessageGroup(context.Background(), &MessageGroup{

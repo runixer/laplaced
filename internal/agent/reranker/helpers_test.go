@@ -66,12 +66,7 @@ func makeChatResponse(content string) openrouter.ChatCompletionResponse {
 				},
 			},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{
+		Usage: openrouter.Usage{
 			PromptTokens:     100,
 			CompletionTokens: 50,
 			TotalTokens:      150,
@@ -102,12 +97,7 @@ func makeToolCallResponse(toolName, arguments string) openrouter.ChatCompletionR
 				},
 			},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{
+		Usage: openrouter.Usage{
 			PromptTokens:     100,
 			CompletionTokens: 50,
 			TotalTokens:      150,
@@ -124,12 +114,7 @@ func makeFinalJSONResponse(jsonContent string) openrouter.ChatCompletionResponse
 func makeEmptyResponse() openrouter.ChatCompletionResponse {
 	return openrouter.ChatCompletionResponse{
 		Choices: []openrouter.ResponseChoice{},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{
+		Usage: openrouter.Usage{
 			PromptTokens:     100,
 			CompletionTokens: 0,
 			TotalTokens:      100,

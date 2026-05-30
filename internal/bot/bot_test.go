@@ -126,12 +126,7 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 		Choices: []openrouter.ResponseChoice{
 			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{TotalTokens: 10},
+		Usage: openrouter.Usage{TotalTokens: 10},
 	}, nil)
 
 	// Execute
@@ -260,12 +255,7 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 		Choices: []openrouter.ResponseChoice{
 			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{TotalTokens: 10},
+		Usage: openrouter.Usage{TotalTokens: 10},
 	}, nil)
 
 	// Execute
@@ -399,12 +389,7 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 		Choices: []openrouter.ResponseChoice{
 			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{TotalTokens: 10},
+		Usage: openrouter.Usage{TotalTokens: 10},
 	}, nil)
 
 	// Execute
@@ -539,12 +524,7 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 		Choices: []openrouter.ResponseChoice{
 			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{TotalTokens: 10},
+		Usage: openrouter.Usage{TotalTokens: 10},
 	}, nil)
 
 	// Execute
@@ -691,12 +671,7 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 		Choices: []openrouter.ResponseChoice{
 			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{TotalTokens: 10},
+		Usage: openrouter.Usage{TotalTokens: 10},
 	}, nil)
 
 	// Execute
@@ -823,12 +798,7 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 		Choices: []openrouter.ResponseChoice{
 			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{TotalTokens: 10},
+		Usage: openrouter.Usage{TotalTokens: 10},
 	}, nil)
 
 	// Execute - voice messages now go through processMessageGroup
@@ -1088,7 +1058,9 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 	// --- Mocking ---
 	// 1. When we process the new message, it will be added to history
 	newMessageContent := newMessage.BuildContent(translator, "en")
-	mockStore.On("AddMessageToHistory", userID, storage.Message{Role: "user", Content: newMessageContent}).Return(nil)
+	mockStore.On("AddMessageToHistory", userID, mock.MatchedBy(func(m storage.Message) bool {
+		return m.Role == "user" && m.Content == newMessageContent
+	})).Return(nil)
 
 	// 2. Then, the bot will fetch the full history
 	fullHistory := append(history, storage.Message{Role: "user", Content: newMessageContent})
@@ -1114,12 +1086,7 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 		Choices: []openrouter.ResponseChoice{
 			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "You said hello."}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{TotalTokens: 100},
+		Usage: openrouter.Usage{TotalTokens: 100},
 	}, nil)
 
 	// --- Execution ---
@@ -1383,12 +1350,7 @@ func TestSendTestMessage_Success(t *testing.T) {
 		Choices: []openrouter.ResponseChoice{
 			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Hello! How can I help you?"}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{
+		Usage: openrouter.Usage{
 			PromptTokens:     100,
 			CompletionTokens: 20,
 		},
@@ -1464,12 +1426,7 @@ func TestSendTestMessage_SaveToHistoryFalse(t *testing.T) {
 		Choices: []openrouter.ResponseChoice{
 			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Response without history"}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{
+		Usage: openrouter.Usage{
 			PromptTokens:     50,
 			CompletionTokens: 10,
 		},
