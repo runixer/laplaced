@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"time"
 )
 
@@ -9,12 +10,35 @@ func (s *SQLiteStore) AddMessageToHistory(userID int64, message Message) error {
 	if message.CreatedAt.IsZero() {
 		message.CreatedAt = time.Now()
 	}
-	// author/message_id/conversation_id (migration 012) are nullable transport
-	// attribution; they stay NULL when the caller leaves them unset.
-	query := "INSERT INTO history (user_id, role, content, topic_id, created_at, author, message_id, conversation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+	// author/message_id/conversation_id (migration 012) and thread_root (013) are
+	// nullable transport attribution; they stay NULL when the caller leaves them
+	// unset (DM/Telegram path).
+	query := "INSERT INTO history (user_id, role, content, topic_id, created_at, author, message_id, conversation_id, thread_root) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
 	_, err := s.db.Exec(query, userID, message.Role, message.Content, message.TopicID, message.CreatedAt.UTC().Format("2006-01-02 15:04:05.999"),
-		message.Author, message.MessageID, message.ConversationID)
+		message.Author, message.MessageID, message.ConversationID, message.ThreadRoot)
 	return err
+}
+
+// BotParticipatedInThread reports whether the bot has already posted an
+// assistant message in the given transport thread within this scope. It backs
+// channel thread-reply gating: a reply into a thread the bot is part of is
+// treated as addressed to the bot even without an explicit @mention.
+func (s *SQLiteStore) BotParticipatedInThread(userID int64, conversationID, threadRoot string) (bool, error) {
+	if conversationID == "" || threadRoot == "" {
+		return false, nil
+	}
+	var exists int
+	err := s.db.QueryRow(
+		`SELECT 1 FROM history WHERE user_id = ? AND conversation_id = ? AND thread_root = ? AND role = 'assistant' LIMIT 1`,
+		userID, conversationID, threadRoot,
+	).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *SQLiteStore) ImportMessage(userID int64, message Message) error {

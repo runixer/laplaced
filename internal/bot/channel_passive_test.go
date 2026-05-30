@@ -67,3 +67,39 @@ func TestStorePassiveChannelMessage_EmptyContentSkipped(t *testing.T) {
 	mockStore.AssertNotCalled(t, "AddMessageToHistory")
 	mockStore.AssertExpectations(t)
 }
+
+func TestBotParticipatesInThread(t *testing.T) {
+	t.Run("DM never consults the repo", func(t *testing.T) {
+		mockStore := new(testutil.MockStorage)
+		b := &Bot{logger: testutil.TestLogger(), msgRepo: mockStore}
+		got := b.botParticipatesInThread(1, IncomingMessage{IsDirect: true, ThreadRoot: "r"})
+		assert.False(t, got)
+		mockStore.AssertNotCalled(t, "BotParticipatedInThread")
+	})
+
+	t.Run("threadless channel post is not a thread reply", func(t *testing.T) {
+		mockStore := new(testutil.MockStorage)
+		b := &Bot{logger: testutil.TestLogger(), msgRepo: mockStore}
+		got := b.botParticipatesInThread(2, IncomingMessage{IsDirect: false, ThreadRoot: ""})
+		assert.False(t, got)
+		mockStore.AssertNotCalled(t, "BotParticipatedInThread")
+	})
+
+	t.Run("delegates to repo for a channel thread", func(t *testing.T) {
+		mockStore := new(testutil.MockStorage)
+		b := &Bot{logger: testutil.TestLogger(), msgRepo: mockStore}
+		im := IncomingMessage{IsDirect: false, ConversationID: "chanA", ThreadRoot: "rootX"}
+		mockStore.On("BotParticipatedInThread", int64(2), "chanA", "rootX").Return(true, nil)
+		assert.True(t, b.botParticipatesInThread(2, im))
+		mockStore.AssertExpectations(t)
+	})
+
+	t.Run("repo error fails safe to false", func(t *testing.T) {
+		mockStore := new(testutil.MockStorage)
+		b := &Bot{logger: testutil.TestLogger(), msgRepo: mockStore}
+		im := IncomingMessage{IsDirect: false, ConversationID: "chanA", ThreadRoot: "rootX"}
+		mockStore.On("BotParticipatedInThread", int64(2), "chanA", "rootX").Return(false, assert.AnError)
+		assert.False(t, b.botParticipatesInThread(2, im))
+		mockStore.AssertExpectations(t)
+	})
+}

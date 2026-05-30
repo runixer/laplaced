@@ -45,6 +45,9 @@ type MessageRepository interface {
 	UpdateMessagesTopicInRange(ctx context.Context, userID, startMsgID, endMsgID, topicID int64) error
 	GetUnprocessedMessages(userID int64) ([]Message, error)
 	GetRecentSessionMessages(ctx context.Context, userID int64, limit int, excludeIDs []int64) ([]Message, error)
+	// BotParticipatedInThread reports whether the bot already replied in the
+	// given transport thread within this scope (channel thread-reply gating).
+	BotParticipatedInThread(userID int64, conversationID, threadRoot string) (bool, error)
 }
 
 // UserRepository handles user data operations.

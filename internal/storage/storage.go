@@ -27,6 +27,12 @@ type Message struct {
 	Author         *string // author display/handle within the scope
 	MessageID      *string // transport-native message/post id
 	ConversationID *string // transport-native chat/channel id
+
+	// ThreadRoot is the transport thread this message belongs to (migration
+	// 013). Set on channel messages and on the bot's channel replies so a later
+	// reply into the same thread can be recognised as addressed to the bot. NULL
+	// in DMs.
+	ThreadRoot *string
 }
 
 type User struct {

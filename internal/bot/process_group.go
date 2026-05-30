@@ -314,19 +314,22 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		shutdownSafeCtx = agent.WithContext(shutdownSafeCtx, shared)
 	}
 
-	// In a channel scope, attribute the message to its sender so background
-	// topic/fact extraction can tell participants apart. DMs leave author NULL,
-	// keeping the single-user history byte-identical.
-	var author *string
+	// In a channel scope, attribute the message to its sender and record its
+	// thread so background extraction can tell participants apart and the bot's
+	// reply joins the same thread (enabling later thread-reply gating). DMs leave
+	// these NULL, keeping the single-user history byte-identical.
+	var chanAuthor, chanThreadRoot *string
 	if !lastMsg.IsDirect {
-		author = strPtrOrNil(lastMsg.SenderDisplay)
+		chanAuthor = strPtrOrNil(lastMsg.SenderDisplay)
+		chanThreadRoot = strPtrOrNil(threadRoot)
 	}
 	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{
 		Role:           "user",
 		Content:        historyContent,
-		Author:         author,
+		Author:         chanAuthor,
 		MessageID:      strPtrOrNil(lastMsg.MessageID),
 		ConversationID: strPtrOrNil(convID),
+		ThreadRoot:     chanThreadRoot,
 	}); err != nil {
 		logger.Error("failed to add message to history", "error", err)
 		return
@@ -573,11 +576,14 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 
 	// Save assistant response to history. ConversationID is attributed; the bot's
 	// own post id is not captured here (it requires the post-send id, unavailable
-	// before the send/streaming-finalize step), so MessageID stays NULL.
+	// before the send/streaming-finalize step), so MessageID stays NULL. In a
+	// channel, thread_root marks the thread the bot spoke in so a later reply
+	// there is recognised as addressed to it (thread-reply gating). DM: NULL.
 	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{
 		Role:           "assistant",
 		Content:        resp.Content,
 		ConversationID: strPtrOrNil(convID),
+		ThreadRoot:     chanThreadRoot,
 	}); err != nil {
 		logger.Error("failed to add assistant message to history", "error", err)
 	}
