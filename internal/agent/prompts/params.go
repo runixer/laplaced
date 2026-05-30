@@ -88,6 +88,7 @@ type LaplaceParams struct {
 	BotName   string // Bot's name (e.g., "Laplaced")
 	Platform  string // Chat platform shown to the model (e.g., "Telegram", "Time")
 	KatexMath bool   // platform renders LaTeX via KaTeX → emit math-formatting rules
+	IsChannel bool   // multi-participant channel scope → emit channel-context framing (Phase 6)
 }
 
 // ExtractorParams for extractor.system_prompt template.

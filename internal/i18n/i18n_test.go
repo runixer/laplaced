@@ -137,15 +137,17 @@ func TestChannelPromptBranches(t *testing.T) {
 	tr, err := NewTranslator("en")
 	require.NoError(t, err)
 
+	// channelMarker is a substring that must appear ONLY in the channel branch
+	// (en and ru variants). The DM branch must not contain it; both branches must
+	// render with no leftover template directives.
 	cases := []struct {
-		key           string
-		channelMarker string // substring expected only in the channel branch
-		dmMarker      string // substring expected only in the DM branch
-		dmMarkerRu    string
-		channelMarkRu string
+		key      string
+		markerEn string
+		markerRu string
 	}{
-		{"rag.topic_extraction_prompt", "multi-participant channel", "USER'S REQUESTS", "ПО ЗАПРОСАМ USER", "мультиучастниковый канал"},
-		{"memory.system_prompt", "CHANNEL PARTICIPANTS", "USER ONLY", "ТОЛЬКО USER", "УЧАСТНИКИ КАНАЛА"},
+		{"rag.topic_extraction_prompt", "multi-participant channel", "мультиучастниковый канал"},
+		{"memory.system_prompt", "CHANNEL PARTICIPANTS", "УЧАСТНИКИ КАНАЛА"},
+		{"bot.system_prompt", "<channel_context>", "<channel_context>"},
 	}
 
 	for _, lang := range []string{"en", "ru"} {
@@ -155,17 +157,15 @@ func TestChannelPromptBranches(t *testing.T) {
 			dm, err := tr.GetTemplate(lang, c.key, map[string]any{"IsChannel": false})
 			require.NoError(t, err)
 
+			marker := c.markerEn
+			if lang == "ru" {
+				marker = c.markerRu
+			}
 			assert.NotEqual(t, ch, dm, "%s/%s: channel and DM branches must differ", lang, c.key)
 			assert.NotContains(t, ch, "{{", "%s/%s channel: unrendered template directive", lang, c.key)
 			assert.NotContains(t, dm, "{{", "%s/%s dm: unrendered template directive", lang, c.key)
-
-			wantCh, wantDM := c.channelMarker, c.dmMarker
-			if lang == "ru" {
-				wantCh, wantDM = c.channelMarkRu, c.dmMarkerRu
-			}
-			assert.Contains(t, ch, wantCh, "%s/%s channel branch missing marker", lang, c.key)
-			assert.Contains(t, dm, wantDM, "%s/%s dm branch missing marker", lang, c.key)
-			assert.NotContains(t, ch, wantDM, "%s/%s channel branch leaked DM marker", lang, c.key)
+			assert.Contains(t, ch, marker, "%s/%s channel branch missing marker", lang, c.key)
+			assert.NotContains(t, dm, marker, "%s/%s DM branch must not contain channel marker", lang, c.key)
 		}
 	}
 }

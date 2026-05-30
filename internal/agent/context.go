@@ -26,7 +26,11 @@ type SharedContext struct {
 	RecentTopics string // Formatted <recent_topics>
 
 	// Social Graph (v0.5.1)
-	InnerCircle string // Formatted <inner_circle> (Work_Inner + Family)
+	InnerCircle string // Formatted <inner_circle> (Work_Inner + Family), or <channel_participants> for channels
+
+	// IsChannel marks the scope as a multi-participant channel (Phase 6). Agents
+	// use it to select channel-framed prompts; false for DMs.
+	IsChannel bool
 
 	// Session Context (v0.5 - nil until implemented)
 	// LastSummary *storage.SessionSummary
@@ -104,6 +108,7 @@ func (c *ContextService) Load(ctx context.Context, userID int64) *SharedContext 
 	// than a single person (Phase 6). DMs (and the Telegram home path) keep the
 	// user-centric framing unchanged.
 	isChannel := c.isChannelScope(userID)
+	shared.IsChannel = isChannel
 
 	// Load profile facts
 	if facts, err := c.factRepo.GetFacts(userID); err == nil {
