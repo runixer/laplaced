@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -45,14 +46,14 @@ func TestMessageGrouper_SingleMessage(t *testing.T) {
 		From:      &telegram.User{ID: 123},
 	}
 
-	grouper.AddMessage(msg)
+	grouper.AddMessage(grpIncoming(msg))
 
 	time.Sleep(50 * time.Millisecond)
 
 	groupProcessed := getGroup()
 	assert.NotNil(t, groupProcessed)
 	assert.Len(t, groupProcessed.Messages, 1)
-	assert.Equal(t, msg.MessageID, groupProcessed.Messages[0].MessageID)
+	assert.Equal(t, strconv.Itoa(msg.MessageID), groupProcessed.Messages[0].MessageID)
 }
 
 func TestMessageGrouper_MultipleMessages(t *testing.T) {
@@ -62,20 +63,20 @@ func TestMessageGrouper_MultipleMessages(t *testing.T) {
 	msg2 := &telegram.Message{MessageID: 2, From: &telegram.User{ID: 123}}
 	msg3 := &telegram.Message{MessageID: 3, From: &telegram.User{ID: 123}}
 
-	grouper.AddMessage(msg1)
+	grouper.AddMessage(grpIncoming(msg1))
 	time.Sleep(10 * time.Millisecond)
-	grouper.AddMessage(msg2)
+	grouper.AddMessage(grpIncoming(msg2))
 	time.Sleep(10 * time.Millisecond)
-	grouper.AddMessage(msg3)
+	grouper.AddMessage(grpIncoming(msg3))
 
 	time.Sleep(100 * time.Millisecond)
 
 	groupProcessed := getGroup()
 	assert.NotNil(t, groupProcessed)
 	assert.Len(t, groupProcessed.Messages, 3)
-	assert.Equal(t, msg1.MessageID, groupProcessed.Messages[0].MessageID)
-	assert.Equal(t, msg2.MessageID, groupProcessed.Messages[1].MessageID)
-	assert.Equal(t, msg3.MessageID, groupProcessed.Messages[2].MessageID)
+	assert.Equal(t, strconv.Itoa(msg1.MessageID), groupProcessed.Messages[0].MessageID)
+	assert.Equal(t, strconv.Itoa(msg2.MessageID), groupProcessed.Messages[1].MessageID)
+	assert.Equal(t, strconv.Itoa(msg3.MessageID), groupProcessed.Messages[2].MessageID)
 }
 
 func TestMessageGrouper_TimerReset(t *testing.T) {
@@ -84,9 +85,9 @@ func TestMessageGrouper_TimerReset(t *testing.T) {
 	msg1 := &telegram.Message{MessageID: 1, From: &telegram.User{ID: 123}}
 	msg2 := &telegram.Message{MessageID: 2, From: &telegram.User{ID: 123}}
 
-	grouper.AddMessage(msg1)
+	grouper.AddMessage(grpIncoming(msg1))
 	time.Sleep(15 * time.Millisecond) // Less than the turnWait duration
-	grouper.AddMessage(msg2)
+	grouper.AddMessage(grpIncoming(msg2))
 
 	time.Sleep(50 * time.Millisecond)
 
@@ -118,9 +119,9 @@ func TestMessageGrouper_Stop_ProcessesPendingGroups(t *testing.T) {
 	msg2 := &telegram.Message{MessageID: 2, From: &telegram.User{ID: 456}}
 	msg3 := &telegram.Message{MessageID: 3, From: &telegram.User{ID: 123}} // Same user as msg1
 
-	grouper.AddMessage(msg1)
-	grouper.AddMessage(msg2)
-	grouper.AddMessage(msg3)
+	grouper.AddMessage(grpIncoming(msg1))
+	grouper.AddMessage(grpIncoming(msg2))
+	grouper.AddMessage(grpIncoming(msg3))
 
 	// Stop should process both pending groups
 	grouper.Stop()
@@ -156,7 +157,7 @@ func TestMessageGrouper_Stop_ProcessesPendingGroups(t *testing.T) {
 func TestMessageGrouper_FIFOOrdering(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 
-	var processingOrder []int
+	var processingOrder []string
 	var orderMu sync.Mutex
 	group1Processing := make(chan struct{})
 	group2CanStart := make(chan struct{})
@@ -169,11 +170,11 @@ func TestMessageGrouper_FIFOOrdering(t *testing.T) {
 		groupNum := group.Messages[0].MessageID
 
 		switch groupNum {
-		case 1:
+		case "1":
 			close(group1Processing) // Signal that group 1 started
 			// Simulate slow processing (e.g., voice transcription)
 			time.Sleep(100 * time.Millisecond)
-		case 2:
+		case "2":
 			// This should NOT start until group 1 is done
 			close(group2CanStart)
 			// Fast processing
@@ -194,7 +195,7 @@ func TestMessageGrouper_FIFOOrdering(t *testing.T) {
 
 	// Add first message (will be slow to process)
 	msg1 := &telegram.Message{MessageID: 1, From: &telegram.User{ID: 123}}
-	grouper.AddMessage(msg1)
+	grouper.AddMessage(grpIncoming(msg1))
 
 	// Wait for first group to start processing
 	<-group1Processing
@@ -202,7 +203,7 @@ func TestMessageGrouper_FIFOOrdering(t *testing.T) {
 	// Now add second message (will be fast to process)
 	// This creates a new group since the first one's timer already fired
 	msg2 := &telegram.Message{MessageID: 2, From: &telegram.User{ID: 123}}
-	grouper.AddMessage(msg2)
+	grouper.AddMessage(grpIncoming(msg2))
 
 	// Wait for all processing to complete
 	select {
@@ -218,7 +219,7 @@ func TestMessageGrouper_FIFOOrdering(t *testing.T) {
 	orderMu.Lock()
 	defer orderMu.Unlock()
 
-	assert.Equal(t, []int{1, 2}, processingOrder,
+	assert.Equal(t, []string{"1", "2"}, processingOrder,
 		"Groups should be processed in FIFO order (group 1 before group 2)")
 
 	// Also verify that group 2 didn't start until group 1 was done
@@ -271,8 +272,8 @@ func TestMessageGrouper_DifferentUsersParallel(t *testing.T) {
 	msg1 := &telegram.Message{MessageID: 1, From: &telegram.User{ID: 111}}
 	msg2 := &telegram.Message{MessageID: 2, From: &telegram.User{ID: 222}}
 
-	grouper.AddMessage(msg1)
-	grouper.AddMessage(msg2)
+	grouper.AddMessage(grpIncoming(msg1))
+	grouper.AddMessage(grpIncoming(msg2))
 
 	// Wait for both users to start processing
 	select {
@@ -325,7 +326,7 @@ func TestMessageGrouper_Stop_WaitsForActiveProcessing(t *testing.T) {
 	grouper := NewMessageGrouper(nil, logger, 10*time.Millisecond, onGroupReady)
 
 	msg := &telegram.Message{MessageID: 1, From: &telegram.User{ID: 123}}
-	grouper.AddMessage(msg)
+	grouper.AddMessage(grpIncoming(msg))
 
 	// Wait for processing to start
 	<-processingStarted
@@ -381,9 +382,9 @@ func TestMessageGrouper_GetActiveSessions_ReturnsActiveGroups(t *testing.T) {
 		Date:      1704067320, // 2024-01-01 00:02:00 UTC
 	}
 
-	grouper.AddMessage(msg1)
-	grouper.AddMessage(msg2)
-	grouper.AddMessage(msg3)
+	grouper.AddMessage(grpIncoming(msg1))
+	grouper.AddMessage(grpIncoming(msg2))
+	grouper.AddMessage(grpIncoming(msg3))
 
 	sessions := grouper.GetActiveSessions()
 
@@ -441,8 +442,8 @@ func TestMessageGrouper_ForceCloseSession_ClosesActiveSession(t *testing.T) {
 	msg1 := &telegram.Message{MessageID: 1, From: &telegram.User{ID: 123}}
 	msg2 := &telegram.Message{MessageID: 2, From: &telegram.User{ID: 456}}
 
-	grouper.AddMessage(msg1)
-	grouper.AddMessage(msg2)
+	grouper.AddMessage(grpIncoming(msg1))
+	grouper.AddMessage(grpIncoming(msg2))
 
 	// Force close session for user 123
 	closed := grouper.ForceCloseSession(123)
@@ -491,7 +492,7 @@ func TestMessageGrouper_ForceCloseSession_WithRunningTimer(t *testing.T) {
 	grouper := NewMessageGrouper(nil, logger, 1*time.Second, onGroupReady)
 
 	msg := &telegram.Message{MessageID: 1, From: &telegram.User{ID: 123}}
-	grouper.AddMessage(msg)
+	grouper.AddMessage(grpIncoming(msg))
 
 	// Wait a bit to ensure timer is scheduled
 	time.Sleep(50 * time.Millisecond)

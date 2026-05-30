@@ -367,10 +367,15 @@ func (ex *Extractor) buildMultimodalMessages(ctx context.Context, req *agent.Req
 
 	var contentParts []interface{}
 
-	// Add file part based on type (v0.6.0: unified FilePart for all file types)
+	// Add file part based on type. Visual media (image/video) is encoded per the
+	// configured backend format via openrouter.MediaPart (image_url/video_url on
+	// OpenAI-compatible backends, else `file`); other types use `file`.
+	format := ex.cfg.OpenRouter.ImageInputFormat
+	mediaPart := func(mimeType, fileName string) interface{} {
+		return openrouter.MediaPart(format, mimeType, fileName, fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data))
+	}
 	switch artifact.FileType {
 	case "image", "photo":
-		// Images use FilePart (unified format)
 		mimeType := artifact.MimeType
 		if mimeType == "" {
 			mimeType = "image/jpeg"
@@ -379,26 +384,14 @@ func (ex *Extractor) buildMultimodalMessages(ctx context.Context, req *agent.Req
 		if fileName == "" {
 			fileName = fmt.Sprintf("image_%d", artifact.ID)
 		}
-		contentParts = append(contentParts, openrouter.FilePart{
-			Type: "file",
-			File: openrouter.File{
-				FileName: fileName,
-				FileData: fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data),
-			},
-		})
+		contentParts = append(contentParts, mediaPart(mimeType, fileName))
 
 	case "pdf":
 		fileName := artifact.OriginalName
 		if fileName == "" {
 			fileName = fmt.Sprintf("document_%d.pdf", artifact.ID)
 		}
-		contentParts = append(contentParts, openrouter.FilePart{
-			Type: "file",
-			File: openrouter.File{
-				FileName: fileName,
-				FileData: fmt.Sprintf("data:application/pdf;base64,%s", base64Data),
-			},
-		})
+		contentParts = append(contentParts, mediaPart("application/pdf", fileName))
 
 	case "voice", "audio", "video_note", "video":
 		mimeType := artifact.MimeType
@@ -418,13 +411,7 @@ func (ex *Extractor) buildMultimodalMessages(ctx context.Context, req *agent.Req
 			fileName = fmt.Sprintf("artifact_%d", artifact.ID)
 		}
 
-		contentParts = append(contentParts, openrouter.FilePart{
-			Type: "file",
-			File: openrouter.File{
-				FileName: fileName,
-				FileData: fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data),
-			},
-		})
+		contentParts = append(contentParts, mediaPart(mimeType, fileName))
 
 	case "document":
 		// For text documents, include content as text
@@ -434,7 +421,6 @@ func (ex *Extractor) buildMultimodalMessages(ctx context.Context, req *agent.Req
 		})
 
 	default:
-		// Fallback: FilePart for unknown types
 		mimeType := artifact.MimeType
 		if mimeType == "" {
 			mimeType = "application/octet-stream"
@@ -443,13 +429,7 @@ func (ex *Extractor) buildMultimodalMessages(ctx context.Context, req *agent.Req
 		if fileName == "" {
 			fileName = fmt.Sprintf("artifact_%d", artifact.ID)
 		}
-		contentParts = append(contentParts, openrouter.FilePart{
-			Type: "file",
-			File: openrouter.File{
-				FileName: fileName,
-				FileData: fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data),
-			},
-		})
+		contentParts = append(contentParts, mediaPart(mimeType, fileName))
 	}
 
 	// Add user prompt text

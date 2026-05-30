@@ -120,7 +120,7 @@ func TestProcessMessageGroup_CompletesOnContextCancel(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		group := &MessageGroup{
-			Messages: messages,
+			Messages: tgIncomings(bot, messages...),
 			UserID:   userID,
 		}
 		bot.processMessageGroup(ctx, group)
@@ -238,7 +238,7 @@ func TestProcessMessageGroup_LLMContextNotCancelled(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		group := &MessageGroup{
-			Messages: messages,
+			Messages: tgIncomings(bot, messages...),
 			UserID:   userID,
 		}
 		bot.processMessageGroup(ctx, group)
@@ -355,7 +355,7 @@ func TestProcessMessageGroup_VoiceCompletesOnContextCancel(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		group := &MessageGroup{
-			Messages: []*telegram.Message{msg},
+			Messages: tgIncomings(bot, msg),
 			UserID:   userID,
 		}
 		bot.processMessageGroup(ctx, group)
@@ -474,7 +474,7 @@ func TestProcessMessageGroup_VoiceDownloadContextNotCancelled(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		group := &MessageGroup{
-			Messages: []*telegram.Message{msg},
+			Messages: tgIncomings(bot, msg),
 			UserID:   userID,
 		}
 		bot.processMessageGroup(ctx, group)

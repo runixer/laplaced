@@ -276,11 +276,7 @@ func TestProcessChunkWithStats(t *testing.T) {
 			Data: []openrouter.EmbeddingObject{
 				{Embedding: []float32{0.1, 0.2, 0.3}, Index: 0},
 			},
-			Usage: struct {
-				PromptTokens int      `json:"prompt_tokens"`
-				TotalTokens  int      `json:"total_tokens"`
-				Cost         *float64 `json:"cost,omitempty"`
-			}{TotalTokens: 10},
+			Usage: openrouter.Usage{TotalTokens: 10},
 		}, nil)
 
 		// Mock AddTopic

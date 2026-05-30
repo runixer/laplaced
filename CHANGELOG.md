@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - The LLM backend is now configurable — point the bot at any OpenAI-compatible endpoint (litellm, vLLM, a self-hosted gateway) via `openrouter.base_url` or `LAPLACED_OPENROUTER_BASE_URL`; defaults to the public OpenRouter API.
+- Mattermost/Time transport — run the bot on a Mattermost-compatible server instead of Telegram by setting `transport: "time"` and the `mattermost.*` config. Supports inbound images (the bot sees photos you send).
+- Image input is now backend-aware (`openrouter.image_input_format`): `openai` sends OpenAI-standard `image_url`/`video_url` parts for litellm/vLLM, `file` (default) keeps the OpenRouter/Gemini shape.
+
+### Fixed
+- Web search (`internet_search`) no longer fails when the backend reports `usage.cost` as an object instead of a number — affected Perplexity via litellm.
+- The bot now reliably re-views an image you ask about later in a conversation, instead of claiming it "can't see past images" — recalled images are placed alongside your question.
+- Background memory (topic creation, fact extraction, file indexing) now runs on non-Telegram transports; previously it only processed users from the Telegram allowlist.
 
 ## [0.9.2] - 2026-05-22
 

@@ -49,6 +49,10 @@ type Bot struct {
 	laplaceAgent    *laplace.Laplace
 	downloader      telegram.FileDownloader
 	fileProcessor   *files.Processor
+	transport       Transport               // output + identity surface (Telegram by default)
+	renderer        Renderer                // wire-format renderer for the active transport
+	scopeRepo       storage.ScopeRepository // identity resolution for non-Telegram transports
+	transportOnce   sync.Once               // guards lazy Telegram default for struct-literal test bots
 	messageGrouper  *MessageGrouper
 	toolExecutor    *tools.ToolExecutor // v0.6.1: Tool execution
 	fileStorage     *files.FileStorage  // v0.8.0: For media-reply path
@@ -67,6 +71,7 @@ func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRe
 
 	fileProcessor := files.NewProcessor(downloader, translator, cfg.Bot.Language, botLogger)
 	fileProcessor.SetMinVoiceDurationSec(cfg.Artifacts.MinVoiceDurationSeconds)
+	fileProcessor.SetImageInputFormat(cfg.OpenRouter.ImageInputFormat)
 
 	// Create tool executor
 	toolExecutor := tools.NewToolExecutor(orClient, factRepo, factHistoryRepo, cfg, botLogger)
@@ -92,6 +97,11 @@ func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRe
 		translator:      translator,
 	}
 
+	// Default transport is Telegram (the home path). main.go swaps in the
+	// Mattermost/Time transport+renderer via SetTransport when transport=time.
+	b.transport = NewTelegramTransport(api, cfg, translator, botLogger)
+	b.renderer = NewTelegramRenderer(botLogger)
+
 	turnWait, err := time.ParseDuration(cfg.Bot.TurnWaitDuration)
 	if err != nil {
 		return nil, fmt.Errorf("invalid turn_wait_duration: %w", err)
@@ -99,8 +109,12 @@ func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRe
 
 	b.messageGrouper = NewMessageGrouper(b, botLogger, turnWait, b.processMessageGroup)
 
-	if err := b.setCommands(); err != nil {
-		return nil, fmt.Errorf("failed to set bot commands: %w", err)
+	// setCommands hits the live Telegram API; skip it for non-Telegram transports
+	// (the Time/Mattermost instance has no Telegram token).
+	if cfg.Transport != transportTime {
+		if err := b.setCommands(); err != nil {
+			return nil, fmt.Errorf("failed to set bot commands: %w", err)
+		}
 	}
 
 	// Warn if no users are allowed - bot will reject all messages
@@ -274,9 +288,59 @@ func (b *Bot) ProcessUpdate(ctx context.Context, update *telegram.Update, source
 
 	// Voice messages are now grouped with text messages for better context
 	if msg.Text != "" || msg.Caption != "" || msg.Photo != nil || msg.Document != nil || msg.Voice != nil || msg.Audio != nil || msg.VideoNote != nil {
-		b.handleGroupedMessage(msg)
+		b.HandleIncoming(b.incomingFromTelegram(msg))
 	}
 }
+
+// ensureTransport lazily installs the default Telegram transport+renderer when
+// they were not set via NewBot — the case for struct-literal Bots in tests.
+// Guarded by sync.Once so it is race-free under concurrent processing. A no-op
+// in production, where NewBot (or SetTransport) populates both before any
+// message is processed.
+func (b *Bot) ensureTransport() {
+	b.transportOnce.Do(func() {
+		if b.transport == nil {
+			b.transport = NewTelegramTransport(b.api, b.cfg, b.translator, b.logger)
+		}
+		if b.renderer == nil {
+			b.renderer = NewTelegramRenderer(b.logger)
+		}
+	})
+}
+
+// HandleIncoming is the transport-neutral ingestion entry: it resolves the
+// internal scope id for the message and feeds it to the message grouper. Both
+// the Telegram path (ProcessUpdate) and future transports (Mattermost WS loop)
+// converge here.
+func (b *Bot) HandleIncoming(im IncomingMessage) {
+	b.ensureTransport()
+	scopeID, err := resolveScopeID(b.scopeRepo, b.transport.Kind(), scopeNativeID(im))
+	if err != nil {
+		b.logger.Error("failed to resolve scope", "error", err, "transport", b.transport.Kind())
+		return
+	}
+	// Non-Telegram transports don't pass through ProcessUpdate's UpsertUser, so
+	// register the resolved scope as a user here. Background memory loops
+	// enumerate real users (backgroundUserIDs), so a scope absent from the users
+	// table would never get topics/facts/artifacts processed.
+	if b.transport.Kind() != transportTelegram {
+		if err := b.userRepo.UpsertUser(storage.User{ID: scopeID, Username: im.SenderDisplay, LastSeen: time.Now()}); err != nil {
+			b.logger.Warn("failed to upsert scope user", "scope_id", scopeID, "error", err)
+		}
+	}
+	b.messageGrouper.AddMessage(scopeID, im)
+}
+
+// SetTransport swaps the output/identity transport (used to install the
+// Mattermost/Time transport for the work instance).
+func (b *Bot) SetTransport(t Transport) { b.transport = t }
+
+// SetRenderer swaps the wire-format renderer to match the active transport.
+func (b *Bot) SetRenderer(r Renderer) { b.renderer = r }
+
+// SetScopeRepository wires the identity resolver store (required for
+// non-Telegram transports that mint surrogate scope ids).
+func (b *Bot) SetScopeRepository(repo storage.ScopeRepository) { b.scopeRepo = repo }
 
 func (b *Bot) isAllowed(userID int64) bool {
 	for _, id := range b.cfg.Bot.AllowedUserIDs {
@@ -298,29 +362,21 @@ func intPtrOrNil(v int) *int {
 	return &v
 }
 
-func (b *Bot) sendAction(ctx context.Context, chatID int64, messageThreadID int, action string) {
-	actionReq := telegram.SendChatActionRequest{
-		ChatID:          chatID,
-		MessageThreadID: intPtrOrNil(messageThreadID),
-		Action:          action,
-	}
-	if err := b.api.SendChatAction(ctx, actionReq); err != nil {
-		b.logger.Warn("failed to send action", "action", action, "error", err)
-	}
-}
-
-func (b *Bot) sendTypingActionLoop(ctx context.Context, chatID int64, messageThreadID int) {
-	// Use detached context with timeout for action requests.
-	// This prevents "context canceled" errors when the parent context is canceled
-	// while an HTTP request is in progress. The typing indicator is automatically
-	// cleared by Telegram when the bot sends a message, so we don't need to
-	// explicitly cancel ongoing requests.
+func (b *Bot) sendTypingActionLoop(ctx context.Context, conversationID string) {
+	b.ensureTransport()
+	// Use detached context with timeout for typing requests. This prevents
+	// "context canceled" errors when the parent context is canceled while an
+	// HTTP request is in progress. The typing indicator is automatically
+	// cleared by the transport when the bot sends a message, so we don't need
+	// to explicitly cancel ongoing requests.
 	const actionTimeout = 5 * time.Second
 
 	sendTyping := func() {
 		actionCtx, cancel := context.WithTimeout(context.Background(), actionTimeout)
 		defer cancel()
-		b.sendAction(actionCtx, chatID, messageThreadID, "typing")
+		if err := b.transport.SendTyping(actionCtx, conversationID); err != nil {
+			b.logger.Warn("failed to send typing action", "error", err)
+		}
 	}
 
 	sendTyping()
@@ -336,10 +392,6 @@ func (b *Bot) sendTypingActionLoop(ctx context.Context, chatID int64, messageThr
 			sendTyping()
 		}
 	}
-}
-
-func (b *Bot) handleGroupedMessage(msg *telegram.Message) {
-	b.messageGrouper.AddMessage(msg)
 }
 
 func (b *Bot) sendResponses(ctx context.Context, chatID int64, responses []telegram.SendMessageRequest, logger *slog.Logger) {

@@ -389,6 +389,7 @@ func processLatexContent(content string) string {
 	content = flattenBraces(content)
 	content = removeTextWrappers(content)
 	content = removeFontWrappers(content)
+	content = removeBoxed(content)
 	content = convertFractions(content)
 	content = convertSquareRoots(content)
 	content = convertVectors(content)
@@ -471,6 +472,38 @@ func flattenConstruct(content, command, separator string) string {
 		i++
 	}
 	return result.String()
+}
+
+// removeBoxed strips \boxed{...} (and \fbox{...}), keeping the inner content —
+// LaTeX uses these to frame a final answer, e.g. \boxed{x_1 = 3}. Brace-matched
+// so nested constructs (\frac, etc.) survive for the later passes.
+func removeBoxed(content string) string {
+	content = stripCommandKeepArg(content, `\boxed`)
+	content = stripCommandKeepArg(content, `\fbox`)
+	return content
+}
+
+// stripCommandKeepArg removes every `cmd{...}` occurrence, replacing it with the
+// brace-matched argument. cmd must include the leading backslash (e.g. `\boxed`).
+func stripCommandKeepArg(content, cmd string) string {
+	runes := []rune(content)
+	prefix := []rune(cmd + "{")
+	var out strings.Builder
+	i := 0
+	for i < len(runes) {
+		if i+len(prefix) <= len(runes) && string(runes[i:i+len(prefix)]) == string(prefix) {
+			braceIdx := i + len(prefix) - 1 // index of the opening '{'
+			end := findMatchingBrace(runes, braceIdx)
+			if end != -1 {
+				out.WriteString(string(runes[braceIdx+1 : end]))
+				i = end + 1
+				continue
+			}
+		}
+		out.WriteRune(runes[i])
+		i++
+	}
+	return out.String()
 }
 
 func removeTextWrappers(content string) string {

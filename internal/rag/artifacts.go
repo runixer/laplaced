@@ -90,7 +90,7 @@ func (s *Service) processArtifactExtraction(ctx context.Context) {
 	}
 
 	// Get all allowed users
-	users := s.cfg.Bot.AllowedUserIDs
+	users := s.backgroundUserIDs()
 	if len(users) == 0 {
 		return
 	}

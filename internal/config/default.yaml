@@ -11,16 +11,29 @@ server:
     username: "admin"
     password: ""
 
+# Transport: chat backend. "telegram" (default) | "time" (Mattermost/Time).
+transport: "telegram"
+
 # Telegram Bot Configuration
 telegram:
   token: ""
   webhook_url: ""
   proxy_url: ""
 
+# Mattermost/Time Configuration (used when transport: "time")
+# server_url/bot_token/allowed_user_ids come from the work overlay + env.
+# proxy_url is the corp proxy (per-client only — never a global HTTP_PROXY).
+mattermost:
+  server_url: ""
+  bot_token: ""
+  proxy_url: ""
+  allowed_user_ids: []
+
 # OpenRouter API Configuration
 openrouter:
   api_key: ""
   base_url: "https://openrouter.ai/api/v1"  # OpenAI-compatible endpoint; override for self-hosted (litellm/vLLM)
+  image_input_format: "file"  # "file" (OpenRouter/Gemini) | "openai" (image_url/video_url for litellm/vLLM)
   proxy_url: ""
   pdf_parser_engine: "native"
   request_cost: 0.0
@@ -179,6 +192,7 @@ agents:
     max_output_images: 4           # Max images shown to user per tool call
     max_input_image_bytes: 20971520 # 20MB per input image
     document_threshold_bytes: 2097152 # 2MB: larger outputs sent as Document (no Telegram recompression) instead of Photo
+    max_concurrent: 4              # Parallel generate_image calls per turn ("draw three pictures"); other tools stay sequential
 
 # Embedding Configuration
 # v0.7.0: migrated to gemini-embedding-2-preview at 1536 dim.

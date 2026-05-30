@@ -93,7 +93,7 @@ func detectEchoOfLastUserMessage(reply, userText string) bool {
 // particular fires on the retries-exhausted path which is also the error
 // path. Sanitized / echo / false_disclaimer guards safely no-op when
 // resp.Content is empty.
-func recordLaplaceAnomalies(span trace.Span, resp *laplace.Response, lastMsg *telegram.Message, hasCurrentMedia bool) {
+func recordLaplaceAnomalies(span trace.Span, resp *laplace.Response, userText string, hasCurrentMedia bool) {
 	// false_disclaimer — model claimed it couldn't read the attachment
 	// yet still produced a long answer. Only meaningful with attached media.
 	if hasCurrentMedia {
@@ -122,10 +122,6 @@ func recordLaplaceAnomalies(span trace.Span, resp *laplace.Response, lastMsg *te
 
 	// echo_user_message — Gemini degenerate failure mode where the model
 	// returns the user's last message verbatim as its completion.
-	userText := lastMsg.Text
-	if userText == "" {
-		userText = lastMsg.Caption
-	}
 	if detectEchoOfLastUserMessage(resp.Content, userText) {
 		span.SetAttributes(
 			attribute.Bool("bot.anomaly.echo_user_message", true),
@@ -152,16 +148,17 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	if len(group.Messages) == 0 {
 		return
 	}
+	b.ensureTransport()
 
 	lastMsg := group.Messages[len(group.Messages)-1]
-	user := lastMsg.From
+	userID := group.UserID // resolved scope id (storage partition key)
 
 	// Track processing time and success for metrics
 	startTime := time.Now()
 	success := false
 	defer func() {
 		duration := time.Since(startTime).Seconds()
-		RecordMessageProcessing(user.ID, duration, success)
+		RecordMessageProcessing(userID, duration, success)
 	}()
 
 	// Root span for the whole turn. Child spans (RAG, reranker, LLM, tools)
@@ -171,12 +168,12 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	// first (LIFO) and can set error status before span.End().
 	totalChars := 0
 	for _, m := range group.Messages {
-		totalChars += len(m.Text) + len(m.Caption)
+		totalChars += len(m.Text)
 	}
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/bot").Start(
 		ctx, "bot.processMessageGroup",
 		trace.WithAttributes(
-			attribute.Int64("user.id", user.ID),
+			attribute.Int64("user.id", userID),
 			attribute.Int("message.count", len(group.Messages)),
 			attribute.Int("message.total_chars", totalChars),
 		),
@@ -218,46 +215,38 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	// on Loki log lines, removing the manual ts → user_id → trace_id
 	// detective work today's investigations need.
 	logger := obs.LoggerWithSpan(ctx, b.logger).With(
-		"user_id", user.ID,
-		"username", user.Username,
-		"first_name", user.FirstName,
-		"last_name", user.LastName,
+		"user_id", userID,
+		"sender", lastMsg.SenderDisplay,
+		"transport", b.transport.Kind(),
 	)
 
 	logger.Info("processing message group", "message_count", len(group.Messages))
 
-	// v0.5.1: Extract people from forwarded messages
-	b.extractForwardedPeople(ctx, group.UserID, group.Messages, logger)
+	// v0.5.1: Extract people from forwarded messages (Telegram-only data)
+	b.extractForwardedPeople(ctx, userID, group.Messages, logger)
 
-	chatID := lastMsg.Chat.ID
+	convID := lastMsg.ConversationID
+	threadRoot := lastMsg.ThreadRoot
 
 	// Use non-cancellable context for all operations that should complete during shutdown.
 	// This ensures RAG retrieval, LLM generation, and response sending all complete
 	// even when graceful shutdown is triggered.
 	shutdownSafeCtx := context.WithoutCancel(ctx)
 
-	// React to the message with a certain probability.
+	// React to the message with a certain probability (transports that don't
+	// support reactions no-op).
 	// #nosec G404 -- emoji reactions are a UX flourish, not a security primitive
-	if rand.Float32() < 0.1 { // 10% chance
+	if b.transport.Capabilities().SupportsReactions && rand.Float32() < 0.1 { // 10% chance
 		reactionStart := time.Now()
-		// #nosec G404 -- emoji reactions are a UX flourish, not a security primitive
-		reaction := availableReactions[rand.IntN(len(availableReactions))]
-		reactionReq := telegram.SetMessageReactionRequest{
-			ChatID:    chatID,
-			MessageID: lastMsg.MessageID,
-			Reaction: []telegram.ReactionType{
-				{Type: "emoji", Emoji: reaction},
-			},
-		}
-		if err := b.api.SetMessageReaction(shutdownSafeCtx, reactionReq); err != nil {
+		if err := b.transport.SetReaction(shutdownSafeCtx, convID, lastMsg.MessageID); err != nil {
 			logger.Warn("failed to set message reaction", "error", err)
 		}
-		RecordMessageReaction(user.ID, time.Since(reactionStart).Seconds())
+		RecordMessageReaction(userID, time.Since(reactionStart).Seconds())
 	}
 
 	typingCtx, cancelTyping := context.WithCancel(shutdownSafeCtx)
 	defer cancelTyping()
-	go b.sendTypingActionLoop(typingCtx, chatID, lastMsg.MessageThreadID)
+	go b.sendTypingActionLoop(typingCtx, convID)
 
 	historyContent, rawQuery, currentUserMessageContent, allProcessedFiles, err := b.prepareUserMessage(shutdownSafeCtx, group, logger)
 	if rawQuery != "" {
@@ -279,16 +268,16 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 				ext = "(" + unsupported.MimeType + ")"
 			}
 			msg = strings.ReplaceAll(msg, "{ext}", ext)
-			b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: msg}}, logger)
+			b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", msg, logger)
 			return
 		case errors.As(err, &tooLarge):
 			msg := b.translator.Get(b.cfg.Bot.Language, "bot.file_too_large")
 			sizeMB := float64(tooLarge.Size) / (1024 * 1024)
 			msg = strings.ReplaceAll(msg, "{size}", fmt.Sprintf("%.1f", sizeMB))
-			b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: msg}}, logger)
+			b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", msg, logger)
 			return
 		default:
-			b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.api_error")}}, logger)
+			b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", b.translator.Get(b.cfg.Bot.Language, "bot.api_error"), logger)
 			return
 		}
 	}
@@ -319,15 +308,18 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		}
 	}
 
-	userID := group.UserID
-
 	// Load SharedContext once for all agents in this request
 	if b.contextService != nil {
 		shared := b.contextService.Load(shutdownSafeCtx, userID)
 		shutdownSafeCtx = agent.WithContext(shutdownSafeCtx, shared)
 	}
 
-	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "user", Content: historyContent}); err != nil {
+	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{
+		Role:           "user",
+		Content:        historyContent,
+		MessageID:      strPtrOrNil(lastMsg.MessageID),
+		ConversationID: strPtrOrNil(convID),
+	}); err != nil {
 		logger.Error("failed to add message to history", "error", err)
 		return
 	}
@@ -368,22 +360,30 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	// Execute via Laplace agent
 	if b.laplaceAgent == nil {
 		logger.Error("laplace agent not configured")
-		b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.generic_error")}}, logger)
+		b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", b.translator.Get(b.cfg.Bot.Language, "bot.generic_error"), logger)
 		return
 	}
 
 	// Create tool handler
 	toolHandler := b.newBotToolHandler(userID, logger)
 
+	// Telegram-only routing ints for the streaming sink + finalize callback,
+	// parsed from the neutral envelope. They are 0 for non-Telegram transports,
+	// which never stream (gated below by the streaming capability).
+	tgChatID, _ := strconv.ParseInt(convID, 10, 64)
+	tgThreadID := atoiOrZero(threadRoot)
+	tgReplyID := atoiOrZero(lastMsg.MessageID)
+
 	// Streaming sink: when enabled, this owns the in-flight reply bubble
-	// (placeholder → tool status → progressive content → final HTML).
+	// (placeholder → tool status → progressive content → final HTML). It is
+	// Telegram-only (edit-based) and gated on the streaming capability.
 	// On error/empty paths we route through sink.Finalize so the placeholder
 	// never gets orphaned.
 	var sink *streamSink
-	if b.cfg.Bot.Streaming.Enabled {
+	if b.cfg.Bot.Streaming.Enabled && b.transport.Capabilities().SupportsStreaming {
 		sink = newStreamSink(
 			shutdownSafeCtx, b.api, b.translator, b.cfg.Bot.Language,
-			b.cfg.Bot.Streaming, chatID, lastMsg.MessageThreadID, lastMsg.MessageID,
+			b.cfg.Bot.Streaming, tgChatID, tgThreadID, tgReplyID,
 			logger,
 		)
 		// Account for the placeholder send in Telegram metrics.
@@ -396,26 +396,21 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		HistoryContent:      historyContent,
 		RawQuery:            rawQuery,
 		CurrentMessageParts: currentUserMessageContent,
-		ChatID:              chatID,
-		MessageThreadID:     lastMsg.MessageThreadID,
-		ReplyToMsgID:        lastMsg.MessageID,
+		ChatID:              tgChatID,
+		MessageThreadID:     tgThreadID,
+		ReplyToMsgID:        tgReplyID,
 		UseStreaming:        sink != nil,
 		OnIntermediateMessage: func(text string) {
-			responses, err := b.finalizeResponse(chatID, lastMsg.MessageThreadID, userID, 0, text, logger)
-			if err != nil {
-				logger.Error("failed to finalize intermediate response", "error", err)
-				return
-			}
 			tgStart := time.Now()
-			b.sendResponses(shutdownSafeCtx, chatID, responses, logger)
+			sent := b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", text, logger)
 			totalTelegramDuration += time.Since(tgStart)
-			telegramCallCount += len(responses)
+			telegramCallCount += sent
 		},
 		OnToolStart: func(toolName, arguments string) {
 			if sink != nil {
 				sink.Status(toolName, arguments)
 			}
-			b.sendAction(shutdownSafeCtx, chatID, lastMsg.MessageThreadID, "typing")
+			_ = b.transport.SendTyping(shutdownSafeCtx, convID)
 		},
 	}
 	if sink != nil {
@@ -433,10 +428,9 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		errText := b.translator.Get(b.cfg.Bot.Language, "bot.api_error")
 		tgStart := time.Now()
 		if sink != nil {
-			sink.Finalize(finalizeArgs{UserID: userID, HadError: true, ErrorText: errText}, b.streamFinalizeCallback(chatID, lastMsg.MessageThreadID, userID, logger))
+			sink.Finalize(finalizeArgs{UserID: userID, HadError: true, ErrorText: errText}, b.streamFinalizeCallback(tgChatID, tgThreadID, userID, logger))
 		} else {
-			b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: errText}}, logger)
-			telegramCallCount++
+			telegramCallCount += b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", errText, logger)
 		}
 		totalTelegramDuration += time.Since(tgStart)
 		return
@@ -446,7 +440,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	// resp.Error — empty_response in particular fires on the retries-
 	// exhausted path which is also the error path. Sanitized / echo do
 	// require non-empty content; their guards handle the no-op cases.
-	recordLaplaceAnomalies(span, resp, lastMsg, hasCurrentMedia)
+	recordLaplaceAnomalies(span, resp, lastMsg.Text, hasCurrentMedia)
 
 	// Check for partial execution error (e.g., max retries reached)
 	if resp.Error != nil {
@@ -456,10 +450,9 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		errText := b.translator.Get(b.cfg.Bot.Language, "bot.api_error")
 		tgStart := time.Now()
 		if sink != nil {
-			sink.Finalize(finalizeArgs{UserID: userID, HadError: true, ErrorText: errText}, b.streamFinalizeCallback(chatID, lastMsg.MessageThreadID, userID, logger))
+			sink.Finalize(finalizeArgs{UserID: userID, HadError: true, ErrorText: errText}, b.streamFinalizeCallback(tgChatID, tgThreadID, userID, logger))
 		} else {
-			b.sendResponses(shutdownSafeCtx, chatID, []telegram.SendMessageRequest{{ChatID: chatID, Text: errText}}, logger)
-			telegramCallCount++
+			telegramCallCount += b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", errText, logger)
 		}
 		totalTelegramDuration += time.Since(tgStart)
 
@@ -555,13 +548,13 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		// finalize it with the response text so the placeholder doesn't
 		// linger. The media path then sends images and any follow-up text.
 		if sink != nil {
-			sink.Finalize(finalizeArgs{UserID: userID, FullText: resp.Content}, b.streamFinalizeCallback(chatID, lastMsg.MessageThreadID, userID, logger))
+			sink.Finalize(finalizeArgs{UserID: userID, FullText: resp.Content}, b.streamFinalizeCallback(tgChatID, tgThreadID, userID, logger))
 			RecordMessageTelegramEditCount(userID, sink.editCount)
 		}
 		obs.RecordContent(span, "bot.reply_sent", resp.Content,
 			attribute.Int64Slice("generated_artifact_ids", resp.GeneratedArtifactIDs))
 		mediaDur, sentCount := b.sendResponseWithGeneratedImages(
-			shutdownSafeCtx, userID, chatID, lastMsg.MessageThreadID, lastMsg.MessageID,
+			shutdownSafeCtx, userID, convID, threadRoot, lastMsg.MessageID,
 			resp.Content, resp.GeneratedArtifactIDs, logger,
 		)
 		totalTelegramDuration += mediaDur
@@ -570,8 +563,14 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		return
 	}
 
-	// Save assistant response to history
-	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "assistant", Content: resp.Content}); err != nil {
+	// Save assistant response to history. ConversationID is attributed; the bot's
+	// own post id is not captured here (it requires the post-send id, unavailable
+	// before the send/streaming-finalize step), so MessageID stays NULL.
+	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{
+		Role:           "assistant",
+		Content:        resp.Content,
+		ConversationID: strPtrOrNil(convID),
+	}); err != nil {
 		logger.Error("failed to add assistant message to history", "error", err)
 	}
 
@@ -581,7 +580,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	if sink != nil {
 		extra, edits := sink.Finalize(
 			finalizeArgs{UserID: userID, FullText: resp.Content},
-			b.streamFinalizeCallback(chatID, lastMsg.MessageThreadID, userID, logger),
+			b.streamFinalizeCallback(tgChatID, tgThreadID, userID, logger),
 		)
 		RecordMessageTelegramEditCount(userID, edits)
 		// Capture the final reply on the root span (under content toggle).
@@ -590,7 +589,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 			attribute.Int("chunks", 1+len(extra)))
 		if len(extra) > 0 {
 			tgStart := time.Now()
-			b.sendResponses(shutdownSafeCtx, chatID, extra, logger)
+			b.sendResponses(shutdownSafeCtx, tgChatID, extra, logger)
 			totalTelegramDuration += time.Since(tgStart)
 			telegramCallCount += len(extra)
 		}
@@ -598,24 +597,16 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		return
 	}
 
-	// Non-streaming path (escape hatch).
-	responses, err := b.finalizeResponse(chatID, lastMsg.MessageThreadID, userID, lastMsg.MessageID, resp.Content, logger)
-	if err != nil {
-		logger.Error("failed to finalize response", "error", err)
-	}
+	// Non-streaming path: render to wire format and send via the transport,
+	// replying to the triggering message on the first chunk.
+	tgStart := time.Now()
+	sent := b.sendRendered(shutdownSafeCtx, convID, threadRoot, lastMsg.MessageID, resp.Content, logger)
+	totalTelegramDuration += time.Since(tgStart)
+	telegramCallCount += sent
 
 	// Capture the final reply on the root span — what the user actually saw
-	// after sanitize/markdown/chunking. Closes the "what did the bot reply"
-	// gap that today required ssh + docker logs to answer. Under content
-	// toggle since this is user-visible text.
-	obs.RecordContent(span, "bot.reply_sent", resp.Content,
-		attribute.Int("chunks", len(responses)))
-
-	// Send response
-	tgStart := time.Now()
-	b.sendResponses(shutdownSafeCtx, chatID, responses, logger)
-	totalTelegramDuration += time.Since(tgStart)
-	telegramCallCount += len(responses)
+	// after sanitize/markdown/chunking.
+	obs.RecordContent(span, "bot.reply_sent", resp.Content, attribute.Int("chunks", sent))
 
 	success = true
 }
@@ -642,7 +633,7 @@ func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logge
 		// Get message IDs from current group to exclude them
 		excludeIDs := make([]int64, len(group.Messages))
 		for i, msg := range group.Messages {
-			excludeIDs[i] = int64(msg.MessageID)
+			excludeIDs[i] = int64(atoiOrZero(msg.MessageID))
 		}
 
 		// Fetch recent session messages (excluding current group messages)
@@ -662,7 +653,7 @@ func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logge
 
 	// 2. Add MessageGroup messages (current context)
 	for _, msg := range group.Messages {
-		if content := msg.BuildContent(b.translator, b.cfg.Bot.Language); content != "" {
+		if content := b.incomingContent(msg); content != "" {
 			appendWithNewline(&groupTextBuilder, content)
 		}
 	}
@@ -675,7 +666,7 @@ func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logge
 	for i, msg := range group.Messages {
 		i, msg := i, msg // capture for goroutine
 		g.Go(func() error {
-			result, err := b.fileProcessor.ProcessMessage(gCtx, msg, group.UserID, groupText)
+			result, err := b.fileProcessor.ProcessFiles(gCtx, msg.Files, group.UserID, groupText)
 			if err != nil {
 				// Check for file validation errors (unsupported format, too large)
 				// These are user-facing errors, return them wrapped
@@ -705,7 +696,7 @@ func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logge
 
 	for i, msg := range group.Messages {
 		// Text content (message text or caption)
-		textContent := msg.BuildContent(b.translator, b.cfg.Bot.Language)
+		textContent := b.incomingContent(msg)
 		if textContent != "" {
 			appendWithNewline(&historyBuilder, textContent)
 			llmParts = append(llmParts, openrouter.TextPart{Type: "text", Text: textContent})
@@ -718,10 +709,9 @@ func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logge
 
 			// Add instruction before file if present (e.g., voice handling instructions)
 			if f.Instruction != "" {
-				prefix := msg.BuildPrefix(b.translator, b.cfg.Bot.Language)
 				llmParts = append(llmParts, openrouter.TextPart{
 					Type: "text",
-					Text: fmt.Sprintf("%s: %s", prefix, f.Instruction),
+					Text: fmt.Sprintf("%s: %s", msg.Prefix, f.Instruction),
 				})
 			}
 
@@ -732,9 +722,8 @@ func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logge
 			switch f.FileType {
 			case files.FileTypeVoice:
 				// Voice: add marker to history and RAG query
-				prefix := msg.BuildPrefix(b.translator, b.cfg.Bot.Language)
 				voiceMarker := b.translator.Get(b.cfg.Bot.Language, "bot.voice_message_marker")
-				appendWithNewline(&historyBuilder, fmt.Sprintf("%s: %s", prefix, voiceMarker))
+				appendWithNewline(&historyBuilder, fmt.Sprintf("%s: %s", msg.Prefix, voiceMarker))
 				appendWithNewline(&rawQueryBuilder, voiceMarker)
 
 				logger.Info("processed voice message",
@@ -774,11 +763,7 @@ func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logge
 		}
 
 		// Build RAG query from text
-		txt := msg.Text
-		if txt == "" {
-			txt = msg.Caption
-		}
-		appendWithNewline(&rawQueryBuilder, txt)
+		appendWithNewline(&rawQueryBuilder, msg.Text)
 	}
 
 	return historyBuilder.String(), rawQueryBuilder.String(), llmParts, allProcessedFiles, nil
@@ -902,6 +887,46 @@ func fixListNumbering(parts []string) []string {
 	return result
 }
 
+// sendRendered renders canonical markdown to wire-format chunks and sends each
+// through the active transport, replying to replyTo on the first chunk and
+// keeping every chunk in threadRoot. On a send failure it emits a single
+// generic-error message and stops. Returns the count of chunks sent.
+func (b *Bot) sendRendered(ctx context.Context, convID, threadRoot, replyTo, text string, logger *slog.Logger) int {
+	chunks, err := b.renderer.Render(text)
+	if err != nil {
+		logger.Error("failed to render response", "error", err)
+	}
+	sent := 0
+	for i, chunk := range chunks {
+		if strings.TrimSpace(chunk) == "" {
+			logger.Warn("skipping empty response chunk", "chunk_index", i)
+			continue
+		}
+		resp := OutgoingResponse{ConversationID: convID, Text: chunk, ThreadRoot: threadRoot}
+		if i == 0 {
+			resp.ReplyTo = replyTo
+		}
+		if _, serr := b.transport.SendText(ctx, resp); serr != nil {
+			logger.Error("failed to send message", "error", serr, "chunk_index", i)
+			b.sendGenericError(ctx, convID, threadRoot, logger)
+			return sent
+		}
+		sent++
+	}
+	return sent
+}
+
+// sendGenericError sends the localized generic-error message, best-effort.
+func (b *Bot) sendGenericError(ctx context.Context, convID, threadRoot string, logger *slog.Logger) {
+	chunks, _ := b.renderer.Render(b.translator.Get(b.cfg.Bot.Language, "bot.generic_error"))
+	for _, chunk := range chunks {
+		if _, err := b.transport.SendText(ctx, OutgoingResponse{ConversationID: convID, Text: chunk, ThreadRoot: threadRoot}); err != nil {
+			logger.Error("failed to send generic error message", "error", err)
+			return
+		}
+	}
+}
+
 func (b *Bot) finalizeResponse(chatID int64, messageThreadID int, userID int64, replyToMsgID int, responseText string, logger *slog.Logger) ([]telegram.SendMessageRequest, error) {
 	// Split by explicit ###SPLIT### delimiter first (respects code blocks)
 	delimiterParts := splitByDelimiter(responseText)
@@ -963,7 +988,7 @@ func (b *Bot) finalizeResponse(chatID int64, messageThreadID int, userID int64, 
 //
 // When a message is forwarded from a user, we can capture their telegram_id and username
 // for the People graph (v0.5.1).
-func (b *Bot) extractForwardedPeople(ctx context.Context, userID int64, messages []*telegram.Message, logger *slog.Logger) {
+func (b *Bot) extractForwardedPeople(ctx context.Context, userID int64, messages []IncomingMessage, logger *slog.Logger) {
 	if b.peopleRepo == nil {
 		return
 	}
@@ -973,38 +998,37 @@ func (b *Bot) extractForwardedPeople(ctx context.Context, userID int64, messages
 	var createdNames, updatedNames []string
 
 	for _, msg := range messages {
-		if msg.ForwardOrigin == nil {
+		fwd := msg.Forward
+		// Only process messages forwarded from users (not channels/hidden).
+		if fwd == nil || !fwd.IsUser {
 			continue
 		}
-
-		// Only process messages forwarded from users (not channels/hidden)
-		if msg.ForwardOrigin.SenderUser == nil {
-			continue
-		}
-
-		sender := msg.ForwardOrigin.SenderUser
-		if sender.IsBot {
+		if fwd.IsBot {
 			continue // Skip bots
 		}
-		if sender.ID == userID {
+		senderID, err := strconv.ParseInt(fwd.SenderID, 10, 64)
+		if err != nil {
+			continue
+		}
+		if senderID == userID {
 			continue // Skip self (user forwarding their own messages)
 		}
 
 		// Build display name from first/last name
-		displayName := sender.FirstName
-		if sender.LastName != "" {
-			displayName = displayName + " " + sender.LastName
+		displayName := fwd.FirstName
+		if fwd.LastName != "" {
+			displayName = displayName + " " + fwd.LastName
 		}
 		if displayName == "" {
-			if sender.Username != "" {
-				displayName = sender.Username
+			if fwd.Username != "" {
+				displayName = fwd.Username
 			} else {
 				continue // No name to use
 			}
 		}
 
 		// Check if we already have this person by telegram_id
-		existingPerson, err := b.peopleRepo.FindPersonByTelegramID(userID, sender.ID)
+		existingPerson, err := b.peopleRepo.FindPersonByTelegramID(userID, senderID)
 		if err != nil {
 			errors++
 			continue
@@ -1014,8 +1038,8 @@ func (b *Bot) extractForwardedPeople(ctx context.Context, userID int64, messages
 			// Update last_seen and mention_count
 			existingPerson.LastSeen = time.Now()
 			existingPerson.MentionCount++
-			if sender.Username != "" && (existingPerson.Username == nil || *existingPerson.Username != sender.Username) {
-				existingPerson.Username = &sender.Username
+			if fwd.Username != "" && (existingPerson.Username == nil || *existingPerson.Username != fwd.Username) {
+				existingPerson.Username = &fwd.Username
 			}
 			if err := b.peopleRepo.UpdatePerson(*existingPerson); err != nil {
 				errors++
@@ -1036,8 +1060,8 @@ func (b *Bot) extractForwardedPeople(ctx context.Context, userID int64, messages
 		} else {
 			// Check if person exists by username or name
 			var foundPerson *storage.Person
-			if sender.Username != "" {
-				foundPerson, _ = b.peopleRepo.FindPersonByUsername(userID, sender.Username)
+			if fwd.Username != "" {
+				foundPerson, _ = b.peopleRepo.FindPersonByUsername(userID, fwd.Username)
 			}
 			if foundPerson == nil {
 				foundPerson, _ = b.peopleRepo.FindPersonByName(userID, displayName)
@@ -1045,11 +1069,11 @@ func (b *Bot) extractForwardedPeople(ctx context.Context, userID int64, messages
 
 			if foundPerson != nil {
 				// Update existing person with telegram_id
-				foundPerson.TelegramID = &sender.ID
+				foundPerson.TelegramID = &senderID
 				foundPerson.LastSeen = time.Now()
 				foundPerson.MentionCount++
-				if sender.Username != "" && (foundPerson.Username == nil || *foundPerson.Username != sender.Username) {
-					foundPerson.Username = &sender.Username
+				if fwd.Username != "" && (foundPerson.Username == nil || *foundPerson.Username != fwd.Username) {
+					foundPerson.Username = &fwd.Username
 				}
 				if err := b.peopleRepo.UpdatePerson(*foundPerson); err != nil {
 					errors++
@@ -1072,14 +1096,14 @@ func (b *Bot) extractForwardedPeople(ctx context.Context, userID int64, messages
 				newPerson := storage.Person{
 					UserID:       userID,
 					DisplayName:  displayName,
-					TelegramID:   &sender.ID,
+					TelegramID:   &senderID,
 					Circle:       "Other",
 					FirstSeen:    now,
 					LastSeen:     now,
 					MentionCount: 1,
 				}
-				if sender.Username != "" {
-					newPerson.Username = &sender.Username
+				if fwd.Username != "" {
+					newPerson.Username = &fwd.Username
 				}
 
 				if _, err := b.peopleRepo.AddPerson(newPerson); err != nil {

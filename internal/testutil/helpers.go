@@ -132,11 +132,7 @@ func MockEmbeddingResponse() *openrouter.EmbeddingResponse {
 				Index:     0,
 			},
 		},
-		Usage: struct {
-			PromptTokens int      `json:"prompt_tokens"`
-			TotalTokens  int      `json:"total_tokens"`
-			Cost         *float64 `json:"cost,omitempty"`
-		}{
+		Usage: openrouter.Usage{
 			PromptTokens: 10,
 			TotalTokens:  10,
 		},

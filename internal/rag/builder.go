@@ -48,6 +48,7 @@ type ServiceBuilder struct {
 	extractorAgent agent.Agent
 	peopleRepo     storage.PeopleRepository
 	artifactRepo   storage.ArtifactRepository
+	userRepo       storage.UserRepository
 	contextService *agent.ContextService
 
 	// Validation errors accumulated during building
@@ -205,6 +206,14 @@ func (b *ServiceBuilder) WithContextService(cs *agent.ContextService) *ServiceBu
 	return b
 }
 
+// WithUserRepository sets the optional user repository, used by background loops
+// to enumerate the actual memory tenants (transport-agnostic) rather than the
+// Telegram-only config allowlist.
+func (b *ServiceBuilder) WithUserRepository(r storage.UserRepository) *ServiceBuilder {
+	b.userRepo = r
+	return b
+}
+
 // Build validates all dependencies and creates the RAG Service.
 // Returns an error if any required dependency is missing.
 func (b *ServiceBuilder) Build() (*Service, error) {
@@ -256,6 +265,7 @@ func (b *ServiceBuilder) Build() (*Service, error) {
 		maintenanceRepo:      b.maintenanceRepo,
 		peopleRepo:           b.peopleRepo,
 		artifactRepo:         b.artifactRepo,
+		userRepo:             b.userRepo,
 		client:               b.client,
 		memoryService:        b.memoryService,
 		translator:           b.translator,

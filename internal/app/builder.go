@@ -141,6 +141,7 @@ func SetupServices(
 		// Optional repos
 		WithPeopleRepository(store).
 		WithArtifactRepository(store).
+		WithUserRepository(store).
 		// Optional services
 		WithAgentLogger(services.AgentLogger).
 		WithContextService(services.ContextService).

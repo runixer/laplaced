@@ -247,6 +247,18 @@ type ImageGeneratorConfig struct {
 	// recompresses photos to ~1280 px on long side). Default 2 MB covers
 	// 2K/4K outputs; set to 0 to always use sendPhoto.
 	DocumentThresholdBytes int `yaml:"document_threshold_bytes" env:"LAPLACED_IMAGE_GENERATOR_DOCUMENT_THRESHOLD_BYTES"`
+	// MaxConcurrent bounds how many generate_image tool calls from a single
+	// assistant turn run in parallel (e.g. "draw three pictures"). Other tools
+	// stay sequential. Defaults to 4.
+	MaxConcurrent int `yaml:"max_concurrent" env:"LAPLACED_IMAGE_GENERATOR_MAX_CONCURRENT"`
+}
+
+// GetMaxConcurrent returns the parallel-generation cap, defaulting to 4.
+func (c *ImageGeneratorConfig) GetMaxConcurrent() int {
+	if c.MaxConcurrent <= 0 {
+		return 4
+	}
+	return c.MaxConcurrent
 }
 
 // GetTimeout returns the per-call timeout. Defaults to 90s.
@@ -345,17 +357,31 @@ type ToolConfig struct {
 	ParameterDescription string `yaml:"parameter_description"`
 }
 
+// MattermostConfig configures the Mattermost/Time transport (used when
+// transport == "time"). The proxy is per-client (corp proxy); never set a
+// process-wide HTTP_PROXY, which would also route the litellm/openrouter client.
+type MattermostConfig struct {
+	ServerURL      string   `yaml:"server_url" env:"LAPLACED_MATTERMOST_SERVER_URL"`
+	BotToken       string   `yaml:"bot_token" env:"LAPLACED_MATTERMOST_BOT_TOKEN"`
+	ProxyURL       string   `yaml:"proxy_url" env:"LAPLACED_MATTERMOST_PROXY_URL"`
+	AllowedUserIDs []string `yaml:"allowed_user_ids" env:"LAPLACED_MATTERMOST_ALLOWED_USER_IDS" env-separator:","`
+}
+
 type OpenRouterConfig struct {
 	APIKey string `yaml:"api_key" env:"LAPLACED_OPENROUTER_API_KEY"`
 	// BaseURL is the OpenAI-compatible endpoint the LLM client talks to.
 	// Defaults to the public OpenRouter API; override to point at a self-hosted
 	// OpenAI-compatible backend (litellm, vLLM, …).
-	BaseURL         string                `yaml:"base_url" env:"LAPLACED_OPENROUTER_BASE_URL"`
-	ProxyURL        string                `yaml:"proxy_url" env:"LAPLACED_OPENROUTER_PROXY_URL"`
-	PDFParserEngine string                `yaml:"pdf_parser_engine"`
-	RequestCost     float64               `yaml:"request_cost"`
-	PriceTiers      []PriceTier           `yaml:"price_tiers"`
-	Provider        ProviderRoutingConfig `yaml:"provider"`
+	BaseURL string `yaml:"base_url" env:"LAPLACED_OPENROUTER_BASE_URL"`
+	// ImageInputFormat selects how images/videos are encoded as LLM content
+	// parts: "file" (default, OpenRouter/Gemini) or "openai" (image_url/video_url,
+	// required by OpenAI-compatible backends like litellm/vLLM which reject "file").
+	ImageInputFormat string                `yaml:"image_input_format" env:"LAPLACED_OPENROUTER_IMAGE_INPUT_FORMAT"`
+	ProxyURL         string                `yaml:"proxy_url" env:"LAPLACED_OPENROUTER_PROXY_URL"`
+	PDFParserEngine  string                `yaml:"pdf_parser_engine"`
+	RequestCost      float64               `yaml:"request_cost"`
+	PriceTiers       []PriceTier           `yaml:"price_tiers"`
+	Provider         ProviderRoutingConfig `yaml:"provider"`
 }
 
 // ProviderRoutingConfig configures OpenRouter provider preference.
@@ -558,13 +584,16 @@ type Config struct {
 			Password string `yaml:"password" env:"LAPLACED_AUTH_PASSWORD"`
 		} `yaml:"auth"`
 	} `yaml:"server"`
-	Telegram struct {
+	// Transport selects the chat backend: "telegram" (default) | "time" (Mattermost).
+	Transport string `yaml:"transport" env:"LAPLACED_TRANSPORT"`
+	Telegram  struct {
 		Token         string `yaml:"token" env:"LAPLACED_TELEGRAM_TOKEN"`
 		WebhookURL    string `yaml:"webhook_url" env:"LAPLACED_TELEGRAM_WEBHOOK_URL"`
 		WebhookPath   string // Auto-generated from token hash (not configurable)
 		WebhookSecret string // Auto-generated from token hash (not configurable)
 		ProxyURL      string `yaml:"proxy_url" env:"LAPLACED_TELEGRAM_PROXY_URL"`
 	} `yaml:"telegram"`
+	Mattermost MattermostConfig `yaml:"mattermost"`
 	OpenRouter OpenRouterConfig `yaml:"openrouter"`
 	Agents     AgentsConfig     `yaml:"agents"`
 	Embedding  EmbeddingConfig  `yaml:"embedding"`
@@ -642,8 +671,15 @@ func DefaultConfigBytes() []byte {
 func (c *Config) Validate() error {
 	var errs []error
 
-	// Required fields
-	if c.Telegram.Token == "" {
+	// Required fields — transport-specific.
+	if c.Transport == "time" {
+		if c.Mattermost.ServerURL == "" {
+			errs = append(errs, errors.New("mattermost.server_url is required when transport is \"time\""))
+		}
+		if c.Mattermost.BotToken == "" {
+			errs = append(errs, errors.New("mattermost.bot_token is required when transport is \"time\""))
+		}
+	} else if c.Telegram.Token == "" {
 		errs = append(errs, errors.New("telegram.token is required"))
 	}
 	if c.OpenRouter.APIKey == "" {

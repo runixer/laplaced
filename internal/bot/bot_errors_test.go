@@ -87,10 +87,7 @@ func setupBotForErrorTests(t *testing.T) (*Bot, *testutil.MockStorage, *testutil
 func TestProcessMessageGroup_EmptyMessageGroup_ReturnsEarly(t *testing.T) {
 	bot, _, _, _ := setupBotForErrorTests(t)
 
-	group := &MessageGroup{
-		Messages: []*telegram.Message{},
-		UserID:   123,
-	}
+	group := tgGroup(bot, 123)
 
 	// Should not panic or call any repos
 	assert.NotPanics(t, func() {
@@ -105,23 +102,18 @@ func TestProcessMessageGroup_UnsupportedFileType_SendsErrorMessage(t *testing.T)
 	userID := int64(123)
 	chatID := int64(456)
 
-	group := &MessageGroup{
-		Messages: []*telegram.Message{
-			{
-				MessageID: 1,
-				From:      &telegram.User{ID: userID, FirstName: "Test"},
-				Chat:      &telegram.Chat{ID: chatID},
-				Date:      int(time.Now().Unix()),
-				Document: &telegram.Document{
-					FileID:   "doc123",
-					FileName: "document.docx",
-					MimeType: "application/vnd.openxmlformats",
-					FileSize: 1000,
-				},
-			},
+	group := tgGroup(bot, userID, &telegram.Message{
+		MessageID: 1,
+		From:      &telegram.User{ID: userID, FirstName: "Test"},
+		Chat:      &telegram.Chat{ID: chatID},
+		Date:      int(time.Now().Unix()),
+		Document: &telegram.Document{
+			FileID:   "doc123",
+			FileName: "document.docx",
+			MimeType: "application/vnd.openxmlformats",
+			FileSize: 1000,
 		},
-		UserID: userID,
-	}
+	})
 
 	mockStore.On("GetRecentSessionMessages", userID, mock.Anything, mock.Anything).Return([]storage.Message{}, nil).Maybe()
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -143,23 +135,18 @@ func TestProcessMessageGroup_FileTooLarge_SendsErrorMessage(t *testing.T) {
 	userID := int64(123)
 	chatID := int64(456)
 
-	group := &MessageGroup{
-		Messages: []*telegram.Message{
-			{
-				MessageID: 1,
-				From:      &telegram.User{ID: userID, FirstName: "Test"},
-				Chat:      &telegram.Chat{ID: chatID},
-				Date:      int(time.Now().Unix()),
-				Document: &telegram.Document{
-					FileID:   "doc123",
-					FileName: "large.pdf",
-					MimeType: "application/pdf",
-					FileSize: 25 * 1024 * 1024, // 25MB > 20MB limit
-				},
-			},
+	group := tgGroup(bot, userID, &telegram.Message{
+		MessageID: 1,
+		From:      &telegram.User{ID: userID, FirstName: "Test"},
+		Chat:      &telegram.Chat{ID: chatID},
+		Date:      int(time.Now().Unix()),
+		Document: &telegram.Document{
+			FileID:   "doc123",
+			FileName: "large.pdf",
+			MimeType: "application/pdf",
+			FileSize: 25 * 1024 * 1024, // 25MB > 20MB limit
 		},
-		UserID: userID,
-	}
+	})
 
 	mockStore.On("GetRecentSessionMessages", userID, mock.Anything, mock.Anything).Return([]storage.Message{}, nil).Maybe()
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -181,18 +168,13 @@ func TestProcessMessageGroup_AddMessageToHistoryError_ReturnsEarly(t *testing.T)
 	userID := int64(123)
 	chatID := int64(456)
 
-	group := &MessageGroup{
-		Messages: []*telegram.Message{
-			{
-				MessageID: 1,
-				From:      &telegram.User{ID: userID, FirstName: "Test"},
-				Chat:      &telegram.Chat{ID: chatID},
-				Text:      "Hello",
-				Date:      int(time.Now().Unix()),
-			},
-		},
-		UserID: userID,
-	}
+	group := tgGroup(bot, userID, &telegram.Message{
+		MessageID: 1,
+		From:      &telegram.User{ID: userID, FirstName: "Test"},
+		Chat:      &telegram.Chat{ID: chatID},
+		Text:      "Hello",
+		Date:      int(time.Now().Unix()),
+	})
 
 	mockStore.On("GetRecentSessionMessages", userID, mock.Anything, mock.Anything).Return([]storage.Message{}, nil).Maybe()
 	mockStore.On("AddMessageToHistory", userID, mock.Anything).Return(assert.AnError)
@@ -219,18 +201,13 @@ func TestProcessMessageGroup_LaplaceAgentNil_SendsGenericError(t *testing.T) {
 	userID := int64(123)
 	chatID := int64(456)
 
-	group := &MessageGroup{
-		Messages: []*telegram.Message{
-			{
-				MessageID: 1,
-				From:      &telegram.User{ID: userID, FirstName: "Test"},
-				Chat:      &telegram.Chat{ID: chatID},
-				Text:      "Hello",
-				Date:      int(time.Now().Unix()),
-			},
-		},
-		UserID: userID,
-	}
+	group := tgGroup(bot, userID, &telegram.Message{
+		MessageID: 1,
+		From:      &telegram.User{ID: userID, FirstName: "Test"},
+		Chat:      &telegram.Chat{ID: chatID},
+		Text:      "Hello",
+		Date:      int(time.Now().Unix()),
+	})
 
 	mockStore.On("GetRecentSessionMessages", userID, mock.Anything, mock.Anything).Return([]storage.Message{}, nil).Maybe()
 	mockStore.On("AddMessageToHistory", userID, mock.MatchedBy(func(m storage.Message) bool {
@@ -253,18 +230,13 @@ func TestProcessMessageGroup_LLMExecutionError_SendsErrorMessage(t *testing.T) {
 	userID := int64(123)
 	chatID := int64(456)
 
-	group := &MessageGroup{
-		Messages: []*telegram.Message{
-			{
-				MessageID: 1,
-				From:      &telegram.User{ID: userID, FirstName: "Test"},
-				Chat:      &telegram.Chat{ID: chatID},
-				Text:      "Hello",
-				Date:      int(time.Now().Unix()),
-			},
-		},
-		UserID: userID,
-	}
+	group := tgGroup(bot, userID, &telegram.Message{
+		MessageID: 1,
+		From:      &telegram.User{ID: userID, FirstName: "Test"},
+		Chat:      &telegram.Chat{ID: chatID},
+		Text:      "Hello",
+		Date:      int(time.Now().Unix()),
+	})
 
 	mockStore.On("GetRecentSessionMessages", userID, mock.Anything, mock.Anything).Return([]storage.Message{}, nil).Maybe()
 	mockStore.On("AddMessageToHistory", userID, mock.MatchedBy(func(m storage.Message) bool {
@@ -294,18 +266,13 @@ func TestProcessMessageGroup_AddStatFailure_Continues(t *testing.T) {
 	userID := int64(123)
 	chatID := int64(456)
 
-	group := &MessageGroup{
-		Messages: []*telegram.Message{
-			{
-				MessageID: 1,
-				From:      &telegram.User{ID: userID, FirstName: "Test"},
-				Chat:      &telegram.Chat{ID: chatID},
-				Text:      "Hello",
-				Date:      int(time.Now().Unix()),
-			},
-		},
-		UserID: userID,
-	}
+	group := tgGroup(bot, userID, &telegram.Message{
+		MessageID: 1,
+		From:      &telegram.User{ID: userID, FirstName: "Test"},
+		Chat:      &telegram.Chat{ID: chatID},
+		Text:      "Hello",
+		Date:      int(time.Now().Unix()),
+	})
 
 	mockStore.On("GetRecentSessionMessages", userID, mock.Anything, mock.Anything).Return([]storage.Message{}, nil).Maybe()
 	mockStore.On("AddMessageToHistory", userID, mock.MatchedBy(func(m storage.Message) bool {
@@ -341,18 +308,13 @@ func TestProcessMessageGroup_ContextCancellation_CompletesProcessing(t *testing.
 	userID := int64(123)
 	chatID := int64(456)
 
-	group := &MessageGroup{
-		Messages: []*telegram.Message{
-			{
-				MessageID: 1,
-				From:      &telegram.User{ID: userID, FirstName: "Test"},
-				Chat:      &telegram.Chat{ID: chatID},
-				Text:      "Hello",
-				Date:      int(time.Now().Unix()),
-			},
-		},
-		UserID: userID,
-	}
+	group := tgGroup(bot, userID, &telegram.Message{
+		MessageID: 1,
+		From:      &telegram.User{ID: userID, FirstName: "Test"},
+		Chat:      &telegram.Chat{ID: chatID},
+		Text:      "Hello",
+		Date:      int(time.Now().Unix()),
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately

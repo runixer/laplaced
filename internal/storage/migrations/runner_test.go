@@ -183,6 +183,111 @@ func TestMigration009_EmbeddingVersion(t *testing.T) {
 	}
 }
 
+func TestMigration010_Scopes(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	runner := NewRunner(db, testLogger())
+	if err := runner.Run(); err != nil {
+		t.Fatalf("Run() failed: %v", err)
+	}
+
+	for _, col := range []string{"transport", "scope_type", "native_id", "internal_id"} {
+		var count int
+		if err := db.QueryRow(
+			"SELECT COUNT(*) FROM pragma_table_info('scopes') WHERE name=?", col,
+		).Scan(&count); err != nil {
+			t.Fatalf("pragma_table_info(scopes): %v", err)
+		}
+		if count != 1 {
+			t.Errorf("scopes: expected column %s, got %d", col, count)
+		}
+	}
+
+	// UNIQUE(transport, native_id) must reject duplicates.
+	if _, err := db.Exec("INSERT INTO scopes (transport, scope_type, native_id, internal_id) VALUES ('time','user','abc',1)"); err != nil {
+		t.Fatalf("first insert: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO scopes (transport, scope_type, native_id, internal_id) VALUES ('time','user','abc',2)"); err == nil {
+		t.Error("expected UNIQUE(transport, native_id) violation, got nil")
+	}
+}
+
+func TestMigration011_PersonExternalID(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	runner := NewRunner(db, testLogger())
+	if err := runner.Run(); err != nil {
+		t.Fatalf("Run() failed: %v", err)
+	}
+
+	for _, col := range []string{"external_transport", "external_id"} {
+		var count int
+		if err := db.QueryRow(
+			"SELECT COUNT(*) FROM pragma_table_info('people') WHERE name=?", col,
+		).Scan(&count); err != nil {
+			t.Fatalf("pragma_table_info(people): %v", err)
+		}
+		if count != 1 {
+			t.Errorf("people: expected column %s, got %d", col, count)
+		}
+	}
+
+	// Backfill: an existing telegram person gets ('telegram', telegram_id).
+	if _, err := db.Exec("INSERT INTO people (user_id, display_name, telegram_id) VALUES (1, 'John', 42)"); err != nil {
+		t.Fatalf("insert person: %v", err)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migratePersonExternalID(tx); err != nil { // idempotent replay also backfills
+		t.Fatalf("replay migratePersonExternalID: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	var tr, eid string
+	if err := db.QueryRow("SELECT external_transport, external_id FROM people WHERE telegram_id=42").Scan(&tr, &eid); err != nil {
+		t.Fatalf("query backfill: %v", err)
+	}
+	if tr != "telegram" || eid != "42" {
+		t.Errorf("backfill mismatch: got (%q,%q), want (telegram,42)", tr, eid)
+	}
+}
+
+func TestMigration012_HistoryAttribution(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	runner := NewRunner(db, testLogger())
+	if err := runner.Run(); err != nil {
+		t.Fatalf("Run() failed: %v", err)
+	}
+
+	for _, col := range []string{"author", "message_id", "conversation_id"} {
+		var count int
+		if err := db.QueryRow(
+			"SELECT COUNT(*) FROM pragma_table_info('history') WHERE name=?", col,
+		).Scan(&count); err != nil {
+			t.Fatalf("pragma_table_info(history): %v", err)
+		}
+		if count != 1 {
+			t.Errorf("history: expected column %s, got %d", col, count)
+		}
+	}
+}
+
 // TestMigration004_Backfill tests the backfill logic in size_tracking migration.
 // This is the only migration with non-trivial business logic (calculating size from messages).
 func TestMigration004_Backfill(t *testing.T) {

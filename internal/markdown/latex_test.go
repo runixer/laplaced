@@ -404,6 +404,33 @@ func TestRemoveTextWrappers(t *testing.T) {
 	}
 }
 
+func TestRemoveBoxed(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"simple boxed", `\boxed{x = 3}`, "x = 3"},
+		{"fbox", `\fbox{answer}`, "answer"},
+		{"boxed with nested braces", `\boxed{\frac{a}{b}}`, `\frac{a}{b}`},
+		{"text around boxed", `Ответ: \boxed{x_1 = 3, x_2 = 2}`, "Ответ: x_1 = 3, x_2 = 2"},
+		{"no boxed", `plain text`, "plain text"},
+		{"unterminated boxed left intact", `\boxed{oops`, `\boxed{oops`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, removeBoxed(tt.input))
+		})
+	}
+}
+
+// TestConvertLatex_BoxedAnswer is the end-to-end case from the screenshot:
+// \boxed{x_1 = 3, x_2 = 2} inside math must become unicode subscripts, no \boxed.
+func TestConvertLatex_BoxedAnswer(t *testing.T) {
+	got := convertLatexToUnicode(`Ответ: $\boxed{x_1 = 3, x_2 = 2}$`)
+	assert.Equal(t, "Ответ: x₁ = 3, x₂ = 2", got)
+}
+
 func TestConvertFractions(t *testing.T) {
 	tests := []struct {
 		name     string

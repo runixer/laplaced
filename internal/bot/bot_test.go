@@ -126,17 +126,12 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 		Choices: []openrouter.ResponseChoice{
 			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{TotalTokens: 10},
+		Usage: openrouter.Usage{TotalTokens: 10},
 	}, nil)
 
 	// Execute
 	group := &MessageGroup{
-		Messages: messages,
+		Messages: tgIncomings(bot, messages...),
 		UserID:   userID,
 	}
 	bot.processMessageGroup(context.Background(), group)
@@ -260,17 +255,12 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 		Choices: []openrouter.ResponseChoice{
 			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{TotalTokens: 10},
+		Usage: openrouter.Usage{TotalTokens: 10},
 	}, nil)
 
 	// Execute
 	group := &MessageGroup{
-		Messages: messages,
+		Messages: tgIncomings(bot, messages...),
 		UserID:   userID,
 	}
 	bot.processMessageGroup(context.Background(), group)
@@ -399,17 +389,12 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 		Choices: []openrouter.ResponseChoice{
 			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{TotalTokens: 10},
+		Usage: openrouter.Usage{TotalTokens: 10},
 	}, nil)
 
 	// Execute
 	group := &MessageGroup{
-		Messages: messages,
+		Messages: tgIncomings(bot, messages...),
 		UserID:   userID,
 	}
 	bot.processMessageGroup(context.Background(), group)
@@ -539,17 +524,12 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 		Choices: []openrouter.ResponseChoice{
 			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{TotalTokens: 10},
+		Usage: openrouter.Usage{TotalTokens: 10},
 	}, nil)
 
 	// Execute
 	group := &MessageGroup{
-		Messages: messages,
+		Messages: tgIncomings(bot, messages...),
 		UserID:   userID,
 	}
 	bot.processMessageGroup(context.Background(), group)
@@ -691,17 +671,12 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 		Choices: []openrouter.ResponseChoice{
 			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{TotalTokens: 10},
+		Usage: openrouter.Usage{TotalTokens: 10},
 	}, nil)
 
 	// Execute
 	group := &MessageGroup{
-		Messages: messages,
+		Messages: tgIncomings(bot, messages...),
 		UserID:   userID,
 	}
 	bot.processMessageGroup(context.Background(), group)
@@ -823,17 +798,12 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 		Choices: []openrouter.ResponseChoice{
 			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{TotalTokens: 10},
+		Usage: openrouter.Usage{TotalTokens: 10},
 	}, nil)
 
 	// Execute - voice messages now go through processMessageGroup
 	group := &MessageGroup{
-		Messages: []*telegram.Message{msg},
+		Messages: tgIncomings(bot, msg),
 		UserID:   userID,
 	}
 	bot.processMessageGroup(context.Background(), group)
@@ -1088,7 +1058,9 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 	// --- Mocking ---
 	// 1. When we process the new message, it will be added to history
 	newMessageContent := newMessage.BuildContent(translator, "en")
-	mockStore.On("AddMessageToHistory", userID, storage.Message{Role: "user", Content: newMessageContent}).Return(nil)
+	mockStore.On("AddMessageToHistory", userID, mock.MatchedBy(func(m storage.Message) bool {
+		return m.Role == "user" && m.Content == newMessageContent
+	})).Return(nil)
 
 	// 2. Then, the bot will fetch the full history
 	fullHistory := append(history, storage.Message{Role: "user", Content: newMessageContent})
@@ -1114,17 +1086,12 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 		Choices: []openrouter.ResponseChoice{
 			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "You said hello."}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{TotalTokens: 100},
+		Usage: openrouter.Usage{TotalTokens: 100},
 	}, nil)
 
 	// --- Execution ---
 	group := &MessageGroup{
-		Messages: []*telegram.Message{newMessage},
+		Messages: tgIncomings(bot, newMessage),
 		UserID:   userID,
 	}
 	bot.processMessageGroup(context.Background(), group)
@@ -1383,12 +1350,7 @@ func TestSendTestMessage_Success(t *testing.T) {
 		Choices: []openrouter.ResponseChoice{
 			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Hello! How can I help you?"}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{
+		Usage: openrouter.Usage{
 			PromptTokens:     100,
 			CompletionTokens: 20,
 		},
@@ -1464,12 +1426,7 @@ func TestSendTestMessage_SaveToHistoryFalse(t *testing.T) {
 		Choices: []openrouter.ResponseChoice{
 			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Response without history"}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{
+		Usage: openrouter.Usage{
 			PromptTokens:     50,
 			CompletionTokens: 10,
 		},
@@ -1649,23 +1606,18 @@ func TestPrepareUserMessage_UnsupportedFormat(t *testing.T) {
 	chatID := int64(456)
 
 	// Create message group with unsupported file format (.docx)
-	group := &MessageGroup{
-		UserID: userID,
-		Messages: []*telegram.Message{
-			{
-				MessageID: 1,
-				From:      &telegram.User{ID: userID, FirstName: "Test", LastName: "User"},
-				Chat:      &telegram.Chat{ID: chatID},
-				Date:      int(time.Now().Unix()),
-				Document: &telegram.Document{
-					FileID:   "doc-123",
-					FileName: "document.docx",
-					MimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-					FileSize: 1000,
-				},
-			},
+	group := tgGroup(bot, userID, &telegram.Message{
+		MessageID: 1,
+		From:      &telegram.User{ID: userID, FirstName: "Test", LastName: "User"},
+		Chat:      &telegram.Chat{ID: chatID},
+		Date:      int(time.Now().Unix()),
+		Document: &telegram.Document{
+			FileID:   "doc-123",
+			FileName: "document.docx",
+			MimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+			FileSize: 1000,
 		},
-	}
+	})
 
 	// Mock storage calls
 	mockStore.On("GetRecentSessionMessages", userID, mock.Anything, mock.Anything).Return([]storage.Message{}, nil)
@@ -1711,23 +1663,18 @@ func TestPrepareUserMessage_FileTooLarge(t *testing.T) {
 	chatID := int64(456)
 
 	// Create message group with oversized file (25MB > 20MB limit)
-	group := &MessageGroup{
-		UserID: userID,
-		Messages: []*telegram.Message{
-			{
-				MessageID: 1,
-				From:      &telegram.User{ID: userID, FirstName: "Test", LastName: "User"},
-				Chat:      &telegram.Chat{ID: chatID},
-				Date:      int(time.Now().Unix()),
-				Document: &telegram.Document{
-					FileID:   "doc-large",
-					FileName: "large.pdf",
-					MimeType: "application/pdf",
-					FileSize: 25 * 1024 * 1024, // 25 MB
-				},
-			},
+	group := tgGroup(bot, userID, &telegram.Message{
+		MessageID: 1,
+		From:      &telegram.User{ID: userID, FirstName: "Test", LastName: "User"},
+		Chat:      &telegram.Chat{ID: chatID},
+		Date:      int(time.Now().Unix()),
+		Document: &telegram.Document{
+			FileID:   "doc-large",
+			FileName: "large.pdf",
+			MimeType: "application/pdf",
+			FileSize: 25 * 1024 * 1024, // 25 MB
 		},
-	}
+	})
 
 	// Mock storage calls
 	mockStore.On("GetRecentSessionMessages", userID, mock.Anything, mock.Anything).Return([]storage.Message{}, nil)

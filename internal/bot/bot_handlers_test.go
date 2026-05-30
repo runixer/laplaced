@@ -376,119 +376,6 @@ func TestIntPtrOrNil_ReturnsPointerForNonZero(t *testing.T) {
 	assert.Equal(t, 42, *result)
 }
 
-// TestSendAction_Success verifies action is sent to Telegram API.
-func TestSendAction_Success(t *testing.T) {
-	bot, _, mockAPI := setupBotForHandlerTests(t)
-
-	chatID := int64(123)
-	threadID := 456
-	action := "typing"
-
-	mockAPI.On("SendChatAction", mock.Anything, mock.MatchedBy(func(req telegram.SendChatActionRequest) bool {
-		return req.ChatID == chatID && req.Action == action
-	})).Return(nil)
-
-	bot.sendAction(context.Background(), chatID, threadID, action)
-
-	mockAPI.AssertExpectations(t)
-}
-
-// TestSendAction_APIError_LogsWarning verifies API errors are logged but don't panic.
-func TestSendAction_APIError_LogsWarning(t *testing.T) {
-	bot, _, mockAPI := setupBotForHandlerTests(t)
-
-	chatID := int64(123)
-	action := "typing"
-
-	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).
-		Return(errors.New("telegram API error"))
-
-	// Should not panic
-	assert.NotPanics(t, func() {
-		bot.sendAction(context.Background(), chatID, 0, action)
-	})
-
-	mockAPI.AssertExpectations(t)
-}
-
-// TestSendAction_WithContextCancellation_StopsGracefully verifies cancelled context stops request.
-func TestSendAction_WithContextCancellation_StopsGracefully(t *testing.T) {
-	bot, _, mockAPI := setupBotForHandlerTests(t)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
-
-	// May still try to send, mock the call
-	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil).Maybe()
-
-	// Should not block or panic
-	assert.NotPanics(t, func() {
-		bot.sendAction(ctx, 123, 0, "typing")
-	})
-}
-
-// TestSendAction_AllActionTypes verifies all action types are sent correctly.
-func TestSendAction_AllActionTypes(t *testing.T) {
-	actions := []string{
-		"typing",
-		"upload_photo",
-		"record_video",
-		"upload_video",
-		"record_voice",
-		"upload_voice",
-		"record_video_note",
-		"upload_video_note",
-		"choose_sticker",
-		"find_location",
-	}
-
-	for _, action := range actions {
-		t.Run(action, func(t *testing.T) {
-			bot, _, mockAPI := setupBotForHandlerTests(t)
-
-			mockAPI.On("SendChatAction", mock.Anything, mock.MatchedBy(func(req telegram.SendChatActionRequest) bool {
-				return req.Action == action
-			})).Return(nil)
-
-			bot.sendAction(context.Background(), 123, 0, action)
-
-			mockAPI.AssertExpectations(t)
-		})
-	}
-}
-
-// TestSendAction_ZeroMessageThreadID_SendsNil verifies zero thread ID becomes nil.
-func TestSendAction_ZeroMessageThreadID_SendsNil(t *testing.T) {
-	bot, _, mockAPI := setupBotForHandlerTests(t)
-
-	chatID := int64(123)
-
-	mockAPI.On("SendChatAction", mock.Anything, mock.MatchedBy(func(req telegram.SendChatActionRequest) bool {
-		// MessageThreadID should be nil for zero value
-		return req.ChatID == chatID && req.MessageThreadID == nil
-	})).Return(nil)
-
-	bot.sendAction(context.Background(), chatID, 0, "typing")
-
-	mockAPI.AssertExpectations(t)
-}
-
-// TestSendAction_NonZeroMessageThreadID_SendsValue verifies non-zero thread ID is sent.
-func TestSendAction_NonZeroMessageThreadID_SendsValue(t *testing.T) {
-	bot, _, mockAPI := setupBotForHandlerTests(t)
-
-	chatID := int64(123)
-	threadID := 456
-
-	mockAPI.On("SendChatAction", mock.Anything, mock.MatchedBy(func(req telegram.SendChatActionRequest) bool {
-		return req.ChatID == chatID && req.MessageThreadID != nil && *req.MessageThreadID == threadID
-	})).Return(nil)
-
-	bot.sendAction(context.Background(), chatID, threadID, "typing")
-
-	mockAPI.AssertExpectations(t)
-}
-
 // TestSendTypingActionLoop_Cancellation_StopsLoop verifies typing loop stops on cancellation.
 func TestSendTypingActionLoop_Cancellation_StopsLoop(t *testing.T) {
 	bot, _, mockAPI := setupBotForHandlerTests(t)
@@ -499,7 +386,7 @@ func TestSendTypingActionLoop_Cancellation_StopsLoop(t *testing.T) {
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	// Start loop in background
-	go bot.sendTypingActionLoop(ctx, 123, 0)
+	go bot.sendTypingActionLoop(ctx, "123")
 
 	// Let it send at least once
 	time.Sleep(100 * time.Millisecond)
@@ -524,7 +411,7 @@ func TestSendTypingActionLoop_SendsPeriodicActions(t *testing.T) {
 		Run(func(mock.Arguments) { actionCount.Add(1) })
 
 	// Start loop
-	go bot.sendTypingActionLoop(ctx, 123, 0)
+	go bot.sendTypingActionLoop(ctx, "123")
 
 	// Wait for multiple actions (initial + at least one periodic)
 	// Initial action is sent immediately, then ticker every 4 seconds

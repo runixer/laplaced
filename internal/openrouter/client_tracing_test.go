@@ -53,12 +53,7 @@ func TestCreateChatCompletion_RecordsSpan(t *testing.T) {
 			Choices: []ResponseChoice{
 				{Message: ResponseMessage{Role: "assistant", Content: "ok"}, FinishReason: "stop"},
 			},
-			Usage: struct {
-				PromptTokens     int      `json:"prompt_tokens"`
-				CompletionTokens int      `json:"completion_tokens"`
-				TotalTokens      int      `json:"total_tokens"`
-				Cost             *float64 `json:"cost,omitempty"`
-			}{PromptTokens: 100, CompletionTokens: 10, TotalTokens: 110},
+			Usage: Usage{PromptTokens: 100, CompletionTokens: 10, TotalTokens: 110},
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
@@ -311,11 +306,7 @@ func TestCreateEmbeddings_RecordsSpan(t *testing.T) {
 		resp := EmbeddingResponse{
 			Object: "list",
 			Data:   []EmbeddingObject{{Embedding: []float32{0.1, 0.2, 0.3}}},
-			Usage: struct {
-				PromptTokens int      `json:"prompt_tokens"`
-				TotalTokens  int      `json:"total_tokens"`
-				Cost         *float64 `json:"cost,omitempty"`
-			}{PromptTokens: 7},
+			Usage:  Usage{PromptTokens: 7},
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)

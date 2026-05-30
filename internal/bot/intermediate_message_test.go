@@ -134,12 +134,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 				},
 			}, FinishReason: "tool_calls"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+		Usage: openrouter.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 	}, nil).Once()
 
 	// Mock the tool execution
@@ -153,12 +148,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 				Content: "Tool result data",
 			}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{PromptTokens: 5, CompletionTokens: 10, TotalTokens: 15},
+		Usage: openrouter.Usage{PromptTokens: 5, CompletionTokens: 10, TotalTokens: 15},
 	}, nil).Once()
 
 	// Second call: Model returns final response after tool execution
@@ -173,17 +163,12 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 				Content: finalText,
 			}, FinishReason: "stop"},
 		},
-		Usage: struct {
-			PromptTokens     int      `json:"prompt_tokens"`
-			CompletionTokens int      `json:"completion_tokens"`
-			TotalTokens      int      `json:"total_tokens"`
-			Cost             *float64 `json:"cost,omitempty"`
-		}{PromptTokens: 20, CompletionTokens: 10, TotalTokens: 30},
+		Usage: openrouter.Usage{PromptTokens: 20, CompletionTokens: 10, TotalTokens: 30},
 	}, nil).Once()
 
 	// Execute
 	group := &MessageGroup{
-		Messages: messages,
+		Messages: tgIncomings(bot, messages...),
 		UserID:   userID,
 	}
 	bot.processMessageGroup(context.Background(), group)
