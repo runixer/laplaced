@@ -90,6 +90,7 @@ func SetupServices(
 	// Create context service for shared user context across agents
 	services.ContextService = agent.NewContextService(store, store, cfg, logger)
 	services.ContextService.SetPeopleRepository(store)
+	services.ContextService.SetScopeRepository(store)
 
 	// Create agent executor for LLM calls
 	services.AgentExecutor = agent.NewExecutor(client, services.AgentLogger, logger)

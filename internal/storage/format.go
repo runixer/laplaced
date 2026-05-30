@@ -10,17 +10,30 @@ import (
 // Format: - [Fact:X] [Category/Type] (Updated: date) Content
 // Use this for agents that need Fact IDs (e.g., Archivist for update/delete).
 func FormatUserProfile(facts []Fact) string {
+	return formatProfileWithIDs(facts, "user_profile")
+}
+
+// FormatChannelProfile is the channel-scope counterpart of FormatUserProfile:
+// the same fact rendering wrapped in <channel_profile> tags (Phase 6). For a
+// channel scope these facts describe the channel itself (shared context,
+// decisions, state) rather than a single person.
+func FormatChannelProfile(facts []Fact) string {
+	return formatProfileWithIDs(facts, "channel_profile")
+}
+
+// formatProfileWithIDs renders facts (with Fact IDs) wrapped in the given tag.
+func formatProfileWithIDs(facts []Fact, tag string) string {
 	if len(facts) == 0 {
-		return "<user_profile>\n</user_profile>"
+		return fmt.Sprintf("<%s>\n</%s>", tag, tag)
 	}
 
 	var sb strings.Builder
-	sb.WriteString("<user_profile>\n")
+	fmt.Fprintf(&sb, "<%s>\n", tag)
 	for _, f := range facts {
 		fmt.Fprintf(&sb, "- [Fact:%d] [%s/%s] (Updated: %s) %s\n",
 			f.ID, f.Category, f.Type, f.LastUpdated.Format("2006-01-02"), f.Content)
 	}
-	sb.WriteString("</user_profile>")
+	fmt.Fprintf(&sb, "</%s>", tag)
 	return sb.String()
 }
 
@@ -79,9 +92,10 @@ func FilterProfileFacts(facts []Fact) []Fact {
 
 // XML tag constants for people formatting.
 const (
-	TagInnerCircle    = "inner_circle"    // Work_Inner + Family, system prompt
-	TagRelevantPeople = "relevant_people" // Reranker selected, user prompt
-	TagPeople         = "people"          // All people, for Archivist
+	TagInnerCircle         = "inner_circle"         // Work_Inner + Family, system prompt
+	TagRelevantPeople      = "relevant_people"      // Reranker selected, user prompt
+	TagPeople              = "people"               // All people, for Archivist
+	TagChannelParticipants = "channel_participants" // Active channel members (Phase 6)
 )
 
 // FormatPeople formats people list with specified XML tag.
