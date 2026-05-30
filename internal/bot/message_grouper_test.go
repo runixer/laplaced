@@ -38,6 +38,43 @@ func setupMessageGrouper(t *testing.T, turnWait time.Duration) (*MessageGrouper,
 	return grouper, getGroup
 }
 
+func TestMessageGrouper_ChannelPerSenderKey(t *testing.T) {
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	var mu sync.Mutex
+	var groups []*MessageGroup
+	grouper := NewMessageGrouper(nil, logger, 30*time.Millisecond, func(_ context.Context, g *MessageGroup) {
+		mu.Lock()
+		groups = append(groups, g)
+		mu.Unlock()
+	})
+
+	const chanScope = int64(555)
+	ch := func(sender, msgID string) IncomingMessage {
+		return IncomingMessage{IsDirect: false, SenderID: sender, ConversationID: "chan", MessageID: msgID, SentAt: time.Now()}
+	}
+
+	// Two different senders posting in the SAME channel scope within turnWait must
+	// NOT be merged — each gets its own group (separate reply).
+	grouper.AddMessage(chanScope, ch("alice", "a1"))
+	grouper.AddMessage(chanScope, ch("bob", "b1"))
+	// Same sender twice → one group with both messages.
+	grouper.AddMessage(chanScope, ch("alice", "a2"))
+
+	time.Sleep(120 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	// Expect exactly two groups: alice {a1,a2} and bob {b1}.
+	assert.Len(t, groups, 2, "two senders → two separate channel groups")
+	bySender := map[string]int{}
+	for _, g := range groups {
+		assert.Equal(t, chanScope, g.UserID, "storage scope stays the channel scope id")
+		bySender[g.Messages[0].SenderID] = len(g.Messages)
+	}
+	assert.Equal(t, 2, bySender["alice"], "alice's two messages grouped together")
+	assert.Equal(t, 1, bySender["bob"], "bob's message in its own group")
+}
+
 func TestMessageGrouper_SingleMessage(t *testing.T) {
 	grouper, getGroup := setupMessageGrouper(t, 10*time.Millisecond)
 
