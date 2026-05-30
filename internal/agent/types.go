@@ -72,6 +72,12 @@ type Request struct {
 	// Multimodal
 	Media []MediaPart // Images, audio, files
 
+	// IsChannel marks the scope as a multi-participant channel (Phase 6). Agents
+	// use it to select channel-framed prompts; false for DMs. Set by the caller
+	// from ScopeRepository.IsChannelScope at the invocation site (background loops
+	// have no SharedContext).
+	IsChannel bool
+
 	// Agent-specific
 	Params map[string]any // Custom parameters
 }

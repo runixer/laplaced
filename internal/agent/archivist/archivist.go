@@ -387,6 +387,7 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (response *
 		Date:           referenceDate.Format("2006-01-02"),
 		UserFactsLimit: maxFacts,
 		UserFactsCount: len(userFacts),
+		IsChannel:      req.IsChannel,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to build system prompt: %w", err)
@@ -403,6 +404,7 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (response *
 		UserFacts:    string(userFactsJSON),
 		KnownPeople:  knownPeople,
 		Conversation: conversation,
+		IsChannel:    req.IsChannel,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to build user prompt: %w", err)

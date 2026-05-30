@@ -132,7 +132,8 @@ type Service struct {
 	maintenanceRepo      storage.MaintenanceRepository
 	peopleRepo           storage.PeopleRepository // v0.5.1: People repository
 	artifactRepo         storage.ArtifactRepository
-	userRepo             storage.UserRepository // background loops enumerate real tenants (transport-agnostic)
+	userRepo             storage.UserRepository  // background loops enumerate real tenants (transport-agnostic)
+	scopeRepo            storage.ScopeRepository // channel-scope detection (Phase 6); nil on home
 	client               openrouter.Client
 	memoryService        MemoryService
 	translator           *i18n.Translator

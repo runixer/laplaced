@@ -37,7 +37,8 @@ type Service struct {
 	translator      *i18n.Translator
 	vectorSearcher  VectorSearcher
 	agentLogger     *agentlog.Logger
-	archivistAgent  agent.Agent // Fact extraction agent
+	archivistAgent  agent.Agent             // Fact extraction agent
+	scopeRepo       storage.ScopeRepository // channel-scope detection (Phase 6); nil on home
 }
 
 func NewService(logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, factHistoryRepo storage.FactHistoryRepository, orClient openrouter.Client, translator *i18n.Translator) *Service {
@@ -72,6 +73,26 @@ func (s *Service) SetArchivistAgent(a agent.Agent) {
 // SetPeopleRepository sets the people repository for person extraction.
 func (s *Service) SetPeopleRepository(pr storage.PeopleRepository) {
 	s.peopleRepo = pr
+}
+
+// SetScopeRepository sets the scope repository used to detect channel scopes
+// (Phase 6). When nil, every scope is treated as a DM.
+func (s *Service) SetScopeRepository(sr storage.ScopeRepository) {
+	s.scopeRepo = sr
+}
+
+// isChannelScope reports whether userID is a channel scope, defaulting to false
+// (DM) when the repo is absent or the lookup fails.
+func (s *Service) isChannelScope(userID int64) bool {
+	if s.scopeRepo == nil {
+		return false
+	}
+	isCh, err := s.scopeRepo.IsChannelScope(userID)
+	if err != nil {
+		s.logger.Warn("channel-scope lookup failed", "user_id", userID, "error", err)
+		return false
+	}
+	return isCh
 }
 
 // MemoryUpdate represents the changes returned by the LLM
@@ -254,6 +275,7 @@ func (s *Service) extractMemoryUpdateViaAgent(ctx context.Context, userID int64,
 	}()
 
 	req := &agent.Request{
+		IsChannel: s.isChannelScope(userID),
 		Params: map[string]any{
 			archivist.ParamMessages:      session,
 			archivist.ParamFacts:         facts,

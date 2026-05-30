@@ -134,6 +134,7 @@ func (s *Splitter) Execute(ctx context.Context, req *agent.Request) (response *a
 		Profile:      profile,
 		RecentTopics: recentTopics,
 		Goal:         goal,
+		IsChannel:    req.IsChannel,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to build system prompt: %w", err)
