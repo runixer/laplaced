@@ -200,8 +200,9 @@ func (l *Laplace) LoadContextData(
 		botName = "Bot"
 	}
 	basePrompt, err := l.translator.GetTemplate(l.cfg.Bot.Language, "bot.system_prompt", prompts.LaplaceParams{
-		BotName:  botName,
-		Platform: platformName(l.cfg.Transport),
+		BotName:   botName,
+		Platform:  platformName(l.cfg.Transport),
+		KatexMath: l.cfg.Transport == "time", // Time renders LaTeX via KaTeX; Telegram does not
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to build system prompt: %w", err)

@@ -11,7 +11,6 @@ import (
 
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
-	"github.com/runixer/laplaced/internal/markdown"
 	"github.com/runixer/laplaced/internal/mattermost"
 	"github.com/runixer/laplaced/internal/telegram"
 )
@@ -51,8 +50,8 @@ func (t *MMTransport) Capabilities() Capabilities {
 	}
 	return Capabilities{
 		MaxMessageLen:         maxPost,
-		ParseMode:             "",    // native markdown — no HTML conversion
-		SupportsLatex:         false, // Time has no native KaTeX → renderer converts latex->unicode
+		ParseMode:             "",   // native markdown — no HTML conversion
+		SupportsLatex:         true, // Time renders LaTeX natively via KaTeX (the prompt steers the model to clean $…$)
 		SupportsStreaming:     false,
 		SupportsReactions:     true,
 		SupportsMedia:         true,
@@ -172,10 +171,10 @@ func mmIdempotencyKey(channelID, rootID, text string) string {
 	return hex.EncodeToString(sum[:16])
 }
 
-// MMRenderer renders canonical markdown for Mattermost: convert LaTeX math to
-// Unicode (Time has no KaTeX), split on the ###SPLIT### delimiter, fix list
-// numbering, and hard-split oversized parts at MaxPostSize. Otherwise markdown
-// is passed through — MM renders it natively (no HTML conversion).
+// MMRenderer renders canonical markdown for Mattermost: split on the ###SPLIT###
+// delimiter, fix list numbering, and hard-split oversized parts at MaxPostSize.
+// Markdown (incl. LaTeX math) is passed through unchanged — Time renders it
+// natively via KaTeX; the system prompt steers the model toward clean $…$.
 type MMRenderer struct {
 	maxLen int
 	logger *slog.Logger
@@ -192,9 +191,6 @@ func NewMattermostRenderer(maxPostSize int, logger *slog.Logger) *MMRenderer {
 }
 
 func (r *MMRenderer) Render(text string) ([]string, error) {
-	// Time renders Markdown natively but has no KaTeX, so convert LaTeX math to
-	// Unicode before splitting (Telegram does the same inside markdown.ToHTML).
-	text = markdown.LatexToUnicode(text)
 	parts := fixListNumbering(splitByDelimiter(text))
 
 	var out []string

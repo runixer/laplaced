@@ -83,14 +83,6 @@ type token struct {
 	raw     string
 }
 
-// LatexToUnicode converts LaTeX math (inline $…$ and display $$…$$) to a
-// best-effort Unicode rendering, leaving code blocks untouched. Telegram applies
-// this inside ToHTML; transports that render markdown natively but lack KaTeX
-// (e.g. Time/Mattermost) call it directly from their Renderer.
-func LatexToUnicode(text string) string {
-	return convertLatexToUnicode(text)
-}
-
 func convertLatexToUnicode(text string) string {
 	tokens := tokenize(text)
 
