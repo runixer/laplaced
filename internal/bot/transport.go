@@ -48,17 +48,41 @@ type OutgoingResponse struct {
 	ReplyTo        string // message id to reply to; set on the first chunk only
 }
 
+// OutgoingMedia is a transport-neutral media reply: one or more files sharing a
+// single caption, threaded/replied like a text response. Caption is canonical
+// markdown (rendered per-transport, like OutgoingResponse.Text); it is already
+// trimmed to the transport's MaxMediaCaptionLen by the caller, any overflow
+// being delivered as a follow-up text message.
+type OutgoingMedia struct {
+	ConversationID string
+	ThreadRoot     string // keeps the media threaded
+	ReplyTo        string // message id to reply to; first item only
+	Caption        string // canonical markdown
+	Items          []OutgoingMediaItem
+}
+
+// OutgoingMediaItem is one file in an OutgoingMedia batch.
+type OutgoingMediaItem struct {
+	Data       []byte
+	Filename   string
+	MIME       string
+	AsDocument bool // force document delivery (Telegram); transports without the photo/doc distinction ignore it
+}
+
 // Capabilities describes per-transport rendering and feature support. The core
 // branches on these, never on Kind(), so transport-specific behavior stays
 // declarative.
 type Capabilities struct {
-	MaxMessageLen     int    // Telegram 4096 UTF-16; Mattermost MaxPostSize (runtime)
-	ParseMode         string // "HTML" (Telegram) | "" native markdown (Mattermost)
-	SupportsLatex     bool   // Telegram false (latex->unicode) | Mattermost true (native KaTeX)
-	SupportsStreaming bool   // Telegram true (editMessageText) | Mattermost false
-	SupportsReactions bool   // Telegram true | Mattermost true (by emoji name)
-	EmojiStyle        string // "unicode" (Telegram) | "shortcode" (Mattermost)
-	MaxFileSize       int64  // 0 = unset/unlimited (files are Phase 4)
+	MaxMessageLen         int    // Telegram 4096 UTF-16; Mattermost MaxPostSize (runtime)
+	ParseMode             string // "HTML" (Telegram) | "" native markdown (Mattermost)
+	SupportsLatex         bool   // Telegram false (latex->unicode) | Mattermost true (native KaTeX)
+	SupportsStreaming     bool   // Telegram true (editMessageText) | Mattermost false
+	SupportsReactions     bool   // Telegram true | Mattermost true (by emoji name)
+	SupportsMedia         bool   // can SendMedia deliver files
+	MaxMediaItemsPerGroup int    // Telegram 10; Mattermost 5 (files per post)
+	MaxMediaCaptionLen    int    // caption budget before overflow becomes follow-up text
+	EmojiStyle            string // "unicode" (Telegram) | "shortcode" (Mattermost)
+	MaxFileSize           int64  // 0 = unset/unlimited (files are Phase 4)
 }
 
 // Transport is the output + identity surface a chat backend must implement.
@@ -68,6 +92,9 @@ type Capabilities struct {
 type Transport interface {
 	// SendText transmits one rendered chunk, returning the new message id.
 	SendText(ctx context.Context, r OutgoingResponse) (msgID string, err error)
+	// SendMedia transmits a batch of files with a shared caption, returning the
+	// primary message id. Callers gate on Capabilities().SupportsMedia.
+	SendMedia(ctx context.Context, m OutgoingMedia) (msgID string, err error)
 	// SendTyping shows a best-effort typing indicator in the conversation.
 	SendTyping(ctx context.Context, conversationID string) error
 	// SetReaction adds a reaction to a message (best-effort; no-op if unsupported).

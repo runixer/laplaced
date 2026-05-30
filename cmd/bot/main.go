@@ -321,9 +321,11 @@ func run() int {
 	// Set artifact repository for linking artifacts to messages (v0.6.0)
 	b.SetArtifactRepo(store)
 
-	// Wire image generation (v0.8.0) — requires artifacts subsystem. Telegram-only:
-	// the Mattermost/Time PoC is text-only, so skip it entirely there.
-	if cfg.Transport != "time" && cfg.Artifacts.Enabled && cfg.Agents.ImageGenerator.Model != "" {
+	// Wire image generation (v0.8.0) — requires artifacts subsystem. Enabled for
+	// every transport (Telegram and Mattermost/Time): the media-reply path is
+	// transport-neutral (Bot.transport.SendMedia). Gated only on artifacts + a
+	// configured model, so the overlay decides per contour.
+	if cfg.Artifacts.Enabled && cfg.Agents.ImageGenerator.Model != "" {
 		imgGen := imagegen.New(openrouterClient, &cfg.Agents.ImageGenerator, logger)
 		b.SetImageGenerator(&imageGenAdapter{agent: imgGen})
 		b.SetFileStorage(fileStorage)

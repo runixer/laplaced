@@ -554,7 +554,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		obs.RecordContent(span, "bot.reply_sent", resp.Content,
 			attribute.Int64Slice("generated_artifact_ids", resp.GeneratedArtifactIDs))
 		mediaDur, sentCount := b.sendResponseWithGeneratedImages(
-			shutdownSafeCtx, userID, tgChatID, tgThreadID, tgReplyID,
+			shutdownSafeCtx, userID, convID, threadRoot, lastMsg.MessageID,
 			resp.Content, resp.GeneratedArtifactIDs, logger,
 		)
 		totalTelegramDuration += mediaDur

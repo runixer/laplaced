@@ -15,7 +15,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"strings"
 	"time"
@@ -85,10 +87,11 @@ type FileInfo struct {
 // createPostReq is the body for POST /posts. idempotency_key and peer are Time
 // extensions (idempotency_key dedupes retries with a 30s TTL).
 type createPostReq struct {
-	ChannelID      string `json:"channel_id,omitempty"`
-	Message        string `json:"message"`
-	RootID         string `json:"root_id,omitempty"`
-	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	ChannelID      string   `json:"channel_id,omitempty"`
+	Message        string   `json:"message"`
+	RootID         string   `json:"root_id,omitempty"`
+	FileIDs        []string `json:"file_ids,omitempty"`
+	IdempotencyKey string   `json:"idempotency_key,omitempty"`
 }
 
 // CreatePostReq is the caller-facing post-creation request.
@@ -96,6 +99,7 @@ type CreatePostReq struct {
 	ChannelID      string
 	Message        string
 	RootID         string
+	FileIDs        []string
 	IdempotencyKey string
 }
 
@@ -199,6 +203,7 @@ func (c *Client) CreatePost(ctx context.Context, r CreatePostReq) (*Post, error)
 		ChannelID:      r.ChannelID,
 		Message:        r.Message,
 		RootID:         r.RootID,
+		FileIDs:        r.FileIDs,
 		IdempotencyKey: r.IdempotencyKey,
 	}
 	var post Post
@@ -250,6 +255,59 @@ func (c *Client) GetFile(ctx context.Context, fileID string) ([]byte, error) {
 		return nil, fmt.Errorf("mattermost get file %s: status %d: %s", fileID, resp.StatusCode, strings.TrimSpace(string(msg)))
 	}
 	return io.ReadAll(resp.Body)
+}
+
+// UploadFile uploads one file to a channel via POST /api/v4/files (multipart),
+// returning the new file id to attach to a post. The MIME type is set on the
+// form part when known so the server records the right content type.
+func (c *Client) UploadFile(ctx context.Context, channelID, filename, mimeType string, data []byte) (string, error) {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if err := mw.WriteField("channel_id", channelID); err != nil {
+		return "", fmt.Errorf("failed to write channel_id field: %w", err)
+	}
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="files"; filename=%q`, filename))
+	if mimeType != "" {
+		h.Set("Content-Type", mimeType)
+	}
+	part, err := mw.CreatePart(h)
+	if err != nil {
+		return "", fmt.Errorf("failed to create form file part: %w", err)
+	}
+	if _, err := part.Write(data); err != nil {
+		return "", fmt.Errorf("failed to write file bytes: %w", err)
+	}
+	if err := mw.Close(); err != nil {
+		return "", fmt.Errorf("failed to close multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/files", &buf)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.cfg.BotToken)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request to /files failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return "", fmt.Errorf("mattermost upload file: status %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	var out struct {
+		FileInfos []FileInfo `json:"file_infos"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", fmt.Errorf("failed to decode upload response: %w", err)
+	}
+	if len(out.FileInfos) == 0 {
+		return "", fmt.Errorf("mattermost upload file: empty file_infos in response")
+	}
+	return out.FileInfos[0].ID, nil
 }
 
 // do performs a JSON request against the API, decoding the response into out

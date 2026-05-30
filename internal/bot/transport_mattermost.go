@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"strings"
@@ -17,6 +18,10 @@ import (
 // mmMarkdownSafeMargin is subtracted from the server's MaxPostSize to leave room
 // for any per-post overhead, mirroring the Telegram renderer's safety margin.
 const mmMarkdownSafeMargin = 200
+
+// mmMaxFilesPerPost is the Mattermost limit of attachments per post; batches
+// larger than this are split across multiple posts.
+const mmMaxFilesPerPost = 5
 
 // mmReactions are the emoji shortcodes the bot may react with (Mattermost takes
 // names, not unicode). MM analog of availableReactions.
@@ -38,13 +43,21 @@ func NewMattermostTransport(client *mattermost.Client, cfg *config.Config, logge
 func (t *MMTransport) Kind() string { return transportTime }
 
 func (t *MMTransport) Capabilities() Capabilities {
+	maxPost := t.client.MaxPostSize()
+	captionLen := maxPost - mmMarkdownSafeMargin
+	if captionLen < 1 {
+		captionLen = maxPost
+	}
 	return Capabilities{
-		MaxMessageLen:     t.client.MaxPostSize(),
-		ParseMode:         "", // native markdown — no HTML conversion
-		SupportsLatex:     true,
-		SupportsStreaming: false,
-		SupportsReactions: true,
-		EmojiStyle:        "shortcode",
+		MaxMessageLen:         maxPost,
+		ParseMode:             "", // native markdown — no HTML conversion
+		SupportsLatex:         true,
+		SupportsStreaming:     false,
+		SupportsReactions:     true,
+		SupportsMedia:         true,
+		MaxMediaItemsPerGroup: mmMaxFilesPerPost,
+		MaxMediaCaptionLen:    captionLen,
+		EmojiStyle:            "shortcode",
 	}
 }
 
@@ -77,6 +90,67 @@ func (t *MMTransport) SendText(ctx context.Context, r OutgoingResponse) (string,
 		return "", err
 	}
 	return post.ID, nil
+}
+
+// SendMedia uploads each item to the channel and posts them with the caption.
+// Mattermost caps attachments at mmMaxFilesPerPost per post, so larger batches
+// are split across posts; the caption rides the first post only. The post
+// threads under ThreadRoot (or ReplyTo when ThreadRoot is empty), mirroring
+// SendText. Markdown is passed through (MM renders it natively).
+func (t *MMTransport) SendMedia(ctx context.Context, m OutgoingMedia) (string, error) {
+	if len(m.Items) == 0 {
+		return "", nil
+	}
+	rootID := m.ThreadRoot
+	if rootID == "" && m.ReplyTo != "" {
+		rootID = m.ReplyTo
+	}
+
+	// Upload every item up front; skip individual failures so a partial batch
+	// still posts.
+	fileIDs := make([]string, 0, len(m.Items))
+	for _, it := range m.Items {
+		id, err := t.client.UploadFile(ctx, m.ConversationID, it.Filename, it.MIME, it.Data)
+		if err != nil {
+			t.logger.Error("mm upload file failed", "filename", it.Filename, "error", err)
+			continue
+		}
+		fileIDs = append(fileIDs, id)
+	}
+	if len(fileIDs) == 0 {
+		return "", fmt.Errorf("mattermost: no files uploaded")
+	}
+
+	var firstPostID string
+	for i := 0; i < len(fileIDs); i += mmMaxFilesPerPost {
+		end := i + mmMaxFilesPerPost
+		if end > len(fileIDs) {
+			end = len(fileIDs)
+		}
+		chunk := fileIDs[i:end]
+		message := ""
+		if i == 0 {
+			message = m.Caption // caption on the first post only
+		}
+		post, err := t.client.CreatePost(ctx, mattermost.CreatePostReq{
+			ChannelID:      m.ConversationID,
+			Message:        message,
+			RootID:         rootID,
+			FileIDs:        chunk,
+			IdempotencyKey: mmIdempotencyKey(m.ConversationID, rootID, message+strings.Join(chunk, ",")),
+		})
+		if err != nil {
+			t.logger.Error("mm create media post failed", "error", err)
+			if firstPostID == "" {
+				return "", err
+			}
+			return firstPostID, err
+		}
+		if firstPostID == "" {
+			firstPostID = post.ID
+		}
+	}
+	return firstPostID, nil
 }
 
 func (t *MMTransport) SendTyping(ctx context.Context, conversationID string) error {
