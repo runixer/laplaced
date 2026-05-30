@@ -76,7 +76,12 @@ func (c *Client) dialAndAuth(ctx context.Context) (*websocket.Conn, error) {
 		dialer.Proxy = http.ProxyURL(c.proxyURL)
 	}
 
-	conn, _, err := dialer.DialContext(ctx, c.wsURL, nil)
+	conn, resp, err := dialer.DialContext(ctx, c.wsURL, nil)
+	if resp != nil && resp.Body != nil {
+		// gorilla already drains/closes this on success, but close defensively
+		// so the linter (and the error path) are satisfied.
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -171,6 +176,7 @@ func nextBackoff(d time.Duration) time.Duration {
 	if next > wsMaxBackoff {
 		next = wsMaxBackoff
 	}
+	// #nosec G404 -- reconnect backoff jitter is timing, not a security primitive
 	jitter := time.Duration(rand.Int64N(int64(next)/5 + 1))
 	return next + jitter
 }

@@ -207,15 +207,11 @@ func (c *Client) fetchMaxPostSize(ctx context.Context) int {
 
 // CreatePost sends a post and returns the created post (with its server id).
 func (c *Client) CreatePost(ctx context.Context, r CreatePostReq) (*Post, error) {
-	body := createPostReq{
-		ChannelID:      r.ChannelID,
-		Message:        r.Message,
-		RootID:         r.RootID,
-		FileIDs:        r.FileIDs,
-		IdempotencyKey: r.IdempotencyKey,
-	}
+	// createPostReq mirrors CreatePostReq field-for-field (it only adds json
+	// tags), so a direct conversion is enough — and the compiler enforces the
+	// mirror if either struct gains a field.
 	var post Post
-	if err := c.do(ctx, http.MethodPost, "/posts", body, &post); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/posts", createPostReq(r), &post); err != nil {
 		return nil, err
 	}
 	return &post, nil
