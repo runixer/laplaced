@@ -131,14 +131,22 @@ rag:
     </role>
 
     <topic_definition>
-    TOPICS ARE DEFINED BY USER'S REQUESTS:
+    {{if .IsChannel}}TOPICS ARE THREADS OF CHANNEL DISCUSSION:
+    - This is a multi-participant channel. Each message is prefixed with its author: [Name (time)].
+    - A topic = a coherent thread of discussion among participants (a question, decision, plan, problem, announcement).
+    - Topic summary = WHAT the channel discussed and WHO drove it — not what the bot answered.
+    - Messages [Bot ...] are the assistant's replies; they ACCOMPANY a topic but don't define it.
+
+    Summary examples:
+    ✓ "Team debated moving CI to GitLab; Alice and Bob in favor, Carol raised cost concerns"
+    ✗ "Bot explained GitLab CI" (focus on the discussion, not the bot){{else}}TOPICS ARE DEFINED BY USER'S REQUESTS:
     - Messages [User ...] — user's requests, questions, tasks. This is the SOURCE of topics.
     - Messages [Bot ...] — assistant's responses. They ACCOMPANY the topic but don't define it.
     - Topic summary = what USER wanted/asked/did, not what Bot answered.
 
     Summary examples:
     ✓ "Setting up Docker for Laplaced project" (focus on User's task)
-    ✗ "Bot explained how to configure Docker" (focus on Bot's actions)
+    ✗ "Bot explained how to configure Docker" (focus on Bot's actions){{end}}
     </topic_definition>
 
     <rules>
@@ -418,7 +426,18 @@ memory:
     </context>
 
     <truth_protocol>
-    SOURCE OF TRUTH — USER ONLY:
+    {{if .IsChannel}}SOURCE OF TRUTH — CHANNEL PARTICIPANTS:
+    - This is a multi-participant channel. Messages are prefixed with their author: [Name ...]. Attribute every fact to the right person.
+    - Messages [Bot ...] are the assistant's replies. Ignore Bot's statements unless a participant explicitly confirmed.
+    - Silence ≠ Consent.
+
+    WHAT TO EXTRACT:
+    - CHANNEL facts → "facts" section: shared context, decisions, agreements, project/team state — the profile of the channel itself.
+    - PER-PARTICIPANT info (role, expertise, preferences, relationships) → "people" section, attributed to that participant — NOT into channel facts.
+
+    PROHIBITIONS:
+    - Do not interpret feelings. Only actions: "decided", "uses", "agreed".
+    - Do not merge facts from different categories into one entry.{{else}}SOURCE OF TRUTH — USER ONLY:
     - Facts and people are extracted ONLY from User messages (start with name in square brackets).
     - Messages [Bot ...] are assistant's responses. Ignore Bot's statements unless User explicitly confirmed ("yes", "correct", "exactly").
     - Silence ≠ Consent: if Bot made a hypothesis and User stayed silent — this is NOT a fact.
@@ -426,7 +445,7 @@ memory:
     PROHIBITIONS:
     - Do not interpret feelings ("reflects", "fears"). Only actions: "decided", "uses".
     - Do not merge facts from different categories (work + health) into one entry.
-    - Facts are ONLY about User! Info about other people goes to "people" section, not "facts".
+    - Facts are ONLY about User! Info about other people goes to "people" section, not "facts".{{end}}
 
     VOICE MESSAGES:
     - Quote "> 🎤" is a voice transcription.
@@ -501,8 +520,8 @@ memory:
     <output_format>
     Return JSON with two sections: "facts" and "people".
 
-    Facts section (ONLY about User):
-    - "added": new facts (content, category, type, importance, reason) — entity is always "User"
+    Facts section ({{if .IsChannel}}about the CHANNEL — shared context, decisions, state. Per-participant info goes to people, not here{{else}}ONLY about User{{end}}):
+    - "added": new facts (content, category, type, importance, reason)
     - "updated": changed facts (fact_id, content, type, importance, reason) — use fact_id from [Fact:N] prefix
     - "removed": deleted facts (fact_id, reason) — use fact_id from [Fact:N] prefix
 
@@ -589,7 +608,7 @@ memory:
   # Archivist user prompt
   # Template fields: UserFacts, KnownPeople, Conversation
   user_prompt: |
-    <current_facts entity="User">
+    <current_facts entity="{{if .IsChannel}}Channel{{else}}User{{end}}">
     {{.UserFacts}}
     </current_facts>
 
