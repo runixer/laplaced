@@ -76,32 +76,37 @@ func (l *Laplace) BuildMessages(
 		})
 	}
 
-	// v0.6.0: Load full artifact content for selected artifacts (Long Context RAG)
+	// v0.6.0: Load full artifact content for selected artifacts (Long Context RAG).
+	// These parts ride WITH the current user message below — NOT as a separate
+	// pre-history message. Vision models reliably attend to images adjacent to the
+	// active question, but disclaim images buried earlier in a long history: with
+	// Qwen/litellm the model "talks itself out of" a memory-injected image
+	// ("у меня нет глаз для файлов из прошлого диалога"), especially once its own
+	// earlier refusals are in the session. Adjacent to the current message it
+	// reads them correctly (verified by replaying a failing request both ways).
+	var artifactParts []interface{}
 	if len(contextData.SelectedArtifactIDs) > 0 {
-		artifactParts, err := l.loadArtifactFullContent(ctx, contextData.UserID, contextData.SelectedArtifactIDs)
+		var err error
+		artifactParts, err = l.loadArtifactFullContent(ctx, contextData.UserID, contextData.SelectedArtifactIDs)
 		if err != nil {
 			l.logger.Warn("failed to load artifact content", "error", err)
 		}
-		// Insert loaded content before recent history so the LLM has full file context
-		if len(artifactParts) > 0 {
-			orMessages = append(orMessages, openrouter.Message{
-				Role:    "user",
-				Content: artifactParts,
-			})
-		}
 	}
 
-	// Add Recent History (active session)
+	// Add Recent History (active session). The current (last user) message carries
+	// the multimodal current-message parts plus any loaded artifact parts.
 	currentMessageAdded := false
 	for i, hMsg := range contextData.RecentHistory {
 		var contentParts []interface{}
 
-		// For the last user message in history, use multimodal parts if available
-		// We check if this is the last message AND it's a user message AND we have multimodal content
 		isLastMessage := i == len(contextData.RecentHistory)-1
-		if isLastMessage && hMsg.Role == "user" && currentMessageParts != nil && len(currentMessageParts) > 0 {
-			// Use multimodal content for the current user message
-			contentParts = currentMessageParts
+		if isLastMessage && hMsg.Role == "user" && (len(currentMessageParts) > 0 || len(artifactParts) > 0) {
+			if len(currentMessageParts) > 0 {
+				contentParts = append(contentParts, currentMessageParts...)
+			} else {
+				contentParts = append(contentParts, openrouter.TextPart{Type: "text", Text: hMsg.Content})
+			}
+			contentParts = append(contentParts, artifactParts...)
 			currentMessageAdded = true
 		} else {
 			contentParts = []interface{}{
@@ -111,9 +116,13 @@ func (l *Laplace) BuildMessages(
 		orMessages = append(orMessages, openrouter.Message{Role: hMsg.Role, Content: contentParts})
 	}
 
-	// Fallback: if current message wasn't added via history (edge case), add it separately
-	if !currentMessageAdded && currentMessageParts != nil && len(currentMessageParts) > 0 {
-		orMessages = append(orMessages, openrouter.Message{Role: "user", Content: currentMessageParts})
+	// Fallback: if the current message wasn't added via history (edge case, e.g.
+	// empty/assistant-tailed history), add it — with artifacts — as a trailing
+	// user message so loaded files still sit adjacent to the turn.
+	if !currentMessageAdded && (len(currentMessageParts) > 0 || len(artifactParts) > 0) {
+		parts := append([]interface{}{}, currentMessageParts...)
+		parts = append(parts, artifactParts...)
+		orMessages = append(orMessages, openrouter.Message{Role: "user", Content: parts})
 	}
 
 	return orMessages
@@ -387,15 +396,10 @@ func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID int64, art
 			}
 			// Normalize MIME type for Gemini (e.g., text/x-web-markdown -> text/plain)
 			mimeType = files.NormalizeMimeForGemini(mimeType)
-			contentParts = append(contentParts, openrouter.FilePart{
-				Type: "file",
-				File: openrouter.File{
-					FileName: fileName,
-					FileData: fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data),
-				},
-			})
+			contentParts = append(contentParts, openrouter.MediaPart(
+				l.cfg.OpenRouter.ImageInputFormat, mimeType, fileName,
+				fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data)))
 		case "image", "photo":
-			// Images use FilePart (v0.6.0: unified format)
 			mimeType := artifact.MimeType
 			if mimeType == "" {
 				mimeType = "image/jpeg"
@@ -407,13 +411,9 @@ func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID int64, art
 			fileName = fmt.Sprintf("memory_%d_%s", artifact.ID, fileName)
 			// Normalize MIME type for Gemini
 			mimeType = files.NormalizeMimeForGemini(mimeType)
-			contentParts = append(contentParts, openrouter.FilePart{
-				Type: "file",
-				File: openrouter.File{
-					FileName: fileName,
-					FileData: "data:" + mimeType + ";base64," + base64Data,
-				},
-			})
+			contentParts = append(contentParts, openrouter.MediaPart(
+				l.cfg.OpenRouter.ImageInputFormat, mimeType, fileName,
+				"data:"+mimeType+";base64,"+base64Data))
 		case "voice", "audio", "video_note", "video":
 			// Audio and video use FilePart
 			fileName := artifact.OriginalName
@@ -443,13 +443,9 @@ func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID int64, art
 			}
 			// Normalize MIME type for Gemini
 			mimeType = files.NormalizeMimeForGemini(mimeType)
-			contentParts = append(contentParts, openrouter.FilePart{
-				Type: "file",
-				File: openrouter.File{
-					FileName: fileName,
-					FileData: fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data),
-				},
-			})
+			contentParts = append(contentParts, openrouter.MediaPart(
+				l.cfg.OpenRouter.ImageInputFormat, mimeType, fileName,
+				fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data)))
 		default:
 			l.logger.Warn("unknown artifact file type", "artifact_id", artifactID, "file_type", artifact.FileType)
 			continue

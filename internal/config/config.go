@@ -360,12 +360,16 @@ type OpenRouterConfig struct {
 	// BaseURL is the OpenAI-compatible endpoint the LLM client talks to.
 	// Defaults to the public OpenRouter API; override to point at a self-hosted
 	// OpenAI-compatible backend (litellm, vLLM, …).
-	BaseURL         string                `yaml:"base_url" env:"LAPLACED_OPENROUTER_BASE_URL"`
-	ProxyURL        string                `yaml:"proxy_url" env:"LAPLACED_OPENROUTER_PROXY_URL"`
-	PDFParserEngine string                `yaml:"pdf_parser_engine"`
-	RequestCost     float64               `yaml:"request_cost"`
-	PriceTiers      []PriceTier           `yaml:"price_tiers"`
-	Provider        ProviderRoutingConfig `yaml:"provider"`
+	BaseURL string `yaml:"base_url" env:"LAPLACED_OPENROUTER_BASE_URL"`
+	// ImageInputFormat selects how images/videos are encoded as LLM content
+	// parts: "file" (default, OpenRouter/Gemini) or "openai" (image_url/video_url,
+	// required by OpenAI-compatible backends like litellm/vLLM which reject "file").
+	ImageInputFormat string                `yaml:"image_input_format" env:"LAPLACED_OPENROUTER_IMAGE_INPUT_FORMAT"`
+	ProxyURL         string                `yaml:"proxy_url" env:"LAPLACED_OPENROUTER_PROXY_URL"`
+	PDFParserEngine  string                `yaml:"pdf_parser_engine"`
+	RequestCost      float64               `yaml:"request_cost"`
+	PriceTiers       []PriceTier           `yaml:"price_tiers"`
+	Provider         ProviderRoutingConfig `yaml:"provider"`
 }
 
 // ProviderRoutingConfig configures OpenRouter provider preference.

@@ -33,6 +33,7 @@ mattermost:
 openrouter:
   api_key: ""
   base_url: "https://openrouter.ai/api/v1"  # OpenAI-compatible endpoint; override for self-hosted (litellm/vLLM)
+  image_input_format: "file"  # "file" (OpenRouter/Gemini) | "openai" (image_url/video_url for litellm/vLLM)
   proxy_url: ""
   pdf_parser_engine: "native"
   request_cost: 0.0

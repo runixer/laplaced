@@ -549,22 +549,18 @@ func (r *Reranker) rerank(
 			continue
 		}
 
-		// No tool calls - expect final JSON response
-		// v0.6.0: Exception: if no topic candidates, skipping tool call is expected
-		if iterations == 0 && len(candidates) > 0 {
-			logger.Warn("reranker protocol violation: no tool calls before final response",
-				"user_id", userID,
-				"content_preview", truncateForLog(choice.Message.Content, 200),
-			)
-			tr.fallbackReason = "protocol_violation"
-			fallbackResult := fallbackToVectorTop(r.cfg, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger)
-			tr.selectedTopics = fallbackResult.Topics
-			tr.selectedPeople = fallbackResult.People
-			tr.selectedArtifacts = fallbackResult.Artifacts
-			saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
-			return fallbackResult, nil
-		}
-
+		// No tool calls — this is the final JSON response.
+		//
+		// get_topics_content is OPTIONAL: the model may call it to read full topic
+		// bodies before selecting, but it is never required. (v0.4.3 forced it and
+		// treated a tool-less response as a "protocol violation" → vector-top
+		// fallback — a leftover from the topics-only era. Forced tool_choice is
+		// unreliable on OpenAI-compatible backends anyway (litellm/Qwen, Phase 0),
+		// and discarding a valid selection dropped the model's artifact/people
+		// picks, e.g. just-sent session images.) We honor whatever the model
+		// returns: a non-empty selection is used; an empty one means "nothing
+		// relevant" (respected, same as the post-tool-call path). Only an
+		// unparseable response falls back.
 		result, err := parseResponse(choice.Message.Content, logger)
 		if err != nil {
 			logger.Warn("failed to parse reranker response", "error", err, "content", choice.Message.Content)

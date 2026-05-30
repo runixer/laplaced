@@ -40,7 +40,7 @@ func (s *Service) backgroundLoop(ctx context.Context) {
 }
 
 func (s *Service) processAllUsers(ctx context.Context) {
-	users := s.cfg.Bot.AllowedUserIDs
+	users := s.backgroundUserIDs()
 	for _, userID := range users {
 		if ctx.Err() != nil {
 			return
@@ -193,7 +193,7 @@ func (s *Service) factExtractionLoop(ctx context.Context) {
 }
 
 func (s *Service) processFactExtraction(ctx context.Context) {
-	users := s.cfg.Bot.AllowedUserIDs
+	users := s.backgroundUserIDs()
 	for _, userID := range users {
 		if ctx.Err() != nil {
 			return

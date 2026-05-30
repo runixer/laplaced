@@ -104,7 +104,7 @@ func (p *Processor) processOne(ctx context.Context, f IncomingFile, userID int64
 	case FileTypePhoto:
 		artifactID := p.saveArtifact(ctx, userID, "image", "photo.jpg", "image/jpeg", data, groupText, f.SourceID)
 		return &ProcessedFile{
-			LLMParts: []interface{}{filePart("photo.jpg", "image/jpeg", base64Data)},
+			LLMParts: []interface{}{p.mediaPart("photo.jpg", "image/jpeg", base64Data)},
 			FileType: FileTypePhoto, FileID: f.SourceID, MimeType: "image/jpeg",
 			Size: int64(len(data)), Duration: duration, ArtifactID: artifactID,
 		}, nil
@@ -112,7 +112,7 @@ func (p *Processor) processOne(ctx context.Context, f IncomingFile, userID int64
 	case FileTypeImage:
 		artifactID := p.saveArtifact(ctx, userID, "image", f.FileName, f.MIME, data, groupText, f.SourceID)
 		return &ProcessedFile{
-			LLMParts: []interface{}{filePart(f.FileName, f.MIME, base64Data)},
+			LLMParts: []interface{}{p.mediaPart(f.FileName, f.MIME, base64Data)},
 			FileType: FileTypeImage, FileID: f.SourceID, FileName: f.FileName, MimeType: f.MIME,
 			Size: int64(len(data)), Duration: duration, ArtifactID: artifactID,
 		}, nil
@@ -120,7 +120,7 @@ func (p *Processor) processOne(ctx context.Context, f IncomingFile, userID int64
 	case FileTypePDF:
 		artifactID := p.saveArtifact(ctx, userID, "pdf", f.FileName, f.MIME, data, groupText, f.SourceID)
 		return &ProcessedFile{
-			LLMParts: []interface{}{filePart(f.FileName, "application/pdf", base64Data)},
+			LLMParts: []interface{}{p.mediaPart(f.FileName, "application/pdf", base64Data)},
 			FileType: FileTypePDF, FileID: f.SourceID, FileName: f.FileName, MimeType: "application/pdf",
 			Size: int64(len(data)), Duration: duration, ArtifactID: artifactID,
 		}, nil
@@ -132,7 +132,7 @@ func (p *Processor) processOne(ctx context.Context, f IncomingFile, userID int64
 		}
 		artifactID := p.saveArtifact(ctx, userID, "video", f.FileName, f.MIME, data, groupText, f.SourceID)
 		return &ProcessedFile{
-			LLMParts: []interface{}{filePart(f.FileName, mimeType, base64Data)},
+			LLMParts: []interface{}{p.mediaPart(f.FileName, mimeType, base64Data)},
 			FileType: FileTypeVideo, FileID: f.SourceID, FileName: f.FileName, MimeType: f.MIME,
 			Size: int64(len(data)), Duration: duration, ArtifactID: artifactID,
 		}, nil
@@ -140,7 +140,7 @@ func (p *Processor) processOne(ctx context.Context, f IncomingFile, userID int64
 	case FileTypeVideoNote:
 		artifactID := p.saveArtifact(ctx, userID, "video_note", f.FileName, "video/mp4", data, groupText, f.SourceID)
 		return &ProcessedFile{
-			LLMParts: []interface{}{filePart(f.FileName, "video/mp4", base64Data)},
+			LLMParts: []interface{}{p.mediaPart(f.FileName, "video/mp4", base64Data)},
 			FileType: FileTypeVideoNote, FileID: f.SourceID, FileName: f.FileName, MimeType: "video/mp4",
 			Size: int64(len(data)), Duration: duration, ArtifactID: artifactID,
 		}, nil
@@ -152,7 +152,7 @@ func (p *Processor) processOne(ctx context.Context, f IncomingFile, userID int64
 		}
 		artifactID := p.saveVoiceArtifact(ctx, userID, mimeType, data, groupText, f.SourceID, f.Duration)
 		return &ProcessedFile{
-			LLMParts:    []interface{}{filePart("voice.ogg", mimeType, base64Data)},
+			LLMParts:    []interface{}{p.mediaPart("voice.ogg", mimeType, base64Data)},
 			Instruction: p.translator.Get(p.language, "bot.voice_instruction"),
 			FileType:    FileTypeVoice, FileID: f.SourceID, MimeType: mimeType,
 			Size: int64(len(data)), Duration: duration, ArtifactID: artifactID,
@@ -165,7 +165,7 @@ func (p *Processor) processOne(ctx context.Context, f IncomingFile, userID int64
 		}
 		artifactID := p.saveArtifact(ctx, userID, "audio", f.FileName, mimeType, data, groupText, f.SourceID)
 		return &ProcessedFile{
-			LLMParts: []interface{}{filePart(f.FileName, mimeType, base64Data)},
+			LLMParts: []interface{}{p.mediaPart(f.FileName, mimeType, base64Data)},
 			FileType: FileTypeAudio, FileID: f.SourceID, FileName: f.FileName, MimeType: mimeType,
 			Size: int64(len(data)), Duration: duration, ArtifactID: artifactID,
 		}, nil
@@ -181,15 +181,13 @@ func (p *Processor) processOne(ctx context.Context, f IncomingFile, userID int64
 	}
 }
 
-// filePart builds an OpenRouter FilePart with a base64 data URL.
-func filePart(fileName, mimeType, base64Data string) openrouter.FilePart {
-	return openrouter.FilePart{
-		Type: "file",
-		File: openrouter.File{
-			FileName: fileName,
-			FileData: fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data),
-		},
-	}
+// mediaPart builds the LLM content part for an inbound file in the configured
+// backend format: image_url/video_url for OpenAI-compatible backends, else the
+// `file` part (also the shape for pdf/audio regardless of format). The single
+// chokepoint for inbound media encoding.
+func (p *Processor) mediaPart(fileName, mimeType, base64Data string) interface{} {
+	dataURL := fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data)
+	return openrouter.MediaPart(p.imageInputFormat, mimeType, fileName, dataURL)
 }
 
 // saveArtifact persists a file as an artifact when a file handler is configured.

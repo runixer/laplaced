@@ -132,6 +132,7 @@ type Service struct {
 	maintenanceRepo      storage.MaintenanceRepository
 	peopleRepo           storage.PeopleRepository // v0.5.1: People repository
 	artifactRepo         storage.ArtifactRepository
+	userRepo             storage.UserRepository // background loops enumerate real tenants (transport-agnostic)
 	client               openrouter.Client
 	memoryService        MemoryService
 	translator           *i18n.Translator
@@ -580,7 +581,7 @@ func (s *Service) loadNewArtifactSummariesLocked() error {
 
 	// Load artifacts per-user (same pattern as topics/facts/people for data isolation)
 	count := 0
-	users := s.cfg.Bot.AllowedUserIDs
+	users := s.backgroundUserIDs()
 	if len(users) == 0 {
 		return nil
 	}
@@ -634,4 +635,36 @@ func (s *Service) LoadNewArtifactSummaries() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.loadNewArtifactSummariesLocked()
+}
+
+// backgroundUserIDs returns the memory tenants the background loops should
+// process: the union of the configured allowlist (Telegram home) and every user
+// that exists in storage. The union covers minted scope ids on non-Telegram
+// transports (where Bot.AllowedUserIDs is empty) while never narrowing the home
+// path — allowlisted users are always included even before they appear in the
+// users table. WARNING: GetAllUsers is cross-user; this is background-only.
+func (s *Service) backgroundUserIDs() []int64 {
+	seen := make(map[int64]struct{})
+	var ids []int64
+	add := func(id int64) {
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	for _, id := range s.cfg.Bot.AllowedUserIDs {
+		add(id)
+	}
+	if s.userRepo != nil {
+		users, err := s.userRepo.GetAllUsers()
+		if err != nil {
+			s.logger.Warn("backgroundUserIDs: GetAllUsers failed, using allowlist only", "error", err)
+		} else {
+			for _, u := range users {
+				add(u.ID)
+			}
+		}
+	}
+	return ids
 }

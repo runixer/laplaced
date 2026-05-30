@@ -48,7 +48,7 @@ func (s *Service) processConsolidation(ctx context.Context) {
 	// Mark as background job for metrics (consolidation is a maintenance task)
 	ctx = jobtype.WithJobType(ctx, jobtype.Background)
 
-	users := s.cfg.Bot.AllowedUserIDs
+	users := s.backgroundUserIDs()
 	for _, userID := range users {
 		if ctx.Err() != nil {
 			return

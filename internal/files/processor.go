@@ -21,7 +21,8 @@ type Processor struct {
 	fileHandler         FileSaver // Optional: for saving artifacts
 	maxRetries          int
 	retryDelay          time.Duration
-	minVoiceDurationSec int // Minimum voice duration (seconds) to save as artifact. 0 = save all, -1 = disable
+	minVoiceDurationSec int    // Minimum voice duration (seconds) to save as artifact. 0 = save all, -1 = disable
+	imageInputFormat    string // How image/video parts are encoded for the LLM (openrouter.ImageInputFormat*). "" = file.
 }
 
 // FileSaver is the interface for saving artifacts (to avoid circular dependency).
@@ -57,6 +58,12 @@ func (p *Processor) SetFileHandler(handler FileSaver) {
 // 0 = save all voices, -1 = disable voice artifacts, N = only save voices >= N seconds.
 func (p *Processor) SetMinVoiceDurationSec(seconds int) {
 	p.minVoiceDurationSec = seconds
+}
+
+// SetImageInputFormat selects how image/video attachments are encoded as LLM
+// content parts (openrouter.ImageInputFormatFile | ImageInputFormatOpenAI).
+func (p *Processor) SetImageInputFormat(format string) {
+	p.imageInputFormat = format
 }
 
 // ProcessMessage extracts and processes the file from a Telegram message.

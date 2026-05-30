@@ -71,6 +71,7 @@ func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRe
 
 	fileProcessor := files.NewProcessor(downloader, translator, cfg.Bot.Language, botLogger)
 	fileProcessor.SetMinVoiceDurationSec(cfg.Artifacts.MinVoiceDurationSeconds)
+	fileProcessor.SetImageInputFormat(cfg.OpenRouter.ImageInputFormat)
 
 	// Create tool executor
 	toolExecutor := tools.NewToolExecutor(orClient, factRepo, factHistoryRepo, cfg, botLogger)
@@ -317,6 +318,15 @@ func (b *Bot) HandleIncoming(im IncomingMessage) {
 	if err != nil {
 		b.logger.Error("failed to resolve scope", "error", err, "transport", b.transport.Kind())
 		return
+	}
+	// Non-Telegram transports don't pass through ProcessUpdate's UpsertUser, so
+	// register the resolved scope as a user here. Background memory loops
+	// enumerate real users (backgroundUserIDs), so a scope absent from the users
+	// table would never get topics/facts/artifacts processed.
+	if b.transport.Kind() != transportTelegram {
+		if err := b.userRepo.UpsertUser(storage.User{ID: scopeID, Username: im.SenderDisplay, LastSeen: time.Now()}); err != nil {
+			b.logger.Warn("failed to upsert scope user", "scope_id", scopeID, "error", err)
+		}
 	}
 	b.messageGrouper.AddMessage(scopeID, im)
 }

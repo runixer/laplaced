@@ -25,7 +25,7 @@ type ActiveSessionInfo struct {
 
 // GetActiveSessions returns information about unprocessed messages (active sessions) for all users.
 func (s *Service) GetActiveSessions() ([]ActiveSessionInfo, error) {
-	users := s.cfg.Bot.AllowedUserIDs
+	users := s.backgroundUserIDs()
 	var sessions []ActiveSessionInfo
 
 	for _, userID := range users {

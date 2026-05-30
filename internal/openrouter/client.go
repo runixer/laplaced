@@ -475,6 +475,48 @@ type ImageURLPart struct {
 	ImageURL ImageURLValue `json:"image_url"`
 }
 
+// VideoURLPart is the OpenAI/vLLM-compatible video input part, analogous to
+// ImageURLPart. litellm/vLLM accept "video_url" for video input; OpenRouter's
+// "file" part is used instead when ImageInputFormatFile is selected.
+type VideoURLPart struct {
+	Type     string        `json:"type"` // "video_url"
+	VideoURL ImageURLValue `json:"video_url"`
+}
+
+// Image input formats — how a media file is encoded as an LLM content part.
+const (
+	// ImageInputFormatFile is OpenRouter's universal `file` part (works for
+	// Gemini; the home default). Kept for backward compatibility.
+	ImageInputFormatFile = "file"
+	// ImageInputFormatOpenAI is the OpenAI-standard image_url/video_url parts,
+	// required by OpenAI-compatible backends (litellm/vLLM) which reject `file`.
+	ImageInputFormatOpenAI = "openai"
+)
+
+// MediaPart builds the LLM input content part for a media file in the shape the
+// configured backend accepts. With ImageInputFormatOpenAI, images become
+// image_url and videos become video_url (litellm/vLLM); every other format, and
+// every non-image/-video MIME (pdf, audio, …), uses OpenRouter's `file` part.
+//
+// dataURL is the full "data:<mime>;base64,<...>" string.
+//
+// 🔴 This is the single chokepoint for encoding visual media for an LLM call.
+// All call sites must route image/video parts through here — see the guard test
+// in media_part_guard_test.go. A site that hand-builds FilePart for an image
+// silently 400s on the OpenAI-compatible contour (class of bug: response/request
+// shape, see CLAUDE.md).
+func MediaPart(format, mimeType, fileName, dataURL string) interface{} {
+	if format == ImageInputFormatOpenAI {
+		switch {
+		case strings.HasPrefix(mimeType, "image/"):
+			return ImageURLPart{Type: "image_url", ImageURL: ImageURLValue{URL: dataURL}}
+		case strings.HasPrefix(mimeType, "video/"):
+			return VideoURLPart{Type: "video_url", VideoURL: ImageURLValue{URL: dataURL}}
+		}
+	}
+	return FilePart{Type: "file", File: File{FileName: fileName, FileData: dataURL}}
+}
+
 type ToolFunction struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`

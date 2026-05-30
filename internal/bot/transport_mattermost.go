@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/mattermost"
 	"github.com/runixer/laplaced/internal/telegram"
 )
@@ -166,7 +167,60 @@ func (b *Bot) StartMattermostIngestion(client *mattermost.Client) {
 			b.logger.Debug("mm ingestion: post filtered out", "post_id", ev.Post.ID, "sender_id", ev.Post.UserID)
 			continue
 		}
-		b.HandleIncoming(b.incomingFromMattermost(ev))
+		im := b.incomingFromMattermost(ev)
+		im.Files = b.extractMattermostFiles(client, ev.Post)
+		b.HandleIncoming(im)
+	}
+}
+
+// extractMattermostFiles maps a post's image/video attachments to neutral
+// IncomingFiles whose Fetch lazily downloads the bytes via the MM client. It
+// prefers the FileInfo embedded in the post metadata (no extra round-trip) and
+// falls back to GET /files/{id}/info when metadata is absent. Non-image/-video
+// attachments are skipped (voice/PDF are off on this contour).
+func (b *Bot) extractMattermostFiles(client *mattermost.Client, post mattermost.Post) []files.IncomingFile {
+	infos := post.Metadata.Files
+	if len(infos) == 0 {
+		for _, id := range post.FileIDs {
+			fi, err := client.GetFileInfo(context.Background(), id)
+			if err != nil {
+				b.logger.Warn("failed to fetch mm file info", "file_id", id, "error", err)
+				continue
+			}
+			infos = append(infos, *fi)
+		}
+	}
+
+	var out []files.IncomingFile
+	for _, fi := range infos {
+		kind, ok := mmFileKind(fi.MimeType)
+		if !ok {
+			b.logger.Info("skipping unsupported mm attachment", "file_id", fi.ID, "name", fi.Name, "mime", fi.MimeType)
+			continue
+		}
+		id := fi.ID
+		out = append(out, files.IncomingFile{
+			Kind:     kind,
+			SourceID: id,
+			FileName: fi.Name,
+			MIME:     fi.MimeType,
+			Size:     fi.Size,
+			Fetch:    func(ctx context.Context) ([]byte, error) { return client.GetFile(ctx, id) },
+		})
+	}
+	return out
+}
+
+// mmFileKind maps a MIME type to the neutral FileType the pipeline understands.
+// v0.10 inbound scope is visual media (image/video); other kinds are skipped.
+func mmFileKind(mime string) (files.FileType, bool) {
+	switch {
+	case strings.HasPrefix(mime, "image/"):
+		return files.FileTypeImage, true
+	case strings.HasPrefix(mime, "video/"):
+		return files.FileTypeVideo, true
+	default:
+		return "", false
 	}
 }
 

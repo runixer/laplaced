@@ -55,13 +55,31 @@ type User struct {
 
 // Post is the subset of a Mattermost post we read/write.
 type Post struct {
+	ID        string       `json:"id"`
+	UserID    string       `json:"user_id"`
+	ChannelID string       `json:"channel_id"`
+	RootID    string       `json:"root_id"`
+	Message   string       `json:"message"`
+	Type      string       `json:"type"` // "" for user posts; non-empty for system posts
+	CreateAt  int64        `json:"create_at"`
+	FileIDs   []string     `json:"file_ids,omitempty"` // attached file ids
+	Metadata  PostMetadata `json:"metadata,omitempty"` // carries embedded FileInfo for attachments
+}
+
+// PostMetadata carries enriched post data; we only read attached file info.
+type PostMetadata struct {
+	Files []FileInfo `json:"files,omitempty"`
+}
+
+// FileInfo is the subset of a Mattermost FileInfo we use for inbound attachments.
+type FileInfo struct {
 	ID        string `json:"id"`
-	UserID    string `json:"user_id"`
-	ChannelID string `json:"channel_id"`
-	RootID    string `json:"root_id"`
-	Message   string `json:"message"`
-	Type      string `json:"type"` // "" for user posts; non-empty for system posts
-	CreateAt  int64  `json:"create_at"`
+	Name      string `json:"name"`
+	Extension string `json:"extension"`
+	Size      int64  `json:"size"`
+	MimeType  string `json:"mime_type"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
 }
 
 // createPostReq is the body for POST /posts. idempotency_key and peer are Time
@@ -204,6 +222,34 @@ func (c *Client) SetReaction(ctx context.Context, postID, emojiName string) erro
 func (c *Client) SendTyping(ctx context.Context, channelID string) error {
 	body := map[string]string{"channel_id": channelID}
 	return c.do(ctx, http.MethodPost, "/users/"+c.botID+"/typing", body, nil)
+}
+
+// GetFileInfo fetches metadata for an attached file (name, mime, size, …).
+func (c *Client) GetFileInfo(ctx context.Context, fileID string) (*FileInfo, error) {
+	var fi FileInfo
+	if err := c.do(ctx, http.MethodGet, "/files/"+fileID+"/info", nil, &fi); err != nil {
+		return nil, err
+	}
+	return &fi, nil
+}
+
+// GetFile downloads the raw bytes of an attached file.
+func (c *Client) GetFile(ctx context.Context, fileID string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/files/"+fileID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.cfg.BotToken)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request to /files/%s failed: %w", fileID, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("mattermost get file %s: status %d: %s", fileID, resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	return io.ReadAll(resp.Body)
 }
 
 // do performs a JSON request against the API, decoding the response into out
