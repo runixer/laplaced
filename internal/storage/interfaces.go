@@ -61,6 +61,11 @@ type UserRepository interface {
 type ScopeRepository interface {
 	GetScope(transport, nativeID string) (*Scope, error)
 	ResolveScope(transport, scopeType, nativeID string) (int64, error)
+	// IsChannelScope reports whether the internal scope id is a multi-participant
+	// channel (scope_type='channel'). Background memory loops have only the int64
+	// user_id and use this to gate channel-aware behaviour. Absence of a row means
+	// a DM (Telegram passthrough / Mattermost DM), so it returns false.
+	IsChannelScope(internalID int64) (bool, error)
 }
 
 // TopicRepository handles topic operations.

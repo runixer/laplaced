@@ -41,3 +41,28 @@ func TestScopes_ResolveAndGet(t *testing.T) {
 	assert.Equal(t, "u26charstring", sc.NativeID)
 	assert.Equal(t, id1, sc.InternalID)
 }
+
+func TestScopes_IsChannelScope(t *testing.T) {
+	store, cleanup := setupTestDB(t)
+	defer cleanup()
+	require.NoError(t, store.Init())
+
+	userID, err := store.ResolveScope("time", "user", "u26charstring")
+	require.NoError(t, err)
+	channelID, err := store.ResolveScope("time", "channel", "chan26char")
+	require.NoError(t, err)
+
+	// Channel scope reports true; user scope and an unknown id report false.
+	isCh, err := store.IsChannelScope(channelID)
+	require.NoError(t, err)
+	assert.True(t, isCh, "channel scope should report channel")
+
+	isCh, err = store.IsChannelScope(userID)
+	require.NoError(t, err)
+	assert.False(t, isCh, "user scope should not report channel")
+
+	// Absent row (e.g. Telegram passthrough id) defaults to DM (false).
+	isCh, err = store.IsChannelScope(999999)
+	require.NoError(t, err)
+	assert.False(t, isCh, "unknown scope id should default to DM")
+}

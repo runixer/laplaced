@@ -314,7 +314,7 @@ func (b *Bot) ensureTransport() {
 // converge here.
 func (b *Bot) HandleIncoming(im IncomingMessage) {
 	b.ensureTransport()
-	scopeID, err := resolveScopeID(b.scopeRepo, b.transport.Kind(), scopeNativeID(im))
+	scopeID, err := resolveScopeID(b.scopeRepo, b.transport.Kind(), im)
 	if err != nil {
 		b.logger.Error("failed to resolve scope", "error", err, "transport", b.transport.Kind())
 		return

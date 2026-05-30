@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -293,6 +294,11 @@ type SQLiteStore struct {
 	db     *sql.DB
 	logger *slog.Logger
 	dbPath string // Original path without query params, for file size check
+
+	// scopeTypeCache memoizes IsChannelScope lookups. A scope's type is fixed at
+	// mint time and never changes, so entries are valid for the process lifetime.
+	// Keyed by internal scope id, value is bool (true=channel).
+	scopeTypeCache sync.Map
 }
 
 func NewSQLiteStore(logger *slog.Logger, path string) (*SQLiteStore, error) {

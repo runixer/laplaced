@@ -654,6 +654,11 @@ func (m *MockStorage) ResolveScope(transport, scopeType, nativeID string) (int64
 	return args.Get(0).(int64), args.Error(1)
 }
 
+func (m *MockStorage) IsChannelScope(internalID int64) (bool, error) {
+	args := m.Called(internalID)
+	return args.Bool(0), args.Error(1)
+}
+
 func (m *MockStorage) FindPersonByUsername(userID int64, username string) (*storage.Person, error) {
 	args := m.Called(userID, username)
 	if args.Get(0) == nil {
