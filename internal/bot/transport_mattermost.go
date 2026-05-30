@@ -235,12 +235,13 @@ func (b *Bot) incomingFromMattermost(client *mattermost.Client, ev mattermost.Po
 		Prefix:         fmt.Sprintf("[%s (%s)]", display, mmFormatTime(ev.Post.CreateAt)),
 		ThreadRoot:     threadRoot,
 		IsDirect:       ev.ChannelType == "D",
-		// Mention drives channel reply-gating (#4). Behaviourally inert until the
-		// gate consumes it: DMs always act, and channels currently still act on
-		// every allowlisted post until the store/respond split lands.
-		Mention: slices.Contains(ev.Mentions, client.BotID()),
-		SentAt:  sentAt,
-		Files:   nil,
+		// Channel reply-gating: the bot replies when @mentioned or when the post
+		// replies to (quotes) one of the bot's own messages. A plain post in a
+		// thread the bot merely spoke in does NOT trigger a reply.
+		Mention:    slices.Contains(ev.Mentions, client.BotID()),
+		ReplyToBot: ev.Post.QuotedAuthorID() == client.BotID(),
+		SentAt:     sentAt,
+		Files:      nil,
 	}
 }
 

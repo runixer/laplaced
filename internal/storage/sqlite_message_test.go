@@ -10,57 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestBotParticipatedInThread(t *testing.T) {
-	store, cleanup := setupTestDB(t)
-	defer cleanup()
-	_ = store.Init()
-
-	scope := int64(2)
-	conv := "chanA"
-	root := "rootX"
-	ptr := func(s string) *string { return &s }
-
-	// Bot replied in thread rootX of chanA.
-	_ = store.AddMessageToHistory(scope, Message{
-		Role: "assistant", Content: "hi", ConversationID: ptr(conv), ThreadRoot: ptr(root),
-	})
-
-	t.Run("true for a thread the bot spoke in", func(t *testing.T) {
-		ok, err := store.BotParticipatedInThread(scope, conv, root)
-		assert.NoError(t, err)
-		assert.True(t, ok)
-	})
-	t.Run("false for a different thread", func(t *testing.T) {
-		ok, err := store.BotParticipatedInThread(scope, conv, "otherRoot")
-		assert.NoError(t, err)
-		assert.False(t, ok)
-	})
-	t.Run("false for a different conversation", func(t *testing.T) {
-		ok, err := store.BotParticipatedInThread(scope, "chanB", root)
-		assert.NoError(t, err)
-		assert.False(t, ok)
-	})
-	t.Run("false for a different scope (isolation)", func(t *testing.T) {
-		ok, err := store.BotParticipatedInThread(int64(99), conv, root)
-		assert.NoError(t, err)
-		assert.False(t, ok)
-	})
-	t.Run("false when a user (not bot) posted in the thread", func(t *testing.T) {
-		_ = store.AddMessageToHistory(scope, Message{
-			Role: "user", Content: "q", ConversationID: ptr(conv), ThreadRoot: ptr("userOnlyThread"),
-		})
-		ok, err := store.BotParticipatedInThread(scope, conv, "userOnlyThread")
-		assert.NoError(t, err)
-		assert.False(t, ok, "only assistant participation counts")
-	})
-	t.Run("false for empty inputs", func(t *testing.T) {
-		ok, _ := store.BotParticipatedInThread(scope, "", root)
-		assert.False(t, ok)
-		ok, _ = store.BotParticipatedInThread(scope, conv, "")
-		assert.False(t, ok)
-	})
-}
-
 func TestHistory(t *testing.T) {
 	store, cleanup := setupTestDB(t)
 	defer cleanup()

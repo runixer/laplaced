@@ -227,6 +227,27 @@ func TestIncomingFromMattermost_Mapping(t *testing.T) {
 		}
 	})
 
+	t.Run("ReplyToBot set when the post quotes a bot message", func(t *testing.T) {
+		quotesBot := mattermost.Post{ID: "q1", UserID: "user2", ChannelID: "chan2", Message: "what about this?"}
+		quotesBot.Metadata.Embeds = []mattermost.Embed{{Type: "quote"}}
+		quotesBot.Metadata.Embeds[0].Data.Post.UserID = "botid"
+		if im := b.incomingFromMattermost(client, mattermost.PostedEvent{Post: quotesBot, ChannelType: "O"}); !im.ReplyToBot {
+			t.Error("ReplyToBot should be true when the quoted post is the bot's")
+		}
+
+		quotesUser := mattermost.Post{ID: "q2", UserID: "user2", ChannelID: "chan2", Message: "@user1 see this"}
+		quotesUser.Metadata.Embeds = []mattermost.Embed{{Type: "quote"}}
+		quotesUser.Metadata.Embeds[0].Data.Post.UserID = "user1"
+		if im := b.incomingFromMattermost(client, mattermost.PostedEvent{Post: quotesUser, ChannelType: "O"}); im.ReplyToBot {
+			t.Error("ReplyToBot should be false when the quoted post is another user's")
+		}
+
+		plain := mattermost.Post{ID: "q3", UserID: "user2", ChannelID: "chan2", Message: "just chatting"}
+		if im := b.incomingFromMattermost(client, mattermost.PostedEvent{Post: plain, ChannelType: "O"}); im.ReplyToBot {
+			t.Error("ReplyToBot should be false for a non-quoting post")
+		}
+	})
+
 	t.Run("Mention set when bot id is among mentions", func(t *testing.T) {
 		mentioned := mattermost.PostedEvent{
 			Post:        mattermost.Post{ID: "p4", UserID: "user2", ChannelID: "chan2", Message: "@laplaced ?"},

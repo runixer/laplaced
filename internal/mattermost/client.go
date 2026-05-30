@@ -75,9 +75,35 @@ type Post struct {
 	Metadata  PostMetadata `json:"metadata,omitempty"` // carries embedded FileInfo for attachments
 }
 
-// PostMetadata carries enriched post data; we only read attached file info.
+// PostMetadata carries enriched post data: attached file info and embeds. A
+// reply that quotes another message carries a "quote" embed whose nested post
+// identifies the quoted author — the signal for reply-to-bot gating (verified
+// present in the live WS event, not just REST).
 type PostMetadata struct {
-	Files []FileInfo `json:"files,omitempty"`
+	Files  []FileInfo `json:"files,omitempty"`
+	Embeds []Embed    `json:"embeds,omitempty"`
+}
+
+// Embed is a post embed. For type=="quote", Data.Post is the quoted message.
+type Embed struct {
+	Type string `json:"type"`
+	Data struct {
+		PostID string `json:"post_id"`
+		Post   struct {
+			UserID string `json:"user_id"`
+		} `json:"post"`
+	} `json:"data"`
+}
+
+// QuotedAuthorID returns the author id of the first quoted post (reply-to), or
+// "" if the post does not quote/reply to another message.
+func (p Post) QuotedAuthorID() string {
+	for _, e := range p.Metadata.Embeds {
+		if e.Type == "quote" && e.Data.Post.UserID != "" {
+			return e.Data.Post.UserID
+		}
+	}
+	return ""
 }
 
 // FileInfo is the subset of a Mattermost FileInfo we use for inbound attachments.

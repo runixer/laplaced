@@ -333,44 +333,27 @@ func (b *Bot) HandleIncoming(im IncomingMessage) {
 	// stored so the conversation is available as context, but the bot only
 	// generates a reply when addressed. DMs — and Telegram, which is always
 	// IsDirect — always reply, so the home/DM path is unchanged (it never
-	// passive-stores). The thread-participation lookup is short-circuited: it
-	// only runs for a channel post that is neither a DM nor an allowlisted
-	// mention.
-	allowed := b.transport.IsAllowed(im.SenderID)
-	if shouldReply(im, allowed) || (allowed && b.botParticipatesInThread(scopeID, im)) {
+	// passive-stores).
+	if shouldReply(im, b.transport.IsAllowed(im.SenderID)) {
 		b.messageGrouper.AddMessage(scopeID, im)
 		return
 	}
 	b.storePassiveChannelMessage(scopeID, im)
 }
 
-// shouldReply decides whether an incoming message warrants a generated reply by
-// mention/DM alone. DMs always do (the per-transport allowlist is enforced
-// before ingestion reaches here); in a channel the bot must be mentioned by an
-// allowlisted sender. Thread-reply continuation is handled separately by the
-// caller (botParticipatesInThread). Channel posts that warrant no reply are
-// still stored passively.
+// shouldReply decides whether an incoming message warrants a generated reply.
+// DMs always do (the per-transport allowlist is enforced before ingestion
+// reaches here). In a channel the bot replies only when addressed by an
+// allowlisted sender: an @mention, or a reply that quotes one of the bot's own
+// messages. A plain post in a thread the bot merely spoke in does NOT qualify —
+// Mattermost threads are flat, so "reply to the bot" is detected via the post's
+// quote (ReplyToBot), not by thread membership. Other channel posts are stored
+// passively for context.
 func shouldReply(im IncomingMessage, senderAllowed bool) bool {
 	if im.IsDirect {
 		return true
 	}
-	return im.Mention && senderAllowed
-}
-
-// botParticipatesInThread reports whether im is a channel reply into a thread
-// the bot already spoke in — treated as addressed to the bot without an explicit
-// mention. Returns false for DMs, top-level/threadless posts, and on lookup
-// error (fail safe: stay silent rather than reply).
-func (b *Bot) botParticipatesInThread(scopeID int64, im IncomingMessage) bool {
-	if im.IsDirect || im.ThreadRoot == "" {
-		return false
-	}
-	ok, err := b.msgRepo.BotParticipatedInThread(scopeID, im.ConversationID, im.ThreadRoot)
-	if err != nil {
-		b.logger.Warn("thread-participation lookup failed", "scope_id", scopeID, "error", err)
-		return false
-	}
-	return ok
+	return senderAllowed && (im.Mention || im.ReplyToBot)
 }
 
 // storePassiveChannelMessage records a channel post the bot is not replying to,

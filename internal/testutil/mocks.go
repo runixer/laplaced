@@ -123,11 +123,6 @@ func (m *MockStorage) AddMessageToHistory(userID int64, message storage.Message)
 	return args.Error(0)
 }
 
-func (m *MockStorage) BotParticipatedInThread(userID int64, conversationID, threadRoot string) (bool, error) {
-	args := m.Called(userID, conversationID, threadRoot)
-	return args.Bool(0), args.Error(1)
-}
-
 func (m *MockStorage) ImportMessage(userID int64, message storage.Message) error {
 	args := m.Called(userID, message)
 	return args.Error(0)

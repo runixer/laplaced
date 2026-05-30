@@ -29,9 +29,10 @@ type Message struct {
 	ConversationID *string // transport-native chat/channel id
 
 	// ThreadRoot is the transport thread this message belongs to (migration
-	// 013). Set on channel messages and on the bot's channel replies so a later
-	// reply into the same thread can be recognised as addressed to the bot. NULL
-	// in DMs.
+	// 013), recorded on channel messages and the bot's channel replies. Reply
+	// gating uses the post's quote (ReplyToBot), not thread membership; this
+	// column is kept as thread-membership metadata for thread-scoped context.
+	// NULL in DMs.
 	ThreadRoot *string
 }
 
