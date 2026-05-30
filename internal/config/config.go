@@ -247,6 +247,18 @@ type ImageGeneratorConfig struct {
 	// recompresses photos to ~1280 px on long side). Default 2 MB covers
 	// 2K/4K outputs; set to 0 to always use sendPhoto.
 	DocumentThresholdBytes int `yaml:"document_threshold_bytes" env:"LAPLACED_IMAGE_GENERATOR_DOCUMENT_THRESHOLD_BYTES"`
+	// MaxConcurrent bounds how many generate_image tool calls from a single
+	// assistant turn run in parallel (e.g. "draw three pictures"). Other tools
+	// stay sequential. Defaults to 4.
+	MaxConcurrent int `yaml:"max_concurrent" env:"LAPLACED_IMAGE_GENERATOR_MAX_CONCURRENT"`
+}
+
+// GetMaxConcurrent returns the parallel-generation cap, defaulting to 4.
+func (c *ImageGeneratorConfig) GetMaxConcurrent() int {
+	if c.MaxConcurrent <= 0 {
+		return 4
+	}
+	return c.MaxConcurrent
 }
 
 // GetTimeout returns the per-call timeout. Defaults to 90s.

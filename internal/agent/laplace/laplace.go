@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -443,34 +444,72 @@ func (l *Laplace) executeToolCalls(
 	onToolStart func(toolName, arguments string),
 	logger *slog.Logger,
 ) ([]openrouter.Message, []int64) {
-	var toolMessages []openrouter.Message
-	var artifactIDs []int64
+	n := len(toolCalls)
+	if n == 0 {
+		return nil, nil
+	}
 
-	for _, toolCall := range toolCalls {
-		if onToolStart != nil {
-			onToolStart(toolCall.Function.Name, toolCall.Function.Arguments)
-		}
+	// Each tool call's outcome is stored by its declared index so the assembled
+	// result preserves order regardless of execution order.
+	type execResult struct {
+		msg         openrouter.Message
+		artifactIDs []int64
+	}
+	results := make([]execResult, n)
 
-		result, err := handler.ExecuteToolCall(ctx, tcc, toolCall.Function.Name, toolCall.Function.Arguments)
+	run := func(i int, tc openrouter.ToolCall) {
+		result, err := handler.ExecuteToolCall(ctx, tcc, tc.Function.Name, tc.Function.Arguments)
 		if err != nil {
-			logger.Error("tool execution failed", "error", err, "tool", toolCall.Function.Name)
-			toolMessages = append(toolMessages, openrouter.Message{
+			logger.Error("tool execution failed", "error", err, "tool", tc.Function.Name)
+			results[i] = execResult{msg: openrouter.Message{
 				Role:       "tool",
 				Content:    fmt.Sprintf("Tool execution failed: %v", err),
-				ToolCallID: toolCall.ID,
-			})
-			continue
+				ToolCallID: tc.ID,
+			}}
+			return
 		}
-		toolMessages = append(toolMessages, openrouter.Message{
-			Role:       "tool",
-			Content:    result.Content,
-			ToolCallID: toolCall.ID,
-		})
-		if len(result.GeneratedArtifactIDs) > 0 {
-			artifactIDs = append(artifactIDs, result.GeneratedArtifactIDs...)
+		results[i] = execResult{
+			msg:         openrouter.Message{Role: "tool", Content: result.Content, ToolCallID: tc.ID},
+			artifactIDs: result.GeneratedArtifactIDs,
 		}
 	}
 
+	// generate_image calls are independent (each writes its own file + artifact
+	// row) and slow (minutes each), so a multi-image turn runs them concurrently,
+	// bounded by max_concurrent. Every other tool may mutate shared state
+	// (memory/people) and runs inline in declared order. onToolStart fires up
+	// front for each call so the UI reflects every dispatched tool.
+	var wg sync.WaitGroup
+	imageConcurrency := 4
+	if l.cfg != nil {
+		imageConcurrency = l.cfg.Agents.ImageGenerator.GetMaxConcurrent()
+	}
+	sem := make(chan struct{}, imageConcurrency)
+
+	for i, tc := range toolCalls {
+		if onToolStart != nil {
+			onToolStart(tc.Function.Name, tc.Function.Arguments)
+		}
+		if tc.Function.Name == "generate_image" {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(i int, tc openrouter.ToolCall) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				run(i, tc)
+			}(i, tc)
+			continue
+		}
+		run(i, tc)
+	}
+	wg.Wait()
+
+	toolMessages := make([]openrouter.Message, 0, n)
+	var artifactIDs []int64
+	for i := range results {
+		toolMessages = append(toolMessages, results[i].msg)
+		artifactIDs = append(artifactIDs, results[i].artifactIDs...)
+	}
 	return toolMessages, artifactIDs
 }
 

@@ -190,6 +190,59 @@ func TestExecuteToolCalls(t *testing.T) {
 	}
 }
 
+// imgToolCall builds a generate_image tool call with the given id and prompt args.
+func imgToolCall(id, args string) openrouter.ToolCall {
+	return openrouter.ToolCall{
+		ID:   id,
+		Type: "function",
+		Function: struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		}{Name: "generate_image", Arguments: args},
+	}
+}
+
+// TestExecuteToolCalls_ParallelImageGen verifies that multiple generate_image
+// calls in one turn run concurrently yet the assembled messages and artifact
+// IDs keep the declared order. The first call sleeps longest so it finishes
+// last — if ordering followed completion (not index), the assertions would fail.
+func TestExecuteToolCalls_ParallelImageGen(t *testing.T) {
+	handler := new(mockToolHandler)
+	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "generate_image", `{"prompt":"cat"}`).
+		Run(func(mock.Arguments) { time.Sleep(60 * time.Millisecond) }).
+		Return(&ToolResult{Content: "img cat", GeneratedArtifactIDs: []int64{11}}, nil)
+	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "generate_image", `{"prompt":"dog"}`).
+		Run(func(mock.Arguments) { time.Sleep(20 * time.Millisecond) }).
+		Return(&ToolResult{Content: "img dog", GeneratedArtifactIDs: []int64{22}}, nil)
+	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "generate_image", `{"prompt":"bird"}`).
+		Return(&ToolResult{Content: "img bird", GeneratedArtifactIDs: []int64{33}}, nil)
+
+	agent := &Laplace{logger: testutil.TestLogger()}
+	toolCalls := []openrouter.ToolCall{
+		imgToolCall("c1", `{"prompt":"cat"}`),
+		imgToolCall("c2", `{"prompt":"dog"}`),
+		imgToolCall("c3", `{"prompt":"bird"}`),
+	}
+
+	start := time.Now()
+	msgs, artifactIDs := agent.executeToolCalls(
+		context.Background(), handler, ToolCallContext{}, toolCalls, nil, agent.logger,
+	)
+	elapsed := time.Since(start)
+
+	require.Len(t, msgs, 3)
+	assert.Equal(t, "c1", msgs[0].ToolCallID)
+	assert.Equal(t, "img cat", msgs[0].Content)
+	assert.Equal(t, "c2", msgs[1].ToolCallID)
+	assert.Equal(t, "img dog", msgs[1].Content)
+	assert.Equal(t, "c3", msgs[2].ToolCallID)
+	assert.Equal(t, "img bird", msgs[2].Content)
+	assert.Equal(t, []int64{11, 22, 33}, artifactIDs)
+	// Concurrent: wall time tracks the slowest call (~60ms), not the sum (~80ms).
+	assert.Less(t, elapsed, 80*time.Millisecond, "generate_image calls should run in parallel")
+	handler.AssertExpectations(t)
+}
+
 // TestExecute_HappyPath tests successful execution with a simple text response.
 func TestExecute_HappyPath(t *testing.T) {
 	cfg, translator, agent, mockStore, mockORClient, handler := setupExecuteTest(t)

@@ -192,6 +192,7 @@ agents:
     max_output_images: 4           # Max images shown to user per tool call
     max_input_image_bytes: 20971520 # 20MB per input image
     document_threshold_bytes: 2097152 # 2MB: larger outputs sent as Document (no Telegram recompression) instead of Photo
+    max_concurrent: 4              # Parallel generate_image calls per turn ("draw three pictures"); other tools stay sequential
 
 # Embedding Configuration
 # v0.7.0: migrated to gemini-embedding-2-preview at 1536 dim.
