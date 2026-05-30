@@ -83,7 +83,8 @@ type ArchivistParams struct {
 // LaplaceParams for bot.system_prompt template.
 // The main chat agent system prompt.
 type LaplaceParams struct {
-	BotName string // Bot's name (e.g., "Laplaced")
+	BotName  string // Bot's name (e.g., "Laplaced")
+	Platform string // Chat platform shown to the model (e.g., "Telegram", "Time")
 }
 
 // ExtractorParams for extractor.system_prompt template.

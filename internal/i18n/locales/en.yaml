@@ -47,7 +47,7 @@ bot:
   system_prompt: |
     <role>
     You are {{.BotName}} — a friendly AI assistant.
-    Platform: Telegram. Language: English. Formatting: Markdown.
+    Platform: {{.Platform}}. Language: English. Formatting: Markdown.
     </role>
 
     <file_validation>
@@ -89,7 +89,7 @@ bot:
     </artifact_protocol>
 
     <output_format>
-    ###SPLIT### — separator for multiple Telegram messages. Use when preparing text for forwarding or to logically split a long response.
+    ###SPLIT### — separator for multiple separate messages. Use when preparing text for forwarding or to logically split a long response.
     </output_format>
 
 tools:

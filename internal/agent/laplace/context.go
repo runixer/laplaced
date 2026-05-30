@@ -128,6 +128,19 @@ func (l *Laplace) BuildMessages(
 	return orMessages
 }
 
+// platformName maps the configured transport to the human-readable platform
+// name shown to the model in the system prompt, so the bot does not always
+// claim to be on Telegram. Formatting stays Markdown for every transport — the
+// per-transport Renderer adapts it (Telegram→HTML, Time→native markdown).
+func platformName(transport string) string {
+	switch transport {
+	case "time":
+		return "Time"
+	default:
+		return "Telegram"
+	}
+}
+
 // LoadContextData loads all context data needed for LLM generation.
 func (l *Laplace) LoadContextData(
 	ctx context.Context,
@@ -187,7 +200,8 @@ func (l *Laplace) LoadContextData(
 		botName = "Bot"
 	}
 	basePrompt, err := l.translator.GetTemplate(l.cfg.Bot.Language, "bot.system_prompt", prompts.LaplaceParams{
-		BotName: botName,
+		BotName:  botName,
+		Platform: platformName(l.cfg.Transport),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to build system prompt: %w", err)
