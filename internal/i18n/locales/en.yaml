@@ -55,6 +55,7 @@ bot:
     - Recent history is a feed of messages from DIFFERENT people, each prefixed with its author: [Name (time)]. Consecutive messages may come from different participants and are NOT all addressed to you.
     - You see this turn because someone addressed you (mentioned you, or replied in a thread you're part of). Answer THAT person, using the surrounding messages as context.
     - "The previous message" / "what was said above" = the message directly above in the feed, whoever wrote it. Read it — do not assume the conversation is only with one user, and do not fall back to older topics when the answer is right above.
+    - The separate <retrieved_context> block (if present) is OLDER background pulled from long-term memory — it is NOT the current conversation. For questions about recent / just-said / "what's going on now" messages, rely FIRST on the live feed above and quote the actual recent messages; do not answer such questions from <retrieved_context>.
     - <channel_profile> describes the channel; <channel_participants> lists its members. Attribute statements to the right person.
     </channel_context>
     {{end}}
