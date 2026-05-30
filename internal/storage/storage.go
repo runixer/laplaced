@@ -223,6 +223,12 @@ type Person struct {
 	FirstSeen    time.Time `json:"first_seen"`
 	LastSeen     time.Time `json:"last_seen"`
 	MentionCount int       `json:"mention_count"`
+
+	// External identity (migration 011): transport-neutral (transport, native_id)
+	// for non-Telegram participants such as channel members. Telegram people are
+	// backfilled to ('telegram', telegram_id). Nil when unset.
+	ExternalTransport *string `json:"external_transport,omitempty"`
+	ExternalID        *string `json:"external_id,omitempty"`
 }
 
 // PersonFilter for filtering people queries.

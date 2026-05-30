@@ -394,6 +394,50 @@ func (b *Bot) storePassiveChannelMessage(scopeID int64, im IncomingMessage) {
 	if err := b.msgRepo.AddMessageToHistory(scopeID, msg); err != nil {
 		b.logger.Error("failed to store passive channel message", "scope_id", scopeID, "error", err)
 	}
+	b.upsertChannelParticipant(scopeID, im)
+}
+
+// upsertChannelParticipant records the sender of a channel message as a Person
+// within the channel scope, keyed by the transport-neutral external id
+// (transport, sender id). Participants accrue into the People graph and feed
+// context/@mention resolution. No-op for DMs (the scope is the person) and when
+// the people repo is absent. Failures are logged, never fatal.
+func (b *Bot) upsertChannelParticipant(scopeID int64, im IncomingMessage) {
+	if b.peopleRepo == nil || im.IsDirect || im.SenderID == "" {
+		return
+	}
+	kind := b.transport.Kind()
+	existing, err := b.peopleRepo.FindPersonByExternalID(scopeID, kind, im.SenderID)
+	if err != nil {
+		b.logger.Warn("channel participant lookup failed", "scope_id", scopeID, "error", err)
+		return
+	}
+	now := time.Now()
+	if existing != nil {
+		existing.LastSeen = now
+		existing.MentionCount++
+		if err := b.peopleRepo.UpdatePerson(*existing); err != nil {
+			b.logger.Warn("failed to touch channel participant", "person_id", existing.ID, "error", err)
+		}
+		return
+	}
+	name := im.SenderDisplay
+	if name == "" {
+		name = im.SenderID
+	}
+	transport, externalID := kind, im.SenderID
+	if _, err := b.peopleRepo.AddPerson(storage.Person{
+		UserID:            scopeID,
+		DisplayName:       name,
+		Circle:            "Other",
+		ExternalTransport: &transport,
+		ExternalID:        &externalID,
+		FirstSeen:         now,
+		LastSeen:          now,
+		MentionCount:      1,
+	}); err != nil {
+		b.logger.Warn("failed to create channel participant", "scope_id", scopeID, "external_id", im.SenderID, "error", err)
+	}
 }
 
 // SetTransport swaps the output/identity transport (used to install the

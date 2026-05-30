@@ -103,3 +103,40 @@ func TestBotParticipatesInThread(t *testing.T) {
 		mockStore.AssertExpectations(t)
 	})
 }
+
+func TestUpsertChannelParticipant(t *testing.T) {
+	t.Run("DM is a no-op", func(t *testing.T) {
+		mockStore := new(testutil.MockStorage)
+		b := &Bot{logger: testutil.TestLogger(), peopleRepo: mockStore, transport: &stubTransport{kind: "time"}}
+		b.upsertChannelParticipant(1, IncomingMessage{IsDirect: true, SenderID: "u1"})
+		mockStore.AssertNotCalled(t, "FindPersonByExternalID")
+	})
+
+	t.Run("creates a new participant with external id", func(t *testing.T) {
+		mockStore := new(testutil.MockStorage)
+		b := &Bot{logger: testutil.TestLogger(), peopleRepo: mockStore, transport: &stubTransport{kind: "time"}}
+		im := IncomingMessage{IsDirect: false, SenderID: "u1", ConversationID: "chanA", SenderDisplay: "Alice (@alice)"}
+		mockStore.On("FindPersonByExternalID", int64(2), "time", "u1").Return(nil, nil)
+		mockStore.On("AddPerson", mock.MatchedBy(func(p storage.Person) bool {
+			return p.UserID == 2 && p.DisplayName == "Alice (@alice)" && p.Circle == "Other" &&
+				p.ExternalTransport != nil && *p.ExternalTransport == "time" &&
+				p.ExternalID != nil && *p.ExternalID == "u1"
+		})).Return(int64(5), nil)
+		b.upsertChannelParticipant(2, im)
+		mockStore.AssertExpectations(t)
+	})
+
+	t.Run("touches an existing participant", func(t *testing.T) {
+		mockStore := new(testutil.MockStorage)
+		b := &Bot{logger: testutil.TestLogger(), peopleRepo: mockStore, transport: &stubTransport{kind: "time"}}
+		im := IncomingMessage{IsDirect: false, SenderID: "u1", ConversationID: "chanA", SenderDisplay: "Alice"}
+		existing := &storage.Person{ID: 5, UserID: 2, DisplayName: "Alice", MentionCount: 3}
+		mockStore.On("FindPersonByExternalID", int64(2), "time", "u1").Return(existing, nil)
+		mockStore.On("UpdatePerson", mock.MatchedBy(func(p storage.Person) bool {
+			return p.ID == 5 && p.MentionCount == 4
+		})).Return(nil)
+		b.upsertChannelParticipant(2, im)
+		mockStore.AssertNotCalled(t, "AddPerson")
+		mockStore.AssertExpectations(t)
+	})
+}

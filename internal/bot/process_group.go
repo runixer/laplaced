@@ -225,6 +225,10 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	// v0.5.1: Extract people from forwarded messages (Telegram-only data)
 	b.extractForwardedPeople(ctx, userID, group.Messages, logger)
 
+	// Phase 6: in a channel, the mentioning sender is a participant — record them
+	// in the channel's People graph. No-op for DMs.
+	b.upsertChannelParticipant(userID, lastMsg)
+
 	convID := lastMsg.ConversationID
 	threadRoot := lastMsg.ThreadRoot
 
