@@ -114,7 +114,8 @@ type CreatePostReq struct {
 // channel type (D/O/P/G) the event carried alongside it.
 type PostedEvent struct {
 	Post        Post
-	ChannelType string // "D" (DM) | "O" (open) | "P" (private) | "G" (group)
+	ChannelType string   // "D" (DM) | "O" (open) | "P" (private) | "G" (group)
+	Mentions    []string // user ids mentioned in the post (nil/empty if none)
 }
 
 // clientConfig is the subset of GET /config/client we read.

@@ -24,10 +24,13 @@ type wsEnvelope struct {
 }
 
 // postedData is the data payload of a "posted" event. Per the MM canon, post is
-// a JSON *string* that must be re-parsed into a Post.
+// a JSON *string* that must be re-parsed into a Post; mentions is likewise a
+// JSON-encoded string holding an array of mentioned user ids (present only when
+// the post mentions someone — absent/empty otherwise).
 type postedData struct {
 	Post        string `json:"post"`
 	ChannelType string `json:"channel_type"`
+	Mentions    string `json:"mentions"`
 }
 
 // wsAction is a client→server WebSocket request frame (auth, presence, …).
@@ -154,7 +157,19 @@ func (c *Client) parsePosted(data json.RawMessage) (PostedEvent, bool) {
 		c.logger.Warn("failed to parse inner post json", "error", err)
 		return PostedEvent{}, false
 	}
-	return PostedEvent{Post: post, ChannelType: pd.ChannelType}, true
+	// mentions is a JSON-encoded string array of user ids (MM canon). It is the
+	// signal for channel reply-gating. The doc doesn't print posted.data fields
+	// verbatim, so log the raw value at debug to confirm the shape on the first
+	// live channel post; a shape mismatch fails safe (no mentions detected → the
+	// bot stays silent in channels rather than spamming).
+	var mentions []string
+	if pd.Mentions != "" {
+		if err := json.Unmarshal([]byte(pd.Mentions), &mentions); err != nil {
+			c.logger.Warn("failed to parse posted mentions", "raw", pd.Mentions, "error", err)
+		}
+	}
+	c.logger.Debug("parsed posted event", "channel_type", pd.ChannelType, "mentions_raw", pd.Mentions, "mentions_parsed", mentions)
+	return PostedEvent{Post: post, ChannelType: pd.ChannelType, Mentions: mentions}, true
 }
 
 // sleepCtx sleeps for d or until ctx is cancelled; returns false if cancelled.

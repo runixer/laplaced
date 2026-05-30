@@ -226,6 +226,26 @@ func TestIncomingFromMattermost_Mapping(t *testing.T) {
 			t.Errorf("SenderDisplay = %q, want raw id \"ghost\" on fetch failure", im.SenderDisplay)
 		}
 	})
+
+	t.Run("Mention set when bot id is among mentions", func(t *testing.T) {
+		mentioned := mattermost.PostedEvent{
+			Post:        mattermost.Post{ID: "p4", UserID: "user2", ChannelID: "chan2", Message: "@laplaced ?"},
+			ChannelType: "O",
+			Mentions:    []string{"someone", "botid"},
+		}
+		if im := b.incomingFromMattermost(client, mentioned); !im.Mention {
+			t.Error("Mention should be true when botid is in mentions")
+		}
+
+		notMentioned := mattermost.PostedEvent{
+			Post:        mattermost.Post{ID: "p5", UserID: "user2", ChannelID: "chan2", Message: "chatter"},
+			ChannelType: "O",
+			Mentions:    []string{"someone"},
+		}
+		if im := b.incomingFromMattermost(client, notMentioned); im.Mention {
+			t.Error("Mention should be false when botid is absent from mentions")
+		}
+	})
 }
 
 func TestMMShouldProcess(t *testing.T) {

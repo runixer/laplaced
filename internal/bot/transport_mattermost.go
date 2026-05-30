@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"slices"
 	"strings"
 	"time"
 
@@ -234,8 +235,12 @@ func (b *Bot) incomingFromMattermost(client *mattermost.Client, ev mattermost.Po
 		Prefix:         fmt.Sprintf("[%s (%s)]", display, mmFormatTime(ev.Post.CreateAt)),
 		ThreadRoot:     threadRoot,
 		IsDirect:       ev.ChannelType == "D",
-		SentAt:         sentAt,
-		Files:          nil,
+		// Mention drives channel reply-gating (#4). Behaviourally inert until the
+		// gate consumes it: DMs always act, and channels currently still act on
+		// every allowlisted post until the store/respond split lands.
+		Mention: slices.Contains(ev.Mentions, client.BotID()),
+		SentAt:  sentAt,
+		Files:   nil,
 	}
 }
 
