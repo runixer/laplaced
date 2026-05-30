@@ -20,6 +20,7 @@ import (
 	"net/textproto"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -43,16 +44,22 @@ type Client struct {
 	botID       string
 	maxPostSize int
 
+	userCache   map[string]*User // id -> profile; populated lazily by GetUser
+	userCacheMu sync.RWMutex
+
 	events chan PostedEvent
 }
 
 // Wire types (subset of the MM v4 schema we use).
 
-// User is the subset of /users/me we read.
+// User is the subset of /users/{id} we read (identity + display name).
 type User struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-	IsBot    bool   `json:"is_bot"`
+	ID        string `json:"id"`
+	Username  string `json:"username"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+	Nickname  string `json:"nickname"`
+	IsBot     bool   `json:"is_bot"`
 }
 
 // Post is the subset of a Mattermost post we read/write.
@@ -152,6 +159,7 @@ func NewClient(ctx context.Context, cfg Config, logger *slog.Logger) (*Client, e
 		baseURL:    server + "/api/v4",
 		wsURL:      wsURLFromServer(server),
 		logger:     logger.With("component", "mattermost"),
+		userCache:  make(map[string]*User),
 		events:     make(chan PostedEvent),
 	}
 
@@ -227,6 +235,27 @@ func (c *Client) SetReaction(ctx context.Context, postID, emojiName string) erro
 func (c *Client) SendTyping(ctx context.Context, channelID string) error {
 	body := map[string]string{"channel_id": channelID}
 	return c.do(ctx, http.MethodPost, "/users/"+c.botID+"/typing", body, nil)
+}
+
+// GetUser fetches a user's profile by id, caching the result — profiles change
+// rarely and the WS ingestion looks them up once per inbound post. Concurrency-
+// safe (the parallel tool path never calls this, but the cache is guarded anyway).
+func (c *Client) GetUser(ctx context.Context, userID string) (*User, error) {
+	c.userCacheMu.RLock()
+	cached, ok := c.userCache[userID]
+	c.userCacheMu.RUnlock()
+	if ok {
+		return cached, nil
+	}
+
+	var u User
+	if err := c.do(ctx, http.MethodGet, "/users/"+userID, nil, &u); err != nil {
+		return nil, err
+	}
+	c.userCacheMu.Lock()
+	c.userCache[userID] = &u
+	c.userCacheMu.Unlock()
+	return &u, nil
 }
 
 // GetFileInfo fetches metadata for an attached file (name, mime, size, …).

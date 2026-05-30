@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"strings"
+	"time"
 
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
@@ -208,21 +209,67 @@ func (r *MMRenderer) Render(text string) ([]string, error) {
 // incomingFromMattermost maps a parsed "posted" event into the neutral envelope.
 // DMs (channel_type "D") are IsDirect so the scope resolves to the sender; the
 // reply threads under the user's message (top-level posts thread on their own id).
-func (b *Bot) incomingFromMattermost(ev mattermost.PostedEvent) IncomingMessage {
+// It resolves the sender's display name (cached) so the model sees who it talks
+// to via Prefix, mirroring the Telegram "[Name (@handle) (time)]" format.
+func (b *Bot) incomingFromMattermost(client *mattermost.Client, ev mattermost.PostedEvent) IncomingMessage {
 	threadRoot := ev.Post.RootID
 	if threadRoot == "" {
 		threadRoot = ev.Post.ID
 	}
+
+	sentAt := time.UnixMilli(ev.Post.CreateAt)
+	display := ev.Post.UserID
+	if u, err := client.GetUser(context.Background(), ev.Post.UserID); err == nil {
+		display = mmFormatUser(u, ev.Post.UserID)
+	} else {
+		b.logger.Warn("failed to fetch mm user for prefix", "user_id", ev.Post.UserID, "error", err)
+	}
+
 	return IncomingMessage{
 		ConversationID: ev.Post.ChannelID,
 		SenderID:       ev.Post.UserID,
 		MessageID:      ev.Post.ID,
 		Text:           ev.Post.Message,
-		SenderDisplay:  ev.Post.UserID,
+		SenderDisplay:  display,
+		Prefix:         fmt.Sprintf("[%s (%s)]", display, mmFormatTime(ev.Post.CreateAt)),
 		ThreadRoot:     threadRoot,
 		IsDirect:       ev.ChannelType == "D",
+		SentAt:         sentAt,
 		Files:          nil,
 	}
+}
+
+// mmFormatUser renders a Mattermost user as "First Last (@username)", falling
+// back through nickname, @username, and finally the raw id — mirroring the
+// Telegram User.Format shape so both transports read identically to the model.
+func mmFormatUser(u *mattermost.User, fallbackID string) string {
+	if u == nil {
+		return fallbackID
+	}
+	name := strings.TrimSpace(u.FirstName + " " + u.LastName)
+	if name == "" {
+		name = strings.TrimSpace(u.Nickname)
+	}
+	if u.Username != "" {
+		if name != "" {
+			name = fmt.Sprintf("%s (@%s)", name, u.Username)
+		} else {
+			name = "@" + u.Username
+		}
+	}
+	if name == "" {
+		name = fallbackID
+	}
+	return name
+}
+
+// mmFormatTime formats a Mattermost epoch-millis timestamp like the Telegram
+// prefix does, mapping 0 to a neutral label.
+func mmFormatTime(createAtMillis int64) string {
+	if createAtMillis == 0 {
+		return "unknown time"
+	}
+	return time.UnixMilli(createAtMillis).Format("2006-01-02 15:04:05")
 }
 
 // StartMattermostIngestion consumes "posted" events from the client and feeds the
@@ -241,7 +288,7 @@ func (b *Bot) StartMattermostIngestion(client *mattermost.Client) {
 			b.logger.Debug("mm ingestion: post filtered out", "post_id", ev.Post.ID, "sender_id", ev.Post.UserID)
 			continue
 		}
-		im := b.incomingFromMattermost(ev)
+		im := b.incomingFromMattermost(client, ev)
 		im.Files = b.extractMattermostFiles(client, ev.Post)
 		b.HandleIncoming(im)
 	}
