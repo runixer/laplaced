@@ -328,7 +328,50 @@ func (b *Bot) HandleIncoming(im IncomingMessage) {
 			b.logger.Warn("failed to upsert scope user", "scope_id", scopeID, "error", err)
 		}
 	}
-	b.messageGrouper.AddMessage(scopeID, im)
+
+	// Channel scopes (Time O/P/G) listen passively: every participant's post is
+	// stored so the conversation is available as context, but the bot only
+	// generates a reply when addressed. DMs — and Telegram, which is always
+	// IsDirect — always reply, so the home/DM path is unchanged (it never
+	// passive-stores).
+	if shouldReply(im, b.transport.IsAllowed(im.SenderID)) {
+		b.messageGrouper.AddMessage(scopeID, im)
+		return
+	}
+	b.storePassiveChannelMessage(scopeID, im)
+}
+
+// shouldReply decides whether an incoming message warrants a generated reply.
+// DMs always do (the per-transport allowlist is enforced before ingestion
+// reaches here); in a channel the bot must be mentioned by an allowlisted
+// sender. Channel posts that don't warrant a reply are still stored passively.
+func shouldReply(im IncomingMessage, senderAllowed bool) bool {
+	if im.IsDirect {
+		return true
+	}
+	return im.Mention && senderAllowed
+}
+
+// storePassiveChannelMessage records a channel post the bot is not replying to,
+// attributing the author, so the surrounding conversation is available as
+// context (and to background topic/fact extraction) when the bot is later
+// mentioned. Text-only: attachments on passive posts are not run through the
+// artifact pipeline — only reply-triggering messages take that path.
+func (b *Bot) storePassiveChannelMessage(scopeID int64, im IncomingMessage) {
+	content := b.incomingContent(im)
+	if content == "" {
+		return
+	}
+	msg := storage.Message{
+		Role:           "user",
+		Content:        content,
+		Author:         strPtrOrNil(im.SenderDisplay),
+		MessageID:      strPtrOrNil(im.MessageID),
+		ConversationID: strPtrOrNil(im.ConversationID),
+	}
+	if err := b.msgRepo.AddMessageToHistory(scopeID, msg); err != nil {
+		b.logger.Error("failed to store passive channel message", "scope_id", scopeID, "error", err)
+	}
 }
 
 // SetTransport swaps the output/identity transport (used to install the

@@ -314,9 +314,17 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		shutdownSafeCtx = agent.WithContext(shutdownSafeCtx, shared)
 	}
 
+	// In a channel scope, attribute the message to its sender so background
+	// topic/fact extraction can tell participants apart. DMs leave author NULL,
+	// keeping the single-user history byte-identical.
+	var author *string
+	if !lastMsg.IsDirect {
+		author = strPtrOrNil(lastMsg.SenderDisplay)
+	}
 	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{
 		Role:           "user",
 		Content:        historyContent,
+		Author:         author,
 		MessageID:      strPtrOrNil(lastMsg.MessageID),
 		ConversationID: strPtrOrNil(convID),
 	}); err != nil {

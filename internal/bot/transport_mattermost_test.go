@@ -253,20 +253,26 @@ func TestMMShouldProcess(t *testing.T) {
 	allowNone := func(string) bool { return false }
 
 	tests := []struct {
-		name    string
-		post    mattermost.Post
-		botID   string
-		allowed func(string) bool
-		want    bool
+		name        string
+		post        mattermost.Post
+		botID       string
+		channelType string
+		allowed     func(string) bool
+		want        bool
 	}{
-		{"normal allowed user post", mattermost.Post{UserID: "u1", Type: ""}, "bot", allowAll, true},
-		{"own post ignored", mattermost.Post{UserID: "bot", Type: ""}, "bot", allowAll, false},
-		{"system post ignored", mattermost.Post{UserID: "u1", Type: "system_join_channel"}, "bot", allowAll, false},
-		{"non-allowed user rejected", mattermost.Post{UserID: "u1", Type: ""}, "bot", allowNone, false},
+		// Own/system posts are dropped regardless of channel type.
+		{"own post ignored", mattermost.Post{UserID: "bot", Type: ""}, "bot", "D", allowAll, false},
+		{"system post ignored", mattermost.Post{UserID: "u1", Type: "system_join_channel"}, "bot", "O", allowAll, false},
+		// DM: allowlist enforced here (no passive listen in DMs).
+		{"DM allowed user", mattermost.Post{UserID: "u1", Type: ""}, "bot", "D", allowAll, true},
+		{"DM non-allowed user rejected", mattermost.Post{UserID: "u1", Type: ""}, "bot", "D", allowNone, false},
+		// Channel: every post admitted (passive listen); reply gated downstream.
+		{"channel allowed user admitted", mattermost.Post{UserID: "u1", Type: ""}, "bot", "O", allowAll, true},
+		{"channel non-allowed user still admitted for passive store", mattermost.Post{UserID: "u1", Type: ""}, "bot", "P", allowNone, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := mmShouldProcess(tt.post, tt.botID, tt.allowed); got != tt.want {
+			if got := mmShouldProcess(tt.post, tt.botID, tt.channelType, tt.allowed); got != tt.want {
 				t.Errorf("mmShouldProcess = %v, want %v", got, tt.want)
 			}
 		})
