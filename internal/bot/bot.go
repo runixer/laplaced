@@ -324,7 +324,7 @@ func (b *Bot) HandleIncoming(im IncomingMessage) {
 	// enumerate real users (backgroundUserIDs), so a scope absent from the users
 	// table would never get topics/facts/artifacts processed.
 	if b.transport.Kind() != transportTelegram {
-		if err := b.userRepo.UpsertUser(storage.User{ID: scopeID, Username: im.SenderDisplay, LastSeen: time.Now()}); err != nil {
+		if err := b.userRepo.UpsertUser(storage.User{ID: scopeID, Username: scopeLabel(im), LastSeen: time.Now()}); err != nil {
 			b.logger.Warn("failed to upsert scope user", "scope_id", scopeID, "error", err)
 		}
 	}

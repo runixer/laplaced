@@ -153,6 +153,7 @@ type Server struct {
 	maintenanceRepo storage.MaintenanceRepository
 	agentLogRepo    storage.AgentLogRepository
 	peopleRepo      storage.PeopleRepository
+	scopeRepo       storage.ScopeRepository
 	artifactRepo    storage.ArtifactRepository
 	bot             BotInterface
 	rag             rag.MaintenanceService
@@ -196,6 +197,13 @@ func (s *Server) SetAgentLogRepo(repo storage.AgentLogRepository) {
 // SetPeopleRepository sets the people repository (v0.5.1)
 func (s *Server) SetPeopleRepository(repo storage.PeopleRepository) {
 	s.peopleRepo = repo
+}
+
+// SetScopeRepository sets the scope repository, letting the dashboard label
+// channel scopes (Time O/P/G) distinctly from person scopes. Optional: when
+// unset (home/simple), every scope renders as a user.
+func (s *Server) SetScopeRepository(repo storage.ScopeRepository) {
+	s.scopeRepo = repo
 }
 
 // SetArtifactRepository sets the artifact repository (for debug UI).
@@ -486,9 +494,22 @@ func (s *Server) getCommonData(r *http.Request) (ui.PageData, error) {
 		selectedUserID = users[0].ID
 	}
 
+	// Mark which scopes are channels (Time O/P/G) so the selector can label them
+	// distinctly. IsChannelScope is cached; absent scopeRepo (home/simple) leaves
+	// the map empty → everything renders as a user.
+	channelScopes := make(map[int64]bool, len(users))
+	if s.scopeRepo != nil {
+		for _, u := range users {
+			if isCh, err := s.scopeRepo.IsChannelScope(u.ID); err == nil && isCh {
+				channelScopes[u.ID] = true
+			}
+		}
+	}
+
 	return ui.PageData{
 		Users:          users,
 		SelectedUserID: selectedUserID,
+		ChannelScopes:  channelScopes,
 	}, nil
 }
 
@@ -630,12 +651,15 @@ func (s *Server) sessionsHandler(w http.ResponseWriter, r *http.Request) {
 	for _, sess := range sessions {
 		userName := fmt.Sprintf("User %d", sess.UserID)
 		if u, ok := userMap[sess.UserID]; ok {
-			if u.FirstName != "" {
+			switch {
+			case pageData.ChannelScopes[sess.UserID] && u.Username != "":
+				userName = "# " + u.Username
+			case u.FirstName != "":
 				userName = u.FirstName
 				if u.LastName != "" {
 					userName += " " + u.LastName
 				}
-			} else if u.Username != "" {
+			case u.Username != "":
 				userName = "@" + u.Username
 			}
 		}

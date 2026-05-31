@@ -375,6 +375,7 @@ func run() int {
 	webServer.SetAgentLogRepo(store)
 	webServer.SetPeopleRepository(store)   // v0.5.1: People page
 	webServer.SetArtifactRepository(store) // v0.5.2: Artifacts page
+	webServer.SetScopeRepository(store)    // label channel scopes in the selector
 	srvDone := make(chan struct{})
 	go func() {
 		defer close(srvDone)

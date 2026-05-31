@@ -560,6 +560,28 @@ func TestGetCommonData(t *testing.T) {
 	assert.Equal(t, 2, len(data.Users))
 }
 
+// TestGetCommonData_ChannelScopes marks channel scopes when a ScopeRepository is wired.
+func TestGetCommonData_ChannelScopes(t *testing.T) {
+	server, mockStorage, _ := setupTestServer(t)
+	server.SetScopeRepository(mockStorage)
+
+	users := []storage.User{
+		{ID: 100, Username: "John Doe"},     // person scope
+		{ID: 200, Username: "Release Team"}, // channel scope
+	}
+	mockStorage.On("GetAllUsers").Return(users, nil)
+	mockStorage.On("IsChannelScope", int64(100)).Return(false, nil)
+	mockStorage.On("IsChannelScope", int64(200)).Return(true, nil)
+
+	req := testutil.NewTestRequest(t, "GET", "/ui/stats", nil)
+	data, err := server.getCommonData(req)
+
+	assert.NoError(t, err)
+	assert.True(t, data.ChannelScopes[200], "channel scope should be marked")
+	assert.False(t, data.ChannelScopes[100], "person scope should not be marked")
+	mockStorage.AssertExpectations(t)
+}
+
 // TestGetCommonData_DefaultsToFirstUser tests default user selection.
 func TestGetCommonData_DefaultsToFirstUser(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)

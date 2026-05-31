@@ -9,6 +9,23 @@ import (
 	"github.com/runixer/laplaced/internal/testutil"
 )
 
+func TestScopeLabel(t *testing.T) {
+	tests := []struct {
+		name string
+		im   IncomingMessage
+		want string
+	}{
+		{"DM uses sender", IncomingMessage{IsDirect: true, SenderDisplay: "John Doe (@jdoe)", ConversationDisplay: "ignored"}, "John Doe (@jdoe)"},
+		{"channel uses channel name", IncomingMessage{IsDirect: false, SenderDisplay: "John Doe (@jdoe)", ConversationDisplay: "Release Team"}, "Release Team"},
+		{"channel without name falls back to sender", IncomingMessage{IsDirect: false, SenderDisplay: "@alice", ConversationDisplay: ""}, "@alice"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, scopeLabel(tt.im))
+		})
+	}
+}
+
 func TestResolveScopeID_TelegramPassthrough(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 

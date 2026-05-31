@@ -226,15 +226,31 @@ func (b *Bot) incomingFromMattermost(client *mattermost.Client, ev mattermost.Po
 		b.logger.Warn("failed to fetch mm user for prefix", "user_id", ev.Post.UserID, "error", err)
 	}
 
+	// For a channel post, resolve the channel's display name so the channel scope
+	// is labeled by the channel (not by the last poster) in the dashboard. DMs
+	// have no meaningful channel name — the scope is the sender.
+	convDisplay := ""
+	if ev.ChannelType != "D" {
+		if ch, err := client.GetChannel(context.Background(), ev.Post.ChannelID); err == nil {
+			convDisplay = ch.DisplayName
+			if convDisplay == "" {
+				convDisplay = ch.Name
+			}
+		} else {
+			b.logger.Warn("failed to fetch mm channel for scope label", "channel_id", ev.Post.ChannelID, "error", err)
+		}
+	}
+
 	return IncomingMessage{
-		ConversationID: ev.Post.ChannelID,
-		SenderID:       ev.Post.UserID,
-		MessageID:      ev.Post.ID,
-		Text:           ev.Post.Message,
-		SenderDisplay:  display,
-		Prefix:         fmt.Sprintf("[%s (%s)]", display, mmFormatTime(ev.Post.CreateAt)),
-		ThreadRoot:     threadRoot,
-		IsDirect:       ev.ChannelType == "D",
+		ConversationID:      ev.Post.ChannelID,
+		SenderID:            ev.Post.UserID,
+		MessageID:           ev.Post.ID,
+		Text:                ev.Post.Message,
+		SenderDisplay:       display,
+		ConversationDisplay: convDisplay,
+		Prefix:              fmt.Sprintf("[%s (%s)]", display, mmFormatTime(ev.Post.CreateAt)),
+		ThreadRoot:          threadRoot,
+		IsDirect:            ev.ChannelType == "D",
 		// Channel reply-gating: the bot replies when @mentioned or when the post
 		// replies to (quotes) one of the bot's own messages. A plain post in a
 		// thread the bot merely spoke in does NOT trigger a reply.

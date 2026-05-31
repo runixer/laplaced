@@ -83,7 +83,7 @@
                     <select class="form-select form-select-sm" style="width: auto;" onchange="switchUser(this.value)">
                         {{range .Users}}
                         <option value="{{.ID}}" {{if eq .ID $.SelectedUserID}}selected{{end}}>
-                            {{if .FirstName}}{{.FirstName}} {{.LastName}}{{else}}{{.Username}}{{end}} ({{.ID}})
+                            {{if index $.ChannelScopes .ID}}# {{.Username}}{{else}}{{if .FirstName}}{{.FirstName}} {{.LastName}}{{else}}@{{.Username}}{{end}}{{end}} ({{.ID}})
                         </option>
                         {{end}}
                     </select>

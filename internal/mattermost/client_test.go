@@ -122,6 +122,36 @@ func TestSetReaction_Body(t *testing.T) {
 	}
 }
 
+func TestGetChannel_FetchesAndCaches(t *testing.T) {
+	var hits int
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v4/users/me", "/api/v4/config/client":
+			bootstrapHandler("16383")(w, r)
+		case "/api/v4/channels/chX":
+			hits++
+			_, _ = io.WriteString(w, `{"id":"chX","name":"release-team","display_name":"Release Team","type":"O"}`)
+		default:
+			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+		}
+	})
+
+	ch, err := c.GetChannel(context.Background(), "chX")
+	if err != nil {
+		t.Fatalf("GetChannel: %v", err)
+	}
+	if ch.DisplayName != "Release Team" || ch.Name != "release-team" || ch.Type != "O" {
+		t.Errorf("channel = %+v", ch)
+	}
+	// Second call must hit the cache, not the server.
+	if _, err := c.GetChannel(context.Background(), "chX"); err != nil {
+		t.Fatalf("GetChannel (cached): %v", err)
+	}
+	if hits != 1 {
+		t.Errorf("server hits = %d, want 1 (second call should be cached)", hits)
+	}
+}
+
 func TestSendTyping_Path(t *testing.T) {
 	var gotPath string
 	var got map[string]string

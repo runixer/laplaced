@@ -161,6 +161,8 @@ func TestIncomingFromMattermost_Mapping(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "user1", "username": "jdoe", "first_name": "John", "last_name": "Doe"})
 		case "/api/v4/users/user2":
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "user2", "username": "alice"})
+		case "/api/v4/channels/channamed":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "channamed", "name": "release-team", "display_name": "Release Team", "type": "O"})
 		default:
 			http.Error(w, "unexpected", http.StatusNotFound)
 		}
@@ -245,6 +247,26 @@ func TestIncomingFromMattermost_Mapping(t *testing.T) {
 		plain := mattermost.Post{ID: "q3", UserID: "user2", ChannelID: "chan2", Message: "just chatting"}
 		if im := b.incomingFromMattermost(client, mattermost.PostedEvent{Post: plain, ChannelType: "O"}); im.ReplyToBot {
 			t.Error("ReplyToBot should be false for a non-quoting post")
+		}
+	})
+
+	t.Run("channel post carries ConversationDisplay (channel name)", func(t *testing.T) {
+		ev := mattermost.PostedEvent{
+			Post:        mattermost.Post{ID: "p6", UserID: "user2", ChannelID: "channamed", Message: "hi"},
+			ChannelType: "O",
+		}
+		if im := b.incomingFromMattermost(client, ev); im.ConversationDisplay != "Release Team" {
+			t.Errorf("ConversationDisplay = %q, want \"Release Team\"", im.ConversationDisplay)
+		}
+	})
+
+	t.Run("DM carries empty ConversationDisplay", func(t *testing.T) {
+		ev := mattermost.PostedEvent{
+			Post:        mattermost.Post{ID: "p7", UserID: "user1", ChannelID: "chan1", Message: "hi"},
+			ChannelType: "D",
+		}
+		if im := b.incomingFromMattermost(client, ev); im.ConversationDisplay != "" {
+			t.Errorf("ConversationDisplay = %q, want empty for DM", im.ConversationDisplay)
 		}
 	})
 

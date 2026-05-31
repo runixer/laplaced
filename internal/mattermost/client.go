@@ -47,6 +47,9 @@ type Client struct {
 	userCache   map[string]*User // id -> profile; populated lazily by GetUser
 	userCacheMu sync.RWMutex
 
+	channelCache   map[string]*Channel // id -> channel; populated lazily by GetChannel
+	channelCacheMu sync.RWMutex
+
 	events chan PostedEvent
 }
 
@@ -60,6 +63,15 @@ type User struct {
 	LastName  string `json:"last_name"`
 	Nickname  string `json:"nickname"`
 	IsBot     bool   `json:"is_bot"`
+}
+
+// Channel is the subset of /channels/{id} we read — the display name used to
+// label a channel scope in the dashboard. Type is "D"/"O"/"P"/"G".
+type Channel struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
+	Type        string `json:"type"`
 }
 
 // Post is the subset of a Mattermost post we read/write.
@@ -180,14 +192,15 @@ func NewClient(ctx context.Context, cfg Config, logger *slog.Logger) (*Client, e
 	}
 
 	c := &Client{
-		cfg:        cfg,
-		httpClient: &http.Client{Timeout: 30 * time.Second, Transport: transport},
-		proxyURL:   proxyURL,
-		baseURL:    server + "/api/v4",
-		wsURL:      wsURLFromServer(server),
-		logger:     logger.With("component", "mattermost"),
-		userCache:  make(map[string]*User),
-		events:     make(chan PostedEvent),
+		cfg:          cfg,
+		httpClient:   &http.Client{Timeout: 30 * time.Second, Transport: transport},
+		proxyURL:     proxyURL,
+		baseURL:      server + "/api/v4",
+		wsURL:        wsURLFromServer(server),
+		logger:       logger.With("component", "mattermost"),
+		userCache:    make(map[string]*User),
+		channelCache: make(map[string]*Channel),
+		events:       make(chan PostedEvent),
 	}
 
 	me, err := c.getMe(ctx)
@@ -279,6 +292,27 @@ func (c *Client) GetUser(ctx context.Context, userID string) (*User, error) {
 	c.userCache[userID] = &u
 	c.userCacheMu.Unlock()
 	return &u, nil
+}
+
+// GetChannel fetches a channel by id, caching the result — channel names change
+// rarely and ingestion looks them up once per inbound channel post. Mirrors
+// GetUser; used to label a channel scope by its display name.
+func (c *Client) GetChannel(ctx context.Context, channelID string) (*Channel, error) {
+	c.channelCacheMu.RLock()
+	cached, ok := c.channelCache[channelID]
+	c.channelCacheMu.RUnlock()
+	if ok {
+		return cached, nil
+	}
+
+	var ch Channel
+	if err := c.do(ctx, http.MethodGet, "/channels/"+channelID, nil, &ch); err != nil {
+		return nil, err
+	}
+	c.channelCacheMu.Lock()
+	c.channelCache[channelID] = &ch
+	c.channelCacheMu.Unlock()
+	return &ch, nil
 }
 
 // GetFileInfo fetches metadata for an attached file (name, mime, size, …).

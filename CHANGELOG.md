@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Web search (`internet_search`) no longer fails when the backend reports `usage.cost` as an object instead of a number — affected Perplexity via litellm.
 - The bot now reliably re-views an image you ask about later in a conversation, instead of claiming it "can't see past images" — recalled images are placed alongside your question.
 - Background memory (topic creation, fact extraction, file indexing) now runs on non-Telegram transports; previously it only processed users from the Telegram allowlist.
+- The dashboard selector now labels a Mattermost/Time channel by its channel name (prefixed `#`) and marks it as a channel, instead of showing it under a random participant's name.
 
 ## [0.9.2] - 2026-05-22
 

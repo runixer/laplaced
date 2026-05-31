@@ -51,6 +51,18 @@ func resolveScopeID(scopes storage.ScopeRepository, kind string, im IncomingMess
 	return scopes.ResolveScope(kind, scopeType, nativeID)
 }
 
+// scopeLabel picks the users-table label for a non-Telegram scope: a channel
+// scope is labeled by its channel name (not the last poster), a DM by the
+// sender. Idempotent — the channel name is stable, so participants posting in a
+// channel don't overwrite its label. Falls back to the sender when no channel
+// name is available (resolve failed).
+func scopeLabel(im IncomingMessage) string {
+	if !im.IsDirect && im.ConversationDisplay != "" {
+		return im.ConversationDisplay
+	}
+	return im.SenderDisplay
+}
+
 // scopeNativeID centralizes the scope-selection policy: a DM is scoped to its
 // sender, a channel to the conversation. v0.10 only exercises the DM/sender
 // branch; the channel branch is forward-design for Phase 6 channel RAG.

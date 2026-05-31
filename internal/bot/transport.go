@@ -12,19 +12,20 @@ import (
 // map their native update into this shape at the ingestion boundary; the core
 // never sees a transport-specific message type.
 type IncomingMessage struct {
-	ConversationID string // Telegram chat.ID (stringified) | Mattermost channel_id
-	SenderID       string // Telegram From.ID (stringified) | Mattermost 26-char user id
-	MessageID      string // transport message/post id
-	Text           string // user text (Telegram Text or Caption, merged)
-	SenderDisplay  string // human-readable sender ("Name (@handle)") for logs
-	Prefix         string // pre-built display prefix ("[Name (time)]" or forwarded-from)
-	ThreadRoot     string // Telegram MessageThreadID (forum) | Mattermost root_id; "" = top level
-	IsDirect       bool   // DM (Telegram private chat | Mattermost channel_type==D)
-	Mention        bool   // bot mentioned (for channels); always acted on in DMs
-	ReplyToBot     bool   // message replies to / quotes a bot message (channel reply-gating)
-	SentAt         time.Time
-	Files          []files.IncomingFile
-	Forward        *ForwardInfo // Telegram-only forwarded-sender info; nil otherwise
+	ConversationID      string // Telegram chat.ID (stringified) | Mattermost channel_id
+	SenderID            string // Telegram From.ID (stringified) | Mattermost 26-char user id
+	MessageID           string // transport message/post id
+	Text                string // user text (Telegram Text or Caption, merged)
+	SenderDisplay       string // human-readable sender ("Name (@handle)") for logs
+	ConversationDisplay string // human-readable channel name (channel scopes); "" for DMs/Telegram
+	Prefix              string // pre-built display prefix ("[Name (time)]" or forwarded-from)
+	ThreadRoot          string // Telegram MessageThreadID (forum) | Mattermost root_id; "" = top level
+	IsDirect            bool   // DM (Telegram private chat | Mattermost channel_type==D)
+	Mention             bool   // bot mentioned (for channels); always acted on in DMs
+	ReplyToBot          bool   // message replies to / quotes a bot message (channel reply-gating)
+	SentAt              time.Time
+	Files               []files.IncomingFile
+	Forward             *ForwardInfo // Telegram-only forwarded-sender info; nil otherwise
 }
 
 // ForwardInfo carries the structured sender of a forwarded message for the
