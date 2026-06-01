@@ -233,13 +233,39 @@ func TestFileStorage_DeleteFile_Success(t *testing.T) {
 		require.NoError(t, err)
 
 		// Delete it
-		err = fs.DeleteFile(saved.Path)
+		err = fs.DeleteFile(ctx, saved.Path)
 		assert.NoError(t, err)
 
 		// Verify it's gone
 		_, err = os.Stat(fullPath)
 		assert.True(t, os.IsNotExist(err))
 	})
+}
+
+func TestFileStorage_ReadFile_RoundTrip(t *testing.T) {
+	tempDir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	fs := NewFileStorage(tempDir, logger)
+	ctx := context.Background()
+
+	want := []byte("hello artifact bytes")
+	saved, err := fs.SaveFile(ctx, "123", bytes.NewReader(want), "note.txt")
+	require.NoError(t, err)
+
+	got, err := fs.ReadFile(ctx, saved.Path)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+}
+
+func TestFileStorage_ReadFile_PathTraversalRejected(t *testing.T) {
+	tempDir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	fs := NewFileStorage(tempDir, logger)
+
+	// A key escaping the base directory must be rejected, not read.
+	_, err := fs.ReadFile(context.Background(), "../../etc/passwd")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "escapes storage directory")
 }
 
 func TestFileStorage_DeleteFile_NonExistent(t *testing.T) {
@@ -251,7 +277,7 @@ func TestFileStorage_DeleteFile_NonExistent(t *testing.T) {
 		fs := NewFileStorage(tempDir, logger)
 
 		// Delete non-existent file
-		err := fs.DeleteFile("user_123/2025-01/nonexistent.txt")
+		err := fs.DeleteFile(context.Background(), "user_123/2025-01/nonexistent.txt")
 
 		assert.NoError(t, err, "deleting non-existent file should not error")
 	})

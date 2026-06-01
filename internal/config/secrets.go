@@ -106,7 +106,7 @@ func (c *Config) secretFields() []struct {
 	name string
 	ptr  *string
 } {
-	return []struct {
+	fields := []struct {
 		name string
 		ptr  *string
 	}{
@@ -116,6 +116,21 @@ func (c *Config) secretFields() []struct {
 		{"database.postgres.password", &c.Database.Postgres.Password},
 		{"server.auth.password", &c.Server.Auth.Password},
 	}
+	// S3 credentials live behind an optional capability block; only register
+	// them when the block is present (else the pointers would be into nil).
+	if c.Artifacts.S3 != nil {
+		fields = append(fields,
+			struct {
+				name string
+				ptr  *string
+			}{"artifacts.s3.access_key", &c.Artifacts.S3.AccessKey},
+			struct {
+				name string
+				ptr  *string
+			}{"artifacts.s3.secret_key", &c.Artifacts.S3.SecretKey},
+		)
+	}
+	return fields
 }
 
 // ResolveSecrets replaces any "vault:" reference held by a known secret field

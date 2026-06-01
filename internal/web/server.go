@@ -9,8 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +17,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/bot"
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/memory"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
@@ -155,6 +154,7 @@ type Server struct {
 	peopleRepo      storage.PeopleRepository
 	scopeRepo       storage.ScopeRepository
 	artifactRepo    storage.ArtifactRepository
+	fileStorage     files.Storage
 	bot             BotInterface
 	rag             rag.MaintenanceService
 	logger          *slog.Logger
@@ -209,6 +209,12 @@ func (s *Server) SetScopeRepository(repo storage.ScopeRepository) {
 // SetArtifactRepository sets the artifact repository (for debug UI).
 func (s *Server) SetArtifactRepository(repo storage.ArtifactRepository) {
 	s.artifactRepo = repo
+}
+
+// SetFileStorage wires the artifact blob store used by the download handler to
+// read artifact bytes (local disk or S3). Optional: when unset, downloads 500.
+func (s *Server) SetFileStorage(fs files.Storage) {
+	s.fileStorage = fs
 }
 
 func (s *Server) Start(ctx context.Context) error {
@@ -1734,37 +1740,17 @@ func (s *Server) artifactDownloadHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Build full file path with path traversal protection (CRIT-4 security fix)
-	fullPath := filepath.Join(s.cfg.Artifacts.StoragePath, artifact.FilePath)
-
-	// Validate that resolved path is within storage directory
-	absFullPath, err := filepath.Abs(fullPath)
-	if err != nil {
-		s.logger.Error("failed to resolve artifact path", "path", fullPath, "error", err)
-		http.Error(w, "Invalid file path", http.StatusBadRequest)
-		return
-	}
-	absStoragePath, err := filepath.Abs(s.cfg.Artifacts.StoragePath)
-	if err != nil {
-		s.logger.Error("failed to resolve storage path", "error", err)
+	// Read the artifact bytes from the configured blob store. The local backend
+	// enforces path-traversal containment inside ReadFile (CRIT-4); the S3
+	// backend addresses by object key, where traversal does not apply.
+	if s.fileStorage == nil {
+		s.logger.Error("file storage not configured — cannot serve artifact download", "artifact_id", artifactID)
 		http.Error(w, "Server configuration error", http.StatusInternalServerError)
 		return
 	}
-	// Ensure the file is within the storage directory (prevent path traversal)
-	if !strings.HasPrefix(absFullPath, absStoragePath+string(os.PathSeparator)) && absFullPath != absStoragePath {
-		s.logger.Warn("path traversal attempt blocked",
-			"requested_path", artifact.FilePath,
-			"resolved_path", absFullPath,
-			"storage_path", absStoragePath,
-		)
-		http.Error(w, "Invalid file path", http.StatusBadRequest)
-		return
-	}
-
-	// Read file
-	fileData, err := os.ReadFile(fullPath) //nolint:gosec // G703: fullPath validated against storage dir by the containment check above
+	fileData, err := s.fileStorage.ReadFile(r.Context(), artifact.FilePath)
 	if err != nil {
-		s.logger.Error("failed to read artifact file", "artifact_id", artifactID, "path", fullPath, "error", err)
+		s.logger.Error("failed to read artifact file", "artifact_id", artifactID, "key", artifact.FilePath, "error", err)
 		http.Error(w, "Failed to read file", http.StatusInternalServerError)
 		return
 	}

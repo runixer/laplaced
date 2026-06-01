@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Mattermost/Time transport — run the bot on a Mattermost-compatible server instead of Telegram by setting `transport: "time"` and the `mattermost.*` config. Supports inbound images (the bot sees photos you send).
 - Image input is now backend-aware (`openrouter.image_input_format`): `openai` sends OpenAI-standard `image_url`/`video_url` parts for litellm/vLLM, `file` (default) keeps the OpenRouter/Gemini shape.
 - Secrets can now be pulled from HashiCorp Vault — add a `vault:` block (token, Kubernetes, or AppRole auth, with a configurable auth mount path) and reference secrets inline like `openrouter.api_key: "vault:secret/laplaced/dev#api_key"`; without the block, behaviour is unchanged.
+- Artifact files can now be stored in an S3-compatible bucket (e.g. Yandex Object Storage) — add an `artifacts.s3` block (endpoint, region, bucket, credentials); without it, files stay on local disk as before.
 
 ### Fixed
 - Web search (`internet_search`) no longer fails when the backend reports `usage.cost` as an object instead of a number — affected Perplexity via litellm.

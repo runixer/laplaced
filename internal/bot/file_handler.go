@@ -12,14 +12,14 @@ import (
 
 // FileHandler coordinates file saving with deduplication.
 type FileHandler struct {
-	storage      *files.FileStorage
+	storage      files.Storage
 	artifactRepo storage.ArtifactRepository
 	logger       *slog.Logger
 }
 
 // NewFileHandler creates a new file handler.
 func NewFileHandler(
-	storage *files.FileStorage,
+	storage files.Storage,
 	artifactRepo storage.ArtifactRepository,
 	logger *slog.Logger,
 ) *FileHandler {

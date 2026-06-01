@@ -57,7 +57,7 @@ type Bot struct {
 	transportOnce     sync.Once         // guards lazy Telegram default for struct-literal test bots
 	messageGrouper    *MessageGrouper
 	toolExecutor      *tools.ToolExecutor // v0.6.1: Tool execution
-	fileStorage       *files.FileStorage  // v0.8.0: For media-reply path
+	fileStorage       files.Storage       // v0.8.0: For media-reply path
 	logger            *slog.Logger
 	translator        *i18n.Translator
 	agentLogger       *agentlog.Logger
@@ -160,9 +160,9 @@ func (b *Bot) SetImageGenerator(gen tools.ImageGenerator) {
 	}
 }
 
-// SetFileStorage wires the on-disk file store used by the generate_image
+// SetFileStorage wires the artifact blob store used by the generate_image
 // tool to persist output PNGs and by the media-reply path to read them.
-func (b *Bot) SetFileStorage(fs *files.FileStorage) {
+func (b *Bot) SetFileStorage(fs files.Storage) {
 	b.fileStorage = fs
 	if b.toolExecutor != nil {
 		b.toolExecutor.SetFileStorage(fs)

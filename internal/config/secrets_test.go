@@ -117,6 +117,34 @@ func TestSecretFieldsRegistryNonNil(t *testing.T) {
 	}
 }
 
+// TestSecretFieldsS3 verifies the S3 credentials are only registered when the
+// capability block is present, and that they resolve from vault when set.
+func TestSecretFieldsS3(t *testing.T) {
+	t.Run("absent block registers no s3 fields", func(t *testing.T) {
+		cfg := &Config{}
+		for _, f := range cfg.secretFields() {
+			assert.NotContains(t, f.name, "artifacts.s3")
+		}
+	})
+
+	t.Run("present block resolves credentials", func(t *testing.T) {
+		cfg := &Config{}
+		cfg.Artifacts.S3 = &S3Config{
+			Bucket:    "laplaced-dev",
+			Endpoint:  "https://storage.yandexcloud.net",
+			AccessKey: "vault:secret/ai/laplaced#s3_access_key",
+			SecretKey: "vault:secret/ai/laplaced#s3_secret_key",
+		}
+		p := &fakeProvider{vals: map[string]string{
+			"secret/ai/laplaced#s3_access_key": "AK",
+			"secret/ai/laplaced#s3_secret_key": "SK",
+		}}
+		require.NoError(t, cfg.ResolveSecrets(context.Background(), p))
+		assert.Equal(t, "AK", cfg.Artifacts.S3.AccessKey)
+		assert.Equal(t, "SK", cfg.Artifacts.S3.SecretKey)
+	})
+}
+
 func TestVaultConfigValidate(t *testing.T) {
 	tests := []struct {
 		name    string

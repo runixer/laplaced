@@ -62,7 +62,7 @@ type ToolExecutor struct {
 	// a configuration error instead of silently failing).
 	imageGen     ImageGenerator
 	artifactRepo storage.ArtifactRepository
-	fileStorage  *files.FileStorage
+	fileStorage  files.Storage
 }
 
 // ImageGenerator is the narrow interface performImageGeneration needs from
@@ -141,7 +141,7 @@ func (e *ToolExecutor) SetArtifactRepository(repo storage.ArtifactRepository) {
 
 // SetFileStorage wires the file storage. Required for the generate_image
 // tool (to save output PNGs to disk with hashing/dedup).
-func (e *ToolExecutor) SetFileStorage(fs *files.FileStorage) {
+func (e *ToolExecutor) SetFileStorage(fs files.Storage) {
 	e.fileStorage = fs
 }
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
@@ -306,6 +307,7 @@ func TestArtifactDownloadHandler_CacheHeaders(t *testing.T) {
 	testFile := filepath.Join(testDir, "test.txt")
 	assert.NoError(t, os.WriteFile(testFile, []byte("test"), 0644))
 	server.cfg.Artifacts.StoragePath = testDir
+	server.SetFileStorage(files.NewFileStorage(testDir, server.logger))
 
 	scope := storage.PassthroughScopeID("telegram", "123")
 	artifact := &storage.Artifact{

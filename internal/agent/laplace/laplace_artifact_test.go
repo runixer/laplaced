@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
@@ -37,6 +38,7 @@ func setupArtifactTest(t *testing.T) (*config.Config, *i18n.Translator, *Laplace
 
 	// Use mockStore for all storage interfaces including artifact repository
 	agent := New(cfg, mockORClient, nil, mockStore, mockStore, mockStore, translator, testutil.TestLogger())
+	agent.SetFileStorage(files.NewFileStorage(tempDir, testutil.TestLogger()))
 
 	return cfg, translator, agent, mockStore, tempDir
 }
@@ -68,9 +70,9 @@ func TestLoadArtifactFullContent_EarlyReturn(t *testing.T) {
 			expectNil:   true,
 		},
 		{
-			name: "empty storage path",
+			name: "no file storage",
 			setupFunc: func(l *Laplace) {
-				l.storagePath = ""
+				l.SetFileStorage(nil)
 			},
 			artifactIDs: []int64{1},
 			expectNil:   true,
@@ -92,8 +94,6 @@ func TestLoadArtifactFullContent_EarlyReturn(t *testing.T) {
 // TestLoadArtifactFullContent_ArtifactNotReady skips artifacts that aren't ready.
 func TestLoadArtifactFullContent_ArtifactNotReady(t *testing.T) {
 	_, _, agent, mockStore, tempDir := setupArtifactTest(t)
-
-	agent.storagePath = tempDir
 
 	userID := storage.ScopeID("123")
 	artifactID := int64(1)
@@ -121,9 +121,7 @@ func TestLoadArtifactFullContent_ArtifactNotReady(t *testing.T) {
 
 // TestLoadArtifactFullContent_ArtifactNotFound handles GetArtifact errors gracefully.
 func TestLoadArtifactFullContent_ArtifactNotFound(t *testing.T) {
-	_, _, agent, mockStore, tempDir := setupArtifactTest(t)
-
-	agent.storagePath = tempDir
+	_, _, agent, mockStore, _ := setupArtifactTest(t)
 
 	userID := storage.ScopeID("123")
 	artifactID := int64(999)
@@ -140,9 +138,7 @@ func TestLoadArtifactFullContent_ArtifactNotFound(t *testing.T) {
 
 // TestLoadArtifactFullContent_FileReadError handles file read errors gracefully.
 func TestLoadArtifactFullContent_FileReadError(t *testing.T) {
-	_, _, agent, mockStore, tempDir := setupArtifactTest(t)
-
-	agent.storagePath = tempDir
+	_, _, agent, mockStore, _ := setupArtifactTest(t)
 
 	userID := storage.ScopeID("123")
 	artifactID := int64(1)
@@ -167,7 +163,6 @@ func TestLoadArtifactFullContent_FileReadError(t *testing.T) {
 func TestLoadArtifactFullContent_CountLimit(t *testing.T) {
 	cfg, _, agent, mockStore, tempDir := setupArtifactTest(t)
 
-	agent.storagePath = tempDir
 	cfg.Agents.Reranker.Artifacts.Max = 2 // Set max to 2
 
 	userID := storage.ScopeID("123")
@@ -214,7 +209,6 @@ func TestLoadArtifactFullContent_CountLimit(t *testing.T) {
 func TestLoadArtifactFullContent_SizeLimit(t *testing.T) {
 	cfg, _, agent, mockStore, tempDir := setupArtifactTest(t)
 
-	agent.storagePath = tempDir
 	cfg.Agents.Reranker.Artifacts.MaxContextBytes = 30 // Set very low limit
 
 	userID := storage.ScopeID("123")
@@ -263,8 +257,6 @@ func TestLoadArtifactFullContent_SizeLimit(t *testing.T) {
 // TestLoadArtifactFullContent_UsageTracking calls IncrementContextLoadCount.
 func TestLoadArtifactFullContent_UsageTracking(t *testing.T) {
 	_, _, agent, mockStore, tempDir := setupArtifactTest(t)
-
-	agent.storagePath = tempDir
 
 	userID := storage.ScopeID("123")
 

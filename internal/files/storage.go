@@ -9,11 +9,31 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/runixer/laplaced/internal/storage"
 )
+
+// Storage abstracts the artifact blob store so the bot can persist files on a
+// local disk (FileStorage) or in an S3-compatible bucket (S3Storage) chosen by
+// config. The DB only ever stores the relative key returned in SavedFile.Path;
+// that key is backend-agnostic (same object key on disk and in S3), so reads go
+// through ReadFile(key) and never need a filesystem path.
+//
+// GetFullPath is intentionally NOT part of this interface: an absolute path has
+// no meaning for an object store. Callers that need the bytes use ReadFile.
+type Storage interface {
+	// SaveFile persists the reader's contents under a freshly generated key and
+	// returns the relative key, content hash, and size.
+	SaveFile(ctx context.Context, userID storage.ScopeID, reader io.Reader, filename string) (*SavedFile, error)
+	// ReadFile returns the full contents of the object at key (the relative path
+	// stored as artifact.FilePath).
+	ReadFile(ctx context.Context, key string) ([]byte, error)
+	// DeleteFile removes the object at key. Missing objects are not an error.
+	DeleteFile(ctx context.Context, key string) error
+}
 
 // FileStorage handles saving files to disk with SHA256 calculation.
 type FileStorage struct {
@@ -27,6 +47,9 @@ type SavedFile struct {
 	ContentHash string // SHA256 hex
 	Size        int64  // Bytes
 }
+
+// compile-time assertion that the local backend satisfies the interface.
+var _ Storage = (*FileStorage)(nil)
 
 // NewFileStorage creates a new file storage service.
 func NewFileStorage(basePath string, logger *slog.Logger) *FileStorage {
@@ -107,13 +130,47 @@ func (fs *FileStorage) SaveFile(
 	}, nil
 }
 
-// GetFullPath returns the absolute path for a relative artifact path.
+// resolveWithinBase joins key onto the base path and verifies the result stays
+// inside the storage directory. This is the path-traversal guard (formerly
+// duplicated in the web download handler): artifact keys come from the DB, but
+// defending here keeps every read site safe by construction.
+func (fs *FileStorage) resolveWithinBase(key string) (string, error) {
+	fullPath := filepath.Join(fs.basePath, key)
+	absFull, err := filepath.Abs(fullPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve artifact path: %w", err)
+	}
+	absBase, err := filepath.Abs(fs.basePath)
+	if err != nil {
+		return "", fmt.Errorf("resolve storage path: %w", err)
+	}
+	if absFull != absBase && !strings.HasPrefix(absFull, absBase+string(os.PathSeparator)) {
+		return "", fmt.Errorf("artifact key %q escapes storage directory", key)
+	}
+	return fullPath, nil
+}
+
+// ReadFile returns the contents of the artifact stored at key (relative path).
+func (fs *FileStorage) ReadFile(_ context.Context, key string) ([]byte, error) {
+	fullPath, err := fs.resolveWithinBase(key)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(fullPath) //nolint:gosec // path validated against base by resolveWithinBase
+	if err != nil {
+		return nil, fmt.Errorf("read artifact %q: %w", key, err)
+	}
+	return data, nil
+}
+
+// GetFullPath returns the absolute path for a relative artifact path. Local-only
+// helper (not part of Storage) — used by DeleteFile and any disk-specific code.
 func (fs *FileStorage) GetFullPath(relativePath string) string {
 	return filepath.Join(fs.basePath, relativePath)
 }
 
 // DeleteFile deletes a file from disk.
-func (fs *FileStorage) DeleteFile(relativePath string) error {
+func (fs *FileStorage) DeleteFile(_ context.Context, relativePath string) error {
 	fullPath := fs.GetFullPath(relativePath)
 	if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete file: %w", err)

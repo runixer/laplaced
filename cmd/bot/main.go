@@ -23,7 +23,6 @@ import (
 	"github.com/runixer/laplaced/internal/bot"
 	botTools "github.com/runixer/laplaced/internal/bot/tools"
 	"github.com/runixer/laplaced/internal/config"
-	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/mattermost"
 	"github.com/runixer/laplaced/internal/obs"
@@ -334,13 +333,13 @@ func run() int {
 		return 1
 	}
 
-	// Create file storage and handler if artifacts are enabled
+	// Create file handler if artifacts are enabled. The blob backend
+	// (local disk or S3) was selected by the service builder per config.
 	var fileHandler *bot.FileHandler
-	var fileStorage *files.FileStorage
+	fileStorage := services.FileStorage
 	if cfg.Artifacts.Enabled {
-		fileStorage = files.NewFileStorage(cfg.Artifacts.StoragePath, logger)
 		fileHandler = bot.NewFileHandler(fileStorage, store, logger)
-		logger.Info("Artifacts system enabled", "storage_path", cfg.Artifacts.StoragePath)
+		logger.Info("Artifacts system enabled")
 	} else {
 		logger.Info("Artifacts system disabled")
 	}
@@ -416,6 +415,9 @@ func run() int {
 	webServer.SetPeopleRepository(store)   // v0.5.1: People page
 	webServer.SetArtifactRepository(store) // v0.5.2: Artifacts page
 	webServer.SetScopeRepository(store)    // label channel scopes in the selector
+	if cfg.Artifacts.Enabled {
+		webServer.SetFileStorage(fileStorage) // serve artifact downloads from the configured backend
+	}
 	srvDone := make(chan struct{})
 	go func() {
 		defer close(srvDone)

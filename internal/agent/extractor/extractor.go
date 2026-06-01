@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"time"
 
@@ -57,7 +56,7 @@ type Extractor struct {
 	translator   *i18n.Translator
 	cfg          *config.Config
 	logger       *slog.Logger
-	fileStorage  *files.FileStorage
+	fileStorage  files.Storage
 	llmClient    openrouter.Client
 	artifactRepo storage.ArtifactRepository
 }
@@ -68,7 +67,7 @@ func New(
 	translator *i18n.Translator,
 	cfg *config.Config,
 	logger *slog.Logger,
-	fileStorage *files.FileStorage,
+	fileStorage files.Storage,
 	llmClient openrouter.Client,
 	artifactRepo storage.ArtifactRepository,
 ) *Extractor {
@@ -170,9 +169,8 @@ func (ex *Extractor) Execute(ctx context.Context, req *agent.Request) (response 
 		return nil, fmt.Errorf("failed to update artifact state: %w", err)
 	}
 
-	// Step 3: Read file from disk
-	fullPath := ex.fileStorage.GetFullPath(artifact.FilePath)
-	fileData, err := os.ReadFile(fullPath)
+	// Step 3: Read file from storage
+	fileData, err := ex.fileStorage.ReadFile(ctx, artifact.FilePath)
 	if err != nil {
 		err := fmt.Errorf("failed to read file: %w", err)
 		ex.markFailed(artifact, err.Error())

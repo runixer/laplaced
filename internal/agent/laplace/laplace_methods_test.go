@@ -43,7 +43,7 @@ func TestNew(t *testing.T) {
 	assert.NotNil(t, agent)
 	assert.Equal(t, cfg, agent.cfg)
 	assert.Equal(t, translator, agent.translator)
-	assert.Equal(t, "/tmp/test", agent.storagePath)
+	assert.Nil(t, agent.fileStorage, "file storage is wired via SetFileStorage, not New")
 	assert.NotNil(t, agent.tools)
 	assert.Len(t, agent.tools, 1) // BuildTools should create tools from config
 }

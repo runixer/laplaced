@@ -331,6 +331,36 @@ type ArtifactsConfig struct {
 
 	// Voice settings (about storage filtering, not extraction)
 	MinVoiceDurationSeconds int `yaml:"min_voice_duration_seconds" env:"LAPLACED_ARTIFACTS_MIN_VOICE_DURATION_SECONDS"` // 0 = save all, -1 = disable voice artifacts
+
+	// S3, when present, switches the artifact blob store from the local disk
+	// (StoragePath) to an S3-compatible bucket. Absence keeps the local backend,
+	// so the home deployment is byte-identical. Capability block, not a mode flag.
+	S3 *S3Config `yaml:"s3"`
+}
+
+// S3Config configures an S3-compatible artifact backend (Yandex Object Storage).
+// access_key/secret_key may be "vault:" references — they're registered in
+// Config.secretFields() so they resolve at startup.
+type S3Config struct {
+	Endpoint  string `yaml:"endpoint" env:"LAPLACED_ARTIFACTS_S3_ENDPOINT"`
+	Region    string `yaml:"region" env:"LAPLACED_ARTIFACTS_S3_REGION"`
+	Bucket    string `yaml:"bucket" env:"LAPLACED_ARTIFACTS_S3_BUCKET"`
+	AccessKey string `yaml:"access_key" env:"LAPLACED_ARTIFACTS_S3_ACCESS_KEY"`
+	SecretKey string `yaml:"secret_key" env:"LAPLACED_ARTIFACTS_S3_SECRET_KEY"`
+}
+
+// validate checks the S3 block for required fields. Called from Config.Validate
+// only when the block is present. Credentials may still be unresolved vault:
+// references at validation time, so they are not required here.
+func (s *S3Config) validate() []error {
+	var errs []error
+	if s.Endpoint == "" {
+		errs = append(errs, errors.New("artifacts.s3.endpoint is required"))
+	}
+	if s.Bucket == "" {
+		errs = append(errs, errors.New("artifacts.s3.bucket is required"))
+	}
+	return errs
 }
 
 // MemoryConfig defines configuration for memory operations.
@@ -886,11 +916,15 @@ func (c *Config) Validate() error {
 
 	// Artifacts validation
 	if c.Artifacts.Enabled {
-		if c.Artifacts.StoragePath == "" {
-			errs = append(errs, errors.New("artifacts.storage_path is required when artifacts.enabled is true"))
+		// storage_path backs the local disk store; an S3 block supersedes it.
+		if c.Artifacts.StoragePath == "" && c.Artifacts.S3 == nil {
+			errs = append(errs, errors.New("artifacts.storage_path is required when artifacts.enabled is true (or configure artifacts.s3)"))
 		}
 		if len(c.Artifacts.AllowedTypes) == 0 {
 			errs = append(errs, errors.New("artifacts.allowed_types must not be empty"))
+		}
+		if c.Artifacts.S3 != nil {
+			errs = append(errs, c.Artifacts.S3.validate()...)
 		}
 	}
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
@@ -365,6 +366,7 @@ func TestArtifactDownloadHandler(t *testing.T) {
 	assert.NoError(t, err)
 
 	server.cfg.Artifacts.StoragePath = testDir
+	server.SetFileStorage(files.NewFileStorage(testDir, server.logger))
 
 	// Home user's scope is the passthrough UUID of the allowlisted telegram id;
 	// the download handler authorizes by comparing that against AllowedUserIDs.
@@ -430,19 +432,24 @@ func TestArtifactDownloadHandler_ArtifactNotFound(t *testing.T) {
 // TestArtifactDownloadHandler_PathTraversal tests path traversal protection.
 func TestArtifactDownloadHandler_PathTraversal(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
+	testDir := t.TempDir()
+	server.cfg.Artifacts.StoragePath = testDir
+	server.SetFileStorage(files.NewFileStorage(testDir, server.logger))
 
-	// Create artifact with path traversal attempt
+	// Authorize as the allowlisted home user so we reach the read path; the
+	// traversal key must then be rejected by the local store's containment check.
+	scope := storage.PassthroughScopeID("telegram", "123")
 	artifact := &storage.Artifact{
-		ID: 1, UserID: "123", FilePath: "../../../etc/passwd",
+		ID: 1, UserID: scope, FilePath: "../../../etc/passwd",
 		OriginalName: "passwd", MimeType: "text/plain",
 	}
 
-	mockStorage.On("GetArtifact", storage.ScopeID("123"), int64(1)).Return(artifact, nil)
+	mockStorage.On("GetArtifact", scope, int64(1)).Return(artifact, nil)
 
-	req := testutil.NewTestRequest(t, "GET", "/ui/debug/artifacts/download?id=1&user_id=123", nil)
+	req := testutil.NewTestRequest(t, "GET", "/ui/debug/artifacts/download?id=1&user_id="+string(scope), nil)
 	rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.artifactDownloadHandler), req)
 
-	// Should be blocked by path validation
+	// Should be blocked by path validation (containment check in ReadFile)
 	assert.NotEqual(t, http.StatusOK, rr.Code)
 }
 

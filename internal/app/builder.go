@@ -43,8 +43,31 @@ type Services struct {
 	AgentLogger      *agentlog.Logger
 	AgentExecutor    *agent.Executor
 	Translator       *i18n.Translator
-	FileStorage      *files.FileStorage
+	FileStorage      files.Storage
 	OpenRouterClient openrouter.Client
+}
+
+// NewArtifactStorage selects the artifact blob backend from config: an
+// artifacts.s3 block switches to S3, otherwise the local disk store backs
+// StoragePath. Capability-driven, so the home deployment (no s3 block) is
+// byte-identical to before.
+func NewArtifactStorage(ctx context.Context, cfg *config.Config, logger *slog.Logger) (files.Storage, error) {
+	if s3 := cfg.Artifacts.S3; s3 != nil {
+		store, err := files.NewS3Storage(ctx, files.S3Options{
+			Endpoint:  s3.Endpoint,
+			Region:    s3.Region,
+			Bucket:    s3.Bucket,
+			AccessKey: s3.AccessKey,
+			SecretKey: s3.SecretKey,
+		}, logger)
+		if err != nil {
+			return nil, fmt.Errorf("init s3 artifact storage: %w", err)
+		}
+		logger.Info("artifact storage backend: s3", "bucket", s3.Bucket, "endpoint", s3.Endpoint)
+		return store, nil
+	}
+	logger.Info("artifact storage backend: local disk", "storage_path", cfg.Artifacts.StoragePath)
+	return files.NewFileStorage(cfg.Artifacts.StoragePath, logger), nil
 }
 
 // SetupServices initializes all core services and agents.
@@ -84,8 +107,12 @@ func SetupServices(
 	// Create agent logger for debugging LLM calls
 	services.AgentLogger = agentlog.NewLogger(store, logger, cfg.Server.DebugMode)
 
-	// Create file storage for artifacts
-	services.FileStorage = files.NewFileStorage(cfg.Artifacts.StoragePath, logger)
+	// Create file storage for artifacts (local disk or S3, per config)
+	fileStorage, err := NewArtifactStorage(ctx, cfg, logger)
+	if err != nil {
+		return nil, err
+	}
+	services.FileStorage = fileStorage
 
 	// Create context service for shared user context across agents
 	services.ContextService = agent.NewContextService(store, store, cfg, logger)
@@ -122,7 +149,6 @@ func SetupServices(
 	services.ArchivistAgent.SetPeopleRepository(store)
 
 	// Create RAG service using fluent builder API
-	var err error
 	services.RAGService, err = rag.NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
@@ -162,6 +188,9 @@ func SetupServices(
 	// interface (requires ToolHandler for tool execution callbacks)
 	services.LaplaceAgent = laplace.New(cfg, client, services.RAGService, store, store, store, translator, logger)
 	services.LaplaceAgent.SetAgentLogger(services.AgentLogger)
+	if cfg.Artifacts.Enabled {
+		services.LaplaceAgent.SetFileStorage(services.FileStorage)
+	}
 
 	services.Translator = translator
 

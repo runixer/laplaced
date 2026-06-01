@@ -18,6 +18,7 @@ import (
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
@@ -38,7 +39,7 @@ type Laplace struct {
 	msgRepo      storage.MessageRepository
 	factRepo     storage.FactRepository
 	artifactRepo storage.ArtifactRepository // v0.6.0: For loading full artifact content
-	storagePath  string                     // v0.6.0: Base path for artifact files
+	fileStorage  files.Storage              // v0.6.0: blob store for artifact content (nil = artifacts off)
 	translator   *i18n.Translator
 	agentLogger  *agentlog.Logger
 	logger       *slog.Logger
@@ -58,10 +59,6 @@ func New(
 	translator *i18n.Translator,
 	logger *slog.Logger,
 ) *Laplace {
-	storagePath := ""
-	if cfg.Artifacts.Enabled {
-		storagePath = cfg.Artifacts.StoragePath
-	}
 	return &Laplace{
 		cfg:          cfg,
 		orClient:     orClient,
@@ -69,11 +66,17 @@ func New(
 		msgRepo:      msgRepo,
 		factRepo:     factRepo,
 		artifactRepo: artifactRepo,
-		storagePath:  storagePath,
 		translator:   translator,
 		logger:       logger.With("agent", "laplace"),
 		tools:        BuildTools(cfg, translator),
 	}
+}
+
+// SetFileStorage wires the artifact blob store used to load full artifact
+// content into the LLM context. When unset (or artifacts disabled), artifact
+// content loading is skipped.
+func (l *Laplace) SetFileStorage(fs files.Storage) {
+	l.fileStorage = fs
 }
 
 // SetAgentLogger sets the agent logger for debug logging.

@@ -7,8 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -270,7 +268,7 @@ func (l *Laplace) LoadContextData(
 // Returns a slice of content parts (FilePart for all file types) for the given artifact IDs.
 // Respects max and max_context_bytes from reranker.artifacts config (v0.6.0).
 func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID storage.ScopeID, artifactIDs []int64) ([]interface{}, error) {
-	if l.artifactRepo == nil || len(artifactIDs) == 0 || l.storagePath == "" {
+	if l.artifactRepo == nil || len(artifactIDs) == 0 || l.fileStorage == nil {
 		return nil, nil
 	}
 
@@ -337,13 +335,10 @@ func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID storage.Sc
 			break
 		}
 
-		// Build full file path
-		fullPath := filepath.Join(l.storagePath, artifact.FilePath)
-
-		// Read file content
-		fileData, err := os.ReadFile(fullPath)
+		// Read file content from the artifact blob store
+		fileData, err := l.fileStorage.ReadFile(ctx, artifact.FilePath)
 		if err != nil {
-			l.logger.Warn("failed to read artifact file", "artifact_id", artifactID, "path", fullPath, "error", err)
+			l.logger.Warn("failed to read artifact file", "artifact_id", artifactID, "key", artifact.FilePath, "error", err)
 			continue
 		}
 

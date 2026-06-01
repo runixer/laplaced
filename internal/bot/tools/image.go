@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"mime"
-	"os"
 	"strings"
 	"time"
 
@@ -17,10 +16,6 @@ import (
 )
 
 var base64Std = base64.StdEncoding
-
-func readFile(path string) ([]byte, error) {
-	return os.ReadFile(path)
-}
 
 // performImageGeneration drives the generate_image tool: it resolves input
 // images (from input_artifact_ids or the current message), invokes the
@@ -50,7 +45,7 @@ func (e *ToolExecutor) performImageGeneration(ctx context.Context, cc CallContex
 	// Resolve input images:
 	//   1. If input_artifact_ids is non-empty, load them from storage.
 	//   2. Otherwise, fall back to images attached to the current user message.
-	inputImages, err := e.resolveInputImages(cc, args)
+	inputImages, err := e.resolveInputImages(ctx, cc, args)
 	if err != nil {
 		return stopRetryResult("failed to load input images", "", err), nil
 	}
@@ -163,7 +158,7 @@ func (e *ToolExecutor) performImageGeneration(ctx context.Context, cc CallContex
 // "here's a new photo, mix it with that one from memory" works as expected.
 // Artifacts whose underlying file matches a current-message photo by content
 // hash are de-duplicated so we don't send the same image twice.
-func (e *ToolExecutor) resolveInputImages(cc CallContext, args map[string]interface{}) ([]openrouter.FilePart, error) {
+func (e *ToolExecutor) resolveInputImages(ctx context.Context, cc CallContext, args map[string]interface{}) ([]openrouter.FilePart, error) {
 	parts := make([]openrouter.FilePart, 0, len(cc.CurrentMessageImages)+4)
 	parts = append(parts, cc.CurrentMessageImages...)
 
@@ -185,7 +180,7 @@ func (e *ToolExecutor) resolveInputImages(cc CallContext, args map[string]interf
 		if !strings.HasPrefix(art.MimeType, "image/") {
 			return nil, fmt.Errorf("artifact %d is %q, not an image", id, art.MimeType)
 		}
-		dataURL, err := e.readArtifactAsDataURL(art)
+		dataURL, err := e.readArtifactAsDataURL(ctx, art)
 		if err != nil {
 			return nil, fmt.Errorf("read artifact %d: %w", id, err)
 		}
@@ -215,10 +210,10 @@ func partsContainDataURL(parts []openrouter.FilePart, url string) bool {
 	return false
 }
 
-// readArtifactAsDataURL reads an artifact file from disk and returns a
+// readArtifactAsDataURL reads an artifact file from storage and returns a
 // base64 data URL suitable for use as openrouter.FilePart.FileData.
-func (e *ToolExecutor) readArtifactAsDataURL(art *storage.Artifact) (string, error) {
-	data, err := readFile(e.fileStorage.GetFullPath(art.FilePath))
+func (e *ToolExecutor) readArtifactAsDataURL(ctx context.Context, art *storage.Artifact) (string, error) {
+	data, err := e.fileStorage.ReadFile(ctx, art.FilePath)
 	if err != nil {
 		return "", err
 	}

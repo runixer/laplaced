@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"time"
 
@@ -46,7 +45,7 @@ func (b *Bot) sendResponseWithGeneratedImages(
 	}
 
 	// 1. Load artifacts in the order produced and read their bytes.
-	loaded := b.loadArtifactBytes(userID, artifactIDs, logger)
+	loaded := b.loadArtifactBytes(ctx, userID, artifactIDs, logger)
 	if len(loaded) == 0 {
 		logger.Error("no generated artifacts loadable from disk — falling back to text-only reply")
 		return b.sendTextOnlyFallback(ctx, convID, threadRoot, replyTo, userID, responseText, logger)
@@ -139,7 +138,7 @@ type loadedArtifact struct {
 // loadArtifactBytes resolves each artifact by ID (user-isolated) and reads
 // its file bytes. Artifacts that fail to load are skipped with a warning —
 // the caller decides what to do with an empty result.
-func (b *Bot) loadArtifactBytes(userID storage.ScopeID, ids []int64, logger *slog.Logger) []loadedArtifact {
+func (b *Bot) loadArtifactBytes(ctx context.Context, userID storage.ScopeID, ids []int64, logger *slog.Logger) []loadedArtifact {
 	out := make([]loadedArtifact, 0, len(ids))
 	for _, id := range ids {
 		art, err := b.artifactRepo.GetArtifact(userID, id)
@@ -157,11 +156,10 @@ func (b *Bot) loadArtifactBytes(userID storage.ScopeID, ids []int64, logger *slo
 				"artifact_id", id, "expected", userID, "got", art.UserID)
 			continue
 		}
-		path := b.fileStorage.GetFullPath(art.FilePath)
-		data, err := os.ReadFile(path)
+		data, err := b.fileStorage.ReadFile(ctx, art.FilePath)
 		if err != nil {
 			logger.Warn("failed to read generated artifact file",
-				"artifact_id", id, "path", path, "error", err)
+				"artifact_id", id, "key", art.FilePath, "error", err)
 			continue
 		}
 		out = append(out, loadedArtifact{artifact: art, data: data})
