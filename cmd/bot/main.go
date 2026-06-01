@@ -28,6 +28,7 @@ import (
 	"github.com/runixer/laplaced/internal/mattermost"
 	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/secrets"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
 	"github.com/runixer/laplaced/internal/web"
@@ -107,6 +108,11 @@ func init() {
 }
 
 func runHealthcheck(configPath string) int {
+	// IMPORTANT: the healthcheck MUST NOT resolve secrets from Vault. Liveness must
+	// not depend on Vault — otherwise a Vault outage fails the probe and makes k8s
+	// restart an otherwise-healthy container (the bot reads secrets once at startup
+	// and never calls Vault again, so a running bot survives a Vault outage). We only
+	// Load() config (pure, no network) to learn the port, then probe local /healthz.
 	// Try to load config to get the port
 	// We suppress errors here because if config fails, we might still want to try default port
 	// or maybe the app is running with env vars only.
@@ -197,6 +203,29 @@ func run() int {
 	if err != nil {
 		// Can't use logger here, because it's not initialized yet
 		slog.Error("failed to load config", "error", err)
+		return 1
+	}
+
+	// Resolve "vault:" references before validation (which requires the resolved
+	// secrets). This startup step is the ONLY path that talks to Vault — secrets are
+	// fetched once here, never again, so a later Vault outage cannot affect a running
+	// bot (and the healthcheck must never touch Vault). provider stays nil when no
+	// [vault] block is configured — a stray reference is then reported by
+	// ResolveSecrets, not silently kept. Bound the phase so a wedged Vault cannot
+	// hang startup indefinitely.
+	secretsCtx, cancelSecrets := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancelSecrets()
+	var secretProvider config.SecretProvider
+	if cfg.Vault != nil {
+		p, err := secrets.New(secretsCtx, *cfg.Vault, slog.Default())
+		if err != nil {
+			slog.Error("failed to initialize vault secret provider", "error", err)
+			return 1
+		}
+		secretProvider = p
+	}
+	if err := cfg.ResolveSecrets(secretsCtx, secretProvider); err != nil {
+		slog.Error("failed to resolve secrets", "error", err)
 		return 1
 	}
 

@@ -637,6 +637,9 @@ type Config struct {
 	Memory    MemoryConfig    `yaml:"memory"`
 	Search    SearchConfig    `yaml:"search"`
 	Telemetry TelemetryConfig `yaml:"telemetry"`
+	// Vault, when present, enables pulling secrets from HashiCorp Vault. Absent
+	// (nil) = secrets come only from literals / LAPLACED_* env vars (default).
+	Vault *VaultConfig `yaml:"vault"`
 }
 
 // Load loads configuration from the specified file path.
@@ -720,6 +723,9 @@ func (c *Config) Validate() error {
 	}
 	if c.OpenRouter.APIKey == "" {
 		errs = append(errs, errors.New("openrouter.api_key is required"))
+	}
+	if c.Vault != nil {
+		errs = append(errs, c.Vault.validate()...)
 	}
 	switch c.Database.Driver {
 	case "", "sqlite":

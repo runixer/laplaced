@@ -25,6 +25,7 @@ import (
 	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
+	"github.com/runixer/laplaced/internal/secrets"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/spf13/cobra"
 )
@@ -124,6 +125,23 @@ checking database state, and processing sessions for fact extraction.`,
 		cfg, err := loadConfig(resolvedCfgPath)
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
+		}
+
+		// Resolve "vault:" references before using any secret — the only Vault call,
+		// fetched once at startup. provider stays nil when no [vault] block is
+		// configured; a stray reference then errors. Bound the phase with a timeout.
+		secretsCtx, cancelSecrets := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancelSecrets()
+		var secretProvider config.SecretProvider
+		if cfg.Vault != nil {
+			p, perr := secrets.New(secretsCtx, *cfg.Vault, slog.Default())
+			if perr != nil {
+				return fmt.Errorf("failed to initialize vault secret provider: %w", perr)
+			}
+			secretProvider = p
+		}
+		if err := cfg.ResolveSecrets(secretsCtx, secretProvider); err != nil {
+			return fmt.Errorf("failed to resolve secrets: %w", err)
 		}
 
 		// Validate API key from config
