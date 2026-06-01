@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
 )
 
@@ -29,7 +30,7 @@ type Processor struct {
 type FileSaver interface {
 	// SaveFile saves a file and returns the artifact ID (existing on dedup, new on creation).
 	// messageText is the text content of the message (msg.Text or msg.Caption) for context (v0.6.0).
-	SaveFile(ctx context.Context, userID int64, messageID int64, fileType string, originalName string, mimeType string, reader io.Reader, messageText string) (*int64, error)
+	SaveFile(ctx context.Context, userID storage.ScopeID, messageID int64, fileType string, originalName string, mimeType string, reader io.Reader, messageText string) (*int64, error)
 }
 
 // NewProcessor creates a new file processor.
@@ -71,7 +72,7 @@ func (p *Processor) SetImageInputFormat(format string) {
 // message to IncomingFiles (ExtractFiles) and runs them through ProcessFiles.
 // A Telegram message contains at most one file, so the result has 0 or 1 entry.
 // groupText is the full text of all messages in the current MessageGroup (v0.6.0).
-func (p *Processor) ProcessMessage(ctx context.Context, msg *telegram.Message, userID int64, groupText string) ([]*ProcessedFile, error) {
+func (p *Processor) ProcessMessage(ctx context.Context, msg *telegram.Message, userID storage.ScopeID, groupText string) ([]*ProcessedFile, error) {
 	return p.ProcessFiles(ctx, p.ExtractFiles(msg, userID), userID, groupText)
 }
 
@@ -79,7 +80,7 @@ func (p *Processor) ProcessMessage(ctx context.Context, msg *telegram.Message, u
 // transport-neutral IncomingFile, with a Fetch closure that downloads on demand
 // via downloadWithRetry. Returns an empty slice when the message has no file.
 // Priority matches the legacy dispatch: photo, document, voice, audio, video note.
-func (p *Processor) ExtractFiles(msg *telegram.Message, userID int64) []IncomingFile {
+func (p *Processor) ExtractFiles(msg *telegram.Message, userID storage.ScopeID) []IncomingFile {
 	fetch := func(fileID string, kind FileType) func(context.Context) ([]byte, error) {
 		return func(ctx context.Context) ([]byte, error) {
 			data, _, err := p.downloadWithRetry(ctx, fileID, userID, kind)
@@ -141,7 +142,7 @@ func (p *Processor) ExtractFiles(msg *telegram.Message, userID int64) []Incoming
 }
 
 // downloadWithRetry attempts to download a file with retries and exponential backoff.
-func (p *Processor) downloadWithRetry(ctx context.Context, fileID string, userID int64, fileType FileType) ([]byte, time.Duration, error) {
+func (p *Processor) downloadWithRetry(ctx context.Context, fileID string, userID storage.ScopeID, fileType FileType) ([]byte, time.Duration, error) {
 	var lastErr error
 	totalDuration := time.Duration(0)
 

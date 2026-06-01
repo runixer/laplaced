@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -34,32 +35,33 @@ var (
 )
 
 type Bot struct {
-	api             telegram.BotAPI
-	cfg             *config.Config
-	userRepo        storage.UserRepository
-	msgRepo         storage.MessageRepository
-	statsRepo       storage.StatsRepository
-	factRepo        storage.FactRepository
-	factHistoryRepo storage.FactHistoryRepository
-	peopleRepo      storage.PeopleRepository   // v0.5.1: People management
-	artifactRepo    storage.ArtifactRepository // v0.6.0: Link artifacts to messages
-	orClient        openrouter.Client
-	ragService      *rag.Service
-	contextService  *agent.ContextService
-	laplaceAgent    *laplace.Laplace
-	downloader      telegram.FileDownloader
-	fileProcessor   *files.Processor
-	transport       Transport               // output + identity surface (Telegram by default)
-	renderer        Renderer                // wire-format renderer for the active transport
-	scopeRepo       storage.ScopeRepository // identity resolution for non-Telegram transports
-	transportOnce   sync.Once               // guards lazy Telegram default for struct-literal test bots
-	messageGrouper  *MessageGrouper
-	toolExecutor    *tools.ToolExecutor // v0.6.1: Tool execution
-	fileStorage     *files.FileStorage  // v0.8.0: For media-reply path
-	logger          *slog.Logger
-	translator      *i18n.Translator
-	agentLogger     *agentlog.Logger
-	wg              sync.WaitGroup
+	api               telegram.BotAPI
+	cfg               *config.Config
+	userRepo          storage.UserRepository
+	msgRepo           storage.MessageRepository
+	statsRepo         storage.StatsRepository
+	factRepo          storage.FactRepository
+	factHistoryRepo   storage.FactHistoryRepository
+	peopleRepo        storage.PeopleRepository   // v0.5.1: People management
+	artifactRepo      storage.ArtifactRepository // v0.6.0: Link artifacts to messages
+	orClient          openrouter.Client
+	ragService        *rag.Service
+	contextService    *agent.ContextService
+	laplaceAgent      *laplace.Laplace
+	downloader        telegram.FileDownloader
+	fileProcessor     *files.Processor
+	transport         Transport         // output + identity surface (Telegram by default)
+	renderer          Renderer          // wire-format renderer for the active transport
+	scopeRepo         identityStore     // identity resolution for non-Telegram transports
+	principalResolver PrincipalResolver // nil = passthrough (Telegram and resolver-less transports)
+	transportOnce     sync.Once         // guards lazy Telegram default for struct-literal test bots
+	messageGrouper    *MessageGrouper
+	toolExecutor      *tools.ToolExecutor // v0.6.1: Tool execution
+	fileStorage       *files.FileStorage  // v0.8.0: For media-reply path
+	logger            *slog.Logger
+	translator        *i18n.Translator
+	agentLogger       *agentlog.Logger
+	wg                sync.WaitGroup
 }
 
 func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRepo storage.UserRepository, msgRepo storage.MessageRepository, statsRepo storage.StatsRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, peopleRepo storage.PeopleRepository, orClient openrouter.Client, ragService *rag.Service, contextService *agent.ContextService, translator *i18n.Translator) (*Bot, error) {
@@ -97,7 +99,7 @@ func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRe
 		translator:      translator,
 	}
 
-	// Default transport is Telegram (the home path). main.go swaps in the
+	// Default transport is Telegram. main.go swaps in the
 	// Mattermost/Time transport+renderer via SetTransport when transport=time.
 	b.transport = NewTelegramTransport(api, cfg, translator, botLogger)
 	b.renderer = NewTelegramRenderer(botLogger)
@@ -111,7 +113,7 @@ func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRe
 
 	// setCommands hits the live Telegram API; skip it for non-Telegram transports
 	// (the Time/Mattermost instance has no Telegram token).
-	if cfg.Transport != transportTime {
+	if cfg.Transport != transportMattermost {
 		if err := b.setCommands(); err != nil {
 			return nil, fmt.Errorf("failed to set bot commands: %w", err)
 		}
@@ -190,12 +192,12 @@ func (b *Bot) GetActiveSessions() ([]rag.ActiveSessionInfo, error) {
 }
 
 // ForceCloseSession immediately processes unprocessed messages for a user into topics.
-func (b *Bot) ForceCloseSession(ctx context.Context, userID int64) (int, error) {
+func (b *Bot) ForceCloseSession(ctx context.Context, userID storage.ScopeID) (int, error) {
 	return b.ragService.ForceProcessUser(ctx, userID)
 }
 
 // ForceCloseSessionWithProgress immediately processes unprocessed messages with progress reporting.
-func (b *Bot) ForceCloseSessionWithProgress(ctx context.Context, userID int64, onProgress rag.ProgressCallback) (*rag.ProcessingStats, error) {
+func (b *Bot) ForceCloseSessionWithProgress(ctx context.Context, userID storage.ScopeID, onProgress rag.ProgressCallback) (*rag.ProcessingStats, error) {
 	return b.ragService.ForceProcessUserWithProgress(ctx, userID, onProgress)
 }
 
@@ -257,6 +259,7 @@ func (b *Bot) ProcessUpdate(ctx context.Context, update *telegram.Update, source
 	msg := update.Message
 	user := msg.From
 	userID := user.ID
+	scope := storage.PassthroughScopeID(transportTelegram, strconv.FormatInt(userID, 10))
 
 	// Enrich the logger with user information
 	logAttrs := []any{
@@ -272,7 +275,7 @@ func (b *Bot) ProcessUpdate(ctx context.Context, update *telegram.Update, source
 
 	// Update user info in storage
 	if err := b.userRepo.UpsertUser(storage.User{
-		ID:        userID,
+		ID:        scope,
 		Username:  user.Username,
 		FirstName: user.FirstName,
 		LastName:  user.LastName,
@@ -314,7 +317,7 @@ func (b *Bot) ensureTransport() {
 // converge here.
 func (b *Bot) HandleIncoming(im IncomingMessage) {
 	b.ensureTransport()
-	scopeID, err := resolveScopeID(b.scopeRepo, b.transport.Kind(), im)
+	scopeID, err := resolveScopeID(context.Background(), b.scopeRepo, b.principalResolver, b.transport.Kind(), im)
 	if err != nil {
 		b.logger.Error("failed to resolve scope", "error", err, "transport", b.transport.Kind())
 		return
@@ -332,7 +335,7 @@ func (b *Bot) HandleIncoming(im IncomingMessage) {
 	// Channel scopes (Time O/P/G) listen passively: every participant's post is
 	// stored so the conversation is available as context, but the bot only
 	// generates a reply when addressed. DMs — and Telegram, which is always
-	// IsDirect — always reply, so the home/DM path is unchanged (it never
+	// IsDirect — always reply, so the DM path is unchanged (it never
 	// passive-stores).
 	if shouldReply(im, b.transport.IsAllowed(im.SenderID)) {
 		b.messageGrouper.AddMessage(scopeID, im)
@@ -361,7 +364,7 @@ func shouldReply(im IncomingMessage, senderAllowed bool) bool {
 // context (and to background topic/fact extraction) when the bot is later
 // mentioned. Text-only: attachments on passive posts are not run through the
 // artifact pipeline — only reply-triggering messages take that path.
-func (b *Bot) storePassiveChannelMessage(scopeID int64, im IncomingMessage) {
+func (b *Bot) storePassiveChannelMessage(scopeID storage.ScopeID, im IncomingMessage) {
 	content := b.incomingContent(im)
 	if content == "" {
 		return
@@ -385,7 +388,7 @@ func (b *Bot) storePassiveChannelMessage(scopeID int64, im IncomingMessage) {
 // (transport, sender id). Participants accrue into the People graph and feed
 // context/@mention resolution. No-op for DMs (the scope is the person) and when
 // the people repo is absent. Failures are logged, never fatal.
-func (b *Bot) upsertChannelParticipant(scopeID int64, im IncomingMessage) {
+func (b *Bot) upsertChannelParticipant(scopeID storage.ScopeID, im IncomingMessage) {
 	if b.peopleRepo == nil || im.IsDirect || im.SenderID == "" {
 		return
 	}
@@ -430,9 +433,14 @@ func (b *Bot) SetTransport(t Transport) { b.transport = t }
 // SetRenderer swaps the wire-format renderer to match the active transport.
 func (b *Bot) SetRenderer(r Renderer) { b.renderer = r }
 
-// SetScopeRepository wires the identity resolver store (required for
-// non-Telegram transports that mint surrogate scope ids).
-func (b *Bot) SetScopeRepository(repo storage.ScopeRepository) { b.scopeRepo = repo }
+// SetScopeRepository wires the identity store (scope/identity map + principal &
+// channel get-or-create), required for non-Telegram transports.
+func (b *Bot) SetScopeRepository(repo identityStore) { b.scopeRepo = repo }
+
+// SetPrincipalResolver wires principal identity resolution for the active
+// transport's DMs. Leaving it nil keeps the passthrough behavior
+// (Telegram, and any transport that hasn't opted into principal resolution).
+func (b *Bot) SetPrincipalResolver(r PrincipalResolver) { b.principalResolver = r }
 
 func (b *Bot) isAllowed(userID int64) bool {
 	for _, id := range b.cfg.Bot.AllowedUserIDs {
@@ -572,7 +580,7 @@ func (b *Bot) getTieredCost(promptTokens, completionTokens int, logger *slog.Log
 
 // SendTestMessage sends a test message through the bot pipeline without Telegram.
 // It returns detailed metrics for debugging purposes.
-func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, saveToHistory bool) (*rag.TestMessageResult, error) {
+func (b *Bot) SendTestMessage(ctx context.Context, userID storage.ScopeID, text string, saveToHistory bool) (*rag.TestMessageResult, error) {
 	startTotal := time.Now()
 	logger := b.logger.With("user_id", userID, "test_message", true)
 
@@ -699,13 +707,13 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID int64, text string, sa
 // botToolHandler implements laplace.ToolHandler for Bot.
 type botToolHandler struct {
 	bot    *Bot
-	userID int64
+	userID storage.ScopeID
 	logger *slog.Logger
 }
 
 // newBotToolHandler creates a new tool handler for the given user.
 // Ctx and per-call context data arrive via the laplace.ToolHandler interface.
-func (b *Bot) newBotToolHandler(userID int64, logger *slog.Logger) *botToolHandler {
+func (b *Bot) newBotToolHandler(userID storage.ScopeID, logger *slog.Logger) *botToolHandler {
 	return &botToolHandler{
 		bot:    b,
 		userID: userID,

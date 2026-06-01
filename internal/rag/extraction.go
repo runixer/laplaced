@@ -17,7 +17,7 @@ type ExtractedTopic struct {
 	EndMsgID   int64  `json:"end_msg_id"`
 }
 
-func (s *Service) extractTopics(ctx context.Context, userID int64, chunk []storage.Message) ([]ExtractedTopic, UsageInfo, error) {
+func (s *Service) extractTopics(ctx context.Context, userID storage.ScopeID, chunk []storage.Message) ([]ExtractedTopic, UsageInfo, error) {
 	if s.splitterAgent == nil {
 		return nil, UsageInfo{}, fmt.Errorf("splitter agent not configured")
 	}
@@ -27,7 +27,7 @@ func (s *Service) extractTopics(ctx context.Context, userID int64, chunk []stora
 // extractTopicsViaAgent delegates topic extraction to the Splitter agent.
 // isChannelScope reports whether userID is a channel scope, defaulting to false
 // (DM) when the scope repo is absent or the lookup fails.
-func (s *Service) isChannelScope(userID int64) bool {
+func (s *Service) isChannelScope(userID storage.ScopeID) bool {
 	if s.scopeRepo == nil {
 		return false
 	}
@@ -39,7 +39,7 @@ func (s *Service) isChannelScope(userID int64) bool {
 	return isCh
 }
 
-func (s *Service) extractTopicsViaAgent(ctx context.Context, userID int64, chunk []storage.Message) ([]ExtractedTopic, UsageInfo, error) {
+func (s *Service) extractTopicsViaAgent(ctx context.Context, userID storage.ScopeID, chunk []storage.Message) ([]ExtractedTopic, UsageInfo, error) {
 	req := &agent.Request{
 		IsChannel: s.isChannelScope(userID),
 		Params: map[string]any{
@@ -83,7 +83,7 @@ func (s *Service) extractTopicsViaAgent(ctx context.Context, userID int64, chunk
 	return topics, usage, nil
 }
 
-func (s *Service) enrichQuery(ctx context.Context, userID int64, query string, history []storage.Message, mediaParts []interface{}) (string, string, int, error) {
+func (s *Service) enrichQuery(ctx context.Context, userID storage.ScopeID, query string, history []storage.Message, mediaParts []interface{}) (string, string, int, error) {
 	if s.enricherAgent == nil {
 		return query, "", 0, nil // No enrichment if agent not configured
 	}
@@ -91,7 +91,7 @@ func (s *Service) enrichQuery(ctx context.Context, userID int64, query string, h
 }
 
 // enrichQueryViaAgent delegates query enrichment to the Enricher agent.
-func (s *Service) enrichQueryViaAgent(ctx context.Context, userID int64, query string, history []storage.Message, mediaParts []interface{}) (string, string, int, error) {
+func (s *Service) enrichQueryViaAgent(ctx context.Context, userID storage.ScopeID, query string, history []storage.Message, mediaParts []interface{}) (string, string, int, error) {
 	model := s.cfg.Agents.Enricher.GetModel(s.cfg.Agents.Default.Model)
 	if model == "" {
 		return query, "", 0, nil

@@ -11,7 +11,7 @@ import (
 )
 
 // performAddFact adds a new fact to memory.
-func (e *ToolExecutor) performAddFact(ctx context.Context, userID int64, p MemoryOpParams) (string, error) {
+func (e *ToolExecutor) performAddFact(ctx context.Context, userID storage.ScopeID, p MemoryOpParams) (string, error) {
 	if p.Content == "" {
 		return "", fmt.Errorf("content is required for adding a fact")
 	}
@@ -76,7 +76,7 @@ func (e *ToolExecutor) performAddFact(ctx context.Context, userID int64, p Memor
 }
 
 // performDeleteFact deletes a fact from memory.
-func (e *ToolExecutor) performDeleteFact(ctx context.Context, userID int64, p MemoryOpParams) (string, error) {
+func (e *ToolExecutor) performDeleteFact(ctx context.Context, userID storage.ScopeID, p MemoryOpParams) (string, error) {
 	if p.FactID == 0 {
 		return "", fmt.Errorf("fact ID is required for deletion")
 	}
@@ -117,7 +117,7 @@ func (e *ToolExecutor) performDeleteFact(ctx context.Context, userID int64, p Me
 }
 
 // performUpdateFact updates an existing fact in memory.
-func (e *ToolExecutor) performUpdateFact(ctx context.Context, userID int64, p MemoryOpParams) (string, error) {
+func (e *ToolExecutor) performUpdateFact(ctx context.Context, userID storage.ScopeID, p MemoryOpParams) (string, error) {
 	if p.FactID == 0 {
 		return "", fmt.Errorf("fact ID is required for update")
 	}
@@ -188,7 +188,7 @@ func (e *ToolExecutor) performUpdateFact(ctx context.Context, userID int64, p Me
 }
 
 // performManageMemory handles batch memory operations.
-func (e *ToolExecutor) performManageMemory(ctx context.Context, userID int64, args map[string]interface{}) (string, error) {
+func (e *ToolExecutor) performManageMemory(ctx context.Context, userID storage.ScopeID, args map[string]interface{}) (string, error) {
 	// The tool receives a JSON string inside the `query` argument
 	query, ok := args["query"].(string)
 	if !ok {

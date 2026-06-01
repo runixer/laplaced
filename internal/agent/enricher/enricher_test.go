@@ -59,7 +59,7 @@ func TestEnricher_Execute(t *testing.T) {
 			req := &agent.Request{
 				Query: tt.query,
 				Shared: &agent.SharedContext{
-					UserID:       123,
+					UserID:       "123",
 					Profile:      "<user_profile>\n- Software engineer\n</user_profile>",
 					RecentTopics: "<recent_topics>\n</recent_topics>",
 				},
@@ -199,7 +199,7 @@ func TestEnricher_getContext(t *testing.T) {
 		{
 			name: "with shared context",
 			shared: &agent.SharedContext{
-				UserID:       123,
+				UserID:       "123",
 				Profile:      "<user_profile>\n- Software engineer\n</user_profile>",
 				RecentTopics: "<recent_topics>\n- Go discussion\n</recent_topics>",
 			},
@@ -378,7 +378,7 @@ func TestEnricher_SpecialCharacters(t *testing.T) {
 			req := &agent.Request{
 				Query: tt.query,
 				Shared: &agent.SharedContext{
-					UserID:       123,
+					UserID:       "123",
 					Profile:      "<user_profile>\n</user_profile>",
 					RecentTopics: "<recent_topics>\n</recent_topics>",
 				},

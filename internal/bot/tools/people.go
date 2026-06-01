@@ -12,7 +12,7 @@ import (
 )
 
 // performManagePeople handles batch people management operations.
-func (e *ToolExecutor) performManagePeople(ctx context.Context, userID int64, args map[string]interface{}) (string, error) {
+func (e *ToolExecutor) performManagePeople(ctx context.Context, userID storage.ScopeID, args map[string]interface{}) (string, error) {
 	if e.peopleRepo == nil {
 		return "", fmt.Errorf("people management is not available")
 	}
@@ -67,7 +67,7 @@ func (e *ToolExecutor) performManagePeople(ctx context.Context, userID int64, ar
 }
 
 // performCreatePerson creates a new person in the social graph.
-func (e *ToolExecutor) performCreatePerson(ctx context.Context, userID int64, name string, params map[string]interface{}) (string, error) {
+func (e *ToolExecutor) performCreatePerson(ctx context.Context, userID storage.ScopeID, name string, params map[string]interface{}) (string, error) {
 	// Check if person already exists
 	existing, err := e.peopleRepo.FindPersonByName(userID, name)
 	if err != nil {
@@ -153,7 +153,7 @@ func (e *ToolExecutor) performCreatePerson(ctx context.Context, userID int64, na
 
 // performUpdatePerson updates a person's information.
 // Supports both person_id (preferred "Person:123" format) and name (fallback) for lookup.
-func (e *ToolExecutor) performUpdatePerson(ctx context.Context, userID int64, name string, params map[string]interface{}) (string, error) {
+func (e *ToolExecutor) performUpdatePerson(ctx context.Context, userID storage.ScopeID, name string, params map[string]interface{}) (string, error) {
 	var person *storage.Person
 	var err error
 
@@ -252,7 +252,7 @@ func (e *ToolExecutor) performUpdatePerson(ctx context.Context, userID int64, na
 
 // performDeletePerson deletes a person from memory.
 // Supports both person_id (preferred "Person:123" format) and name (fallback) for lookup.
-func (e *ToolExecutor) performDeletePerson(ctx context.Context, userID int64, name string, params map[string]interface{}) (string, error) {
+func (e *ToolExecutor) performDeletePerson(ctx context.Context, userID storage.ScopeID, name string, params map[string]interface{}) (string, error) {
 	var person *storage.Person
 	var err error
 
@@ -309,7 +309,7 @@ func (e *ToolExecutor) performDeletePerson(ctx context.Context, userID int64, na
 // Error handling: Returns formatted error messages for LLM consumption
 //
 // Supports both target_id/source_id (preferred "Person:123" format) and target/source names (fallback).
-func (e *ToolExecutor) performMergePeople(ctx context.Context, userID int64, targetName, sourceName string, targetID, sourceID interface{}, params map[string]interface{}) (string, error) {
+func (e *ToolExecutor) performMergePeople(ctx context.Context, userID storage.ScopeID, targetName, sourceName string, targetID, sourceID interface{}, params map[string]interface{}) (string, error) {
 	var target, source *storage.Person
 	var err error
 
@@ -455,7 +455,7 @@ func (e *ToolExecutor) performMergePeople(ctx context.Context, userID int64, tar
 // <relevant_people> context — retries the display_name match with the handle
 // suffix stripped. Returns (nil, nil) when no match is found so the caller can
 // emit a "person 'X' not found" error in the same shape as before.
-func lookupPersonByName(repo storage.PeopleRepository, userID int64, name string) (*storage.Person, error) {
+func lookupPersonByName(repo storage.PeopleRepository, userID storage.ScopeID, name string) (*storage.Person, error) {
 	person, err := repo.FindPersonByName(userID, name)
 	if err != nil {
 		return nil, fmt.Errorf("finding person: %w", err)

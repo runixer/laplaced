@@ -19,8 +19,8 @@ import (
 // MemoryService defines the interface for memory service operations used by RAG.
 // This allows for easier testing and decoupling from the concrete implementation.
 type MemoryService interface {
-	ProcessSession(ctx context.Context, userID int64, messages []storage.Message, topicDate time.Time, topicID int64) error
-	ProcessSessionWithStats(ctx context.Context, userID int64, messages []storage.Message, topicDate time.Time, topicID int64) (memory.FactStats, error)
+	ProcessSession(ctx context.Context, userID storage.ScopeID, messages []storage.Message, topicDate time.Time, topicID int64) error
+	ProcessSessionWithStats(ctx context.Context, userID storage.ScopeID, messages []storage.Message, topicDate time.Time, topicID int64) (memory.FactStats, error)
 }
 
 // ServiceBuilder provides a fluent API for constructing RAG Service instances.
@@ -217,7 +217,7 @@ func (b *ServiceBuilder) WithUserRepository(r storage.UserRepository) *ServiceBu
 
 // WithScopeRepository sets the optional scope repository, used by background
 // loops to detect channel scopes (Phase 6) for channel-framed prompts. Absent
-// on the home/Telegram path, where every scope is a DM.
+// on the Telegram path, where every scope is a DM.
 func (b *ServiceBuilder) WithScopeRepository(r storage.ScopeRepository) *ServiceBuilder {
 	b.scopeRepo = r
 	return b
@@ -286,10 +286,10 @@ func (b *ServiceBuilder) Build() (*Service, error) {
 		rerankerAgent:        b.rerankerAgent,
 		extractorAgent:       b.extractorAgent,
 		contextService:       b.contextService,
-		topicVectors:         make(map[int64][]TopicVectorItem),
-		factVectors:          make(map[int64][]FactVectorItem),
-		peopleVectors:        make(map[int64][]PersonVectorItem),
-		artifactVectors:      make(map[int64][]ArtifactVectorItem),
+		topicVectors:         make(map[storage.ScopeID][]TopicVectorItem),
+		factVectors:          make(map[storage.ScopeID][]FactVectorItem),
+		peopleVectors:        make(map[storage.ScopeID][]PersonVectorItem),
+		artifactVectors:      make(map[storage.ScopeID][]ArtifactVectorItem),
 		maxLoadedTopicID:     0,
 		maxLoadedFactID:      0,
 		maxLoadedPersonID:    0,

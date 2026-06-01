@@ -22,7 +22,7 @@ func TestPerformManageMemory_BatchOperations(t *testing.T) {
 	cfg.Embedding.Model = "test-embedding-model"
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, testutil.TestLogger())
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	queryJSON := `{
 		"operations": [
 			{
@@ -103,7 +103,7 @@ func TestPerformManageMemory_BatchOperations_PartialFailure(t *testing.T) {
 	cfg.Embedding.Model = "test-embedding-model"
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, testutil.TestLogger())
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	queryJSON := `{
 		"operations": [
 			{

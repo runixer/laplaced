@@ -28,7 +28,7 @@ func TestRenderer_Render_Success(t *testing.T) {
 
 	var sb strings.Builder
 	data := PageData{
-		SelectedUserID: 123,
+		SelectedUserID: "123",
 	}
 
 	err = r.Render(&sb, "test.html", data, GetFuncMap())
@@ -55,7 +55,7 @@ func TestRenderer_Render_WithoutFuncMap(t *testing.T) {
 
 	var sb strings.Builder
 	data := PageData{
-		SelectedUserID: 123,
+		SelectedUserID: "123",
 	}
 
 	err = r.Render(&sb, "test.html", data, nil)
@@ -77,7 +77,7 @@ func TestRenderer_Render_InvalidTemplate(t *testing.T) {
 
 	var sb strings.Builder
 	data := PageData{
-		SelectedUserID: 123,
+		SelectedUserID: "123",
 	}
 
 	err = r.Render(&sb, "nonexistent.html", data, GetFuncMap())

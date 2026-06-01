@@ -1,10 +1,9 @@
 package bot
 
 import (
-	"strconv"
-
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/runixer/laplaced/internal/storage"
 )
 
 // Prometheus метрики для Bot
@@ -238,8 +237,8 @@ const (
 )
 
 // formatUserID converts user ID to string for metric labels.
-func formatUserID(userID int64) string {
-	return strconv.FormatInt(userID, 10)
+func formatUserID(userID storage.ScopeID) string {
+	return string(userID)
 }
 
 // SetActiveSessions устанавливает текущее количество активных сессий.
@@ -258,7 +257,7 @@ func DecActiveSessions() {
 }
 
 // RecordMessageProcessing записывает метрики обработки сообщения.
-func RecordMessageProcessing(userID int64, durationSeconds float64, success bool) {
+func RecordMessageProcessing(userID storage.ScopeID, durationSeconds float64, success bool) {
 	uid := formatUserID(userID)
 	messageProcessingDuration.WithLabelValues(uid).Observe(durationSeconds)
 
@@ -275,7 +274,7 @@ func RecordContextTokens(tokens int) {
 }
 
 // RecordContextTokensBySource записывает токены по источнику контекста.
-func RecordContextTokensBySource(userID int64, source string, tokens int) {
+func RecordContextTokensBySource(userID storage.ScopeID, source string, tokens int) {
 	uid := formatUserID(userID)
 	contextTokensBySource.WithLabelValues(uid, source).Observe(float64(tokens))
 }
@@ -285,28 +284,28 @@ func RecordContextTokensBySource(userID int64, source string, tokens int) {
 // ============================================================
 
 // RecordMessageLLM records total LLM duration and call count for a message.
-func RecordMessageLLM(userID int64, totalDuration float64, callCount int) {
+func RecordMessageLLM(userID storage.ScopeID, totalDuration float64, callCount int) {
 	uid := formatUserID(userID)
 	messageLLMDuration.WithLabelValues(uid).Observe(totalDuration)
 	messageLLMCalls.WithLabelValues(uid).Observe(float64(callCount))
 }
 
 // RecordMessageTools records total tool execution duration and call count for a message.
-func RecordMessageTools(userID int64, totalDuration float64, callCount int) {
+func RecordMessageTools(userID storage.ScopeID, totalDuration float64, callCount int) {
 	uid := formatUserID(userID)
 	messageToolDuration.WithLabelValues(uid).Observe(totalDuration)
 	messageToolCalls.WithLabelValues(uid).Observe(float64(callCount))
 }
 
 // RecordMessageTelegram records total Telegram send duration and call count for a message.
-func RecordMessageTelegram(userID int64, totalDuration float64, callCount int) {
+func RecordMessageTelegram(userID storage.ScopeID, totalDuration float64, callCount int) {
 	uid := formatUserID(userID)
 	messageTelegramDuration.WithLabelValues(uid).Observe(totalDuration)
 	messageTelegramCalls.WithLabelValues(uid).Observe(float64(callCount))
 }
 
 // RecordMessageReaction records SetMessageReaction duration.
-func RecordMessageReaction(userID int64, duration float64) {
+func RecordMessageReaction(userID storage.ScopeID, duration float64) {
 	uid := formatUserID(userID)
 	messageReactionDuration.WithLabelValues(uid).Observe(duration)
 }
@@ -314,14 +313,14 @@ func RecordMessageReaction(userID int64, duration float64) {
 // RecordMessageLLMFirstToken records time-to-first-content in stream mode.
 // Only call when streaming actually produced at least one content delta;
 // reasoning-only or empty responses should not be observed here.
-func RecordMessageLLMFirstToken(userID int64, durationSeconds float64) {
+func RecordMessageLLMFirstToken(userID storage.ScopeID, durationSeconds float64) {
 	uid := formatUserID(userID)
 	messageLLMFirstTokenDuration.WithLabelValues(uid).Observe(durationSeconds)
 }
 
 // RecordMessageTelegramEditCount records the number of editMessageText calls
 // the streaming sink issued for a single message turn.
-func RecordMessageTelegramEditCount(userID int64, count int) {
+func RecordMessageTelegramEditCount(userID storage.ScopeID, count int) {
 	uid := formatUserID(userID)
 	messageTelegramEditCount.WithLabelValues(uid).Observe(float64(count))
 }

@@ -66,14 +66,14 @@ func TestProcessMessageGroup_CompletesOnContextCancel(t *testing.T) {
 	}
 	bot.messageGrouper = NewMessageGrouper(bot, logger, 0, bot.processMessageGroup)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	chatID := int64(456)
 
 	messages := []*telegram.Message{
 		{
 			MessageID: 1,
 			Text:      "Test message",
-			From:      &telegram.User{ID: userID, FirstName: "User", Username: "testuser"},
+			From:      &telegram.User{ID: 123, FirstName: "User", Username: "testuser"},
 			Chat:      &telegram.Chat{ID: chatID},
 			Date:      1234567890,
 		},
@@ -187,14 +187,14 @@ func TestProcessMessageGroup_LLMContextNotCancelled(t *testing.T) {
 	}
 	bot.messageGrouper = NewMessageGrouper(bot, logger, 0, bot.processMessageGroup)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	chatID := int64(456)
 
 	messages := []*telegram.Message{
 		{
 			MessageID: 1,
 			Text:      "Test message",
-			From:      &telegram.User{ID: userID, FirstName: "User", Username: "testuser"},
+			From:      &telegram.User{ID: 123, FirstName: "User", Username: "testuser"},
 			Chat:      &telegram.Chat{ID: chatID},
 			Date:      1234567890,
 		},
@@ -305,13 +305,13 @@ func TestProcessMessageGroup_VoiceCompletesOnContextCancel(t *testing.T) {
 	}
 	bot.messageGrouper = NewMessageGrouper(bot, logger, 0, bot.processMessageGroup)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	chatID := int64(456)
 	voiceFileID := "voice_file_id"
 
 	msg := &telegram.Message{
 		MessageID: 1,
-		From:      &telegram.User{ID: userID, FirstName: "User", Username: "testuser"},
+		From:      &telegram.User{ID: 123, FirstName: "User", Username: "testuser"},
 		Chat:      &telegram.Chat{ID: chatID},
 		Date:      1234567890,
 		Voice:     &telegram.Voice{FileID: voiceFileID, MimeType: "audio/ogg"},
@@ -425,13 +425,13 @@ func TestProcessMessageGroup_VoiceDownloadContextNotCancelled(t *testing.T) {
 	}
 	bot.messageGrouper = NewMessageGrouper(bot, logger, 0, bot.processMessageGroup)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	chatID := int64(456)
 	voiceFileID := "voice_file_id"
 
 	msg := &telegram.Message{
 		MessageID: 1,
-		From:      &telegram.User{ID: userID, FirstName: "User", Username: "testuser"},
+		From:      &telegram.User{ID: 123, FirstName: "User", Username: "testuser"},
 		Chat:      &telegram.Chat{ID: chatID},
 		Date:      1234567890,
 		Voice:     &telegram.Voice{FileID: voiceFileID, MimeType: "audio/ogg"},

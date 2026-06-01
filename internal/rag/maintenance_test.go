@@ -20,7 +20,7 @@ func TestServiceGetDatabaseHealth_Success(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	topics := []storage.Topic{
 		{ID: 1, UserID: userID, Summary: "Small topic", SizeChars: 1000},
@@ -76,14 +76,14 @@ func TestServiceGetDatabaseHealth_AllUsers(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 
 	topics := []storage.Topic{
-		{ID: 1, UserID: 123, Summary: "Topic 1", SizeChars: 5000},
-		{ID: 2, UserID: 456, Summary: "Topic 2", SizeChars: 10000},
+		{ID: 1, UserID: "123", Summary: "Topic 1", SizeChars: 5000},
+		{ID: 2, UserID: "456", Summary: "Topic 2", SizeChars: 10000},
 	}
 
 	mockStore.On("GetAllTopics").Return(topics, nil).Once()
-	mockStore.On("CountOrphanedTopics", int64(0)).Return(0, nil).Once()
-	mockStore.On("CountOverlappingTopics", int64(0)).Return(0, nil).Once()
-	mockStore.On("CountFactsOnOrphanedTopics", int64(0)).Return(0, nil).Once()
+	mockStore.On("CountOrphanedTopics", storage.ScopeID("")).Return(0, nil).Once()
+	mockStore.On("CountOverlappingTopics", storage.ScopeID("")).Return(0, nil).Once()
+	mockStore.On("CountFactsOnOrphanedTopics", storage.ScopeID("")).Return(0, nil).Once()
 
 	memSvc := memory.NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockClient, translator)
 	svc, err := NewServiceBuilder().
@@ -100,7 +100,7 @@ func TestServiceGetDatabaseHealth_AllUsers(t *testing.T) {
 		Build()
 	assert.NoError(t, err)
 
-	health, err := svc.GetDatabaseHealth(context.Background(), 0, 25000)
+	health, err := svc.GetDatabaseHealth(context.Background(), "", 25000)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 2, health.TotalTopics)
@@ -116,7 +116,7 @@ func TestServiceGetDatabaseHealth_DefaultThreshold(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	topics := []storage.Topic{
 		{ID: 1, UserID: userID, SizeChars: 26000}, // Above default 25000
@@ -162,17 +162,17 @@ func TestServiceGetDatabaseHealth_Errors(t *testing.T) {
 		{
 			name: "GetTopics fails",
 			setupMocks: func(s *testutil.MockStorage) {
-				s.On("GetTopics", int64(123)).Return(nil, errors.New("db error"))
+				s.On("GetTopics", storage.ScopeID("123")).Return(nil, errors.New("db error"))
 			},
 			wantErr: true,
 		},
 		{
 			name: "CountOrphanedTopics fails - continues",
 			setupMocks: func(s *testutil.MockStorage) {
-				s.On("GetTopics", int64(123)).Return([]storage.Topic{}, nil)
-				s.On("CountOrphanedTopics", int64(123)).Return(0, errors.New("count error"))
-				s.On("CountOverlappingTopics", int64(123)).Return(0, nil)
-				s.On("CountFactsOnOrphanedTopics", int64(123)).Return(0, nil)
+				s.On("GetTopics", storage.ScopeID("123")).Return([]storage.Topic{}, nil)
+				s.On("CountOrphanedTopics", storage.ScopeID("123")).Return(0, errors.New("count error"))
+				s.On("CountOverlappingTopics", storage.ScopeID("123")).Return(0, nil)
+				s.On("CountFactsOnOrphanedTopics", storage.ScopeID("123")).Return(0, nil)
 			},
 			wantErr:     false,
 			checkHealth: true,
@@ -181,10 +181,10 @@ func TestServiceGetDatabaseHealth_Errors(t *testing.T) {
 		{
 			name: "CountOverlappingTopics fails - continues",
 			setupMocks: func(s *testutil.MockStorage) {
-				s.On("GetTopics", int64(123)).Return([]storage.Topic{}, nil)
-				s.On("CountOrphanedTopics", int64(123)).Return(0, nil)
-				s.On("CountOverlappingTopics", int64(123)).Return(0, errors.New("overlap error"))
-				s.On("CountFactsOnOrphanedTopics", int64(123)).Return(0, nil)
+				s.On("GetTopics", storage.ScopeID("123")).Return([]storage.Topic{}, nil)
+				s.On("CountOrphanedTopics", storage.ScopeID("123")).Return(0, nil)
+				s.On("CountOverlappingTopics", storage.ScopeID("123")).Return(0, errors.New("overlap error"))
+				s.On("CountFactsOnOrphanedTopics", storage.ScopeID("123")).Return(0, nil)
 			},
 			wantErr:     false,
 			checkHealth: true,
@@ -192,10 +192,10 @@ func TestServiceGetDatabaseHealth_Errors(t *testing.T) {
 		{
 			name: "CountFactsOnOrphanedTopics fails - continues",
 			setupMocks: func(s *testutil.MockStorage) {
-				s.On("GetTopics", int64(123)).Return([]storage.Topic{}, nil)
-				s.On("CountOrphanedTopics", int64(123)).Return(0, nil)
-				s.On("CountOverlappingTopics", int64(123)).Return(0, nil)
-				s.On("CountFactsOnOrphanedTopics", int64(123)).Return(0, errors.New("facts error"))
+				s.On("GetTopics", storage.ScopeID("123")).Return([]storage.Topic{}, nil)
+				s.On("CountOrphanedTopics", storage.ScopeID("123")).Return(0, nil)
+				s.On("CountOverlappingTopics", storage.ScopeID("123")).Return(0, nil)
+				s.On("CountFactsOnOrphanedTopics", storage.ScopeID("123")).Return(0, errors.New("facts error"))
 			},
 			wantErr:     false,
 			checkHealth: true,
@@ -203,10 +203,10 @@ func TestServiceGetDatabaseHealth_Errors(t *testing.T) {
 		{
 			name: "No topics",
 			setupMocks: func(s *testutil.MockStorage) {
-				s.On("GetTopics", int64(123)).Return([]storage.Topic{}, nil)
-				s.On("CountOrphanedTopics", int64(123)).Return(0, nil)
-				s.On("CountOverlappingTopics", int64(123)).Return(0, nil)
-				s.On("CountFactsOnOrphanedTopics", int64(123)).Return(0, nil)
+				s.On("GetTopics", storage.ScopeID("123")).Return([]storage.Topic{}, nil)
+				s.On("CountOrphanedTopics", storage.ScopeID("123")).Return(0, nil)
+				s.On("CountOverlappingTopics", storage.ScopeID("123")).Return(0, nil)
+				s.On("CountFactsOnOrphanedTopics", storage.ScopeID("123")).Return(0, nil)
 			},
 			wantErr:     false,
 			checkHealth: true,
@@ -237,7 +237,7 @@ func TestServiceGetDatabaseHealth_Errors(t *testing.T) {
 				Build()
 			assert.NoError(t, err)
 
-			health, err := svc.GetDatabaseHealth(context.Background(), 123, 25000)
+			health, err := svc.GetDatabaseHealth(context.Background(), "123", 25000)
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -260,7 +260,7 @@ func TestServiceRepairDatabase_DryRun(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	orphanedIDs := []int64{10, 20}
 
@@ -304,7 +304,7 @@ func TestServiceRepairDatabase_RealRun(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	orphanedIDs := []int64{10, 20}
 	topics := []storage.Topic{
@@ -369,7 +369,7 @@ func TestServiceRepairDatabase_NoOrphans(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	mockStore.On("GetOrphanedTopicIDs", userID).Return([]int64{}, nil).Once()
 	topics := []storage.Topic{
@@ -417,21 +417,21 @@ func TestServiceRepairDatabase_AllUsers(t *testing.T) {
 
 	orphanedIDs := []int64{10, 20}
 	topics := []storage.Topic{
-		{ID: 10, UserID: 123},
-		{ID: 20, UserID: 456},
-		{ID: 1, UserID: 123},
-		{ID: 2, UserID: 456},
+		{ID: 10, UserID: "123"},
+		{ID: 20, UserID: "456"},
+		{ID: 1, UserID: "123"},
+		{ID: 2, UserID: "456"},
 	}
 
-	mockStore.On("GetOrphanedTopicIDs", int64(0)).Return(orphanedIDs, nil).Once()
+	mockStore.On("GetOrphanedTopicIDs", storage.ScopeID("")).Return(orphanedIDs, nil).Once()
 	// GetAllTopics is called multiple times during repair
 	mockStore.On("GetAllTopics").Return(topics, nil).Maybe()
-	mockStore.On("GetFactsByTopicID", int64(123), int64(10)).Return([]storage.Fact{}, nil).Once()
-	mockStore.On("GetFactsByTopicID", int64(456), int64(20)).Return([]storage.Fact{}, nil).Once()
-	mockStore.On("DeleteTopicCascade", int64(123), int64(10)).Return(nil).Once()
-	mockStore.On("DeleteTopicCascade", int64(456), int64(20)).Return(nil).Once()
-	mockStore.On("RecalculateTopicRanges", int64(0)).Return(0, nil).Once()
-	mockStore.On("RecalculateTopicSizes", int64(0)).Return(0, nil).Once()
+	mockStore.On("GetFactsByTopicID", storage.ScopeID("123"), int64(10)).Return([]storage.Fact{}, nil).Once()
+	mockStore.On("GetFactsByTopicID", storage.ScopeID("456"), int64(20)).Return([]storage.Fact{}, nil).Once()
+	mockStore.On("DeleteTopicCascade", storage.ScopeID("123"), int64(10)).Return(nil).Once()
+	mockStore.On("DeleteTopicCascade", storage.ScopeID("456"), int64(20)).Return(nil).Once()
+	mockStore.On("RecalculateTopicRanges", storage.ScopeID("")).Return(0, nil).Once()
+	mockStore.On("RecalculateTopicSizes", storage.ScopeID("")).Return(0, nil).Once()
 	// ReloadVectors calls GetAllFacts
 	mockStore.On("GetAllFacts").Return([]storage.Fact{}, nil).Maybe()
 
@@ -450,7 +450,7 @@ func TestServiceRepairDatabase_AllUsers(t *testing.T) {
 		Build()
 	assert.NoError(t, err)
 
-	stats, err := svc.RepairDatabase(context.Background(), 0, false)
+	stats, err := svc.RepairDatabase(context.Background(), "", false)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 2, stats.OrphanedTopicsDeleted)
@@ -465,11 +465,11 @@ func TestServiceGetContaminationInfo_Success(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	contaminated := []storage.ContaminatedTopic{
-		{TopicID: 1, TopicOwner: 123, ForeignUsers: []int64{456, 789}, ForeignMsgCnt: 3},
-		{TopicID: 2, TopicOwner: 123, ForeignUsers: []int64{456}, ForeignMsgCnt: 1},
+		{TopicID: 1, TopicOwner: "123", ForeignUsers: []storage.ScopeID{"456", "789"}, ForeignMsgCnt: 3},
+		{TopicID: 2, TopicOwner: "123", ForeignUsers: []storage.ScopeID{"456"}, ForeignMsgCnt: 1},
 	}
 
 	mockStore.On("CountContaminatedTopics", userID).Return(2, nil).Once()
@@ -508,11 +508,11 @@ func TestServiceGetContaminationInfo_AllUsers(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 
 	contaminated := []storage.ContaminatedTopic{
-		{TopicID: 1, TopicOwner: 123, ForeignUsers: []int64{456}, ForeignMsgCnt: 2},
+		{TopicID: 1, TopicOwner: "123", ForeignUsers: []storage.ScopeID{"456"}, ForeignMsgCnt: 2},
 	}
 
-	mockStore.On("CountContaminatedTopics", int64(0)).Return(1, nil).Once()
-	mockStore.On("GetContaminatedTopics", int64(0)).Return(contaminated, nil).Once()
+	mockStore.On("CountContaminatedTopics", storage.ScopeID("")).Return(1, nil).Once()
+	mockStore.On("GetContaminatedTopics", storage.ScopeID("")).Return(contaminated, nil).Once()
 
 	memSvc := memory.NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockClient, translator)
 	svc, err := NewServiceBuilder().
@@ -529,7 +529,7 @@ func TestServiceGetContaminationInfo_AllUsers(t *testing.T) {
 		Build()
 	assert.NoError(t, err)
 
-	info, err := svc.GetContaminationInfo(context.Background(), 0)
+	info, err := svc.GetContaminationInfo(context.Background(), "")
 	assert.NoError(t, err)
 
 	assert.Equal(t, 1, info.TotalContaminated)
@@ -544,11 +544,11 @@ func TestServiceFixContamination_DryRun(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	contaminated := []storage.ContaminatedTopic{
-		{TopicID: 1, TopicOwner: 123, ForeignUsers: []int64{456}, ForeignMsgCnt: 3},
-		{TopicID: 2, TopicOwner: 123, ForeignUsers: []int64{789}, ForeignMsgCnt: 2},
+		{TopicID: 1, TopicOwner: "123", ForeignUsers: []storage.ScopeID{"456"}, ForeignMsgCnt: 3},
+		{TopicID: 2, TopicOwner: "123", ForeignUsers: []storage.ScopeID{"789"}, ForeignMsgCnt: 2},
 	}
 
 	mockStore.On("GetContaminatedTopics", userID).Return(contaminated, nil).Once()
@@ -585,12 +585,12 @@ func TestServiceFixContamination_RealRun(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	orphanedIDs := []int64{1}
 	topics := []storage.Topic{
-		{ID: 1, UserID: 123},
-		{ID: 2, UserID: 123},
+		{ID: 1, UserID: "123"},
+		{ID: 2, UserID: "123"},
 	}
 
 	mockStore.On("CountContaminatedTopics", userID).Return(1, nil).Once()
@@ -635,7 +635,7 @@ func TestServiceFixContamination_NoContamination(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// CountContaminatedTopics is called twice (before and after fix)
 	mockStore.On("CountContaminatedTopics", userID).Return(0, nil).Times(2)
@@ -672,7 +672,7 @@ func TestServiceRelinkFactsFromOrphanedTopics_Success(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	orphanedIDs := []int64{10, 20}
 	topics := []storage.Topic{
@@ -720,7 +720,7 @@ func TestServiceRelinkFactsFromOrphanedTopics_NoValidTopic(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	orphanedIDs := []int64{10, 20}
 	topics := []storage.Topic{
@@ -774,7 +774,7 @@ func TestServiceRelinkFactsFromOrphanedTopics_EmptyList(t *testing.T) {
 		Build()
 	assert.NoError(t, err)
 
-	count, err := svc.relinkFactsFromOrphanedTopics(context.Background(), 123, []int64{})
+	count, err := svc.relinkFactsFromOrphanedTopics(context.Background(), "123", []int64{})
 	assert.NoError(t, err)
 	assert.Equal(t, 0, count)
 }

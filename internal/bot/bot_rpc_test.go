@@ -176,7 +176,7 @@ func TestForceCloseSession_DelegatesToRAG(t *testing.T) {
 		ragService: ragService,
 	}
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	count, err := bot.ForceCloseSession(context.Background(), userID)
 
@@ -202,7 +202,7 @@ func TestForceCloseSession_RAGServiceNil_Panics(t *testing.T) {
 		// ragService is nil
 	}
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// This will panic - which is expected behavior
 	assert.Panics(t, func() {
@@ -227,7 +227,7 @@ func TestForceCloseSessionWithProgress_RAGServiceNil_Panics(t *testing.T) {
 		// ragService is nil
 	}
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// This will panic - which is expected behavior
 	assert.Panics(t, func() {

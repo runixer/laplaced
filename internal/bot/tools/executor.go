@@ -24,7 +24,7 @@ import (
 // Some tools (generate_image) need the user's current-message image parts;
 // all tools need UserID for data isolation.
 type CallContext struct {
-	UserID int64
+	UserID storage.ScopeID
 	// CurrentMessageImages is the image FileParts attached to the current
 	// user message. generate_image uses these as default input when the LLM
 	// does not pass explicit artifact IDs.
@@ -76,7 +76,7 @@ type ImageGenerator interface {
 // package. The bot-level wiring adapts between this type and the agent's
 // own Request type.
 type ImageGenRequest struct {
-	UserID      int64
+	UserID      storage.ScopeID
 	Prompt      string
 	InputImages []openrouter.FilePart
 	AspectRatio string
@@ -157,7 +157,7 @@ func (e *ToolExecutor) ExecuteToolCall(ctx context.Context, cc CallContext, tool
 		ctx, "tool_executor.ExecuteToolCall",
 		trace.WithAttributes(
 			attribute.String("tool.name", toolName),
-			attribute.Int64("user.id", cc.UserID),
+			attribute.String("user.id", string(cc.UserID)),
 			attribute.Int("tool.iteration", cc.Iteration),
 		),
 	)

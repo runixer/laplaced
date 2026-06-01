@@ -126,7 +126,7 @@ func (ex *Extractor) Execute(ctx context.Context, req *agent.Request) (response 
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/extractor").Start(
 		ctx, "extractor.Execute",
 		trace.WithAttributes(
-			attribute.Int64("user.id", userID),
+			attribute.String("user.id", string(userID)),
 			attribute.Int64("extractor.artifact_id", artifactID),
 			attribute.String("extractor.file_type", artifact.FileType),
 			attribute.Int64("extractor.file_size_bytes", artifact.FileSize),
@@ -284,7 +284,7 @@ func (ex *Extractor) Execute(ctx context.Context, req *agent.Request) (response 
 // generateSummaryEmbedding creates embedding for summary text for vector search.
 func (ex *Extractor) generateSummaryEmbedding(
 	ctx context.Context,
-	userID int64,
+	userID storage.ScopeID,
 	summary string,
 ) ([]float32, error) {
 	embeddingModel := ex.cfg.Embedding.Model

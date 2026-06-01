@@ -250,7 +250,7 @@ type ResultWithRawArrays struct {
 
 // PeopleRepository is the interface for loading people.
 type PeopleRepository interface {
-	GetPeople(userID int64) ([]storage.Person, error)
+	GetPeople(userID storage.ScopeID) ([]storage.Person, error)
 }
 
 // Archivist extracts and manages facts and people from conversations.
@@ -345,7 +345,7 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (response *
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/archivist").Start(
 		ctx, "archivist.Execute",
 		trace.WithAttributes(
-			attribute.Int64("user.id", userID),
+			attribute.String("user.id", string(userID)),
 			attribute.Int("archivist.input_count", len(messages)),
 		),
 	)
@@ -432,7 +432,7 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (response *
 		// Reasoning works correctly without plugins.
 		ResponseFormat: openrouter.ResponseFormat{Type: "json_object"},
 		Reasoning:      reasoning,
-		UserID:         userID,
+		UserID:         string(userID),
 	}
 
 	resp, err := a.executor.Client().CreateChatCompletion(ctx, llmReq)
@@ -613,7 +613,7 @@ func hasStructuredContent(r *Result) bool {
 
 // saveTrace saves the execution trace for debugging.
 func (a *Archivist) saveTrace(
-	userID int64,
+	userID storage.ScopeID,
 	conversation string,
 	tracker *agentlog.TurnTracker,
 	startTime time.Time,
@@ -703,7 +703,7 @@ func (a *Archivist) getUser(req *agent.Request) *storage.User {
 }
 
 // getUserID extracts user ID from request.
-func (a *Archivist) getUserID(req *agent.Request) int64 {
+func (a *Archivist) getUserID(req *agent.Request) storage.ScopeID {
 	return agent.GetUserID(req)
 }
 
@@ -741,7 +741,7 @@ func (a *Archivist) formatUserName(user *storage.User) string {
 		}
 	}
 	if name == "" {
-		name = fmt.Sprintf("ID:%d", user.ID)
+		name = fmt.Sprintf("ID:%s", user.ID)
 	}
 	return name
 }

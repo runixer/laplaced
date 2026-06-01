@@ -33,7 +33,7 @@ func TestRetrieve_TopicsGrouping(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 
 	// User ID
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// 2. Data
 	// Topics
@@ -169,7 +169,7 @@ func TestRetrieveFacts(t *testing.T) {
 	cfg.Embedding.Model = "test-model"
 	cfg.RAG.MinSafetyThreshold = 0.5
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	t.Run("RAG disabled", func(t *testing.T) {
 		disabledCfg := &config.Config{}
@@ -375,7 +375,7 @@ func TestRetrieve_SkipEnrichment(t *testing.T) {
 		_ = svc.Start(context.Background())
 
 		opts := &RetrievalOptions{SkipEnrichment: true}
-		results, debugInfo, err := svc.Retrieve(context.Background(), 123, "test query", opts)
+		results, debugInfo, err := svc.Retrieve(context.Background(), "123", "test query", opts)
 
 		assert.NoError(t, err)
 		assert.Empty(t, results)                               // No topics loaded
@@ -428,7 +428,7 @@ func TestRetrieve_NilOptions(t *testing.T) {
 		_ = svc.Start(context.Background())
 
 		// Call with nil options - should not panic
-		_, _, err = svc.Retrieve(context.Background(), 123, "test query", nil)
+		_, _, err = svc.Retrieve(context.Background(), "123", "test query", nil)
 
 		assert.NoError(t, err)
 	})
@@ -463,7 +463,7 @@ func TestEnrichQuery(t *testing.T) {
 		}
 		// Don't set enricher agent - should return original query
 
-		result, prompt, tokens, err := svc.enrichQuery(context.Background(), int64(123), "test query", nil, nil)
+		result, prompt, tokens, err := svc.enrichQuery(context.Background(), storage.ScopeID("123"), "test query", nil, nil)
 
 		assert.NoError(t, err)
 		assert.Equal(t, "test query", result)
@@ -508,7 +508,7 @@ func TestEnrichQuery(t *testing.T) {
 		}
 		svc.SetEnricherAgent(mockEnricher)
 
-		_, _, _, err = svc.enrichQuery(context.Background(), int64(123), "test query", nil, nil)
+		_, _, _, err = svc.enrichQuery(context.Background(), storage.ScopeID("123"), "test query", nil, nil)
 
 		assert.Error(t, err)
 	})
@@ -561,7 +561,7 @@ func TestEnrichQuery(t *testing.T) {
 			{Role: "assistant", Content: "Hi there"},
 		}
 
-		result, _, tokens, err := svc.enrichQuery(context.Background(), int64(123), "test query", history, nil)
+		result, _, tokens, err := svc.enrichQuery(context.Background(), storage.ScopeID("123"), "test query", history, nil)
 
 		assert.NoError(t, err)
 		assert.Equal(t, "enriched search terms", result)
@@ -615,7 +615,7 @@ func TestEnrichQuery(t *testing.T) {
 
 		mediaParts := []interface{}{"image_data"}
 
-		result, prompt, tokens, err := svc.enrichQuery(context.Background(), int64(123), "test query", nil, mediaParts)
+		result, prompt, tokens, err := svc.enrichQuery(context.Background(), storage.ScopeID("123"), "test query", nil, mediaParts)
 
 		assert.NoError(t, err)
 		assert.Equal(t, "enriched with media", result)
@@ -659,7 +659,7 @@ func TestEnrichQuery(t *testing.T) {
 		}
 		svc.SetEnricherAgent(mockEnricher)
 
-		result, prompt, tokens, err := svc.enrichQuery(context.Background(), int64(123), "test query", nil, nil)
+		result, prompt, tokens, err := svc.enrichQuery(context.Background(), storage.ScopeID("123"), "test query", nil, nil)
 
 		assert.NoError(t, err)
 		assert.Equal(t, "test query", result) // Returns original when model is empty
@@ -707,7 +707,7 @@ func TestEnrichQuery(t *testing.T) {
 		}
 		svc.SetEnricherAgent(mockEnricher)
 
-		result, _, _, err := svc.enrichQuery(context.Background(), int64(123), "test query", nil, nil)
+		result, _, _, err := svc.enrichQuery(context.Background(), storage.ScopeID("123"), "test query", nil, nil)
 
 		assert.NoError(t, err)
 		assert.Equal(t, "enriched query", result) // Whitespace trimmed

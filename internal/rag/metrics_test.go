@@ -4,13 +4,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/runixer/laplaced/internal/storage"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestRecordEmbeddingRequest_Success(t *testing.T) {
-	userID := int64(12345)
+	userID := storage.ScopeID("12345")
 	model := "test-model-success"
 	uid := formatUserID(userID)
 
@@ -31,7 +33,7 @@ func TestRecordEmbeddingRequest_Success(t *testing.T) {
 }
 
 func TestRecordEmbeddingRequest_Error(t *testing.T) {
-	userID := int64(22222)
+	userID := storage.ScopeID("22222")
 	model := "test-model-error"
 	uid := formatUserID(userID)
 
@@ -47,7 +49,7 @@ func TestRecordEmbeddingRequest_Error(t *testing.T) {
 }
 
 func TestRecordEmbeddingRequest_NilCost(t *testing.T) {
-	userID := int64(33333)
+	userID := storage.ScopeID("33333")
 	model := "test-model-nil-cost"
 	uid := formatUserID(userID)
 
@@ -63,7 +65,7 @@ func TestRecordEmbeddingRequest_NilCost(t *testing.T) {
 }
 
 func TestRecordEmbeddingRequest_ZeroCost(t *testing.T) {
-	userID := int64(44444)
+	userID := storage.ScopeID("44444")
 	model := "test-model-zero-cost"
 	uid := formatUserID(userID)
 
@@ -78,15 +80,15 @@ func TestRecordEmbeddingRequest_ZeroCost(t *testing.T) {
 func TestRecordVectorSearch(t *testing.T) {
 	tests := []struct {
 		name           string
-		userID         int64
+		userID         storage.ScopeID
 		searchType     string
 		duration       float64
 		vectorsScanned int
 	}{
-		{"topics search", 123, searchTypeTopics, 0.01, 100},
-		{"facts search", 456, searchTypeFacts, 0.005, 50},
-		{"people search", 789, searchTypePeople, 0.008, 25}, // v0.5.1
-		{"empty search", 101112, searchTypeTopics, 0.001, 0},
+		{"topics search", "123", searchTypeTopics, 0.01, 100},
+		{"facts search", "456", searchTypeFacts, 0.005, 50},
+		{"people search", "789", searchTypePeople, 0.008, 25}, // v0.5.1
+		{"empty search", "101112", searchTypeTopics, 0.001, 0},
 	}
 
 	for _, tt := range tests {
@@ -102,12 +104,12 @@ func TestRecordVectorSearch(t *testing.T) {
 func TestRecordRAGRetrieval(t *testing.T) {
 	tests := []struct {
 		name       string
-		userID     int64
+		userID     storage.ScopeID
 		hasContext bool
 		expected   string
 	}{
-		{"hit", 123, true, resultHit},
-		{"miss", 456, false, resultMiss},
+		{"hit", "123", true, resultHit},
+		{"miss", "456", false, resultMiss},
 	}
 
 	for _, tt := range tests {
@@ -122,13 +124,13 @@ func TestRecordRAGRetrieval(t *testing.T) {
 func TestRecordRAGCandidates(t *testing.T) {
 	tests := []struct {
 		name       string
-		userID     int64
+		userID     storage.ScopeID
 		searchType string
 		count      int
 	}{
-		{"topics candidates", 123, searchTypeTopics, 25},
-		{"facts candidates", 456, searchTypeFacts, 10},
-		{"zero candidates", 789, searchTypeTopics, 0},
+		{"topics candidates", "123", searchTypeTopics, 25},
+		{"facts candidates", "456", searchTypeFacts, 10},
+		{"zero candidates", "789", searchTypeTopics, 0},
 	}
 
 	for _, tt := range tests {
@@ -143,13 +145,13 @@ func TestRecordRAGCandidates(t *testing.T) {
 func TestRecordRAGLatency(t *testing.T) {
 	tests := []struct {
 		name     string
-		userID   int64
+		userID   storage.ScopeID
 		source   string
 		duration float64
 	}{
-		{"fast auto retrieval", 123, "auto", 0.05},
-		{"slow tool retrieval", 456, "tool", 2.5},
-		{"empty source defaults to auto", 789, "", 0},
+		{"fast auto retrieval", "123", "auto", 0.05},
+		{"slow tool retrieval", "456", "tool", 2.5},
+		{"empty source defaults to auto", "789", "", 0},
 	}
 
 	for _, tt := range tests {
@@ -286,13 +288,13 @@ func TestConstants(t *testing.T) {
 
 func TestFormatUserID(t *testing.T) {
 	tests := []struct {
-		userID   int64
+		userID   storage.ScopeID
 		expected string
 	}{
-		{0, "0"},
-		{123, "123"},
-		{-1, "-1"},
-		{9223372036854775807, "9223372036854775807"},
+		{"0", "0"},
+		{"123", "123"},
+		{"-1", "-1"},
+		{"9223372036854775807", "9223372036854775807"},
 	}
 
 	for _, tt := range tests {
@@ -308,12 +310,12 @@ func TestFormatUserID(t *testing.T) {
 func TestRecordRerankerDuration(t *testing.T) {
 	tests := []struct {
 		name     string
-		userID   int64
+		userID   storage.ScopeID
 		duration float64
 	}{
-		{"fast rerank", 111, 0.5},
-		{"slow rerank", 222, 5.0},
-		{"zero duration", 333, 0.0},
+		{"fast rerank", "111", 0.5},
+		{"slow rerank", "222", 5.0},
+		{"zero duration", "333", 0.0},
 	}
 
 	for _, tt := range tests {
@@ -326,7 +328,7 @@ func TestRecordRerankerDuration(t *testing.T) {
 }
 
 func TestRecordRerankerToolCalls(t *testing.T) {
-	userID := int64(55555)
+	userID := storage.ScopeID("55555")
 	uid := formatUserID(userID)
 
 	// Record some tool calls
@@ -345,12 +347,12 @@ func TestRecordRerankerToolCalls(t *testing.T) {
 func TestRecordRerankerCandidatesInput(t *testing.T) {
 	tests := []struct {
 		name   string
-		userID int64
+		userID storage.ScopeID
 		count  int
 	}{
-		{"50 candidates", 666, 50},
-		{"zero candidates", 777, 0},
-		{"100 candidates", 888, 100},
+		{"50 candidates", "666", 50},
+		{"zero candidates", "777", 0},
+		{"100 candidates", "888", 100},
 	}
 
 	for _, tt := range tests {
@@ -365,12 +367,12 @@ func TestRecordRerankerCandidatesInput(t *testing.T) {
 func TestRecordRerankerCandidatesOutput(t *testing.T) {
 	tests := []struct {
 		name   string
-		userID int64
+		userID storage.ScopeID
 		count  int
 	}{
-		{"5 selected", 999, 5},
-		{"zero selected", 1000, 0},
-		{"max selected", 1001, 10},
+		{"5 selected", "999", 5},
+		{"zero selected", "1000", 0},
+		{"max selected", "1001", 10},
 	}
 
 	for _, tt := range tests {
@@ -383,7 +385,7 @@ func TestRecordRerankerCandidatesOutput(t *testing.T) {
 }
 
 func TestRecordRerankerCost(t *testing.T) {
-	userID := int64(77777)
+	userID := storage.ScopeID("77777")
 	uid := formatUserID(userID)
 
 	// Record cost
@@ -401,15 +403,15 @@ func TestRecordRerankerCost(t *testing.T) {
 func TestRecordRerankerFallback(t *testing.T) {
 	tests := []struct {
 		name   string
-		userID int64
+		userID storage.ScopeID
 		reason string
 	}{
-		{"timeout", 1111, "timeout"},
-		{"error", 2222, "error"},
-		{"max tool calls", 3333, "max_tool_calls"},
-		{"invalid json", 4444, "invalid_json"},
-		{"requested ids fallback", 5555, "requested_ids"},
-		{"vector top fallback", 6666, "vector_top"},
+		{"timeout", "1111", "timeout"},
+		{"error", "2222", "error"},
+		{"max tool calls", "3333", "max_tool_calls"},
+		{"invalid json", "4444", "invalid_json"},
+		{"requested ids fallback", "5555", "requested_ids"},
+		{"vector top fallback", "6666", "vector_top"},
 	}
 
 	for _, tt := range tests {
@@ -427,13 +429,13 @@ func TestRecordRerankerFallback(t *testing.T) {
 
 func TestRerankerMetricsRegistration(t *testing.T) {
 	// Trigger metric registration by calling the functions
-	RecordRerankerDuration(123, 1.0)
-	RecordRerankerToolCalls(123, 1)
-	RecordRerankerCandidatesInput(123, 10)
-	RecordRerankerCandidatesOutput(123, 5)
-	RecordRerankerCost(123, 0.01)
-	RecordRerankerFallback(123, "timeout")
-	RecordRerankerHallucination(123, 1)
+	RecordRerankerDuration("123", 1.0)
+	RecordRerankerToolCalls("123", 1)
+	RecordRerankerCandidatesInput("123", 10)
+	RecordRerankerCandidatesOutput("123", 5)
+	RecordRerankerCost("123", 0.01)
+	RecordRerankerFallback("123", "timeout")
+	RecordRerankerHallucination("123", 1)
 
 	// Verify all reranker metrics are registered
 	metrics := []string{
@@ -460,7 +462,7 @@ func TestRerankerMetricsRegistration(t *testing.T) {
 }
 
 func TestRecordRerankerHallucination(t *testing.T) {
-	userID := int64(99999)
+	userID := storage.ScopeID("99999")
 	uid := formatUserID(userID)
 
 	// Record some hallucinations
@@ -477,7 +479,7 @@ func TestRecordRerankerHallucination(t *testing.T) {
 }
 
 func TestRecordRerankerHallucination_ZeroCount(t *testing.T) {
-	userID := int64(88888)
+	userID := storage.ScopeID("88888")
 
 	// Should not panic with zero count
 	assert.NotPanics(t, func() {

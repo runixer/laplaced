@@ -37,7 +37,7 @@ func TestSplitter_Execute(t *testing.T) {
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID:       123,
+			UserID:       "123",
 			Profile:      "<user_profile>\n</user_profile>",
 			RecentTopics: "<recent_topics>\n</recent_topics>",
 		},
@@ -153,24 +153,24 @@ func TestSplitter_getUserID(t *testing.T) {
 	tests := []struct {
 		name     string
 		req      *agent.Request
-		expected int64
+		expected storage.ScopeID
 	}{
 		{
 			name:     "nil request",
 			req:      nil,
-			expected: 0,
+			expected: "",
 		},
 		{
 			name:     "no shared context",
 			req:      &agent.Request{},
-			expected: 0,
+			expected: "",
 		},
 		{
 			name: "with shared context",
 			req: &agent.Request{
-				Shared: &agent.SharedContext{UserID: 123},
+				Shared: &agent.SharedContext{UserID: "123"},
 			},
-			expected: 123,
+			expected: "123",
 		},
 	}
 
@@ -267,7 +267,7 @@ func TestSplitter_SingleMessage(t *testing.T) {
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID:       123,
+			UserID:       "123",
 			Profile:      "<user_profile>\n</user_profile>",
 			RecentTopics: "<recent_topics>\n</recent_topics>",
 		},
@@ -308,7 +308,7 @@ func TestSplitter_ParseError(t *testing.T) {
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID:       123,
+			UserID:       "123",
 			Profile:      "<user_profile>\n</user_profile>",
 			RecentTopics: "<recent_topics>\n</recent_topics>",
 		},
@@ -356,7 +356,7 @@ func TestSplitter_getContext_WithFallback(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 
 	// Setup mock fact repo to return facts
-	mockStore.On("GetFacts", int64(123)).Return([]storage.Fact{
+	mockStore.On("GetFacts", storage.ScopeID("123")).Return([]storage.Fact{
 		{ID: 1, Relation: "test_relation", Content: "Test fact", Category: "test", Type: "identity", Importance: 80},
 	}, nil)
 
@@ -377,11 +377,11 @@ func TestSplitter_getContext_WithFallback(t *testing.T) {
 	// Call with empty SharedContext (should trigger fallback)
 	profile, recentTopics := splitter.getContext(context.Background(), &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID:       123,
+			UserID:       "123",
 			Profile:      "", // Empty - triggers fallback
 			RecentTopics: "", // Empty - triggers fallback
 		},
-	}, 123)
+	}, "123")
 
 	// Should have loaded from storage due to fallback
 	// FormatUserProfile formats facts differently, just check it's not empty and contains fact content

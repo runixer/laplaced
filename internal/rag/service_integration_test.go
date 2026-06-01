@@ -216,7 +216,7 @@ func TestServiceReloadVectors_FullReload(t *testing.T) {
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	topics := []storage.Topic{
 		{ID: 1, UserID: userID, Summary: "Topic 1", Embedding: []float32{0.1, 0.2, 0.3}},
@@ -282,7 +282,7 @@ func TestServiceReloadVectors_EmptyEmbeddingsSkipped(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	topics := []storage.Topic{
 		{ID: 1, UserID: userID, Summary: "With embedding", Embedding: []float32{0.1, 0.2}},
@@ -373,7 +373,7 @@ func TestServiceLoadNewVectors_IncrementalLoading(t *testing.T) {
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// New items (IDs greater than baseline)
 	newTopics := []storage.Topic{
@@ -484,7 +484,7 @@ func TestServiceLoadNewVectors_DuplicateDetection(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	topics := []storage.Topic{
 		{ID: 30, UserID: userID, Embedding: []float32{0.1, 0.2}},
@@ -544,7 +544,7 @@ func TestServiceGetRecentTopics(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	topics := []storage.TopicExtended{
 		{Topic: storage.Topic{ID: 1, UserID: userID, Summary: "Recent 1"}, MessageCount: 10},
@@ -607,12 +607,12 @@ func TestServiceGetRecentTopics_LimitZero(t *testing.T) {
 	}
 
 	// Zero limit
-	result, err := svc.GetRecentTopics(123, 0)
+	result, err := svc.GetRecentTopics("123", 0)
 	assert.NoError(t, err)
 	assert.Nil(t, result)
 
 	// Negative limit
-	result, err = svc.GetRecentTopics(123, -1)
+	result, err = svc.GetRecentTopics("123", -1)
 	assert.NoError(t, err)
 	assert.Nil(t, result)
 
@@ -631,8 +631,8 @@ func TestServiceLoadNewArtifactSummaries(t *testing.T) {
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
-	userID2 := int64(456)
+	userID := storage.PassthroughScopeID("telegram", "123")
+	userID2 := storage.PassthroughScopeID("telegram", "456")
 
 	artifacts := []storage.Artifact{
 		{ID: 1, UserID: userID, FileType: "pdf", Embedding: []float32{0.1, 0.2}},
@@ -721,7 +721,7 @@ func TestServiceLoadNewArtifactSummaries_Incremental(t *testing.T) {
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 
 	memSvc := memory.NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockClient, translator)
 	svc, err := NewServiceBuilder().
@@ -1131,7 +1131,7 @@ func TestServiceProcessingFlags(t *testing.T) {
 	})
 
 	t.Run("tryStartProcessingUser returns true first time", func(t *testing.T) {
-		userID := int64(123)
+		userID := storage.ScopeID("123")
 
 		// First call should return true
 		result := svc.tryStartProcessingUser(userID)

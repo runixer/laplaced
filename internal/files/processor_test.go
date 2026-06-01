@@ -9,6 +9,8 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/runixer/laplaced/internal/storage"
+
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/telegram"
 	"github.com/runixer/laplaced/internal/testutil"
@@ -51,7 +53,7 @@ func TestProcessor_ProcessMessage_Photo(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -82,7 +84,7 @@ func TestProcessor_ProcessMessage_Voice(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -112,7 +114,7 @@ func TestProcessor_ProcessMessage_DocumentPDF(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -141,7 +143,7 @@ func TestProcessor_ProcessMessage_DocumentImage(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -169,7 +171,7 @@ func TestProcessor_ProcessMessage_DocumentText(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -199,7 +201,7 @@ func TestProcessor_ProcessMessage_RetryOnFailure(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -219,7 +221,7 @@ func TestProcessor_ProcessMessage_EmptyMessage(t *testing.T) {
 		Text: "Hello, no files here!",
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	require.NoError(t, err)
 	assert.Empty(t, files)
@@ -244,7 +246,7 @@ func TestProcessor_VoiceArtifactDurationThreshold(t *testing.T) {
 
 		mockSaver.ExpectedCalls = nil
 		artifactID := int64(1)
-		mockSaver.On("SaveFile", mock.Anything, int64(12345), int64(0), "voice", "voice.ogg", "audio/ogg", mock.Anything, "").Return(&artifactID, nil)
+		mockSaver.On("SaveFile", mock.Anything, storage.ScopeID("12345"), int64(0), "voice", "voice.ogg", "audio/ogg", mock.Anything, "").Return(&artifactID, nil)
 
 		msg := &telegram.Message{
 			Voice: &telegram.Voice{
@@ -254,7 +256,7 @@ func TestProcessor_VoiceArtifactDurationThreshold(t *testing.T) {
 			},
 		}
 
-		files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+		files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 		require.NoError(t, err)
 		require.Len(t, files, 1)
 		mockSaver.AssertExpectations(t)
@@ -277,7 +279,7 @@ func TestProcessor_VoiceArtifactDurationThreshold(t *testing.T) {
 			},
 		}
 
-		files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+		files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 		require.NoError(t, err)
 		require.Len(t, files, 1) // Still returns processed file
 		assert.Empty(t, mockSaver.Calls, "SaveFile should not be called for short voices")
@@ -290,7 +292,7 @@ func TestProcessor_VoiceArtifactDurationThreshold(t *testing.T) {
 
 		mockSaver.ExpectedCalls = nil
 		artifactID := int64(2)
-		mockSaver.On("SaveFile", mock.Anything, int64(12345), int64(0), "voice", "voice.ogg", "audio/ogg", mock.Anything, "").Return(&artifactID, nil)
+		mockSaver.On("SaveFile", mock.Anything, storage.ScopeID("12345"), int64(0), "voice", "voice.ogg", "audio/ogg", mock.Anything, "").Return(&artifactID, nil)
 
 		msg := &telegram.Message{
 			Voice: &telegram.Voice{
@@ -300,7 +302,7 @@ func TestProcessor_VoiceArtifactDurationThreshold(t *testing.T) {
 			},
 		}
 
-		files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+		files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 		require.NoError(t, err)
 		require.Len(t, files, 1)
 		mockSaver.AssertExpectations(t)
@@ -323,7 +325,7 @@ func TestProcessor_VoiceArtifactDurationThreshold(t *testing.T) {
 			},
 		}
 
-		files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+		files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 		require.NoError(t, err)
 		require.Len(t, files, 1)
 		assert.Empty(t, mockSaver.Calls, "SaveFile should not be called when disabled")
@@ -431,7 +433,7 @@ func TestProcessor_ProcessMessage_UnsupportedFormat(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	// Should return UnsupportedFormatError
 	assert.Error(t, err)
@@ -463,7 +465,7 @@ func TestProcessor_ProcessMessage_FileTooLarge(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	// Should return FileTooLargeError
 	assert.Error(t, err)
@@ -497,7 +499,7 @@ func TestProcessor_ProcessMessage_Audio(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -526,7 +528,7 @@ func TestProcessor_ProcessMessage_VideoNote(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -555,7 +557,7 @@ func TestProcessor_ProcessMessage_DocumentVideo(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -585,7 +587,7 @@ func TestProcessor_ProcessMessage_AllRetriesFailed(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	// Should return nil, nil (error logged but not propagated)
 	assert.NoError(t, err)
@@ -615,7 +617,7 @@ func TestProcessor_ProcessMessage_AudioWithMetadata(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -647,7 +649,7 @@ func TestProcessor_ProcessMessage_WithTitleOnly(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -673,7 +675,7 @@ func TestProcessor_ProcessMessage_VoiceFileTooLarge(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	// Should return FileTooLargeError
 	assert.Error(t, err)
@@ -702,7 +704,7 @@ func TestProcessor_ProcessMessage_AudioFileTooLarge(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	// Should return FileTooLargeError
 	assert.Error(t, err)
@@ -731,7 +733,7 @@ func TestProcessor_ProcessMessage_VideoNoteFileTooLarge(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	// Should return FileTooLargeError
 	assert.Error(t, err)
@@ -758,7 +760,7 @@ func TestProcessor_ProcessMessage_WithFileHandler(t *testing.T) {
 	mockDownloader.On("DownloadFile", mock.Anything, "photo-999").Return(photoData, nil)
 
 	artifactID := int64(42)
-	mockSaver.On("SaveFile", mock.Anything, int64(12345), int64(0), "image", "photo.jpg", "image/jpeg", mock.Anything, "").
+	mockSaver.On("SaveFile", mock.Anything, storage.ScopeID("12345"), int64(0), "image", "photo.jpg", "image/jpeg", mock.Anything, "").
 		Return(&artifactID, nil)
 
 	msg := &telegram.Message{
@@ -767,7 +769,7 @@ func TestProcessor_ProcessMessage_WithFileHandler(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -791,7 +793,7 @@ func TestProcessor_ProcessMessage_WithFileHandlerError(t *testing.T) {
 	photoData := []byte("fake-jpeg-data")
 	mockDownloader.On("DownloadFile", mock.Anything, "photo-err").Return(photoData, nil)
 
-	mockSaver.On("SaveFile", mock.Anything, int64(12345), int64(0), "image", "photo.jpg", "image/jpeg", mock.Anything, "").
+	mockSaver.On("SaveFile", mock.Anything, storage.ScopeID("12345"), int64(0), "image", "photo.jpg", "image/jpeg", mock.Anything, "").
 		Return(nil, errors.New("database error"))
 
 	msg := &telegram.Message{
@@ -801,7 +803,7 @@ func TestProcessor_ProcessMessage_WithFileHandlerError(t *testing.T) {
 	}
 
 	// Should still succeed despite artifact save failure
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -830,7 +832,7 @@ func TestProcessor_ProcessMessage_VideoNoteWithUniqueID(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -859,7 +861,7 @@ func TestProcessor_ProcessMessage_AudioDefaultMimeType(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)
@@ -887,7 +889,7 @@ func TestProcessor_ProcessMessage_VoiceDefaultMimeType(t *testing.T) {
 		},
 	}
 
-	files, err := processor.ProcessMessage(ctx, msg, 12345, "")
+	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	require.NoError(t, err)
 	require.Len(t, files, 1)

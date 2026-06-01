@@ -65,7 +65,7 @@ func TestCreateChatCompletion_RecordsSpan(t *testing.T) {
 
 	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
 		Model:    "requested-model",
-		UserID:   42,
+		UserID:   "42",
 		Messages: []Message{{Role: "user", Content: "hi"}},
 	})
 	require.NoError(t, err)
@@ -84,7 +84,7 @@ func TestCreateChatCompletion_RecordsSpan(t *testing.T) {
 	assert.Equal(t, "test-model-resolved", attrs["gen_ai.response.model"].AsString())
 	assert.Equal(t, int64(100), attrs["gen_ai.usage.input_tokens"].AsInt64())
 	assert.Equal(t, int64(10), attrs["gen_ai.usage.output_tokens"].AsInt64())
-	assert.Equal(t, int64(42), attrs["user.id"].AsInt64())
+	assert.Equal(t, "42", attrs["user.id"].AsString())
 	assert.Equal(t, int64(1), attrs["llm.attempts"].AsInt64(), "single successful attempt")
 	assert.Equal(t, sdkcodes.Unset, span.Status.Code)
 }
@@ -249,7 +249,7 @@ func TestCreateChatCompletion_PopulatesBroadcastFields(t *testing.T) {
 
 	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
 		Model:    "m",
-		UserID:   314,
+		UserID:   "314",
 		Messages: []Message{{Role: "user", Content: "hi"}},
 	})
 	require.NoError(t, err)
@@ -286,7 +286,7 @@ func TestCreateChatCompletion_BroadcastFields_CallerWins(t *testing.T) {
 
 	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
 		Model:    "m",
-		UserID:   314,
+		UserID:   "314",
 		User:     "explicit-user",
 		Trace:    map[string]any{"trace_id": "caller-trace", "parent_span_id": "caller-span"},
 		Messages: []Message{{Role: "user", Content: "hi"}},
@@ -674,7 +674,7 @@ func TestCreateChatCompletion_EdgePlainText502_4xRetries(t *testing.T) {
 
 	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
 		Model:    "m",
-		UserID:   42,
+		UserID:   "42",
 		Messages: []Message{{Role: "user", Content: "hi"}},
 	})
 	require.Error(t, err)
@@ -831,7 +831,7 @@ func TestCreateChatCompletionStream_RecordsSpan(t *testing.T) {
 
 	stream, err := client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{
 		Model:    "requested-model",
-		UserID:   42,
+		UserID:   "42",
 		Messages: []Message{{Role: "user", Content: "hi"}},
 	})
 	require.NoError(t, err)
@@ -854,7 +854,7 @@ func TestCreateChatCompletionStream_RecordsSpan(t *testing.T) {
 	assert.Equal(t, "resolved-model", attrs["gen_ai.response.model"].AsString())
 	assert.Equal(t, int64(7), attrs["gen_ai.usage.input_tokens"].AsInt64())
 	assert.Equal(t, int64(2), attrs["gen_ai.usage.output_tokens"].AsInt64())
-	assert.Equal(t, int64(42), attrs["user.id"].AsInt64())
+	assert.Equal(t, "42", attrs["user.id"].AsString())
 	assert.Equal(t, int64(1), attrs["llm.attempts"].AsInt64(), "single successful open attempt")
 	assert.Equal(t, sdkcodes.Unset, span.Status.Code)
 }
@@ -966,7 +966,7 @@ func TestCreateChatCompletionStream_PopulatesBroadcastFields(t *testing.T) {
 
 	stream, err := client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{
 		Model:    "m",
-		UserID:   314,
+		UserID:   "314",
 		Messages: []Message{{Role: "user", Content: "hi"}},
 	})
 	require.NoError(t, err)

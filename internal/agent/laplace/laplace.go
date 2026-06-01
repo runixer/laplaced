@@ -97,7 +97,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 	// reranker calls in TraceQL.
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/laplace").Start(
 		ctx, "laplace.Execute",
-		trace.WithAttributes(attribute.Int64("user.id", req.UserID)),
+		trace.WithAttributes(attribute.String("user.id", string(req.UserID))),
 	)
 	// Captured by the deferred closure for span attrs. tool/llm counters
 	// live with the existing tracker; we copy at end-of-turn into attrs.
@@ -202,7 +202,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 			Plugins:   plugins,
 			Tools:     l.tools,
 			Reasoning: reasoning,
-			UserID:    req.UserID,
+			UserID:    string(req.UserID),
 		}
 
 		tracker.StartTurn()
@@ -564,7 +564,7 @@ func extractImageFileParts(parts []interface{}) []openrouter.FilePart {
 }
 
 // LogExecution logs the execution to agent logger.
-func (l *Laplace) LogExecution(ctx context.Context, userID int64, resp *Response, cost float64) {
+func (l *Laplace) LogExecution(ctx context.Context, userID storage.ScopeID, resp *Response, cost float64) {
 	if l.agentLogger == nil {
 		return
 	}

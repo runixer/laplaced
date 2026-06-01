@@ -71,7 +71,7 @@ func TestRetrieve_RecordsSpan(t *testing.T) {
 	).Maybe()
 
 	svc := buildRetrieveServiceForTracing(t, mockStore, mockClient)
-	_, _, err := svc.Retrieve(context.Background(), 123, "hello", &RetrievalOptions{Source: "auto"})
+	_, _, err := svc.Retrieve(context.Background(), "123", "hello", &RetrievalOptions{Source: "auto"})
 	require.NoError(t, err)
 
 	spans := getSpans()
@@ -83,7 +83,7 @@ func TestRetrieve_RecordsSpan(t *testing.T) {
 	for _, kv := range span.Attributes {
 		attrs[kv.Key] = kv.Value
 	}
-	assert.Equal(t, int64(123), attrs["user.id"].AsInt64())
+	assert.Equal(t, "123", attrs["user.id"].AsString())
 	assert.Equal(t, "auto", attrs["rag.source"].AsString())
 	assert.False(t, attrs["rag.used_reranker"].AsBool(), "empty store means no reranker path taken")
 	assert.Equal(t, sdkcodes.Unset, span.Status.Code)
@@ -105,7 +105,7 @@ func TestRetrieve_ContentEventsGatedByToggle(t *testing.T) {
 		t.Cleanup(func() { obs.SetContentEnabled(prev) })
 		obs.SetContentEnabled(false)
 
-		_, _, err := svc.Retrieve(context.Background(), 123, "secret question", &RetrievalOptions{Source: "auto"})
+		_, _, err := svc.Retrieve(context.Background(), "123", "secret question", &RetrievalOptions{Source: "auto"})
 		require.NoError(t, err)
 		spans := getSpans()
 		require.Len(t, spans, 1)
@@ -118,7 +118,7 @@ func TestRetrieve_ContentEventsGatedByToggle(t *testing.T) {
 		t.Cleanup(func() { obs.SetContentEnabled(prev) })
 		obs.SetContentEnabled(true)
 
-		_, _, err := svc.Retrieve(context.Background(), 123, "secret question", &RetrievalOptions{Source: "tool", SkipEnrichment: true})
+		_, _, err := svc.Retrieve(context.Background(), "123", "secret question", &RetrievalOptions{Source: "tool", SkipEnrichment: true})
 		require.NoError(t, err)
 		spans := getSpans()
 		require.Len(t, spans, 1)
@@ -148,7 +148,7 @@ func TestRetrieve_EmbeddingError_SetsErrorStatus(t *testing.T) {
 	)
 
 	svc := buildRetrieveServiceForTracing(t, mockStore, mockClient)
-	_, _, err := svc.Retrieve(context.Background(), 123, "anything", &RetrievalOptions{Source: "auto"})
+	_, _, err := svc.Retrieve(context.Background(), "123", "anything", &RetrievalOptions{Source: "auto"})
 	require.Error(t, err)
 
 	spans := getSpans()

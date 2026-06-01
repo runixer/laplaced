@@ -35,7 +35,7 @@ func NewFileHandler(
 // messageText is the text content of the message (msg.Text or msg.Caption) for context (v0.6.0).
 func (fh *FileHandler) SaveFile(
 	ctx context.Context,
-	userID int64,
+	userID storage.ScopeID,
 	messageID int64,
 	fileType string,
 	originalName string,

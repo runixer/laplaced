@@ -142,7 +142,7 @@ func NewSharedContextBuilder() *SharedContextBuilder {
 }
 
 // WithUserID sets the user ID.
-func (b *SharedContextBuilder) WithUserID(userID int64) *SharedContextBuilder {
+func (b *SharedContextBuilder) WithUserID(userID storage.ScopeID) *SharedContextBuilder {
 	b.shared.UserID = userID
 	return b
 }

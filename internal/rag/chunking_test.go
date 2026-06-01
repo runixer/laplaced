@@ -35,7 +35,7 @@ func TestProcessChunk_HallucinatedIDs(t *testing.T) {
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	messages := []storage.Message{
 		{ID: 100, Role: "user", Content: "Msg 1", CreatedAt: time.Now()},
 		{ID: 102, Role: "user", Content: "Msg 2", CreatedAt: time.Now().Add(time.Minute)},
@@ -108,7 +108,7 @@ func TestProcessChunk_ValidIDs(t *testing.T) {
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	messages := []storage.Message{
 		{ID: 100, Role: "user", Content: "Msg 1", CreatedAt: time.Now()},
 		{ID: 102, Role: "user", Content: "Msg 2", CreatedAt: time.Now().Add(time.Minute)},

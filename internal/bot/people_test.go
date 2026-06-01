@@ -51,7 +51,7 @@ func TestExtractForwardedPeople_NewPerson(t *testing.T) {
 	// Setup
 	bot, mockStore, _, logger := setupBotForPeopleTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	now := int(time.Now().Unix())
 	senderID := int64(789)
 	senderUsername := "john_doe"
@@ -61,7 +61,7 @@ func TestExtractForwardedPeople_NewPerson(t *testing.T) {
 		{
 			MessageID: 1,
 			Text:      "Forwarded message",
-			From:      &telegram.User{ID: userID, FirstName: "User", Username: "testuser"},
+			From:      &telegram.User{ID: 123, FirstName: "User", Username: "testuser"},
 			Chat:      &telegram.Chat{ID: 456},
 			Date:      now,
 			ForwardOrigin: &telegram.MessageOrigin{
@@ -105,7 +105,7 @@ func TestExtractForwardedPeople_NewPerson(t *testing.T) {
 func TestExtractForwardedPeople_UpdateExistingPerson(t *testing.T) {
 	bot, mockStore, _, logger := setupBotForPeopleTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	now := int(time.Now().Unix())
 	senderID := int64(789)
 
@@ -123,7 +123,7 @@ func TestExtractForwardedPeople_UpdateExistingPerson(t *testing.T) {
 		{
 			MessageID: 1,
 			Text:      "Forwarded message",
-			From:      &telegram.User{ID: userID, FirstName: "User"},
+			From:      &telegram.User{ID: 123, FirstName: "User"},
 			Chat:      &telegram.Chat{ID: 456},
 			Date:      now,
 			ForwardOrigin: &telegram.MessageOrigin{
@@ -152,14 +152,14 @@ func TestExtractForwardedPeople_UpdateExistingPerson(t *testing.T) {
 func TestExtractForwardedPeople_SkipBots(t *testing.T) {
 	bot, mockStore, _, logger := setupBotForPeopleTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	now := int(time.Now().Unix())
 
 	messages := []*telegram.Message{
 		{
 			MessageID: 1,
 			Text:      "Forwarded from bot",
-			From:      &telegram.User{ID: userID, FirstName: "User"},
+			From:      &telegram.User{ID: 123, FirstName: "User"},
 			Chat:      &telegram.Chat{ID: 456},
 			Date:      now,
 			ForwardOrigin: &telegram.MessageOrigin{
@@ -185,20 +185,20 @@ func TestExtractForwardedPeople_SkipBots(t *testing.T) {
 func TestExtractForwardedPeople_SkipSelf(t *testing.T) {
 	bot, mockStore, _, logger := setupBotForPeopleTests(t)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	now := int(time.Now().Unix())
 
 	messages := []*telegram.Message{
 		{
 			MessageID: 1,
 			Text:      "Self-forwarded message",
-			From:      &telegram.User{ID: userID, FirstName: "User"},
+			From:      &telegram.User{ID: 123, FirstName: "User"},
 			Chat:      &telegram.Chat{ID: 456},
 			Date:      now,
 			ForwardOrigin: &telegram.MessageOrigin{
 				Type:       "user",
 				Date:       now - 3600,
-				SenderUser: &telegram.User{ID: userID, FirstName: "User"},
+				SenderUser: &telegram.User{ID: 123, FirstName: "User"},
 			},
 		},
 	}
@@ -214,14 +214,14 @@ func TestExtractForwardedPeople_SkipSelf(t *testing.T) {
 func TestExtractForwardedPeople_SkipNonUserForwards(t *testing.T) {
 	bot, mockStore, _, logger := setupBotForPeopleTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	now := int(time.Now().Unix())
 
 	messages := []*telegram.Message{
 		{
 			MessageID: 1,
 			Text:      "Forwarded from channel",
-			From:      &telegram.User{ID: userID, FirstName: "User"},
+			From:      &telegram.User{ID: 123, FirstName: "User"},
 			Chat:      &telegram.Chat{ID: 456},
 			Date:      now,
 			ForwardOrigin: &telegram.MessageOrigin{
@@ -242,7 +242,7 @@ func TestExtractForwardedPeople_SkipNonUserForwards(t *testing.T) {
 func TestExtractForwardedPeople_UpdatePersonByUsername(t *testing.T) {
 	bot, mockStore, _, logger := setupBotForPeopleTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	now := int(time.Now().Unix())
 	senderID := int64(789)
 	senderUsername := "jane_doe"
@@ -260,7 +260,7 @@ func TestExtractForwardedPeople_UpdatePersonByUsername(t *testing.T) {
 		{
 			MessageID: 1,
 			Text:      "Forwarded message",
-			From:      &telegram.User{ID: userID, FirstName: "User"},
+			From:      &telegram.User{ID: 123, FirstName: "User"},
 			Chat:      &telegram.Chat{ID: 456},
 			Date:      now,
 			ForwardOrigin: &telegram.MessageOrigin{
@@ -298,14 +298,14 @@ func TestExtractForwardedPeople_NilPeopleRepo(t *testing.T) {
 	// Override peopleRepo to nil for this test
 	bot.peopleRepo = nil
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	now := int(time.Now().Unix())
 
 	messages := []*telegram.Message{
 		{
 			MessageID: 1,
 			Text:      "Forwarded message",
-			From:      &telegram.User{ID: userID, FirstName: "User"},
+			From:      &telegram.User{ID: 123, FirstName: "User"},
 			Chat:      &telegram.Chat{ID: 456},
 			Date:      now,
 			ForwardOrigin: &telegram.MessageOrigin{
@@ -336,7 +336,7 @@ func TestPerformSearchPeople_FoundByUsername(t *testing.T) {
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
 	toolExecutor.SetPeopleRepository(mockStore)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	foundPerson := &storage.Person{
 		ID:          1,
@@ -375,7 +375,7 @@ func TestPerformSearchPeople_FoundByName(t *testing.T) {
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
 	toolExecutor.SetPeopleRepository(mockStore)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	foundPerson := &storage.Person{
 		ID:          1,
@@ -410,7 +410,7 @@ func TestPerformSearchPeople_NotFound(t *testing.T) {
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
 	toolExecutor.SetPeopleRepository(mockStore)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// Mock: not found (no @ prefix, so only FindPersonByName and FindPersonByAlias are called)
 	mockStore.On("FindPersonByName", userID, "unknown").Return((*storage.Person)(nil), nil).Once()
@@ -435,7 +435,7 @@ func TestPerformUpdatePerson_Success(t *testing.T) {
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
 	toolExecutor.SetPeopleRepository(mockStore)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	existingPerson := &storage.Person{
 		ID:          1,
@@ -481,7 +481,7 @@ func TestPerformUpdatePerson_PersonNotFound(t *testing.T) {
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
 	toolExecutor.SetPeopleRepository(mockStore)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// Mock: not found
 	mockStore.On("FindPersonByName", userID, "Unknown").Return((*storage.Person)(nil), nil).Once()
@@ -508,7 +508,7 @@ func TestPerformMergePeople_Success(t *testing.T) {
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
 	toolExecutor.SetPeopleRepository(mockStore)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	targetPerson := &storage.Person{
 		ID:          1,
@@ -566,7 +566,7 @@ func TestPerformMergePeople_SelfMerge(t *testing.T) {
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
 	toolExecutor.SetPeopleRepository(mockStore)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	person := &storage.Person{
 		ID:          1,
@@ -601,7 +601,7 @@ func TestPerformMergePeople_SourceNotFound(t *testing.T) {
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
 	toolExecutor.SetPeopleRepository(mockStore)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	targetPerson := &storage.Person{
 		ID:          1,
@@ -637,7 +637,7 @@ func TestPerformCreatePerson_Success(t *testing.T) {
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
 	toolExecutor.SetPeopleRepository(mockStore)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// Mock: person not found by name
 	mockStore.On("FindPersonByName", userID, "John Doe").Return((*storage.Person)(nil), nil).Once()
@@ -678,7 +678,7 @@ func TestPerformCreatePerson_AlreadyExists(t *testing.T) {
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
 	toolExecutor.SetPeopleRepository(mockStore)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	existingPerson := &storage.Person{
 		ID:          1,
@@ -711,7 +711,7 @@ func TestPerformCreatePerson_AliasAlreadyExists(t *testing.T) {
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
 	toolExecutor.SetPeopleRepository(mockStore)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	existingPerson := &storage.Person{
 		ID:          1,
@@ -748,7 +748,7 @@ func TestPerformCreatePerson_WithUsername(t *testing.T) {
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
 	toolExecutor.SetPeopleRepository(mockStore)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// Mock: person not found
 	mockStore.On("FindPersonByName", userID, "Jane Doe").Return((*storage.Person)(nil), nil).Once()
@@ -782,7 +782,7 @@ func TestPerformDeletePerson_Success(t *testing.T) {
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
 	toolExecutor.SetPeopleRepository(mockStore)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	existingPerson := &storage.Person{
 		ID:          1,
@@ -816,7 +816,7 @@ func TestPerformDeletePerson_ByID(t *testing.T) {
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
 	toolExecutor.SetPeopleRepository(mockStore)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	existingPerson := &storage.Person{
 		ID:          42,
@@ -850,7 +850,7 @@ func TestPerformDeletePerson_NotFound(t *testing.T) {
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
 	toolExecutor.SetPeopleRepository(mockStore)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// Mock: not found by name
 	mockStore.On("FindPersonByName", userID, "Unknown").Return((*storage.Person)(nil), nil).Once()

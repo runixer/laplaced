@@ -52,7 +52,7 @@ func TestServiceSplitLargeTopics_Success(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// Large topics
 	topics := []storage.Topic{
@@ -119,8 +119,8 @@ func TestServiceSplitLargeTopics_AllUsers(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 
 	topics := []storage.Topic{
-		{ID: 1, UserID: 123, SizeChars: 30000},
-		{ID: 2, UserID: 456, SizeChars: 35000},
+		{ID: 1, UserID: "123", SizeChars: 30000},
+		{ID: 2, UserID: "456", SizeChars: 35000},
 	}
 	messages := []storage.Message{
 		{ID: 1, Role: "user", Content: "Message"},
@@ -130,8 +130,8 @@ func TestServiceSplitLargeTopics_AllUsers(t *testing.T) {
 	// splitTopic calls GetMessagesByTopicID for each large topic
 	mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return(messages, nil).Once()
 	mockStore.On("GetMessagesByTopicID", mock.Anything, int64(2)).Return(messages, nil).Once()
-	mockStore.On("GetFacts", int64(123)).Return([]storage.Fact{}, nil).Maybe()
-	mockStore.On("GetFacts", int64(456)).Return([]storage.Fact{}, nil).Maybe()
+	mockStore.On("GetFacts", storage.ScopeID("123")).Return([]storage.Fact{}, nil).Maybe()
+	mockStore.On("GetFacts", storage.ScopeID("456")).Return([]storage.Fact{}, nil).Maybe()
 	mockStore.On("GetTopicsExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(storage.TopicResult{Data: []storage.TopicExtended{}, TotalCount: 0}, nil).Maybe()
 	mockStore.On("GetAllFacts").Return([]storage.Fact{}, nil).Maybe() // For ReloadVectors
@@ -160,7 +160,7 @@ func TestServiceSplitLargeTopics_AllUsers(t *testing.T) {
 		nil,
 	).Times(2)
 
-	stats, err := svc.SplitLargeTopics(context.Background(), 0, 25000)
+	stats, err := svc.SplitLargeTopics(context.Background(), "", 25000)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 2, stats.TopicsProcessed)
@@ -175,7 +175,7 @@ func TestServiceSplitLargeTopics_NoLargeTopics(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	topics := []storage.Topic{
 		{ID: 1, UserID: userID, SizeChars: 10000},
@@ -215,7 +215,7 @@ func TestServiceSplitLargeTopics_ContextCanceled(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	topics := []storage.Topic{
 		{ID: 1, UserID: userID, SizeChars: 30000},
@@ -256,7 +256,7 @@ func TestServiceSplitLargeTopics_GetTopicsError(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	mockStore.On("GetTopics", userID).Return(nil, errors.New("db error"))
 
@@ -289,10 +289,10 @@ func TestServiceSplitTopic_EmptyTopic(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	topic := storage.Topic{ID: 1, UserID: 123, SizeChars: 1000}
+	topic := storage.Topic{ID: 1, UserID: "123", SizeChars: 1000}
 
 	mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return([]storage.Message{}, nil).Once()
-	mockStore.On("DeleteTopicCascade", int64(123), int64(1)).Return(nil).Once()
+	mockStore.On("DeleteTopicCascade", storage.ScopeID("123"), int64(1)).Return(nil).Once()
 
 	memSvc := memory.NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockClient, translator)
 	svc, err := NewServiceBuilder().
@@ -324,14 +324,14 @@ func TestServiceSplitTopic_CannotSplit(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	topic := storage.Topic{ID: 1, UserID: 123, SizeChars: 30000}
+	topic := storage.Topic{ID: 1, UserID: "123", SizeChars: 30000}
 	messages := []storage.Message{
 		{ID: 1, Role: "user", Content: "Hello"},
 		{ID: 2, Role: "assistant", Content: "Hi"},
 	}
 
 	mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return(messages, nil).Once()
-	mockStore.On("GetFacts", int64(123)).Return([]storage.Fact{}, nil).Maybe()
+	mockStore.On("GetFacts", storage.ScopeID("123")).Return([]storage.Fact{}, nil).Maybe()
 	mockStore.On("GetTopicsExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(storage.TopicResult{Data: []storage.TopicExtended{}, TotalCount: 0}, nil).Maybe()
 
@@ -374,7 +374,7 @@ func TestServiceExtractTopicsForSplit_Success(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	messages := []storage.Message{
 		{ID: 1, Role: "user", Content: "First message", CreatedAt: time.Now()},
 		{ID: 2, Role: "assistant", Content: "Response", CreatedAt: time.Now()},
@@ -430,7 +430,7 @@ func TestServiceExtractTopicsForSplit_AgentError(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	messages := []storage.Message{{ID: 1, Role: "user", Content: "Hello"}}
 
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil).Once()
@@ -474,7 +474,7 @@ func TestServiceExtractTopicsForSplit_NoFacts(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	messages := []storage.Message{{ID: 1, Role: "user", Content: "Hello"}}
 
 	// GetFacts returns error - should continue with empty profile
@@ -540,7 +540,7 @@ func TestExtractTopics_NoSplitterAgent(t *testing.T) {
 	// Don't set splitter agent
 	messages := []storage.Message{{ID: 1, Role: "user", Content: "Hello"}}
 
-	topics, usage, err := svc.extractTopics(context.Background(), 123, messages)
+	topics, usage, err := svc.extractTopics(context.Background(), "123", messages)
 	assert.Error(t, err)
 	assert.Nil(t, topics)
 	assert.Equal(t, UsageInfo{}, usage)
@@ -579,7 +579,7 @@ func TestExtractTopicsViaAgent_UnexpectedResult(t *testing.T) {
 
 	messages := []storage.Message{{ID: 1, Role: "user", Content: "Hello"}}
 
-	topics, usage, err := svc.extractTopics(context.Background(), 123, messages)
+	topics, usage, err := svc.extractTopics(context.Background(), "123", messages)
 	assert.Error(t, err)
 	assert.Nil(t, topics)
 	assert.Equal(t, UsageInfo{}, usage)
@@ -593,7 +593,7 @@ func TestServiceSplitTopic_SuccessfulSplit(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// Large topic with multiple messages
 	topic := storage.Topic{ID: 1, UserID: userID, SizeChars: 30000, FactsExtracted: false}

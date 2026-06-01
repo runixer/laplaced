@@ -68,13 +68,13 @@ func setupBotForHandlerTests(t *testing.T) (*Bot, *testutil.MockStorage, *testut
 func TestHandleUpdate_AllowedUser_Success(t *testing.T) {
 	bot, mockStore, _ := setupBotForHandlerTests(t)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	update := &telegram.Update{
 		UpdateID: 1,
 		Message: &telegram.Message{
 			MessageID: 1,
-			From:      &telegram.User{ID: userID, FirstName: "Test", Username: "testuser"},
-			Chat:      &telegram.Chat{ID: userID},
+			From:      &telegram.User{ID: 123, FirstName: "Test", Username: "testuser"},
+			Chat:      &telegram.Chat{ID: 123},
 			Text:      "Hello",
 			Date:      int(time.Now().Unix()),
 		},
@@ -109,7 +109,7 @@ func TestHandleUpdate_UnauthorizedUser_ReturnsEarly(t *testing.T) {
 
 	// Expect UpsertUser to be called even for unauthorized users
 	mockStore.On("UpsertUser", mock.MatchedBy(func(u storage.User) bool {
-		return u.ID == unauthorizedUserID
+		return u.ID == storage.PassthroughScopeID("telegram", "999")
 	})).Return(nil)
 
 	// ProcessUpdate should return after isAllowed check
@@ -122,13 +122,12 @@ func TestHandleUpdate_UnauthorizedUser_ReturnsEarly(t *testing.T) {
 func TestHandleUpdate_UpsertUserError_LogsAndContinues(t *testing.T) {
 	bot, mockStore, _ := setupBotForHandlerTests(t)
 
-	userID := int64(123)
 	update := &telegram.Update{
 		UpdateID: 1,
 		Message: &telegram.Message{
 			MessageID: 1,
-			From:      &telegram.User{ID: userID, FirstName: "Test"},
-			Chat:      &telegram.Chat{ID: userID},
+			From:      &telegram.User{ID: 123, FirstName: "Test"},
+			Chat:      &telegram.Chat{ID: 123},
 			Text:      "Hello",
 			Date:      int(time.Now().Unix()),
 		},
@@ -165,13 +164,12 @@ func TestHandleUpdate_NilMessage_ReturnsEarly(t *testing.T) {
 func TestHandleUpdate_VoiceMessage_RoutedToGrouper(t *testing.T) {
 	bot, mockStore, _ := setupBotForHandlerTests(t)
 
-	userID := int64(123)
 	update := &telegram.Update{
 		UpdateID: 1,
 		Message: &telegram.Message{
 			MessageID: 1,
-			From:      &telegram.User{ID: userID, FirstName: "Test"},
-			Chat:      &telegram.Chat{ID: userID},
+			From:      &telegram.User{ID: 123, FirstName: "Test"},
+			Chat:      &telegram.Chat{ID: 123},
 			Voice:     &telegram.Voice{FileID: "voice123"},
 			Date:      int(time.Now().Unix()),
 		},
@@ -191,13 +189,12 @@ func TestHandleUpdate_VoiceMessage_RoutedToGrouper(t *testing.T) {
 func TestHandleUpdate_PhotoMessage_RoutedToGrouper(t *testing.T) {
 	bot, mockStore, _ := setupBotForHandlerTests(t)
 
-	userID := int64(123)
 	update := &telegram.Update{
 		UpdateID: 1,
 		Message: &telegram.Message{
 			MessageID: 1,
-			From:      &telegram.User{ID: userID, FirstName: "Test"},
-			Chat:      &telegram.Chat{ID: userID},
+			From:      &telegram.User{ID: 123, FirstName: "Test"},
+			Chat:      &telegram.Chat{ID: 123},
 			Photo: []telegram.PhotoSize{
 				{FileID: "photo123", Width: 100, Height: 100},
 			},
@@ -218,13 +215,12 @@ func TestHandleUpdate_PhotoMessage_RoutedToGrouper(t *testing.T) {
 func TestHandleUpdateAsync_ConcurrentCalls(t *testing.T) {
 	bot, mockStore, _ := setupBotForHandlerTests(t)
 
-	userID := int64(123)
 	rawUpdate, _ := json.Marshal(&telegram.Update{
 		UpdateID: 1,
 		Message: &telegram.Message{
 			MessageID: 1,
-			From:      &telegram.User{ID: userID, FirstName: "Test"},
-			Chat:      &telegram.Chat{ID: userID},
+			From:      &telegram.User{ID: 123, FirstName: "Test"},
+			Chat:      &telegram.Chat{ID: 123},
 			Text:      "Hello",
 			Date:      int(time.Now().Unix()),
 		},
@@ -265,7 +261,7 @@ func TestHandleUpdateAsync_PanicInGoroutine_Recovered(t *testing.T) {
 func TestProcessUpdateAsync_QueueMechanics(t *testing.T) {
 	bot, mockStore, _ := setupBotForHandlerTests(t)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 
 	mockStore.On("UpsertUser", mock.MatchedBy(func(u storage.User) bool {
 		return u.ID == userID
@@ -277,8 +273,8 @@ func TestProcessUpdateAsync_QueueMechanics(t *testing.T) {
 			UpdateID: i + 1,
 			Message: &telegram.Message{
 				MessageID: i + 1,
-				From:      &telegram.User{ID: userID, FirstName: "Test"},
-				Chat:      &telegram.Chat{ID: userID},
+				From:      &telegram.User{ID: 123, FirstName: "Test"},
+				Chat:      &telegram.Chat{ID: 123},
 				Text:      "Hello",
 				Date:      int(time.Now().Unix()),
 			},
@@ -297,8 +293,6 @@ func TestProcessUpdateAsync_QueueMechanics(t *testing.T) {
 func TestProcessUpdateAsync_ContextCancellation_StopsProcessing(t *testing.T) {
 	bot, mockStore, _ := setupBotForHandlerTests(t)
 
-	userID := int64(123)
-
 	ctx, cancel := context.WithCancel(context.Background())
 
 	mockStore.On("UpsertUser", mock.Anything).Return(nil).Maybe()
@@ -307,8 +301,8 @@ func TestProcessUpdateAsync_ContextCancellation_StopsProcessing(t *testing.T) {
 		UpdateID: 1,
 		Message: &telegram.Message{
 			MessageID: 1,
-			From:      &telegram.User{ID: userID, FirstName: "Test"},
-			Chat:      &telegram.Chat{ID: userID},
+			From:      &telegram.User{ID: 123, FirstName: "Test"},
+			Chat:      &telegram.Chat{ID: 123},
 			Text:      "Hello",
 			Date:      int(time.Now().Unix()),
 		},

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -37,7 +38,7 @@ type PersonVectorItem struct {
 // ArtifactVectorItem stores artifact summary embeddings for vector search (v0.6.0).
 type ArtifactVectorItem struct {
 	ArtifactID int64
-	UserID     int64
+	UserID     storage.ScopeID
 	Embedding  []float32
 }
 
@@ -133,25 +134,25 @@ type Service struct {
 	peopleRepo           storage.PeopleRepository // v0.5.1: People repository
 	artifactRepo         storage.ArtifactRepository
 	userRepo             storage.UserRepository  // background loops enumerate real tenants (transport-agnostic)
-	scopeRepo            storage.ScopeRepository // channel-scope detection (Phase 6); nil on home
+	scopeRepo            storage.ScopeRepository // channel-scope detection (Phase 6); nil without a resolver (Telegram-only path)
 	client               openrouter.Client
 	memoryService        MemoryService
 	translator           *i18n.Translator
 	agentLogger          *agentlog.Logger
-	enricherAgent        agent.Agent                    // Query enrichment agent
-	splitterAgent        agent.Agent                    // Topic splitting agent
-	mergerAgent          agent.Agent                    // Topic merging agent
-	rerankerAgent        agent.Agent                    // Topic reranking agent
-	extractorAgent       agent.Agent                    // Artifact extraction agent (Phase 3)
-	topicVectors         map[int64][]TopicVectorItem    // UserID -> []TopicVectorItem
-	factVectors          map[int64][]FactVectorItem     // UserID -> []FactVectorItem
-	peopleVectors        map[int64][]PersonVectorItem   // UserID -> []PersonVectorItem (v0.5.1)
-	artifactVectors      map[int64][]ArtifactVectorItem // UserID -> []ArtifactVectorItem (v0.6.0)
-	maxLoadedTopicID     int64                          // Track max loaded topic ID for incremental loading
-	maxLoadedFactID      int64                          // Track max loaded fact ID for incremental loading
-	maxLoadedPersonID    int64                          // Track max loaded person ID for incremental loading (v0.5.1)
-	maxLoadedArtifactID  int64                          // Track max loaded artifact ID for incremental loading (v0.6.0)
-	contextService       *agent.ContextService          // Context service for loading user context
+	enricherAgent        agent.Agent                              // Query enrichment agent
+	splitterAgent        agent.Agent                              // Topic splitting agent
+	mergerAgent          agent.Agent                              // Topic merging agent
+	rerankerAgent        agent.Agent                              // Topic reranking agent
+	extractorAgent       agent.Agent                              // Artifact extraction agent (Phase 3)
+	topicVectors         map[storage.ScopeID][]TopicVectorItem    // UserID -> []TopicVectorItem
+	factVectors          map[storage.ScopeID][]FactVectorItem     // UserID -> []FactVectorItem
+	peopleVectors        map[storage.ScopeID][]PersonVectorItem   // UserID -> []PersonVectorItem (v0.5.1)
+	artifactVectors      map[storage.ScopeID][]ArtifactVectorItem // UserID -> []ArtifactVectorItem (v0.6.0)
+	maxLoadedTopicID     int64                                    // Track max loaded topic ID for incremental loading
+	maxLoadedFactID      int64                                    // Track max loaded fact ID for incremental loading
+	maxLoadedPersonID    int64                                    // Track max loaded person ID for incremental loading (v0.5.1)
+	maxLoadedArtifactID  int64                                    // Track max loaded artifact ID for incremental loading (v0.6.0)
+	contextService       *agent.ContextService                    // Context service for loading user context
 	mu                   sync.RWMutex
 	stopChan             chan struct{}
 	consolidationTrigger chan struct{}
@@ -216,13 +217,13 @@ func (s *Service) finishProcessingTopic(topicID int64) {
 // tryStartProcessingUser attempts to mark a user as being processed for fact extraction.
 // Returns true if this goroutine should process, false if another is already processing.
 // This prevents concurrent people merges for the same user (BUG-013).
-func (s *Service) tryStartProcessingUser(userID int64) bool {
+func (s *Service) tryStartProcessingUser(userID storage.ScopeID) bool {
 	_, alreadyProcessing := s.processingUsers.LoadOrStore(userID, true)
 	return !alreadyProcessing
 }
 
 // finishProcessingUser marks a user as no longer being processed for fact extraction.
-func (s *Service) finishProcessingUser(userID int64) {
+func (s *Service) finishProcessingUser(userID storage.ScopeID) {
 	s.processingUsers.Delete(userID)
 }
 
@@ -336,7 +337,7 @@ func (s *Service) TriggerConsolidation() {
 }
 
 // GetRecentTopics returns the N most recent topics for a user with message counts.
-func (s *Service) GetRecentTopics(userID int64, limit int) ([]storage.TopicExtended, error) {
+func (s *Service) GetRecentTopics(userID storage.ScopeID, limit int) ([]storage.TopicExtended, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
@@ -374,10 +375,10 @@ func (s *Service) ReloadVectors() error {
 	s.mu.Lock()
 
 	// Reset maps for full reload
-	s.topicVectors = make(map[int64][]TopicVectorItem)
-	s.factVectors = make(map[int64][]FactVectorItem)
-	s.peopleVectors = make(map[int64][]PersonVectorItem)
-	s.artifactVectors = make(map[int64][]ArtifactVectorItem)
+	s.topicVectors = make(map[storage.ScopeID][]TopicVectorItem)
+	s.factVectors = make(map[storage.ScopeID][]FactVectorItem)
+	s.peopleVectors = make(map[storage.ScopeID][]PersonVectorItem)
+	s.artifactVectors = make(map[storage.ScopeID][]ArtifactVectorItem)
 	s.maxLoadedTopicID = 0
 	s.maxLoadedFactID = 0
 	s.maxLoadedPersonID = 0
@@ -615,7 +616,7 @@ func (s *Service) loadNewArtifactSummariesLocked() error {
 	}
 
 	// Count per-user for metrics
-	perUserCounts := make(map[int64]int)
+	perUserCounts := make(map[storage.ScopeID]int)
 	for userID, vectors := range s.artifactVectors {
 		perUserCounts[userID] = len(vectors)
 	}
@@ -639,15 +640,15 @@ func (s *Service) LoadNewArtifactSummaries() error {
 }
 
 // backgroundUserIDs returns the memory tenants the background loops should
-// process: the union of the configured allowlist (Telegram home) and every user
+// process: the union of the configured allowlist (Telegram) and every user
 // that exists in storage. The union covers minted scope ids on non-Telegram
-// transports (where Bot.AllowedUserIDs is empty) while never narrowing the home
+// transports (where Bot.AllowedUserIDs is empty) while never narrowing the Telegram
 // path — allowlisted users are always included even before they appear in the
 // users table. WARNING: GetAllUsers is cross-user; this is background-only.
-func (s *Service) backgroundUserIDs() []int64 {
-	seen := make(map[int64]struct{})
-	var ids []int64
-	add := func(id int64) {
+func (s *Service) backgroundUserIDs() []storage.ScopeID {
+	seen := make(map[storage.ScopeID]struct{})
+	var ids []storage.ScopeID
+	add := func(id storage.ScopeID) {
 		if _, ok := seen[id]; ok {
 			return
 		}
@@ -655,7 +656,7 @@ func (s *Service) backgroundUserIDs() []int64 {
 		ids = append(ids, id)
 	}
 	for _, id := range s.cfg.Bot.AllowedUserIDs {
-		add(id)
+		add(storage.PassthroughScopeID("telegram", strconv.FormatInt(id, 10)))
 	}
 	if s.userRepo != nil {
 		users, err := s.userRepo.GetAllUsers()

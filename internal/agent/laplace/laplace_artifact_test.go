@@ -80,7 +80,7 @@ func TestLoadArtifactFullContent_EarlyReturn(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.setupFunc(agent)
-			parts, err := agent.loadArtifactFullContent(context.Background(), 123, tt.artifactIDs)
+			parts, err := agent.loadArtifactFullContent(context.Background(), "123", tt.artifactIDs)
 			require.NoError(t, err)
 			if tt.expectNil {
 				assert.Nil(t, parts)
@@ -95,7 +95,7 @@ func TestLoadArtifactFullContent_ArtifactNotReady(t *testing.T) {
 
 	agent.storagePath = tempDir
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	artifactID := int64(1)
 
 	// Create a test file
@@ -125,7 +125,7 @@ func TestLoadArtifactFullContent_ArtifactNotFound(t *testing.T) {
 
 	agent.storagePath = tempDir
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	artifactID := int64(999)
 
 	// Mock artifact not found
@@ -144,7 +144,7 @@ func TestLoadArtifactFullContent_FileReadError(t *testing.T) {
 
 	agent.storagePath = tempDir
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	artifactID := int64(1)
 
 	// Mock artifact with file that doesn't exist
@@ -170,7 +170,7 @@ func TestLoadArtifactFullContent_CountLimit(t *testing.T) {
 	agent.storagePath = tempDir
 	cfg.Agents.Reranker.Artifacts.Max = 2 // Set max to 2
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// Create test files
 	testFile := filepath.Join(tempDir, filepath.Join("test", "file.pdf"))
@@ -217,7 +217,7 @@ func TestLoadArtifactFullContent_SizeLimit(t *testing.T) {
 	agent.storagePath = tempDir
 	cfg.Agents.Reranker.Artifacts.MaxContextBytes = 30 // Set very low limit
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// Create a small test file (10 bytes)
 	smallFile := filepath.Join(tempDir, "small.pdf")
@@ -266,7 +266,7 @@ func TestLoadArtifactFullContent_UsageTracking(t *testing.T) {
 
 	agent.storagePath = tempDir
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// Create test file
 	testFile := filepath.Join(tempDir, "test.pdf")

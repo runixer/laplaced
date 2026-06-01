@@ -21,9 +21,9 @@ func TestFileHandler_SaveFile_Success(t *testing.T) {
 	fileStorage := files.NewFileStorage(tmpDir, testutil.TestLogger())
 
 	mockRepo := &testutil.MockStorage{}
-	mockRepo.On("GetByHash", int64(123), mock.AnythingOfType("string")).Return(nil, nil) // No existing artifact
+	mockRepo.On("GetByHash", storage.ScopeID("123"), mock.AnythingOfType("string")).Return(nil, nil) // No existing artifact
 	mockRepo.On("AddArtifact", mock.MatchedBy(func(a storage.Artifact) bool {
-		return a.UserID == 123 &&
+		return a.UserID == "123" &&
 			a.MessageID == 456 &&
 			a.FileType == "image" &&
 			a.MimeType == "image/jpeg" &&
@@ -36,7 +36,7 @@ func TestFileHandler_SaveFile_Success(t *testing.T) {
 	data := bytes.NewReader([]byte("fake image data"))
 	id, err := handler.SaveFile(
 		context.Background(),
-		123,             // userID
+		"123",           // userID
 		456,             // messageID
 		"image",         // fileType
 		"test.jpg",      // originalName
@@ -57,20 +57,20 @@ func TestFileHandler_SaveFile_Deduplication(t *testing.T) {
 
 	existingArtifact := &storage.Artifact{
 		ID:          42,
-		UserID:      123,
+		UserID:      "123",
 		ContentHash: "abc123",
 	}
 
 	mockRepo := &testutil.MockStorage{}
 	// GetByHash returns existing artifact
-	mockRepo.On("GetByHash", int64(123), mock.AnythingOfType("string")).Return(existingArtifact, nil)
+	mockRepo.On("GetByHash", storage.ScopeID("123"), mock.AnythingOfType("string")).Return(existingArtifact, nil)
 
 	handler := NewFileHandler(fileStorage, mockRepo, testutil.TestLogger())
 
 	data := bytes.NewReader([]byte("duplicate data"))
 	id, err := handler.SaveFile(
 		context.Background(),
-		123,
+		"123",
 		456,
 		"document",
 		"doc.pdf",
@@ -99,7 +99,7 @@ func TestFileHandler_SaveFile_StorageError(t *testing.T) {
 	data := bytes.NewReader([]byte("test data"))
 	id, err := handler.SaveFile(
 		context.Background(),
-		123,
+		"123",
 		456,
 		"image",
 		"test.jpg",
@@ -119,14 +119,14 @@ func TestFileHandler_SaveFile_GetByHashError(t *testing.T) {
 	fileStorage := files.NewFileStorage(tmpDir, testutil.TestLogger())
 
 	mockRepo := &testutil.MockStorage{}
-	mockRepo.On("GetByHash", int64(123), mock.AnythingOfType("string")).Return(nil, errors.New("db connection error"))
+	mockRepo.On("GetByHash", storage.ScopeID("123"), mock.AnythingOfType("string")).Return(nil, errors.New("db connection error"))
 
 	handler := NewFileHandler(fileStorage, mockRepo, testutil.TestLogger())
 
 	data := bytes.NewReader([]byte("test data"))
 	id, err := handler.SaveFile(
 		context.Background(),
-		123,
+		"123",
 		456,
 		"image",
 		"test.jpg",
@@ -146,9 +146,9 @@ func TestFileHandler_SaveFile_AddArtifactError(t *testing.T) {
 	fileStorage := files.NewFileStorage(tmpDir, testutil.TestLogger())
 
 	mockRepo := &testutil.MockStorage{}
-	mockRepo.On("GetByHash", int64(123), mock.AnythingOfType("string")).Return(nil, nil) // No existing
+	mockRepo.On("GetByHash", storage.ScopeID("123"), mock.AnythingOfType("string")).Return(nil, nil) // No existing
 	mockRepo.On("AddArtifact", mock.MatchedBy(func(a storage.Artifact) bool {
-		return a.UserID == 123
+		return a.UserID == "123"
 	})).Return(int64(0), errors.New("unique constraint violation"))
 
 	handler := NewFileHandler(fileStorage, mockRepo, testutil.TestLogger())
@@ -156,7 +156,7 @@ func TestFileHandler_SaveFile_AddArtifactError(t *testing.T) {
 	data := bytes.NewReader([]byte("test data"))
 	id, err := handler.SaveFile(
 		context.Background(),
-		123,
+		"123",
 		456,
 		"image",
 		"test.jpg",
@@ -176,9 +176,9 @@ func TestFileHandler_SaveFile_WithUserContext(t *testing.T) {
 	fileStorage := files.NewFileStorage(tmpDir, testutil.TestLogger())
 
 	mockRepo := &testutil.MockStorage{}
-	mockRepo.On("GetByHash", int64(123), mock.AnythingOfType("string")).Return(nil, nil)
+	mockRepo.On("GetByHash", storage.ScopeID("123"), mock.AnythingOfType("string")).Return(nil, nil)
 	mockRepo.On("AddArtifact", mock.MatchedBy(func(a storage.Artifact) bool {
-		return a.UserID == 123 &&
+		return a.UserID == "123" &&
 			a.UserContext != nil &&
 			*a.UserContext == "This is my vacation photo"
 	})).Return(int64(1), nil)
@@ -188,7 +188,7 @@ func TestFileHandler_SaveFile_WithUserContext(t *testing.T) {
 	data := bytes.NewReader([]byte("test data"))
 	id, err := handler.SaveFile(
 		context.Background(),
-		123,
+		"123",
 		456,
 		"image",
 		"vacation.jpg",
@@ -208,9 +208,9 @@ func TestFileHandler_SaveFile_EmptyMessageText(t *testing.T) {
 	fileStorage := files.NewFileStorage(tmpDir, testutil.TestLogger())
 
 	mockRepo := &testutil.MockStorage{}
-	mockRepo.On("GetByHash", int64(123), mock.AnythingOfType("string")).Return(nil, nil)
+	mockRepo.On("GetByHash", storage.ScopeID("123"), mock.AnythingOfType("string")).Return(nil, nil)
 	mockRepo.On("AddArtifact", mock.MatchedBy(func(a storage.Artifact) bool {
-		return a.UserID == 123 && a.UserContext == nil
+		return a.UserID == "123" && a.UserContext == nil
 	})).Return(int64(1), nil)
 
 	handler := NewFileHandler(fileStorage, mockRepo, testutil.TestLogger())
@@ -218,7 +218,7 @@ func TestFileHandler_SaveFile_EmptyMessageText(t *testing.T) {
 	data := bytes.NewReader([]byte("test data"))
 	id, err := handler.SaveFile(
 		context.Background(),
-		123,
+		"123",
 		456,
 		"document",
 		"doc.pdf",

@@ -38,7 +38,7 @@ func (s *SplitStats) AddCost(cost *float64) {
 
 // SplitLargeTopics finds and splits all topics larger than threshold.
 // If userID is 0, processes all users.
-func (s *Service) SplitLargeTopics(ctx context.Context, userID int64, thresholdChars int) (*SplitStats, error) {
+func (s *Service) SplitLargeTopics(ctx context.Context, userID storage.ScopeID, thresholdChars int) (*SplitStats, error) {
 	ctx = jobtype.WithJobType(ctx, jobtype.Background)
 
 	stats := &SplitStats{}
@@ -46,7 +46,7 @@ func (s *Service) SplitLargeTopics(ctx context.Context, userID int64, thresholdC
 	// Find large topics (all users or specific user)
 	var topics []storage.Topic
 	var err error
-	if userID == 0 {
+	if userID == "" {
 		topics, err = s.topicRepo.GetAllTopics()
 	} else {
 		topics, err = s.topicRepo.GetTopics(userID)
@@ -286,7 +286,7 @@ func (s *Service) splitTopic(ctx context.Context, topic storage.Topic) ([]int64,
 }
 
 // extractTopicsForSplit extracts topics with emphasis on splitting large conversations.
-func (s *Service) extractTopicsForSplit(ctx context.Context, userID int64, messages []storage.Message) ([]ExtractedTopic, UsageInfo, error) {
+func (s *Service) extractTopicsForSplit(ctx context.Context, userID storage.ScopeID, messages []storage.Message) ([]ExtractedTopic, UsageInfo, error) {
 	// Load user profile for context (unified format with tags)
 	allFacts, err := s.factRepo.GetFacts(userID)
 	var profile string
@@ -325,7 +325,7 @@ func (s *Service) extractTopicsForSplit(ctx context.Context, userID int64, messa
 }
 
 // extractTopicsWithPrompt is like extractTopics but with custom prompt.
-func (s *Service) extractTopicsWithPrompt(ctx context.Context, userID int64, chunk []storage.Message, systemPrompt string) ([]ExtractedTopic, UsageInfo, error) {
+func (s *Service) extractTopicsWithPrompt(ctx context.Context, userID storage.ScopeID, chunk []storage.Message, systemPrompt string) ([]ExtractedTopic, UsageInfo, error) {
 	startTime := time.Now()
 
 	type MsgItem struct {
@@ -397,7 +397,7 @@ func (s *Service) extractTopicsWithPrompt(ctx context.Context, userID int64, chu
 			{Role: "user", Content: userMessage},
 		},
 		ResponseFormat: schema,
-		UserID:         userID,
+		UserID:         string(userID),
 	})
 	durationMs := int(time.Since(startTime).Milliseconds())
 

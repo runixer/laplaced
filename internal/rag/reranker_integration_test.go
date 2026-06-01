@@ -27,7 +27,7 @@ func TestExecuteReranker_Success(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// Create test topics
 	topicMap := map[int64]storage.Topic{
@@ -132,7 +132,7 @@ func TestExecuteReranker_AgentNotConfigured(t *testing.T) {
 
 	input := rerankerInput{}
 
-	_, err = svc.executeReranker(context.Background(), 123, input)
+	_, err = svc.executeReranker(context.Background(), "123", input)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "reranker agent not configured")
@@ -148,7 +148,7 @@ func TestExecuteReranker_AgentError(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	topicMap := map[int64]storage.Topic{
 		1: {ID: 1, UserID: userID, Summary: "Topic 1", StartMsgID: 1, EndMsgID: 5},
 	}
@@ -206,7 +206,7 @@ func TestExecuteReranker_InvalidTopicID(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	topicMap := map[int64]storage.Topic{
 		1: {ID: 1, UserID: userID, Summary: "Topic 1", StartMsgID: 1, EndMsgID: 5},
 	}
@@ -277,7 +277,7 @@ func TestExecuteReranker_WithPeople(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// Setup mock for GetPeopleByIDs
 	people := []storage.Person{
@@ -349,7 +349,7 @@ func TestRerankViaAgent_Success(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	mockReranker := new(agenttesting.MockAgent)
 	mockReranker.On("Type").Return(agent.TypeReranker).Maybe()
@@ -420,7 +420,7 @@ func TestRerankViaAgent_SharedContext(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// Create SharedContext
 	shared := agent.NewSharedContextBuilder().
@@ -494,7 +494,7 @@ func TestRerankViaAgent_UnexpectedType(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	mockReranker := new(agenttesting.MockAgent)
 	mockReranker.On("Type").Return(agent.TypeReranker).Maybe()
@@ -555,7 +555,7 @@ func TestRerankViaAgent_WithArtifacts(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	mockReranker := new(agenttesting.MockAgent)
 	mockReranker.On("Type").Return(agent.TypeReranker).Maybe()

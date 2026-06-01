@@ -45,7 +45,7 @@ const (
 
 // Entry represents a log entry for an agent call.
 type Entry struct {
-	UserID           int64
+	UserID           storage.ScopeID
 	AgentType        AgentType
 	InputPrompt      string
 	InputContext     interface{} // Will be JSON serialized (full API request)
@@ -133,7 +133,7 @@ func (l *Logger) Log(ctx context.Context, entry Entry) {
 }
 
 // LogSuccess is a convenience method for logging successful agent calls.
-func (l *Logger) LogSuccess(ctx context.Context, userID int64, agentType AgentType, inputPrompt string, inputContext interface{}, outputResponse string, outputParsed interface{}, outputContext interface{}, model string, promptTokens, completionTokens int, totalCost *float64, durationMs int, metadata interface{}) {
+func (l *Logger) LogSuccess(ctx context.Context, userID storage.ScopeID, agentType AgentType, inputPrompt string, inputContext interface{}, outputResponse string, outputParsed interface{}, outputContext interface{}, model string, promptTokens, completionTokens int, totalCost *float64, durationMs int, metadata interface{}) {
 	l.Log(ctx, Entry{
 		UserID:           userID,
 		AgentType:        agentType,
@@ -153,7 +153,7 @@ func (l *Logger) LogSuccess(ctx context.Context, userID int64, agentType AgentTy
 }
 
 // LogError is a convenience method for logging failed agent calls.
-func (l *Logger) LogError(ctx context.Context, userID int64, agentType AgentType, inputPrompt string, inputContext interface{}, errorMessage string, model string, durationMs int, metadata interface{}) {
+func (l *Logger) LogError(ctx context.Context, userID storage.ScopeID, agentType AgentType, inputPrompt string, inputContext interface{}, errorMessage string, model string, durationMs int, metadata interface{}) {
 	l.Log(ctx, Entry{
 		UserID:       userID,
 		AgentType:    agentType,

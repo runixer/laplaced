@@ -33,7 +33,7 @@ Example:
 			return fmt.Errorf("failed to delete facts: %w", err)
 		}
 
-		fmt.Printf("Cleared %d facts for user %d\n", len(facts), userID)
+		fmt.Printf("Cleared %d facts for user %s\n", len(facts), userID)
 		return nil
 	},
 }
@@ -65,7 +65,7 @@ Example:
 			return fmt.Errorf("failed to delete topics: %w", err)
 		}
 
-		fmt.Printf("Cleared %d topics for user %d\n", len(topics), userID)
+		fmt.Printf("Cleared %d topics for user %s\n", len(topics), userID)
 		return nil
 	},
 }
@@ -97,7 +97,7 @@ Example:
 			return fmt.Errorf("failed to delete people: %w", err)
 		}
 
-		fmt.Printf("Cleared %d people for user %d\n", len(people), userID)
+		fmt.Printf("Cleared %d people for user %s\n", len(people), userID)
 		return nil
 	},
 }

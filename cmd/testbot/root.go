@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"time"
@@ -55,7 +56,7 @@ type testbotOptions struct {
 // testBot wraps a full bot instance for CLI testing.
 type testBot struct {
 	logger         *slog.Logger
-	store          *storage.SQLiteStore
+	store          *storage.Store
 	cfg            *config.Config
 	bot            *bot.Bot
 	storePath      string
@@ -183,11 +184,11 @@ func getOptions(cmd *cobra.Command) *testbotOptions {
 }
 
 // getUserID retrieves the user ID from options.
-func getUserID(cmd *cobra.Command) int64 {
+func getUserID(cmd *cobra.Command) storage.ScopeID {
 	if opts := getOptions(cmd); opts != nil {
-		return opts.userID
+		return storage.PassthroughScopeID("telegram", strconv.FormatInt(opts.userID, 10))
 	}
-	return 0
+	return ""
 }
 
 func init() {

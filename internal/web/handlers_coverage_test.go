@@ -76,7 +76,7 @@ func TestLogoHandler(t *testing.T) {
 func TestDatabaseMaintenanceHandler(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123, Username: "test"}}, nil)
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123", Username: "test"}}, nil)
 
 	req := testutil.NewTestRequest(t, "GET", "/ui/debug/database?user_id=123", nil)
 	rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.databaseMaintenanceHandler), req)
@@ -204,14 +204,14 @@ func TestDatabasePurgeHandler(t *testing.T) {
 func TestPeopleHandler(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 
-	users := []storage.User{{ID: 123, Username: "testuser"}}
+	users := []storage.User{{ID: "123", Username: "testuser"}}
 	people := []storage.Person{
-		{ID: 1, UserID: 123, DisplayName: "Alice", Circle: "Family"},
-		{ID: 2, UserID: 123, DisplayName: "Bob", Circle: "Work"},
+		{ID: 1, UserID: "123", DisplayName: "Alice", Circle: "Family"},
+		{ID: 2, UserID: "123", DisplayName: "Bob", Circle: "Work"},
 	}
 
 	mockStorage.On("GetAllUsers").Return(users, nil)
-	mockStorage.On("GetPeopleExtended", storage.PersonFilter{UserID: 123}, 50, 0, "last_seen", "DESC").Return(
+	mockStorage.On("GetPeopleExtended", storage.PersonFilter{UserID: "123"}, 50, 0, "last_seen", "DESC").Return(
 		storage.PersonResult{Data: people, TotalCount: 2}, nil,
 	)
 
@@ -236,7 +236,7 @@ func TestPeopleHandler_MethodNotAllowed(t *testing.T) {
 func TestPeopleHandler_ErrorGettingPeople(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
 	mockStorage.On("GetPeopleExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(storage.PersonResult{}, assert.AnError)
 
@@ -251,12 +251,12 @@ func TestFactsHandler(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 
 	facts := []storage.Fact{
-		{ID: 1, UserID: 123, Content: "User likes pizza", Type: "preference"},
-		{ID: 2, UserID: 123, Content: "User lives in NY", Type: "identity"},
+		{ID: 1, UserID: "123", Content: "User likes pizza", Type: "preference"},
+		{ID: 2, UserID: "123", Content: "User lives in NY", Type: "identity"},
 	}
 
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
-	mockStorage.On("GetFacts", int64(123)).Return(facts, nil)
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
+	mockStorage.On("GetFacts", storage.ScopeID("123")).Return(facts, nil)
 
 	req := testutil.NewTestRequest(t, "GET", "/ui/debug/facts?user_id=123", nil)
 	rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.factsHandler), req)
@@ -280,11 +280,11 @@ func TestTopicsHandler(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 
 	topics := []storage.TopicExtended{
-		{Topic: storage.Topic{ID: 1, UserID: 123, Summary: "Discussion about AI"}},
+		{Topic: storage.Topic{ID: 1, UserID: "123", Summary: "Discussion about AI"}},
 	}
 
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
-	mockStorage.On("GetTopicsExtended", storage.TopicFilter{UserID: 123}, 20, 0, "created_at", "DESC").
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
+	mockStorage.On("GetTopicsExtended", storage.TopicFilter{UserID: "123"}, 20, 0, "created_at", "DESC").
 		Return(storage.TopicResult{Data: topics, TotalCount: 1}, nil)
 	mockStorage.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return([]storage.Message{}, nil)
 
@@ -308,8 +308,8 @@ func TestTopicsHandler_MethodNotAllowed(t *testing.T) {
 func TestTopicsHandler_Pagination(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
-	mockStorage.On("GetTopicsExtended", storage.TopicFilter{UserID: 123}, 20, 20, "created_at", "DESC").
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
+	mockStorage.On("GetTopicsExtended", storage.TopicFilter{UserID: "123"}, 20, 20, "created_at", "DESC").
 		Return(storage.TopicResult{Data: []storage.TopicExtended{}, TotalCount: 0}, nil)
 	mockStorage.On("GetMessagesByTopicID", mock.Anything, mock.Anything).Return([]storage.Message{}, nil)
 
@@ -324,17 +324,17 @@ func TestArtifactsHandler(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 
 	artifacts := []storage.Artifact{
-		{ID: 1, UserID: 123, FileType: "image", OriginalName: "photo.jpg", State: "ready"},
+		{ID: 1, UserID: "123", FileType: "image", OriginalName: "photo.jpg", State: "ready"},
 	}
 
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
-	mockStorage.On("GetArtifacts", storage.ArtifactFilter{UserID: 123, State: "", FileType: ""}, 20, 0).
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
+	mockStorage.On("GetArtifacts", storage.ArtifactFilter{UserID: "123", State: "", FileType: ""}, 20, 0).
 		Return(artifacts, int64(1), nil)
 	// Stats calls
-	mockStorage.On("GetArtifacts", storage.ArtifactFilter{UserID: 123}, 1, 0).Return(artifacts, int64(1), nil)
-	mockStorage.On("GetArtifacts", storage.ArtifactFilter{UserID: 123, State: "pending"}, 1, 0).Return([]storage.Artifact{}, int64(0), nil)
-	mockStorage.On("GetArtifacts", storage.ArtifactFilter{UserID: 123, State: "ready"}, 1, 0).Return(artifacts, int64(1), nil)
-	mockStorage.On("GetArtifacts", storage.ArtifactFilter{UserID: 123, State: "failed"}, 1, 0).Return([]storage.Artifact{}, int64(0), nil)
+	mockStorage.On("GetArtifacts", storage.ArtifactFilter{UserID: "123"}, 1, 0).Return(artifacts, int64(1), nil)
+	mockStorage.On("GetArtifacts", storage.ArtifactFilter{UserID: "123", State: "pending"}, 1, 0).Return([]storage.Artifact{}, int64(0), nil)
+	mockStorage.On("GetArtifacts", storage.ArtifactFilter{UserID: "123", State: "ready"}, 1, 0).Return(artifacts, int64(1), nil)
+	mockStorage.On("GetArtifacts", storage.ArtifactFilter{UserID: "123", State: "failed"}, 1, 0).Return([]storage.Artifact{}, int64(0), nil)
 
 	req := testutil.NewTestRequest(t, "GET", "/ui/debug/artifacts?user_id=123", nil)
 	rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.artifactsHandler), req)
@@ -366,14 +366,17 @@ func TestArtifactDownloadHandler(t *testing.T) {
 
 	server.cfg.Artifacts.StoragePath = testDir
 
+	// Home user's scope is the passthrough UUID of the allowlisted telegram id;
+	// the download handler authorizes by comparing that against AllowedUserIDs.
+	scope := storage.PassthroughScopeID("telegram", "123")
 	artifact := &storage.Artifact{
-		ID: 1, UserID: 123, FilePath: "test_artifact.txt",
+		ID: 1, UserID: scope, FilePath: "test_artifact.txt",
 		OriginalName: "test.txt", MimeType: "text/plain",
 	}
 
-	mockStorage.On("GetArtifact", int64(123), int64(1)).Return(artifact, nil)
+	mockStorage.On("GetArtifact", scope, int64(1)).Return(artifact, nil)
 
-	req := testutil.NewTestRequest(t, "GET", "/ui/debug/artifacts/download?id=1&user_id=123", nil)
+	req := testutil.NewTestRequest(t, "GET", "/ui/debug/artifacts/download?id=1&user_id="+string(scope), nil)
 	rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.artifactDownloadHandler), req)
 
 	assert.Equal(t, http.StatusOK, rr.Code)
@@ -395,7 +398,7 @@ func TestArtifactDownloadHandler_MissingID(t *testing.T) {
 func TestArtifactDownloadHandler_InvalidUserID(t *testing.T) {
 	server, _, _ := setupTestServer(t)
 
-	req := testutil.NewTestRequest(t, "GET", "/ui/debug/artifacts/download?id=1&user_id=invalid", nil)
+	req := testutil.NewTestRequest(t, "GET", "/ui/debug/artifacts/download?id=1&user_id=", nil)
 	rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.artifactDownloadHandler), req)
 
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
@@ -416,9 +419,9 @@ func TestArtifactDownloadHandler_UserNotAllowed(t *testing.T) {
 func TestArtifactDownloadHandler_ArtifactNotFound(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 
-	mockStorage.On("GetArtifact", int64(123), int64(1)).Return((*storage.Artifact)(nil), nil)
+	mockStorage.On("GetArtifact", storage.PassthroughScopeID("telegram", "123"), int64(1)).Return((*storage.Artifact)(nil), nil)
 
-	req := testutil.NewTestRequest(t, "GET", "/ui/debug/artifacts/download?id=1&user_id=123", nil)
+	req := testutil.NewTestRequest(t, "GET", "/ui/debug/artifacts/download?id=1&user_id="+string(storage.PassthroughScopeID("telegram", "123"))+"", nil)
 	rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.artifactDownloadHandler), req)
 
 	assert.Equal(t, http.StatusNotFound, rr.Code)
@@ -430,11 +433,11 @@ func TestArtifactDownloadHandler_PathTraversal(t *testing.T) {
 
 	// Create artifact with path traversal attempt
 	artifact := &storage.Artifact{
-		ID: 1, UserID: 123, FilePath: "../../../etc/passwd",
+		ID: 1, UserID: "123", FilePath: "../../../etc/passwd",
 		OriginalName: "passwd", MimeType: "text/plain",
 	}
 
-	mockStorage.On("GetArtifact", int64(123), int64(1)).Return(artifact, nil)
+	mockStorage.On("GetArtifact", storage.ScopeID("123"), int64(1)).Return(artifact, nil)
 
 	req := testutil.NewTestRequest(t, "GET", "/ui/debug/artifacts/download?id=1&user_id=123", nil)
 	rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.artifactDownloadHandler), req)
@@ -448,11 +451,11 @@ func TestAgentLogHandler(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 
 	logs := []storage.AgentLog{
-		{ID: 1, AgentType: "laplace", UserID: 123, CreatedAt: time.Now()},
+		{ID: 1, AgentType: "laplace", UserID: "123", CreatedAt: time.Now()},
 	}
 
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
-	mockStorage.On("GetAgentLogs", "laplace", int64(123), 50).Return(logs, nil)
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
+	mockStorage.On("GetAgentLogs", "laplace", storage.ScopeID("123"), 50).Return(logs, nil)
 
 	req := testutil.NewTestRequest(t, "GET", "/ui/agents/laplace?user_id=123", nil)
 
@@ -468,7 +471,7 @@ func TestAgentLogHandler_NoRepo(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 	server.agentLogRepo = nil
 
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
 
 	req := testutil.NewTestRequest(t, "GET", "/ui/agents/laplace?user_id=123", nil)
 	handler := server.agentLogHandler("laplace", "Laplace", "robot", "description")
@@ -482,11 +485,11 @@ func TestAgentLogDetailHandler(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 
 	fullLog := &storage.AgentLog{
-		ID: 1, AgentType: "laplace", UserID: 123,
+		ID: 1, AgentType: "laplace", UserID: "123",
 		InputContext: "test input", OutputContext: "test output",
 	}
 
-	mockStorage.On("GetAgentLogFull", mock.Anything, int64(1), int64(123)).Return(fullLog, nil)
+	mockStorage.On("GetAgentLogFull", mock.Anything, int64(1), storage.ScopeID("123")).Return(fullLog, nil)
 
 	req := testutil.NewTestRequest(t, "GET", "/api/agent-log/1?user_id=123", nil)
 	rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.agentLogDetailHandler), req)
@@ -547,8 +550,8 @@ func TestGetCommonData(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 
 	users := []storage.User{
-		{ID: 123, Username: "user1"},
-		{ID: 456, Username: "user2"},
+		{ID: "123", Username: "user1"},
+		{ID: "456", Username: "user2"},
 	}
 	mockStorage.On("GetAllUsers").Return(users, nil)
 
@@ -556,7 +559,7 @@ func TestGetCommonData(t *testing.T) {
 	data, err := server.getCommonData(req)
 
 	assert.NoError(t, err)
-	assert.Equal(t, int64(456), data.SelectedUserID)
+	assert.Equal(t, storage.ScopeID("456"), data.SelectedUserID)
 	assert.Equal(t, 2, len(data.Users))
 }
 
@@ -566,19 +569,19 @@ func TestGetCommonData_ChannelScopes(t *testing.T) {
 	server.SetScopeRepository(mockStorage)
 
 	users := []storage.User{
-		{ID: 100, Username: "John Doe"},     // person scope
-		{ID: 200, Username: "Release Team"}, // channel scope
+		{ID: "100", Username: "John Doe"},     // person scope
+		{ID: "200", Username: "Release Team"}, // channel scope
 	}
 	mockStorage.On("GetAllUsers").Return(users, nil)
-	mockStorage.On("IsChannelScope", int64(100)).Return(false, nil)
-	mockStorage.On("IsChannelScope", int64(200)).Return(true, nil)
+	mockStorage.On("IsChannelScope", storage.ScopeID("100")).Return(false, nil)
+	mockStorage.On("IsChannelScope", storage.ScopeID("200")).Return(true, nil)
 
 	req := testutil.NewTestRequest(t, "GET", "/ui/stats", nil)
 	data, err := server.getCommonData(req)
 
 	assert.NoError(t, err)
-	assert.True(t, data.ChannelScopes[200], "channel scope should be marked")
-	assert.False(t, data.ChannelScopes[100], "person scope should not be marked")
+	assert.True(t, data.ChannelScopes["200"], "channel scope should be marked")
+	assert.False(t, data.ChannelScopes["100"], "person scope should not be marked")
 	mockStorage.AssertExpectations(t)
 }
 
@@ -586,28 +589,28 @@ func TestGetCommonData_ChannelScopes(t *testing.T) {
 func TestGetCommonData_DefaultsToFirstUser(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 
-	users := []storage.User{{ID: 123, Username: "user1"}}
+	users := []storage.User{{ID: "123", Username: "user1"}}
 	mockStorage.On("GetAllUsers").Return(users, nil)
 
 	req := testutil.NewTestRequest(t, "GET", "/ui/stats", nil)
 	data, err := server.getCommonData(req)
 
 	assert.NoError(t, err)
-	assert.Equal(t, int64(123), data.SelectedUserID)
+	assert.Equal(t, storage.ScopeID("123"), data.SelectedUserID)
 }
 
 // TestGetCommonData_InvalidUserID tests invalid user ID handling.
 func TestGetCommonData_InvalidUserID(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
 
-	req := testutil.NewTestRequest(t, "GET", "/ui/stats?user_id=invalid", nil)
+	req := testutil.NewTestRequest(t, "GET", "/ui/stats?user_id=", nil)
 	data, err := server.getCommonData(req)
 
 	assert.NoError(t, err)
 	// Should default to first user
-	assert.Equal(t, int64(123), data.SelectedUserID)
+	assert.Equal(t, storage.ScopeID("123"), data.SelectedUserID)
 }
 
 // TestGetCommonData_NoUsers tests empty user list.
@@ -620,7 +623,7 @@ func TestGetCommonData_NoUsers(t *testing.T) {
 	data, err := server.getCommonData(req)
 
 	assert.NoError(t, err)
-	assert.Equal(t, int64(0), data.SelectedUserID)
+	assert.Equal(t, storage.ScopeID(""), data.SelectedUserID)
 }
 
 // TestDashboardStatsCache tests the dashboard stats cache.
@@ -630,12 +633,12 @@ func TestDashboardStatsCache(t *testing.T) {
 	stats := &storage.DashboardStats{TotalTopics: 10, TotalFacts: 5}
 
 	// Get non-existent entry
-	_, ok := cache.Get(123)
+	_, ok := cache.Get("123")
 	assert.False(t, ok)
 
 	// Set and get
-	cache.Set(123, stats)
-	retrieved, ok := cache.Get(123)
+	cache.Set("123", stats)
+	retrieved, ok := cache.Get("123")
 	assert.True(t, ok)
 	assert.Equal(t, stats, retrieved)
 }
@@ -645,17 +648,17 @@ func TestDashboardStatsCache_Expiration(t *testing.T) {
 	cache := newDashboardStatsCache(1 * time.Millisecond) // Short TTL
 
 	stats := &storage.DashboardStats{TotalTopics: 10}
-	cache.Set(123, stats)
+	cache.Set("123", stats)
 
 	// Should exist immediately
-	_, ok := cache.Get(123)
+	_, ok := cache.Get("123")
 	assert.True(t, ok)
 
 	// Wait for expiration
 	time.Sleep(10 * time.Millisecond)
 
 	// Should be expired
-	_, ok = cache.Get(123)
+	_, ok = cache.Get("123")
 	assert.False(t, ok)
 }
 
@@ -698,7 +701,7 @@ func TestPeopleHandler_NoRepo(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 	server.peopleRepo = nil
 
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
 
 	req := testutil.NewTestRequest(t, "GET", "/ui/debug/people?user_id=123", nil)
 	rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.peopleHandler), req)
@@ -711,12 +714,12 @@ func TestPeopleHandler_CircleFilter(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 
 	people := []storage.Person{
-		{ID: 1, UserID: 123, DisplayName: "Alice", Circle: "Family"},
-		{ID: 2, UserID: 123, DisplayName: "Bob", Circle: "Work"},
+		{ID: 1, UserID: "123", DisplayName: "Alice", Circle: "Family"},
+		{ID: 2, UserID: "123", DisplayName: "Bob", Circle: "Work"},
 	}
 
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
-	mockStorage.On("GetPeopleExtended", storage.PersonFilter{UserID: 123, Circle: "Family"}, 50, 0, "last_seen", "DESC").
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
+	mockStorage.On("GetPeopleExtended", storage.PersonFilter{UserID: "123", Circle: "Family"}, 50, 0, "last_seen", "DESC").
 		Return(storage.PersonResult{Data: people[:1], TotalCount: 1}, nil)
 
 	req := testutil.NewTestRequest(t, "GET", "/ui/debug/people?user_id=123&circle=Family", nil)
@@ -731,11 +734,11 @@ func TestPeopleHandler_SearchFilter(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 
 	people := []storage.Person{
-		{ID: 1, UserID: 123, DisplayName: "Alice Smith", Circle: "Family"},
+		{ID: 1, UserID: "123", DisplayName: "Alice Smith", Circle: "Family"},
 	}
 
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
-	mockStorage.On("GetPeopleExtended", storage.PersonFilter{UserID: 123, Search: "Alice"}, 50, 0, "last_seen", "DESC").
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
+	mockStorage.On("GetPeopleExtended", storage.PersonFilter{UserID: "123", Search: "Alice"}, 50, 0, "last_seen", "DESC").
 		Return(storage.PersonResult{Data: people, TotalCount: 1}, nil)
 
 	req := testutil.NewTestRequest(t, "GET", "/ui/debug/people?user_id=123&search=Alice", nil)
@@ -753,10 +756,10 @@ func TestTopicsHandler_GetMessagesError(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 
 	topics := []storage.TopicExtended{
-		{Topic: storage.Topic{ID: 1, UserID: 123, Summary: "Discussion"}},
+		{Topic: storage.Topic{ID: 1, UserID: "123", Summary: "Discussion"}},
 	}
 
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
 	mockStorage.On("GetTopicsExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(storage.TopicResult{Data: topics, TotalCount: 1}, nil)
 	mockStorage.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return([]storage.Message{}, assert.AnError)
@@ -772,10 +775,10 @@ func TestTopicsHandler_GetMessagesError(t *testing.T) {
 func TestArtifactsHandler_StatsError(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
 	mockStorage.On("GetArtifacts", mock.Anything, mock.Anything, mock.Anything).Return([]storage.Artifact{}, int64(0), nil)
 	// Stats calls fail
-	mockStorage.On("GetArtifacts", storage.ArtifactFilter{UserID: 123}, 1, 0).Return([]storage.Artifact{}, int64(0), assert.AnError)
+	mockStorage.On("GetArtifacts", storage.ArtifactFilter{UserID: "123"}, 1, 0).Return([]storage.Artifact{}, int64(0), assert.AnError)
 
 	req := testutil.NewTestRequest(t, "GET", "/ui/debug/artifacts?user_id=123", nil)
 	rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.artifactsHandler), req)
@@ -788,8 +791,8 @@ func TestArtifactsHandler_StatsError(t *testing.T) {
 func TestAgentLogHandler_GetLogsError(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
-	mockStorage.On("GetAgentLogs", "laplace", int64(123), 50).Return([]storage.AgentLog{}, assert.AnError)
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
+	mockStorage.On("GetAgentLogs", "laplace", storage.ScopeID("123"), 50).Return([]storage.AgentLog{}, assert.AnError)
 
 	req := testutil.NewTestRequest(t, "GET", "/ui/agents/laplace?user_id=123", nil)
 	handler := server.agentLogHandler("laplace", "Laplace", "robot", "description")
@@ -803,11 +806,11 @@ func TestAgentLogHandler_RenderError(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 
 	logs := []storage.AgentLog{
-		{ID: 1, AgentType: "laplace", UserID: 123},
+		{ID: 1, AgentType: "laplace", UserID: "123"},
 	}
 
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
-	mockStorage.On("GetAgentLogs", "laplace", int64(123), 50).Return(logs, nil)
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
+	mockStorage.On("GetAgentLogs", "laplace", storage.ScopeID("123"), 50).Return(logs, nil)
 
 	req := testutil.NewTestRequest(t, "GET", "/ui/agents/laplace?user_id=123", nil)
 	handler := server.agentLogHandler("laplace", "Laplace", "robot", "description")
@@ -826,16 +829,16 @@ func TestRoutesVerification(t *testing.T) {
 
 	// Mock updateMetrics calls
 	mockBot.On("GetActiveSessions").Return([]rag.ActiveSessionInfo{}, nil).Maybe()
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil).Maybe()
-	mockStorage.On("GetFactStatsByUser", int64(123)).Return(storage.FactStats{CountByType: map[string]int{}}, nil).Maybe()
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil).Maybe()
+	mockStorage.On("GetFactStatsByUser", storage.ScopeID("123")).Return(storage.FactStats{CountByType: map[string]int{}}, nil).Maybe()
 	mockStorage.On("GetTopicsExtended", mock.Anything, 1, 0, "", "").Return(storage.TopicResult{TotalCount: 0}, nil).Maybe()
 	mockStorage.On("GetDBSize").Return(int64(1024), nil).Maybe()
 	mockStorage.On("GetTableSizes").Return([]storage.TableSize{}, nil).Maybe()
 	mockStorage.On("CleanupFactHistory", mock.Anything).Return(int64(0), nil).Maybe()
 	mockStorage.On("CleanupAgentLogs", mock.Anything).Return(int64(0), nil).Maybe()
-	mockStorage.On("GetStats").Return(map[int64]storage.Stat{}, nil).Maybe()
-	mockStorage.On("GetDashboardStats", int64(123)).Return(&storage.DashboardStats{}, nil).Maybe()
-	mockStorage.On("GetFacts", int64(123)).Return([]storage.Fact{}, nil).Maybe()
+	mockStorage.On("GetStats").Return(map[storage.ScopeID]storage.Stat{}, nil).Maybe()
+	mockStorage.On("GetDashboardStats", storage.ScopeID("123")).Return(&storage.DashboardStats{}, nil).Maybe()
+	mockStorage.On("GetFacts", storage.ScopeID("123")).Return([]storage.Fact{}, nil).Maybe()
 	mockStorage.On("GetPeopleExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(storage.PersonResult{Data: []storage.Person{}, TotalCount: 0}, nil).Maybe()
 	mockStorage.On("GetTopicsExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
@@ -948,8 +951,8 @@ func TestStart_DebugModeDisabled(t *testing.T) {
 
 	// Mock updateMetrics calls
 	mockBot.On("GetActiveSessions").Return([]rag.ActiveSessionInfo{}, nil)
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
-	mockStorage.On("GetFactStatsByUser", int64(123)).Return(storage.FactStats{CountByType: map[string]int{}}, nil)
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
+	mockStorage.On("GetFactStatsByUser", storage.ScopeID("123")).Return(storage.FactStats{CountByType: map[string]int{}}, nil)
 	mockStorage.On("GetTopicsExtended", mock.Anything, 1, 0, "", "").Return(storage.TopicResult{TotalCount: 0}, nil)
 	mockStorage.On("GetDBSize").Return(int64(1024), nil)
 	mockStorage.On("GetTableSizes").Return([]storage.TableSize{}, nil)

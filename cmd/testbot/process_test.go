@@ -20,7 +20,7 @@ func TestProcessSessionEmpty(t *testing.T) {
 	// Create command with testbot in context
 	cmd := processSessionCmd
 	ctx := context.WithValue(context.Background(), testbotKey, tb)
-	opts := &testbotOptions{userID: testutil.TestUserID}
+	opts := &testbotOptions{userID: 123}
 	ctx = context.WithValue(ctx, optionsKey, opts)
 	cmd.SetContext(ctx)
 
@@ -48,7 +48,7 @@ func TestProcessSessionWithUnprocessedMessages(t *testing.T) {
 	// Create command with testbot in context
 	cmd := processSessionCmd
 	ctx := context.WithValue(context.Background(), testbotKey, tb)
-	opts := &testbotOptions{userID: testutil.TestUserID}
+	opts := &testbotOptions{userID: 123}
 	ctx = context.WithValue(ctx, optionsKey, opts)
 	cmd.SetContext(ctx)
 
@@ -80,7 +80,7 @@ func TestProcessSessionErrors(t *testing.T) {
 
 		cmd := processSessionCmd
 		ctx := context.WithValue(context.Background(), testbotKey, tb)
-		opts := &testbotOptions{userID: testutil.TestUserID}
+		opts := &testbotOptions{userID: 123}
 		ctx = context.WithValue(ctx, optionsKey, opts)
 		cmd.SetContext(ctx)
 

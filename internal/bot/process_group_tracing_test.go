@@ -55,7 +55,7 @@ func TestProcessMessageGroup_RecordsRootSpan(t *testing.T) {
 	}
 	b.messageGrouper = NewMessageGrouper(b, logger, 0, b.processMessageGroup)
 
-	const userID = int64(555)
+	const userID = storage.ScopeID("555")
 	const text = "Hello tracing world"
 	chatID := int64(777)
 	now := int(time.Now().Unix())
@@ -64,7 +64,7 @@ func TestProcessMessageGroup_RecordsRootSpan(t *testing.T) {
 		{
 			MessageID: 42,
 			Text:      text,
-			From:      &telegram.User{ID: userID, FirstName: "User", Username: "testuser"},
+			From:      &telegram.User{ID: 555, FirstName: "User", Username: "testuser"},
 			Chat:      &telegram.Chat{ID: chatID},
 			Date:      now,
 		},
@@ -113,7 +113,7 @@ func TestProcessMessageGroup_RecordsRootSpan(t *testing.T) {
 
 	userIDAttr, ok := attrs["user.id"]
 	require.True(t, ok, "user.id attribute missing")
-	assert.Equal(t, userID, userIDAttr.AsInt64())
+	assert.Equal(t, string(userID), userIDAttr.AsString())
 
 	countAttr, ok := attrs["message.count"]
 	require.True(t, ok, "message.count attribute missing")
@@ -164,7 +164,7 @@ func runAnomalyTraceCase(t *testing.T, userText, llmContent string) map[attribut
 	}
 	b.messageGrouper = NewMessageGrouper(b, logger, 0, b.processMessageGroup)
 
-	const userID = int64(555)
+	const userID = storage.ScopeID("555")
 	chatID := int64(777)
 	now := int(time.Now().Unix())
 
@@ -172,7 +172,7 @@ func runAnomalyTraceCase(t *testing.T, userText, llmContent string) map[attribut
 		{
 			MessageID: 42,
 			Text:      userText,
-			From:      &telegram.User{ID: userID, FirstName: "User", Username: "testuser"},
+			From:      &telegram.User{ID: 555, FirstName: "User", Username: "testuser"},
 			Chat:      &telegram.Chat{ID: chatID},
 			Date:      now,
 		},

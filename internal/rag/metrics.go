@@ -1,10 +1,9 @@
 package rag
 
 import (
-	"strconv"
-
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/runixer/laplaced/internal/storage"
 )
 
 // Prometheus метрики для RAG системы
@@ -245,13 +244,13 @@ func embeddingMemoryBytes(dim int) int {
 }
 
 // formatUserID converts user ID to string for metric labels.
-func formatUserID(userID int64) string {
-	return strconv.FormatInt(userID, 10)
+func formatUserID(userID storage.ScopeID) string {
+	return string(userID)
 }
 
 // RecordEmbeddingRequest записывает метрики embedding запроса.
 // embeddingType: searchTypeTopics или searchTypeFacts
-func RecordEmbeddingRequest(userID int64, model string, embeddingType string, durationSeconds float64, success bool, tokens int, cost *float64) {
+func RecordEmbeddingRequest(userID storage.ScopeID, model string, embeddingType string, durationSeconds float64, success bool, tokens int, cost *float64) {
 	status := statusSuccess
 	if !success {
 		status = statusError
@@ -271,7 +270,7 @@ func RecordEmbeddingRequest(userID int64, model string, embeddingType string, du
 }
 
 // RecordVectorSearch записывает метрики vector search.
-func RecordVectorSearch(userID int64, searchType string, durationSeconds float64, vectorsScanned int) {
+func RecordVectorSearch(userID storage.ScopeID, searchType string, durationSeconds float64, vectorsScanned int) {
 	uid := formatUserID(userID)
 	vectorSearchDuration.WithLabelValues(uid, searchType).Observe(durationSeconds)
 	vectorSearchVectorsScanned.WithLabelValues(uid, searchType).Observe(float64(vectorsScanned))
@@ -292,7 +291,7 @@ func UpdateVectorIndexMetrics(topicsCount, factsCount, peopleCount, dim int) {
 }
 
 // RecordRAGRetrieval записывает результат RAG retrieval.
-func RecordRAGRetrieval(userID int64, hasContext bool) {
+func RecordRAGRetrieval(userID storage.ScopeID, hasContext bool) {
 	uid := formatUserID(userID)
 	if hasContext {
 		ragRetrievalTotal.WithLabelValues(uid, resultHit).Inc()
@@ -302,14 +301,14 @@ func RecordRAGRetrieval(userID int64, hasContext bool) {
 }
 
 // RecordRAGCandidates записывает количество кандидатов до фильтрации.
-func RecordRAGCandidates(userID int64, searchType string, count int) {
+func RecordRAGCandidates(userID storage.ScopeID, searchType string, count int) {
 	uid := formatUserID(userID)
 	ragCandidatesTotal.WithLabelValues(uid, searchType).Observe(float64(count))
 }
 
 // RecordRAGLatency записывает общее время RAG retrieval.
 // source: "auto" для buildContext, "tool" для search_history tool.
-func RecordRAGLatency(userID int64, source string, durationSeconds float64) {
+func RecordRAGLatency(userID storage.ScopeID, source string, durationSeconds float64) {
 	uid := formatUserID(userID)
 	if source == "" {
 		source = "auto"
@@ -318,7 +317,7 @@ func RecordRAGLatency(userID int64, source string, durationSeconds float64) {
 }
 
 // RecordRAGEnrichment записывает время LLM вызова для обогащения запроса.
-func RecordRAGEnrichment(userID int64, durationSeconds float64) {
+func RecordRAGEnrichment(userID storage.ScopeID, durationSeconds float64) {
 	uid := formatUserID(userID)
 	ragEnrichmentDuration.WithLabelValues(uid).Observe(durationSeconds)
 }
@@ -408,44 +407,44 @@ var (
 )
 
 // RecordRerankerDuration записывает время reranker операции.
-func RecordRerankerDuration(userID int64, durationSeconds float64) {
+func RecordRerankerDuration(userID storage.ScopeID, durationSeconds float64) {
 	uid := formatUserID(userID)
 	rerankerDuration.WithLabelValues(uid).Observe(durationSeconds)
 }
 
 // RecordRerankerToolCalls записывает количество tool calls.
-func RecordRerankerToolCalls(userID int64, count int) {
+func RecordRerankerToolCalls(userID storage.ScopeID, count int) {
 	uid := formatUserID(userID)
 	rerankerToolCallsTotal.WithLabelValues(uid).Add(float64(count))
 }
 
 // RecordRerankerCandidatesInput записывает кандидатов на входе.
-func RecordRerankerCandidatesInput(userID int64, count int) {
+func RecordRerankerCandidatesInput(userID storage.ScopeID, count int) {
 	uid := formatUserID(userID)
 	rerankerCandidatesInput.WithLabelValues(uid).Observe(float64(count))
 }
 
 // RecordRerankerCandidatesOutput записывает кандидатов на выходе.
-func RecordRerankerCandidatesOutput(userID int64, count int) {
+func RecordRerankerCandidatesOutput(userID storage.ScopeID, count int) {
 	uid := formatUserID(userID)
 	rerankerCandidatesOutput.WithLabelValues(uid).Observe(float64(count))
 }
 
 // RecordRerankerCost записывает стоимость reranker.
-func RecordRerankerCost(userID int64, cost float64) {
+func RecordRerankerCost(userID storage.ScopeID, cost float64) {
 	uid := formatUserID(userID)
 	rerankerCostTotal.WithLabelValues(uid).Add(cost)
 }
 
 // RecordRerankerFallback записывает срабатывание fallback.
 // reason: "timeout", "error", "max_tool_calls", "invalid_json", "requested_ids", "vector_top", "all_hallucinated"
-func RecordRerankerFallback(userID int64, reason string) {
+func RecordRerankerFallback(userID storage.ScopeID, reason string) {
 	uid := formatUserID(userID)
 	rerankerFallbackTotal.WithLabelValues(uid, reason).Inc()
 }
 
 // RecordRerankerHallucination записывает количество галлюцинированных topic IDs.
-func RecordRerankerHallucination(userID int64, count int) {
+func RecordRerankerHallucination(userID storage.ScopeID, count int) {
 	uid := formatUserID(userID)
 	rerankerHallucinationTotal.WithLabelValues(uid).Add(float64(count))
 }
@@ -495,7 +494,7 @@ var (
 )
 
 // RecordArtifactExtraction records metrics for artifact extraction job (v0.6.0).
-func RecordArtifactExtraction(userID int64, durationSeconds float64, success bool) {
+func RecordArtifactExtraction(userID storage.ScopeID, durationSeconds float64, success bool) {
 	status := statusSuccess
 	if !success {
 		status = statusError
@@ -507,7 +506,7 @@ func RecordArtifactExtraction(userID int64, durationSeconds float64, success boo
 }
 
 // UpdateArtifactSummaryMetrics updates the artifact summary index size metric (v0.6.0).
-func UpdateArtifactSummaryMetrics(perUserCounts map[int64]int) {
+func UpdateArtifactSummaryMetrics(perUserCounts map[storage.ScopeID]int) {
 	total := 0
 	for _, count := range perUserCounts {
 		total += count

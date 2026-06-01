@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/runixer/laplaced/internal/storage"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
@@ -29,13 +31,13 @@ func TestIncDecActiveSessions(t *testing.T) {
 func TestRecordMessageProcessing(t *testing.T) {
 	tests := []struct {
 		name     string
-		userID   int64
+		userID   storage.ScopeID
 		duration float64
 		success  bool
 		status   string
 	}{
-		{"success", 123, 1.5, true, statusSuccess},
-		{"error", 456, 0.5, false, statusError},
+		{"success", "123", 1.5, true, statusSuccess},
+		{"error", "456", 0.5, false, statusError},
 	}
 
 	for _, tt := range tests {
@@ -57,14 +59,14 @@ func TestRecordContextTokens(t *testing.T) {
 
 func TestRecordContextTokensBySource(t *testing.T) {
 	tests := []struct {
-		userID int64
+		userID storage.ScopeID
 		source string
 		tokens int
 	}{
-		{100, ContextSourceSystem, 800},
-		{123, ContextSourceProfile, 500},
-		{456, ContextSourceTopics, 2000},
-		{789, ContextSourceSession, 1000},
+		{"100", ContextSourceSystem, 800},
+		{"123", ContextSourceProfile, 500},
+		{"456", ContextSourceTopics, 2000},
+		{"789", ContextSourceSession, 1000},
 	}
 
 	for _, tt := range tests {
@@ -78,8 +80,8 @@ func TestRecordContextTokensBySource(t *testing.T) {
 
 func TestMetricsRegistration(t *testing.T) {
 	// Trigger vec metrics so they appear in the registry
-	RecordMessageProcessing(99999, 1.0, true)
-	RecordContextTokensBySource(99999, ContextSourceProfile, 100)
+	RecordMessageProcessing("99999", 1.0, true)
+	RecordContextTokensBySource("99999", ContextSourceProfile, 100)
 
 	// Verify all metrics are registered with correct names
 	metrics := []string{

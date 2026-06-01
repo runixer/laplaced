@@ -54,7 +54,7 @@ func TestMerger_Execute_RecordsSpan(t *testing.T) {
 	m := New(executor, testutil.TestTranslator(t), cfg, nil, nil)
 
 	req := &agent.Request{
-		Shared: &agent.SharedContext{UserID: 7},
+		Shared: &agent.SharedContext{UserID: "7"},
 		Params: map[string]any{
 			ParamTopic1Summary: "first",
 			ParamTopic2Summary: "second topic",
@@ -73,7 +73,7 @@ func TestMerger_Execute_RecordsSpan(t *testing.T) {
 	}
 	require.NotNil(t, found)
 	attrs := collectAttrs(found.Attributes)
-	assert.Equal(t, int64(7), attrs["user.id"].AsInt64())
+	assert.Equal(t, "7", attrs["user.id"].AsString())
 	assert.Equal(t, int64(5), attrs["merger.topic1_size_chars"].AsInt64())
 	assert.Equal(t, int64(12), attrs["merger.topic2_size_chars"].AsInt64())
 	assert.True(t, attrs["merger.should_merge"].AsBool())

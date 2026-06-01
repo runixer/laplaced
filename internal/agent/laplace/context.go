@@ -134,7 +134,9 @@ func (l *Laplace) BuildMessages(
 // per-transport Renderer adapts it (Telegram→HTML, Time→native markdown).
 func platformName(transport string) string {
 	switch transport {
-	case "time":
+	case "mattermost":
+		// "mattermost" is the transport (protocol) id; the deployed product users
+		// know as "Time", so that is the model-facing platform name.
 		return "Time"
 	default:
 		return "Telegram"
@@ -144,7 +146,7 @@ func platformName(transport string) string {
 // LoadContextData loads all context data needed for LLM generation.
 func (l *Laplace) LoadContextData(
 	ctx context.Context,
-	userID int64,
+	userID storage.ScopeID,
 	rawQuery string,
 	currentMessageParts []interface{},
 ) (*ContextData, error) {
@@ -204,7 +206,7 @@ func (l *Laplace) LoadContextData(
 	basePrompt, err := l.translator.GetTemplate(l.cfg.Bot.Language, "bot.system_prompt", prompts.LaplaceParams{
 		BotName:   botName,
 		Platform:  platformName(l.cfg.Transport),
-		KatexMath: l.cfg.Transport == "time", // Time renders LaTeX via KaTeX; Telegram does not
+		KatexMath: l.cfg.Transport == "mattermost", // Mattermost/Time renders LaTeX via KaTeX; Telegram does not
 		IsChannel: isChannel,
 	})
 	if err != nil {
@@ -267,7 +269,7 @@ func (l *Laplace) LoadContextData(
 //
 // Returns a slice of content parts (FilePart for all file types) for the given artifact IDs.
 // Respects max and max_context_bytes from reranker.artifacts config (v0.6.0).
-func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID int64, artifactIDs []int64) ([]interface{}, error) {
+func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID storage.ScopeID, artifactIDs []int64) ([]interface{}, error) {
 	if l.artifactRepo == nil || len(artifactIDs) == 0 || l.storagePath == "" {
 		return nil, nil
 	}

@@ -22,7 +22,7 @@ type stubStore struct {
 	artifacts map[int64]storage.Artifact
 }
 
-func (s *stubStore) GetTopicsByIDs(_ int64, ids []int64) ([]storage.Topic, error) {
+func (s *stubStore) GetTopicsByIDs(_ storage.ScopeID, ids []int64) ([]storage.Topic, error) {
 	out := make([]storage.Topic, 0, len(ids))
 	for _, id := range ids {
 		if t, ok := s.topics[id]; ok {
@@ -32,7 +32,7 @@ func (s *stubStore) GetTopicsByIDs(_ int64, ids []int64) ([]storage.Topic, error
 	return out, nil
 }
 
-func (s *stubStore) GetPeopleByIDs(_ int64, ids []int64) ([]storage.Person, error) {
+func (s *stubStore) GetPeopleByIDs(_ storage.ScopeID, ids []int64) ([]storage.Person, error) {
 	out := make([]storage.Person, 0, len(ids))
 	for _, id := range ids {
 		if p, ok := s.people[id]; ok {
@@ -42,7 +42,7 @@ func (s *stubStore) GetPeopleByIDs(_ int64, ids []int64) ([]storage.Person, erro
 	return out, nil
 }
 
-func (s *stubStore) GetArtifactsByIDs(_ int64, ids []int64) ([]storage.Artifact, error) {
+func (s *stubStore) GetArtifactsByIDs(_ storage.ScopeID, ids []int64) ([]storage.Artifact, error) {
 	out := make([]storage.Artifact, 0, len(ids))
 	for _, id := range ids {
 		if a, ok := s.artifacts[id]; ok {
@@ -55,7 +55,7 @@ func (s *stubStore) GetArtifactsByIDs(_ int64, ids []int64) ([]storage.Artifact,
 func TestBuildRerankerRequest_HappyPath(t *testing.T) {
 	span := &snapshot.RerankerSpanData{
 		TraceID:       "t1",
-		UserID:        42,
+		UserID:        "42",
 		RawQuery:      "что про H100?",
 		EnrichedQuery: "vLLM H100 production",
 		CandidatesInput: `[Topic:9695] (0.81) 2026-04-07 | 2 msgs, ~4K chars | sglang vs vLLM
@@ -73,14 +73,14 @@ func TestBuildRerankerRequest_HappyPath(t *testing.T) {
 	entitiesJSON := `["Mom","Foo"]`
 	store := &stubStore{
 		topics: map[int64]storage.Topic{
-			9695: {ID: 9695, UserID: 42, Summary: "sglang vs vLLM", StartMsgID: 100, EndMsgID: 101, SizeChars: 4000},
-			4815: {ID: 4815, UserID: 42, Summary: "H100 NVL", StartMsgID: 200, EndMsgID: 205, SizeChars: 6000},
+			9695: {ID: 9695, UserID: "42", Summary: "sglang vs vLLM", StartMsgID: 100, EndMsgID: 101, SizeChars: 4000},
+			4815: {ID: 4815, UserID: "42", Summary: "H100 NVL", StartMsgID: 200, EndMsgID: 205, SizeChars: 6000},
 		},
 		people: map[int64]storage.Person{
-			304: {ID: 304, UserID: 42, DisplayName: "Наиля"},
+			304: {ID: 304, UserID: "42", DisplayName: "Наиля"},
 		},
 		artifacts: map[int64]storage.Artifact{
-			978: {ID: 978, UserID: 42, FileType: "image", OriginalName: "photo.jpg",
+			978: {ID: 978, UserID: "42", FileType: "image", OriginalName: "photo.jpg",
 				Summary:  ptrString("hand of mother"),
 				Keywords: ptrString(keywordsJSON),
 				Entities: ptrString(entitiesJSON)},
@@ -89,7 +89,7 @@ func TestBuildRerankerRequest_HappyPath(t *testing.T) {
 
 	br, err := BuildRerankerRequest(context.Background(), span, store, nil)
 	require.NoError(t, err)
-	assert.Equal(t, int64(42), br.UserID)
+	assert.Equal(t, storage.ScopeID("42"), br.UserID)
 
 	// Topic candidates wired through with similarity from event body and
 	// MessageCount derived from the topic's StartMsgID..EndMsgID range.
@@ -128,7 +128,7 @@ func TestBuildRerankerRequest_HappyPath(t *testing.T) {
 
 	// SharedContext fallback: nil loader → minimal SharedContext{UserID}.
 	require.NotNil(t, br.Request.Shared)
-	assert.Equal(t, int64(42), br.Request.Shared.UserID)
+	assert.Equal(t, storage.ScopeID("42"), br.Request.Shared.UserID)
 }
 
 func TestBuildRerankerRequest_MissingFromDB(t *testing.T) {
@@ -137,14 +137,14 @@ func TestBuildRerankerRequest_MissingFromDB(t *testing.T) {
 	// must drop the missing IDs from the request and surface them via Skipped.
 	span := &snapshot.RerankerSpanData{
 		TraceID: "t2",
-		UserID:  42,
+		UserID:  "42",
 		CandidatesInput: `[Topic:9695] (0.81) 2026-04-07 | 2 msgs, ~4K chars | exists
 [Topic:9999] (0.80) 2026-04-07 | 2 msgs, ~3K chars | gone-1
 [Topic:8888] (0.75) 2026-04-07 | 2 msgs, ~3K chars | gone-2`,
 	}
 	store := &stubStore{
 		topics: map[int64]storage.Topic{
-			9695: {ID: 9695, UserID: 42, StartMsgID: 1, EndMsgID: 2, SizeChars: 4000},
+			9695: {ID: 9695, UserID: "42", StartMsgID: 1, EndMsgID: 2, SizeChars: 4000},
 		},
 	}
 
@@ -167,12 +167,12 @@ func TestBuildRerankerRequest_PrefersSpanSharedContext(t *testing.T) {
 	// loader entirely — no drift through today's DB.
 	span := &snapshot.RerankerSpanData{
 		TraceID:      "tspan",
-		UserID:       42,
+		UserID:       "42",
 		UserProfile:  "<user_profile>\n- frozen at trace time\n</user_profile>",
 		RecentTopics: "<recent_topics>\n- frozen too\n</recent_topics>",
 	}
 	loaderCalled := false
-	loader := func(_ context.Context, _ int64) *agent.SharedContext {
+	loader := func(_ context.Context, _ storage.ScopeID) *agent.SharedContext {
 		loaderCalled = true
 		return &agent.SharedContext{Profile: "today's drift", RecentTopics: "today's drift"}
 	}
@@ -187,8 +187,8 @@ func TestBuildRerankerRequest_PrefersSpanSharedContext(t *testing.T) {
 func TestBuildRerankerRequest_FallsBackToLoaderForOldTraces(t *testing.T) {
 	// Pre-2026-04-29 traces have no shared-context events. Fall back to the
 	// loader (snapshot DB) and accept the drift.
-	span := &snapshot.RerankerSpanData{TraceID: "told", UserID: 42}
-	loader := func(_ context.Context, _ int64) *agent.SharedContext {
+	span := &snapshot.RerankerSpanData{TraceID: "told", UserID: "42"}
+	loader := func(_ context.Context, _ storage.ScopeID) *agent.SharedContext {
 		return &agent.SharedContext{Profile: "from loader", RecentTopics: "from loader"}
 	}
 
@@ -200,7 +200,7 @@ func TestBuildRerankerRequest_FallsBackToLoaderForOldTraces(t *testing.T) {
 func TestBuildRerankerRequest_RejectsZeroUserID(t *testing.T) {
 	// Defensive: a trace with no user.id attribute is corrupt and we don't
 	// want to ship it to a real DB / agent — fail fast.
-	span := &snapshot.RerankerSpanData{TraceID: "x", UserID: 0}
+	span := &snapshot.RerankerSpanData{TraceID: "x", UserID: ""}
 	_, err := BuildRerankerRequest(context.Background(), span, &stubStore{}, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "user.id")

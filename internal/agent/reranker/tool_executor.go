@@ -35,7 +35,7 @@ func parseToolCallIDs(arguments string) ([]int64, error) {
 // Returns formatted content block and updates trace with stats.
 func loadTopicsContent(
 	ctx context.Context,
-	userID int64,
+	userID storage.ScopeID,
 	ids []int64,
 	candidateMap map[int64]Candidate,
 	msgRepo MessageRepository,
@@ -183,7 +183,7 @@ func saveTrace(
 	ctx context.Context,
 	agentLogger *agentlog.Logger,
 	logger *slog.Logger,
-	userID int64,
+	userID storage.ScopeID,
 	originalQuery string,
 	contextualizedQuery string,
 	tr *trace,

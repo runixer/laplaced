@@ -3,6 +3,8 @@ package rag
 import (
 	"sync"
 	"time"
+
+	"github.com/runixer/laplaced/internal/storage"
 )
 
 const (
@@ -11,7 +13,7 @@ const (
 )
 
 type chunkKey struct {
-	userID     int64
+	userID     storage.ScopeID
 	startMsgID int64
 }
 
@@ -40,7 +42,7 @@ func newChunkCircuitBreaker() *chunkCircuitBreaker {
 
 // cooldownRemaining returns the time until this chunk may be retried, or 0 if
 // it is not in cooldown.
-func (cb *chunkCircuitBreaker) cooldownRemaining(userID, startMsgID int64) time.Duration {
+func (cb *chunkCircuitBreaker) cooldownRemaining(userID storage.ScopeID, startMsgID int64) time.Duration {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 	st, ok := cb.state[chunkKey{userID, startMsgID}]
@@ -56,7 +58,7 @@ func (cb *chunkCircuitBreaker) cooldownRemaining(userID, startMsgID int64) time.
 
 // recordFailure increments the failure count and sets a new cooldown. Returns
 // the cooldown duration applied (for logging).
-func (cb *chunkCircuitBreaker) recordFailure(userID, startMsgID int64) time.Duration {
+func (cb *chunkCircuitBreaker) recordFailure(userID storage.ScopeID, startMsgID int64) time.Duration {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 	key := chunkKey{userID, startMsgID}
@@ -75,7 +77,7 @@ func (cb *chunkCircuitBreaker) recordFailure(userID, startMsgID int64) time.Dura
 }
 
 // recordSuccess clears any recorded failures for this chunk.
-func (cb *chunkCircuitBreaker) recordSuccess(userID, startMsgID int64) {
+func (cb *chunkCircuitBreaker) recordSuccess(userID storage.ScopeID, startMsgID int64) {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 	delete(cb.state, chunkKey{userID, startMsgID})

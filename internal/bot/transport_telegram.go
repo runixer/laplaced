@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/runixer/laplaced/internal/storage"
+
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/markdown"
@@ -21,7 +23,7 @@ const telegramMarkdownSafeLimit = 3500
 
 // TelegramTransport adapts the Telegram Bot API to the neutral Transport
 // interface. It wraps the same telegram.BotAPI the bot already holds, so the
-// home send path is byte-identical to the pre-seam code.
+// Telegram send path is byte-identical to the pre-seam code.
 type TelegramTransport struct {
 	api        telegram.BotAPI
 	cfg        *config.Config
@@ -401,7 +403,7 @@ func (b *Bot) incomingFromTelegram(msg *telegram.Message) IncomingMessage {
 		ThreadRoot:     threadRootFromTelegram(msg.MessageThreadID),
 		IsDirect:       true,
 		SentAt:         time.Unix(int64(msg.Date), 0),
-		Files:          b.fileProcessor.ExtractFiles(msg, msg.From.ID),
+		Files:          b.fileProcessor.ExtractFiles(msg, storage.PassthroughScopeID(transportTelegram, strconv.FormatInt(msg.From.ID, 10))),
 	}
 
 	if fo := msg.ForwardOrigin; fo != nil && fo.SenderUser != nil {

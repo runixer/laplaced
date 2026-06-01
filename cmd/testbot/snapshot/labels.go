@@ -59,7 +59,7 @@ func writeHeader(b *strings.Builder, m *Manifest, spans []*RerankerSpanData) {
 func writeTraceSection(b *strings.Builder, sp *RerankerSpanData) {
 	fmt.Fprintf(b, "## Trace `%s`\n\n", sp.TraceID)
 
-	fmt.Fprintf(b, "- **User:** %d\n", sp.UserID)
+	fmt.Fprintf(b, "- **User:** %s\n", sp.UserID)
 	fmt.Fprintf(b, "- **Counts:** topics %d→%d (raw %d) / people %d→%d (raw %d) / artifacts %d→%d (raw %d)\n",
 		sp.CandidatesIn.Topics, sp.ModelKept.Topics, sp.ModelRawCount.Topics,
 		sp.CandidatesIn.People, sp.ModelKept.People, sp.ModelRawCount.People,

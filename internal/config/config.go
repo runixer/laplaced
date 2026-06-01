@@ -358,13 +358,29 @@ type ToolConfig struct {
 }
 
 // MattermostConfig configures the Mattermost/Time transport (used when
-// transport == "time"). The proxy is per-client (corp proxy); never set a
+// transport == "mattermost"). The proxy is per-client (HTTP proxy); never set a
 // process-wide HTTP_PROXY, which would also route the litellm/openrouter client.
 type MattermostConfig struct {
 	ServerURL      string   `yaml:"server_url" env:"LAPLACED_MATTERMOST_SERVER_URL"`
 	BotToken       string   `yaml:"bot_token" env:"LAPLACED_MATTERMOST_BOT_TOKEN"`
 	ProxyURL       string   `yaml:"proxy_url" env:"LAPLACED_MATTERMOST_PROXY_URL"`
 	AllowedUserIDs []string `yaml:"allowed_user_ids" env:"LAPLACED_MATTERMOST_ALLOWED_USER_IDS" env-separator:","`
+	// PrincipalResolver, when present, turns on principal identity resolution for
+	// this transport's DMs. Its mere presence enables resolution
+	// (organic config, not a mode flag); absence = passthrough (the default behavior).
+	PrincipalResolver *PrincipalResolverConfig `yaml:"principal_resolver"`
+}
+
+// PrincipalResolverConfig enables and tunes federated-passive principal
+// resolution for a transport. The trust gate is the transport's
+// own auth_service (Mattermost GetUser): a local account (auth_service == "") is
+// NEVER linked, and identities are NEVER linked by self-claimed email. Resolution
+// is federated-passive only for now; an objectGUID/Keycloak lookup arrives later.
+type PrincipalResolverConfig struct {
+	// TrustedAuthServices restricts which Mattermost auth_service values are
+	// trusted for principal linkage. Empty = trust any non-empty auth_service
+	// (the default gate). Local accounts (auth_service == "") are never linked.
+	TrustedAuthServices []string `yaml:"trusted_auth_services" env:"LAPLACED_MATTERMOST_TRUSTED_AUTH_SERVICES" env-separator:","`
 }
 
 type OpenRouterConfig struct {
@@ -584,7 +600,7 @@ type Config struct {
 			Password string `yaml:"password" env:"LAPLACED_AUTH_PASSWORD"`
 		} `yaml:"auth"`
 	} `yaml:"server"`
-	// Transport selects the chat backend: "telegram" (default) | "time" (Mattermost).
+	// Transport selects the chat backend: "telegram" (default) | "mattermost".
 	Transport string `yaml:"transport" env:"LAPLACED_TRANSPORT"`
 	Telegram  struct {
 		Token         string `yaml:"token" env:"LAPLACED_TELEGRAM_TOKEN"`
@@ -601,7 +617,21 @@ type Config struct {
 	Tools      []ToolConfig     `yaml:"tools"`
 	Bot        BotConfig        `yaml:"bot"`
 	Database   struct {
+		// Driver selects the storage backend: "sqlite" (default) or "postgres".
+		// Empty defaults to sqlite for backward compatibility.
+		Driver string `yaml:"driver" env:"LAPLACED_DATABASE_DRIVER"`
+		// Path is the SQLite database file path (driver=sqlite).
 		Path string `yaml:"path" env:"LAPLACED_DATABASE_PATH"`
+		// Postgres holds the connection params for driver=postgres. The password
+		// MUST come from the LAPLACED_DATABASE_PASSWORD env var, never a committed literal.
+		Postgres struct {
+			Host     string `yaml:"host" env:"LAPLACED_DATABASE_HOST"`
+			Port     int    `yaml:"port" env:"LAPLACED_DATABASE_PORT"`
+			Database string `yaml:"database" env:"LAPLACED_DATABASE_NAME"`
+			User     string `yaml:"user" env:"LAPLACED_DATABASE_USER"`
+			Password string `yaml:"password" env:"LAPLACED_DATABASE_PASSWORD"`
+			SSLMode  string `yaml:"sslmode" env:"LAPLACED_DATABASE_SSLMODE"`
+		} `yaml:"postgres"`
 	} `yaml:"database"`
 	Artifacts ArtifactsConfig `yaml:"artifacts"`
 	Memory    MemoryConfig    `yaml:"memory"`
@@ -672,21 +702,42 @@ func (c *Config) Validate() error {
 	var errs []error
 
 	// Required fields — transport-specific.
-	if c.Transport == "time" {
+	if c.Transport == "mattermost" {
 		if c.Mattermost.ServerURL == "" {
-			errs = append(errs, errors.New("mattermost.server_url is required when transport is \"time\""))
+			errs = append(errs, errors.New("mattermost.server_url is required when transport is \"mattermost\""))
 		}
 		if c.Mattermost.BotToken == "" {
-			errs = append(errs, errors.New("mattermost.bot_token is required when transport is \"time\""))
+			errs = append(errs, errors.New("mattermost.bot_token is required when transport is \"mattermost\""))
 		}
 	} else if c.Telegram.Token == "" {
 		errs = append(errs, errors.New("telegram.token is required"))
 	}
+	// A principal resolver only makes sense for the transport that owns its trust
+	// source (Mattermost auth_service). Catch a misplaced block at load time
+	// instead of silently never resolving.
+	if c.Mattermost.PrincipalResolver != nil && c.Transport != "mattermost" {
+		errs = append(errs, errors.New("mattermost.principal_resolver requires transport \"mattermost\""))
+	}
 	if c.OpenRouter.APIKey == "" {
 		errs = append(errs, errors.New("openrouter.api_key is required"))
 	}
-	if c.Database.Path == "" {
-		errs = append(errs, errors.New("database.path is required"))
+	switch c.Database.Driver {
+	case "", "sqlite":
+		if c.Database.Path == "" {
+			errs = append(errs, errors.New("database.path is required"))
+		}
+	case "postgres":
+		if c.Database.Postgres.Host == "" {
+			errs = append(errs, errors.New("database.postgres.host is required when driver is \"postgres\""))
+		}
+		if c.Database.Postgres.Database == "" {
+			errs = append(errs, errors.New("database.postgres.database is required when driver is \"postgres\""))
+		}
+		if c.Database.Postgres.User == "" {
+			errs = append(errs, errors.New("database.postgres.user is required when driver is \"postgres\""))
+		}
+	default:
+		errs = append(errs, fmt.Errorf("database.driver %q is not supported (use \"sqlite\" or \"postgres\")", c.Database.Driver))
 	}
 
 	// Server auth requires username if enabled (password is auto-generated if not set)

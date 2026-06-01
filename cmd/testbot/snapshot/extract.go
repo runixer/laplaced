@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/runixer/laplaced/internal/storage"
 )
 
 // ErrNoRerankerSpan is returned by ExtractRerankerSpan when the trace JSON
@@ -22,7 +24,7 @@ var ErrNoRerankerSpan = errors.New("no reranker.Execute span in trace")
 // the trace ended in a fallback path.
 type RerankerSpanData struct {
 	TraceID    string
-	UserID     int64
+	UserID     storage.ScopeID
 	DurationMs int64
 
 	CandidatesIn struct {
@@ -170,7 +172,7 @@ func buildRerankerSpan(traceID string, sp rawSpan) *RerankerSpanData {
 	for _, a := range sp.Attributes {
 		switch a.Key {
 		case "user.id":
-			out.UserID = a.Value.asInt()
+			out.UserID = storage.ScopeID(a.Value.asString())
 		case "reranker.candidates_in.topics":
 			out.CandidatesIn.Topics = int(a.Value.asInt())
 		case "reranker.candidates_in.people":

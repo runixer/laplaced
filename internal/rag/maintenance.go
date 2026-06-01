@@ -47,7 +47,7 @@ type RepairStats struct {
 
 // GetDatabaseHealth returns diagnostic information about database health.
 // If userID is 0, returns stats for all users.
-func (s *Service) GetDatabaseHealth(ctx context.Context, userID int64, largeThreshold int) (*DatabaseHealth, error) {
+func (s *Service) GetDatabaseHealth(ctx context.Context, userID storage.ScopeID, largeThreshold int) (*DatabaseHealth, error) {
 	if largeThreshold == 0 {
 		largeThreshold = 25000
 	}
@@ -57,7 +57,7 @@ func (s *Service) GetDatabaseHealth(ctx context.Context, userID int64, largeThre
 	// Get topics (all or for specific user)
 	var topics []storage.Topic
 	var err error
-	if userID == 0 {
+	if userID == "" {
 		topics, err = s.topicRepo.GetAllTopics()
 	} else {
 		topics, err = s.topicRepo.GetTopics(userID)
@@ -139,7 +139,7 @@ func (s *Service) GetDatabaseHealth(ctx context.Context, userID int64, largeThre
 }
 
 // RepairDatabase fixes database integrity issues.
-func (s *Service) RepairDatabase(ctx context.Context, userID int64, dryRun bool) (*RepairStats, error) {
+func (s *Service) RepairDatabase(ctx context.Context, userID storage.ScopeID, dryRun bool) (*RepairStats, error) {
 	ctx = jobtype.WithJobType(ctx, jobtype.Background)
 
 	stats := &RepairStats{}
@@ -168,7 +168,7 @@ func (s *Service) RepairDatabase(ctx context.Context, userID int64, dryRun bool)
 			// Delete orphaned topics
 			for _, id := range orphanedIDs {
 				// When userID is 0, we need to get the owner of each topic
-				if userID == 0 {
+				if userID == "" {
 					// Fetch the topic to get its owner
 					allTopics, _ := s.topicRepo.GetAllTopics()
 					for _, t := range allTopics {
@@ -191,7 +191,7 @@ func (s *Service) RepairDatabase(ctx context.Context, userID int64, dryRun bool)
 
 	// 2. Recalculate topic ranges and sizes
 	var topics []storage.Topic
-	if userID == 0 {
+	if userID == "" {
 		topics, _ = s.topicRepo.GetAllTopics()
 	} else {
 		topics, _ = s.topicRepo.GetTopics(userID)
@@ -230,7 +230,7 @@ func (s *Service) RepairDatabase(ctx context.Context, userID int64, dryRun bool)
 
 // relinkFactsFromOrphanedTopics moves facts from orphaned topics to valid ones.
 // Facts are relinked to a valid topic owned by the SAME user.
-func (s *Service) relinkFactsFromOrphanedTopics(ctx context.Context, userID int64, orphanedIDs []int64) (int, error) {
+func (s *Service) relinkFactsFromOrphanedTopics(ctx context.Context, userID storage.ScopeID, orphanedIDs []int64) (int, error) {
 	if len(orphanedIDs) == 0 {
 		return 0, nil
 	}
@@ -244,7 +244,7 @@ func (s *Service) relinkFactsFromOrphanedTopics(ctx context.Context, userID int6
 	// Get all topics (we need to find valid topics per user)
 	var allTopics []storage.Topic
 	var err error
-	if userID == 0 {
+	if userID == "" {
 		allTopics, err = s.topicRepo.GetAllTopics()
 	} else {
 		allTopics, err = s.topicRepo.GetTopics(userID)
@@ -254,7 +254,7 @@ func (s *Service) relinkFactsFromOrphanedTopics(ctx context.Context, userID int6
 	}
 
 	// Build map: userID -> first valid (non-orphaned) topic ID
-	validTopicByUser := make(map[int64]int64)
+	validTopicByUser := make(map[storage.ScopeID]int64)
 	for _, t := range allTopics {
 		if !orphanedSet[t.ID] {
 			if _, exists := validTopicByUser[t.UserID]; !exists {
@@ -264,7 +264,7 @@ func (s *Service) relinkFactsFromOrphanedTopics(ctx context.Context, userID int6
 	}
 
 	// Also build map: orphanedTopicID -> userID
-	orphanedTopicOwner := make(map[int64]int64)
+	orphanedTopicOwner := make(map[int64]storage.ScopeID)
 	for _, t := range allTopics {
 		if orphanedSet[t.ID] {
 			orphanedTopicOwner[t.ID] = t.UserID
@@ -311,7 +311,7 @@ type ContaminationFixStats struct {
 
 // GetContaminationInfo returns information about cross-user data contamination.
 // If userID is 0, checks all users.
-func (s *Service) GetContaminationInfo(ctx context.Context, userID int64) (*ContaminationInfo, error) {
+func (s *Service) GetContaminationInfo(ctx context.Context, userID storage.ScopeID) (*ContaminationInfo, error) {
 	info := &ContaminationInfo{}
 
 	// Count contaminated topics
@@ -333,7 +333,7 @@ func (s *Service) GetContaminationInfo(ctx context.Context, userID int64) (*Cont
 
 // FixContamination removes foreign messages from contaminated topics.
 // If userID is 0, fixes all users.
-func (s *Service) FixContamination(ctx context.Context, userID int64, dryRun bool) (*ContaminationFixStats, error) {
+func (s *Service) FixContamination(ctx context.Context, userID storage.ScopeID, dryRun bool) (*ContaminationFixStats, error) {
 	stats := &ContaminationFixStats{}
 
 	if dryRun {
@@ -378,7 +378,7 @@ func (s *Service) FixContamination(ctx context.Context, userID int64, dryRun boo
 		} else if len(orphanedIDs) > 0 {
 			for _, id := range orphanedIDs {
 				// When userID is 0, we need to get the owner of each topic
-				if userID == 0 {
+				if userID == "" {
 					// Fetch the topic to get its owner
 					allTopics, _ := s.topicRepo.GetAllTopics()
 					for _, t := range allTopics {

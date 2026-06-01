@@ -29,7 +29,7 @@ func TestProcessSingleArtifact_Success(t *testing.T) {
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	artifactID := int64(10)
 
 	// Create test artifact
@@ -108,7 +108,7 @@ func TestProcessSingleArtifact_AgentError(t *testing.T) {
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	artifactID := int64(10)
 
 	artifact := storage.Artifact{
@@ -171,7 +171,7 @@ func TestProcessSingleArtifact_EmbeddingError(t *testing.T) {
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	artifactID := int64(10)
 
 	artifact := storage.Artifact{
@@ -235,7 +235,7 @@ func TestProcessSingleArtifact_RetryLogic(t *testing.T) {
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	artifactID := int64(10)
 
 	now := time.Now()
@@ -317,7 +317,7 @@ func TestProcessSingleArtifact_ShuttingDown(t *testing.T) {
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	artifactID := int64(10)
 
 	artifact := storage.Artifact{
@@ -386,7 +386,7 @@ func TestProcessSingleArtifact_WithSharedContext(t *testing.T) {
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	artifactID := int64(10)
 
 	artifact := storage.Artifact{
@@ -467,7 +467,7 @@ func TestProcessArtifactExtraction_RespectsShuttingDown(t *testing.T) {
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 
 	// Create test artifacts
 	artifacts := []storage.Artifact{
@@ -524,8 +524,8 @@ func TestProcessArtifactExtraction_ProcessesAllPending(t *testing.T) {
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
-	userID1 := int64(123)
-	userID2 := int64(456)
+	userID1 := storage.PassthroughScopeID("telegram", "123")
+	userID2 := storage.PassthroughScopeID("telegram", "456")
 
 	// Create test artifacts for both users
 	artifacts1 := []storage.Artifact{
@@ -537,7 +537,7 @@ func TestProcessArtifactExtraction_ProcessesAllPending(t *testing.T) {
 
 	mockArtifactRepo.On("GetPendingArtifacts", userID1, mock.AnythingOfType("int")).Return(artifacts1, nil).Once()
 	mockArtifactRepo.On("GetPendingArtifacts", userID2, mock.AnythingOfType("int")).Return(artifacts2, nil).Once()
-	mockArtifactRepo.On("GetPendingArtifacts", mock.AnythingOfType("int64"), mock.AnythingOfType("int")).Return([]storage.Artifact{}, nil).Maybe()
+	mockArtifactRepo.On("GetPendingArtifacts", mock.AnythingOfType("storage.ScopeID"), mock.AnythingOfType("int")).Return([]storage.Artifact{}, nil).Maybe()
 	// Setup for LoadNewArtifactSummaries (called after extraction)
 	mockArtifactRepo.On("GetArtifacts", mock.Anything, mock.Anything, mock.Anything).
 		Return([]storage.Artifact{}, int64(0), nil).Maybe()
@@ -635,7 +635,7 @@ func TestProcessArtifactExtraction_DefaultMaxRetries(t *testing.T) {
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	artifacts := []storage.Artifact{
 		{ID: 1, UserID: userID, FileType: "image", State: "pending"},
 	}
@@ -696,7 +696,7 @@ func TestProcessArtifactExtraction_DefaultMaxConcurrent(t *testing.T) {
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	artifacts := []storage.Artifact{
 		{ID: 1, UserID: userID, FileType: "image", State: "pending"},
 	}

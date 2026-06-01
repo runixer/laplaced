@@ -150,7 +150,7 @@ func TestContextService_Load_Channel(t *testing.T) {
 
 func TestWithContext_FromContext(t *testing.T) {
 	shared := &SharedContext{
-		UserID:   123,
+		UserID:   "123",
 		Profile:  "test profile",
 		Language: "ru",
 		LoadedAt: time.Now(),
@@ -160,7 +160,7 @@ func TestWithContext_FromContext(t *testing.T) {
 	retrieved := FromContext(ctx)
 
 	assert.Equal(t, shared, retrieved)
-	assert.Equal(t, int64(123), retrieved.UserID)
+	assert.Equal(t, storage.ScopeID("123"), retrieved.UserID)
 	assert.Equal(t, "test profile", retrieved.Profile)
 }
 
@@ -180,7 +180,7 @@ func TestMustFromContext_Panics(t *testing.T) {
 }
 
 func TestMustFromContext_Success(t *testing.T) {
-	shared := &SharedContext{UserID: 123}
+	shared := &SharedContext{UserID: "123"}
 	ctx := WithContext(context.Background(), shared)
 
 	assert.NotPanics(t, func() {
@@ -396,34 +396,34 @@ func TestGetUserID(t *testing.T) {
 	tests := []struct {
 		name   string
 		req    *Request
-		wantID int64
+		wantID storage.ScopeID
 	}{
 		{
 			name: "from request.Shared.UserID",
 			req: &Request{
-				Shared: &SharedContext{UserID: 123},
+				Shared: &SharedContext{UserID: "123"},
 			},
-			wantID: 123,
+			wantID: "123",
 		},
 		{
 			name: "from request.Params user_id",
 			req: &Request{
-				Params: map[string]any{"user_id": int64(456)},
+				Params: map[string]any{"user_id": storage.ScopeID("456")},
 			},
-			wantID: 456,
+			wantID: "456",
 		},
 		{
 			name: "request.Shared takes priority over params",
 			req: &Request{
-				Shared: &SharedContext{UserID: 123},
-				Params: map[string]any{"user_id": int64(456)},
+				Shared: &SharedContext{UserID: "123"},
+				Params: map[string]any{"user_id": storage.ScopeID("456")},
 			},
-			wantID: 123,
+			wantID: "123",
 		},
 		{
 			name:   "nil request returns 0",
 			req:    nil,
-			wantID: 0,
+			wantID: "",
 		},
 		{
 			name: "request with nil Shared and no user_id param",
@@ -431,21 +431,21 @@ func TestGetUserID(t *testing.T) {
 				Shared: nil,
 				Params: map[string]any{"other": "value"},
 			},
-			wantID: 0,
+			wantID: "",
 		},
 		{
 			name: "user_id param with wrong type returns 0",
 			req: &Request{
 				Params: map[string]any{"user_id": "not an int64"},
 			},
-			wantID: 0,
+			wantID: "",
 		},
 		{
 			name: "user_id param with int returns 0 (type mismatch)",
 			req: &Request{
 				Params: map[string]any{"user_id": 123},
 			},
-			wantID: 0,
+			wantID: "",
 		},
 	}
 

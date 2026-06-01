@@ -42,7 +42,7 @@ func NewMattermostTransport(client *mattermost.Client, cfg *config.Config, logge
 	return &MMTransport{client: client, cfg: cfg, logger: logger.With("component", "mm-transport")}
 }
 
-func (t *MMTransport) Kind() string { return transportTime }
+func (t *MMTransport) Kind() string { return transportMattermost }
 
 func (t *MMTransport) Capabilities() Capabilities {
 	maxPost := t.client.MaxPostSize()

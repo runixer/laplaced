@@ -24,7 +24,7 @@ func TestExecuteToolCall_UnknownTool(t *testing.T) {
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, cfg, testutil.TestLogger())
 
 	ctx := context.Background()
-	_, err := exec.ExecuteToolCall(ctx, CallContext{UserID: 123}, "unknown_tool", `{}`)
+	_, err := exec.ExecuteToolCall(ctx, CallContext{UserID: "123"}, "unknown_tool", `{}`)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown tool")
@@ -41,7 +41,7 @@ func TestExecuteToolCall_InvalidArguments(t *testing.T) {
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, cfg, testutil.TestLogger())
 
 	ctx := context.Background()
-	_, err := exec.ExecuteToolCall(ctx, CallContext{UserID: 123}, "search_history", `{invalid json`)
+	_, err := exec.ExecuteToolCall(ctx, CallContext{UserID: "123"}, "search_history", `{invalid json`)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse arguments")
@@ -60,7 +60,7 @@ func TestExecuteToolCall_SearchHistory(t *testing.T) {
 	// No RAG service set, should return "not available"
 	ctx := context.Background()
 	args, _ := json.Marshal(map[string]string{"query": "test"})
-	result, err := exec.ExecuteToolCall(ctx, CallContext{UserID: 123}, "search_history", string(args))
+	result, err := exec.ExecuteToolCall(ctx, CallContext{UserID: "123"}, "search_history", string(args))
 
 	assert.NoError(t, err)
 	assert.Contains(t, result.Content, "Search is not available")
@@ -91,7 +91,7 @@ func TestExecuteToolCall_ManageMemory(t *testing.T) {
 	args, _ := json.Marshal(map[string]interface{}{
 		"query": `{"operations":[{"action":"add","content":"Test fact"}]}`,
 	})
-	result, err := exec.ExecuteToolCall(ctx, CallContext{UserID: 123}, "manage_memory", string(args))
+	result, err := exec.ExecuteToolCall(ctx, CallContext{UserID: "123"}, "manage_memory", string(args))
 
 	assert.NoError(t, err)
 	assert.Contains(t, result.Content, "Success")
@@ -108,13 +108,13 @@ func TestExecuteToolCall_SearchPeople(t *testing.T) {
 	username := "alice"
 	testPerson := storage.Person{
 		ID:          1,
-		UserID:      123,
+		UserID:      "123",
 		DisplayName: "Alice",
 		Username:    &username,
 		Circle:      "Friends",
 	}
 
-	mockStore.On("FindPersonByUsername", int64(123), "alice").Return(&testPerson, nil)
+	mockStore.On("FindPersonByUsername", storage.ScopeID("123"), "alice").Return(&testPerson, nil)
 
 	cfg := testutil.TestConfig()
 	cfg.Tools = []config.ToolConfig{{Name: "search_people"}}
@@ -124,7 +124,7 @@ func TestExecuteToolCall_SearchPeople(t *testing.T) {
 
 	ctx := context.Background()
 	args, _ := json.Marshal(map[string]string{"query": "@alice"})
-	result, err := exec.ExecuteToolCall(ctx, CallContext{UserID: 123}, "search_people", string(args))
+	result, err := exec.ExecuteToolCall(ctx, CallContext{UserID: "123"}, "search_people", string(args))
 
 	assert.NoError(t, err)
 	assert.Contains(t, result.Content, "Found 1 people")
@@ -146,8 +146,8 @@ func TestExecuteToolCall_ManagePeople(t *testing.T) {
 		Data: []openrouter.EmbeddingObject{{Embedding: embedding}},
 	}, nil)
 
-	mockStore.On("FindPersonByName", int64(123), "Alice").Return(nil, nil)
-	mockStore.On("FindPersonByAlias", int64(123), "Alice").Return([]storage.Person{}, nil)
+	mockStore.On("FindPersonByName", storage.ScopeID("123"), "Alice").Return(nil, nil)
+	mockStore.On("FindPersonByAlias", storage.ScopeID("123"), "Alice").Return([]storage.Person{}, nil)
 	mockStore.On("AddPerson", mock.MatchedBy(func(p storage.Person) bool {
 		return p.DisplayName == "Alice"
 	})).Return(int64(42), nil)
@@ -163,7 +163,7 @@ func TestExecuteToolCall_ManagePeople(t *testing.T) {
 	args, _ := json.Marshal(map[string]interface{}{
 		"query": `{"operation":"create","name":"Alice"}`,
 	})
-	result, err := exec.ExecuteToolCall(ctx, CallContext{UserID: 123}, "manage_people", string(args))
+	result, err := exec.ExecuteToolCall(ctx, CallContext{UserID: "123"}, "manage_people", string(args))
 
 	assert.NoError(t, err)
 	assert.Contains(t, result.Content, "Successfully created person")
@@ -195,7 +195,7 @@ func TestExecuteToolCall_ModelTool(t *testing.T) {
 
 	ctx := context.Background()
 	args, _ := json.Marshal(map[string]string{"query": "test query"})
-	result, err := exec.ExecuteToolCall(ctx, CallContext{UserID: 123}, "custom_model", string(args))
+	result, err := exec.ExecuteToolCall(ctx, CallContext{UserID: "123"}, "custom_model", string(args))
 
 	assert.NoError(t, err)
 	assert.Contains(t, result.Content, "Model response")

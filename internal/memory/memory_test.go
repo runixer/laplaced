@@ -61,7 +61,7 @@ func TestAddFactWithHistory(t *testing.T) {
 			svc := NewService(logger, cfg, mockStore, mockStore, mockStore, nil, translator)
 
 			fact := storage.Fact{
-				UserID:     123,
+				UserID:     "123",
 				Content:    "Test fact",
 				Category:   "test",
 				Relation:   "related_to",
@@ -101,7 +101,7 @@ func TestProcessSession_AddFact_RecordsHistory(t *testing.T) {
 
 	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	messages := []storage.Message{{Role: "user", Content: "My name is John"}}
 	refDate := time.Now()
 
@@ -164,7 +164,7 @@ func TestProcessSession_UpdateFact_RecordsHistory(t *testing.T) {
 
 	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	messages := []storage.Message{{Role: "user", Content: "My name is actually Bob"}}
 	refDate := time.Now()
 
@@ -233,7 +233,7 @@ func TestProcessSession_RemoveFact_RecordsHistory(t *testing.T) {
 
 	svc := NewService(logger, cfg, mockStore, mockStore, mockStore, mockOR, translator)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	messages := []storage.Message{{Role: "user", Content: "Forget my name"}}
 	refDate := time.Now()
 
@@ -486,7 +486,7 @@ func TestApplyUpdateWithStats(t *testing.T) {
 				},
 			},
 			existingFacts: []storage.Fact{
-				{ID: 1, UserID: 123, Content: "Old content", Type: "identity", Importance: 50, Embedding: []float32{0.1, 0.2}},
+				{ID: 1, UserID: "123", Content: "Old content", Type: "identity", Importance: 50, Embedding: []float32{0.1, 0.2}},
 			},
 			mockSetup: func(store *testutil.MockStorage, orClient *testutil.MockOpenRouterClient) {
 				orClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(testutil.MockEmbeddingResponse(), nil).Once()
@@ -505,10 +505,10 @@ func TestApplyUpdateWithStats(t *testing.T) {
 				},
 			},
 			existingFacts: []storage.Fact{
-				{ID: 1, UserID: 123, Content: "Old fact", Relation: "name", Category: "bio", Importance: 50},
+				{ID: 1, UserID: "123", Content: "Old fact", Relation: "name", Category: "bio", Importance: 50},
 			},
 			mockSetup: func(store *testutil.MockStorage, orClient *testutil.MockOpenRouterClient) {
-				store.On("DeleteFact", int64(123), int64(1)).Return(nil).Once()
+				store.On("DeleteFact", storage.ScopeID("123"), int64(1)).Return(nil).Once()
 			},
 			wantStats: FactStats{Deleted: 1},
 		},
@@ -542,14 +542,14 @@ func TestApplyUpdateWithStats(t *testing.T) {
 				},
 			},
 			existingFacts: []storage.Fact{
-				{ID: 1, UserID: 123, Content: "Same content", Type: "identity", Importance: 50, Embedding: []float32{0.1}},
-				{ID: 2, UserID: 123, Content: "To remove", Relation: "name", Category: "bio", Importance: 50},
+				{ID: 1, UserID: "123", Content: "Same content", Type: "identity", Importance: 50, Embedding: []float32{0.1}},
+				{ID: 2, UserID: "123", Content: "To remove", Relation: "name", Category: "bio", Importance: 50},
 			},
 			mockSetup: func(store *testutil.MockStorage, orClient *testutil.MockOpenRouterClient) {
 				orClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(testutil.MockEmbeddingResponse(), nil).Once()
 				store.On("AddFact", mock.Anything).Return(int64(3), nil).Once()
 				store.On("UpdateFact", mock.Anything).Return(nil).Once()
-				store.On("DeleteFact", int64(123), int64(2)).Return(nil).Once()
+				store.On("DeleteFact", storage.ScopeID("123"), int64(2)).Return(nil).Once()
 			},
 			wantStats: FactStats{Created: 1, Updated: 1, Deleted: 1},
 		},
@@ -570,7 +570,7 @@ func TestApplyUpdateWithStats(t *testing.T) {
 				tt.mockSetup(mockStore, mockOR)
 			}
 
-			stats, err := svc.applyUpdateWithStats(context.Background(), 123, tt.update, tt.existingFacts, time.Now(), 0, "test input")
+			stats, err := svc.applyUpdateWithStats(context.Background(), "123", tt.update, tt.existingFacts, time.Now(), 0, "test input")
 
 			if tt.wantErr {
 				assert.Error(t, err)

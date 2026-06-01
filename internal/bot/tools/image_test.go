@@ -63,10 +63,10 @@ func TestPerformImageGeneration_HappyPath(t *testing.T) {
 		TextContent: "done",
 	}
 
-	mockStore.On("GetByHash", int64(100), mock.Anything).Return(nil, nil)
+	mockStore.On("GetByHash", storage.ScopeID("100"), mock.Anything).Return(nil, nil)
 	// AddArtifact called once per output image; return two distinct IDs in order.
 	mockStore.On("AddArtifact", mock.MatchedBy(func(a storage.Artifact) bool {
-		return a.UserID == 100 &&
+		return a.UserID == "100" &&
 			a.FileType == "image" &&
 			a.MimeType == "image/png" &&
 			a.State == "pending" &&
@@ -76,7 +76,7 @@ func TestPerformImageGeneration_HappyPath(t *testing.T) {
 	mockStore.On("AddArtifact", mock.Anything).Return(int64(2), nil).Once()
 
 	result, err := exec.performImageGeneration(context.Background(),
-		CallContext{UserID: 100},
+		CallContext{UserID: "100"},
 		map[string]interface{}{
 			"prompt":       "a cat",
 			"aspect_ratio": "16:9",
@@ -92,7 +92,7 @@ func TestPerformImageGeneration_HappyPath(t *testing.T) {
 	assert.Contains(t, result.Content, "Model note: done")
 
 	// Agent was called with the right parameters
-	assert.Equal(t, int64(100), gen.lastRequest.UserID)
+	assert.Equal(t, storage.ScopeID("100"), gen.lastRequest.UserID)
 	assert.Equal(t, "a cat", gen.lastRequest.Prompt)
 	assert.Equal(t, "16:9", gen.lastRequest.AspectRatio)
 	assert.Equal(t, "2K", gen.lastRequest.ImageSize)
@@ -108,7 +108,7 @@ func TestPerformImageGeneration_EmptyPromptRejected(t *testing.T) {
 	exec, _, _, _ := newImageTestExecutor(t)
 
 	_, err := exec.performImageGeneration(context.Background(),
-		CallContext{UserID: 1},
+		CallContext{UserID: "1"},
 		map[string]interface{}{"prompt": "   "},
 	)
 	assert.Error(t, err)
@@ -121,7 +121,7 @@ func TestPerformImageGeneration_MissingDependenciesReturnsStopRetry(t *testing.T
 	exec := NewToolExecutor(nil, nil, nil, cfg, testutil.TestLogger())
 
 	result, err := exec.performImageGeneration(context.Background(),
-		CallContext{UserID: 1},
+		CallContext{UserID: "1"},
 		map[string]interface{}{"prompt": "x"},
 	)
 	// Must NOT return a raw error (which the LLM would retry on).
@@ -147,7 +147,7 @@ func TestPerformImageGeneration_CurrentMessageImagesUsedWhenNoArtifactIDs(t *tes
 	}
 
 	_, err := exec.performImageGeneration(context.Background(),
-		CallContext{UserID: 1, CurrentMessageImages: []openrouter.FilePart{attached}},
+		CallContext{UserID: "1", CurrentMessageImages: []openrouter.FilePart{attached}},
 		map[string]interface{}{"prompt": "add sepia"},
 	)
 	require.NoError(t, err)
@@ -168,20 +168,20 @@ func TestPerformImageGeneration_ArtifactIDsResolvedAndUserIsolated(t *testing.T)
 	require.NoError(t, os.MkdirAll(filepath.Dir(absRef), 0o755))
 	require.NoError(t, os.WriteFile(absRef, []byte("ref-bytes"), 0o644))
 
-	mockStore.On("GetArtifact", int64(1), int64(77)).Return(&storage.Artifact{
-		ID: 77, UserID: 1, FileType: "image", FilePath: refPath,
+	mockStore.On("GetArtifact", storage.ScopeID("1"), int64(77)).Return(&storage.Artifact{
+		ID: 77, UserID: "1", FileType: "image", FilePath: refPath,
 		MimeType: "image/png", OriginalName: "ref.png",
 	}, nil)
 	// GetArtifact for a foreign user's ID returns nil (user isolation is
 	// enforced by the repository itself via WHERE user_id=?; the mock just
 	// mirrors that behavior).
-	mockStore.On("GetArtifact", int64(1), int64(999)).Return(nil, nil)
+	mockStore.On("GetArtifact", storage.ScopeID("1"), int64(999)).Return(nil, nil)
 
 	mockStore.On("GetByHash", mock.Anything, mock.Anything).Return(nil, nil)
 	mockStore.On("AddArtifact", mock.Anything).Return(int64(100), nil)
 
 	_, err := exec.performImageGeneration(context.Background(),
-		CallContext{UserID: 1},
+		CallContext{UserID: "1"},
 		map[string]interface{}{
 			"prompt":             "edit",
 			"input_artifact_ids": []interface{}{float64(77), float64(999)}, // JSON number decoding
@@ -205,7 +205,7 @@ func TestPerformImageGeneration_UntypedErrorReturnsStopRetryResult(t *testing.T)
 	gen.err = errors.New("openrouter API error: 400 Bad Request")
 
 	result, err := exec.performImageGeneration(context.Background(),
-		CallContext{UserID: 1},
+		CallContext{UserID: "1"},
 		map[string]interface{}{"prompt": "problematic"},
 	)
 	require.NoError(t, err, "tool must return result, not error, so LLM doesn't retry")
@@ -276,7 +276,7 @@ func TestPerformImageGeneration_FailureKindWording(t *testing.T) {
 			gen.err = tt.failure
 
 			result, err := exec.performImageGeneration(context.Background(),
-				CallContext{UserID: 1},
+				CallContext{UserID: "1"},
 				map[string]interface{}{"prompt": "x"},
 			)
 			require.NoError(t, err, "tool must not return error — that triggers LLM retry storm")
@@ -311,8 +311,8 @@ func TestPerformImageGeneration_MergesCurrentMessageAndArtifactIDs(t *testing.T)
 	require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(tmp, refPath)), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(tmp, refPath), []byte("old-bytes"), 0o644))
 
-	mockStore.On("GetArtifact", int64(1), int64(42)).Return(&storage.Artifact{
-		ID: 42, UserID: 1, FileType: "image", FilePath: refPath,
+	mockStore.On("GetArtifact", storage.ScopeID("1"), int64(42)).Return(&storage.Artifact{
+		ID: 42, UserID: "1", FileType: "image", FilePath: refPath,
 		MimeType: "image/png", OriginalName: "old.png",
 	}, nil)
 	mockStore.On("GetByHash", mock.Anything, mock.Anything).Return(nil, nil)
@@ -324,7 +324,7 @@ func TestPerformImageGeneration_MergesCurrentMessageAndArtifactIDs(t *testing.T)
 	}
 
 	_, err := exec.performImageGeneration(context.Background(),
-		CallContext{UserID: 1, CurrentMessageImages: []openrouter.FilePart{currentAttached}},
+		CallContext{UserID: "1", CurrentMessageImages: []openrouter.FilePart{currentAttached}},
 		map[string]interface{}{
 			"prompt":             "mix these",
 			"input_artifact_ids": []interface{}{float64(42)},
@@ -351,7 +351,7 @@ func TestPerformImageGeneration_MaxOutputImagesCap(t *testing.T) {
 	mockStore.On("AddArtifact", mock.Anything).Return(int64(1), nil)
 
 	res, err := exec.performImageGeneration(context.Background(),
-		CallContext{UserID: 1},
+		CallContext{UserID: "1"},
 		map[string]interface{}{"prompt": "x"},
 	)
 	require.NoError(t, err)

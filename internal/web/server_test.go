@@ -45,12 +45,12 @@ func (m *MockBotInterface) GetActiveSessions() ([]rag.ActiveSessionInfo, error) 
 	return args.Get(0).([]rag.ActiveSessionInfo), args.Error(1)
 }
 
-func (m *MockBotInterface) ForceCloseSession(ctx context.Context, userID int64) (int, error) {
+func (m *MockBotInterface) ForceCloseSession(ctx context.Context, userID storage.ScopeID) (int, error) {
 	args := m.Called(ctx, userID)
 	return args.Int(0), args.Error(1)
 }
 
-func (m *MockBotInterface) ForceCloseSessionWithProgress(ctx context.Context, userID int64, onProgress rag.ProgressCallback) (*rag.ProcessingStats, error) {
+func (m *MockBotInterface) ForceCloseSessionWithProgress(ctx context.Context, userID storage.ScopeID, onProgress rag.ProgressCallback) (*rag.ProcessingStats, error) {
 	args := m.Called(ctx, userID, onProgress)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -58,7 +58,7 @@ func (m *MockBotInterface) ForceCloseSessionWithProgress(ctx context.Context, us
 	return args.Get(0).(*rag.ProcessingStats), args.Error(1)
 }
 
-func (m *MockBotInterface) SendTestMessage(ctx context.Context, userID int64, text string, saveToHistory bool) (*rag.TestMessageResult, error) {
+func (m *MockBotInterface) SendTestMessage(ctx context.Context, userID storage.ScopeID, text string, saveToHistory bool) (*rag.TestMessageResult, error) {
 	args := m.Called(ctx, userID, text, saveToHistory)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -72,7 +72,7 @@ type MockMaintenanceService struct {
 	mock.Mock
 }
 
-func (m *MockMaintenanceService) GetDatabaseHealth(ctx context.Context, userID int64, largeThreshold int) (*rag.DatabaseHealth, error) {
+func (m *MockMaintenanceService) GetDatabaseHealth(ctx context.Context, userID storage.ScopeID, largeThreshold int) (*rag.DatabaseHealth, error) {
 	args := m.Called(ctx, userID, largeThreshold)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -80,7 +80,7 @@ func (m *MockMaintenanceService) GetDatabaseHealth(ctx context.Context, userID i
 	return args.Get(0).(*rag.DatabaseHealth), args.Error(1)
 }
 
-func (m *MockMaintenanceService) RepairDatabase(ctx context.Context, userID int64, dryRun bool) (*rag.RepairStats, error) {
+func (m *MockMaintenanceService) RepairDatabase(ctx context.Context, userID storage.ScopeID, dryRun bool) (*rag.RepairStats, error) {
 	args := m.Called(ctx, userID, dryRun)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -88,7 +88,7 @@ func (m *MockMaintenanceService) RepairDatabase(ctx context.Context, userID int6
 	return args.Get(0).(*rag.RepairStats), args.Error(1)
 }
 
-func (m *MockMaintenanceService) GetContaminationInfo(ctx context.Context, userID int64) (*rag.ContaminationInfo, error) {
+func (m *MockMaintenanceService) GetContaminationInfo(ctx context.Context, userID storage.ScopeID) (*rag.ContaminationInfo, error) {
 	args := m.Called(ctx, userID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -96,7 +96,7 @@ func (m *MockMaintenanceService) GetContaminationInfo(ctx context.Context, userI
 	return args.Get(0).(*rag.ContaminationInfo), args.Error(1)
 }
 
-func (m *MockMaintenanceService) FixContamination(ctx context.Context, userID int64, dryRun bool) (*rag.ContaminationFixStats, error) {
+func (m *MockMaintenanceService) FixContamination(ctx context.Context, userID storage.ScopeID, dryRun bool) (*rag.ContaminationFixStats, error) {
 	args := m.Called(ctx, userID, dryRun)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -104,7 +104,7 @@ func (m *MockMaintenanceService) FixContamination(ctx context.Context, userID in
 	return args.Get(0).(*rag.ContaminationFixStats), args.Error(1)
 }
 
-func (m *MockMaintenanceService) SplitLargeTopics(ctx context.Context, userID int64, thresholdChars int) (*rag.SplitStats, error) {
+func (m *MockMaintenanceService) SplitLargeTopics(ctx context.Context, userID storage.ScopeID, thresholdChars int) (*rag.SplitStats, error) {
 	args := m.Called(ctx, userID, thresholdChars)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -123,16 +123,16 @@ func TestStatsHandler(t *testing.T) {
 	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, nil, mockBot, nil)
 	assert.NoError(t, err)
 
-	stats := map[int64]storage.Stat{
-		123: {UserID: 123, TokensUsed: 1000, CostUSD: 0.001},
+	stats := map[storage.ScopeID]storage.Stat{
+		"123": {UserID: "123", TokensUsed: 1000, CostUSD: 0.001},
 	}
 	dashboardStats := &storage.DashboardStats{
 		TotalTopics: 10,
 		TotalFacts:  5,
 	}
 	mockStorage.On("GetStats").Return(stats, nil)
-	mockStorage.On("GetDashboardStats", int64(123)).Return(dashboardStats, nil) // Fixed: expect 123, not 0
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123, Username: "testuser"}}, nil)
+	mockStorage.On("GetDashboardStats", storage.ScopeID("123")).Return(dashboardStats, nil) // Fixed: expect 123, not 0
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123", Username: "testuser"}}, nil)
 
 	req, err := http.NewRequest("GET", "/ui/stats", nil)
 	assert.NoError(t, err)
@@ -241,7 +241,7 @@ func TestServerRouting_CorrectPath(t *testing.T) {
 
 	mockBot.On("API").Return(mockAPI)
 	mockAPI.On("GetToken").Return(token)
-	mockStorage.On("GetStats").Return(map[int64]storage.Stat{}, nil) // For stats handler
+	mockStorage.On("GetStats").Return(map[storage.ScopeID]storage.Stat{}, nil) // For stats handler
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, nil, mockBot, nil)
@@ -274,7 +274,7 @@ func TestServerRouting_IncorrectPath(t *testing.T) {
 
 	mockBot.On("API").Return(mockAPI)
 	mockAPI.On("GetToken").Return(token)
-	mockStorage.On("GetStats").Return(map[int64]storage.Stat{}, nil) // For stats handler
+	mockStorage.On("GetStats").Return(map[storage.ScopeID]storage.Stat{}, nil) // For stats handler
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	server, err := NewServer(context.Background(), logger, cfg, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, mockStorage, nil, mockBot, nil)
@@ -317,8 +317,8 @@ func TestUpdateMetrics(t *testing.T) {
 
 	// Mock users
 	users := []storage.User{
-		{ID: 123, Username: "user1"},
-		{ID: 456, Username: "user2"},
+		{ID: "123", Username: "user1"},
+		{ID: "456", Username: "user2"},
 	}
 	mockStorage.On("GetAllUsers").Return(users, nil)
 
@@ -331,17 +331,17 @@ func TestUpdateMetrics(t *testing.T) {
 		CountByType: map[string]int{"identity": 3},
 		AvgAgeDays:  1.0,
 	}
-	mockStorage.On("GetFactStatsByUser", int64(123)).Return(stats1, nil)
-	mockStorage.On("GetFactStatsByUser", int64(456)).Return(stats2, nil)
+	mockStorage.On("GetFactStatsByUser", storage.ScopeID("123")).Return(stats1, nil)
+	mockStorage.On("GetFactStatsByUser", storage.ScopeID("456")).Return(stats2, nil)
 
 	// Mock per-user topics count
-	mockStorage.On("GetTopicsExtended", storage.TopicFilter{UserID: 123}, 1, 0, "", "").Return(storage.TopicResult{TotalCount: 42}, nil)
-	mockStorage.On("GetTopicsExtended", storage.TopicFilter{UserID: 456}, 1, 0, "", "").Return(storage.TopicResult{TotalCount: 10}, nil)
+	mockStorage.On("GetTopicsExtended", storage.TopicFilter{UserID: "123"}, 1, 0, "", "").Return(storage.TopicResult{TotalCount: 42}, nil)
+	mockStorage.On("GetTopicsExtended", storage.TopicFilter{UserID: "456"}, 1, 0, "", "").Return(storage.TopicResult{TotalCount: 10}, nil)
 
 	// Mock active sessions
 	mockBot.On("GetActiveSessions").Return([]rag.ActiveSessionInfo{
-		{UserID: 123, MessageCount: 5},
-		{UserID: 456, MessageCount: 3},
+		{UserID: "123", MessageCount: 5},
+		{UserID: "456", MessageCount: 3},
 	}, nil)
 
 	// Mock maintenance operations
@@ -434,7 +434,7 @@ func TestSessionsHandler_POST_InvalidForm(t *testing.T) {
 	assert.NoError(t, err)
 
 	// POST with invalid user_id
-	req, err := http.NewRequest("POST", "/ui/debug/sessions", bytes.NewBufferString("user_id=invalid"))
+	req, err := http.NewRequest("POST", "/ui/debug/sessions", bytes.NewBufferString("user_id="))
 	assert.NoError(t, err)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
@@ -453,7 +453,7 @@ func TestSessionsHandler_POST_Success(t *testing.T) {
 	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
 	assert.NoError(t, err)
 
-	mockBot.On("ForceCloseSession", mock.Anything, int64(123)).Return(5, nil)
+	mockBot.On("ForceCloseSession", mock.Anything, storage.ScopeID("123")).Return(5, nil)
 
 	req, err := http.NewRequest("POST", "/ui/debug/sessions", bytes.NewBufferString("user_id=123"))
 	assert.NoError(t, err)
@@ -515,7 +515,7 @@ func TestSessionsProcessSSEHandler_InvalidUserID(t *testing.T) {
 	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
 	assert.NoError(t, err)
 
-	req, err := http.NewRequest("GET", "/ui/debug/sessions/process?user_id=invalid", nil)
+	req, err := http.NewRequest("GET", "/ui/debug/sessions/process?user_id=", nil)
 	assert.NoError(t, err)
 
 	rr := httptest.NewRecorder()
@@ -598,7 +598,7 @@ func TestSessionsHandler_GET_Success(t *testing.T) {
 	now := time.Now()
 	sessions := []rag.ActiveSessionInfo{
 		{
-			UserID:           123,
+			UserID:           "123",
 			MessageCount:     5,
 			FirstMessageTime: now.Add(-time.Hour),
 			LastMessageTime:  now,
@@ -606,7 +606,7 @@ func TestSessionsHandler_GET_Success(t *testing.T) {
 		},
 	}
 	mockBot.On("GetActiveSessions").Return(sessions, nil)
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123, FirstName: "Test", LastName: "User"}}, nil)
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123", FirstName: "Test", LastName: "User"}}, nil)
 
 	req, err := http.NewRequest("GET", "/ui/debug/sessions", nil)
 	assert.NoError(t, err)
@@ -629,7 +629,7 @@ func TestSessionsHandler_POST_ForceCloseError(t *testing.T) {
 	server, err := NewServer(context.Background(), logger, cfg, nil, nil, nil, nil, nil, nil, nil, nil, mockBot, nil)
 	assert.NoError(t, err)
 
-	mockBot.On("ForceCloseSession", mock.Anything, int64(123)).Return(0, assert.AnError)
+	mockBot.On("ForceCloseSession", mock.Anything, storage.ScopeID("123")).Return(0, assert.AnError)
 
 	req, err := http.NewRequest("POST", "/ui/debug/sessions", bytes.NewBufferString("user_id=123"))
 	assert.NoError(t, err)
@@ -656,7 +656,7 @@ func TestSessionsHandler_GET_UsernameOnly(t *testing.T) {
 	now := time.Now()
 	sessions := []rag.ActiveSessionInfo{
 		{
-			UserID:           123,
+			UserID:           "123",
 			MessageCount:     5,
 			FirstMessageTime: now.Add(-time.Hour),
 			LastMessageTime:  now,
@@ -665,7 +665,7 @@ func TestSessionsHandler_GET_UsernameOnly(t *testing.T) {
 	}
 	mockBot.On("GetActiveSessions").Return(sessions, nil)
 	// User has only Username, no FirstName
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123, Username: "testuser"}}, nil)
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123", Username: "testuser"}}, nil)
 
 	req, err := http.NewRequest("GET", "/ui/debug/sessions", nil)
 	assert.NoError(t, err)
@@ -712,9 +712,9 @@ func TestDebugChatHandler_GET(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Mock common data
-	users := []storage.User{{ID: 123, FirstName: "Test", LastName: "User"}}
+	users := []storage.User{{ID: "123", FirstName: "Test", LastName: "User"}}
 	mockStorage.On("GetAllUsers").Return(users, nil)
-	mockStorage.On("GetUnprocessedMessages", int64(123)).Return([]storage.Message{
+	mockStorage.On("GetUnprocessedMessages", storage.ScopeID("123")).Return([]storage.Message{
 		{Role: "user", Content: "Hello", CreatedAt: time.Now()},
 		{Role: "assistant", Content: "Hi!", CreatedAt: time.Now()},
 	}, nil)
@@ -742,7 +742,7 @@ func TestDebugChatSendHandler_POST_Success(t *testing.T) {
 
 	// Mock bot.SendTestMessage
 	cost := 0.0045
-	mockBot.On("SendTestMessage", mock.Anything, int64(123), "Hello bot", true).Return(&rag.TestMessageResult{
+	mockBot.On("SendTestMessage", mock.Anything, storage.ScopeID("123"), "Hello bot", true).Return(&rag.TestMessageResult{
 		Response:         "Hello! How can I help?",
 		TimingTotal:      2300 * time.Millisecond,
 		TimingEmbedding:  45 * time.Millisecond,
@@ -756,7 +756,7 @@ func TestDebugChatSendHandler_POST_Success(t *testing.T) {
 		ContextPreview:   "System: You are...",
 	}, nil)
 
-	body := `{"user_id": 123, "message": "Hello bot", "save_to_history": true}`
+	body := `{"user_id": "123", "message": "Hello bot", "save_to_history": true}`
 	req, err := http.NewRequest("POST", "/ui/debug/chat/send", bytes.NewBufferString(body))
 	assert.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
@@ -808,9 +808,9 @@ func TestDebugChatSendHandler_POST_BotError(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Mock bot.SendTestMessage returning error
-	mockBot.On("SendTestMessage", mock.Anything, int64(123), "Hello", true).Return(nil, assert.AnError)
+	mockBot.On("SendTestMessage", mock.Anything, storage.ScopeID("123"), "Hello", true).Return(nil, assert.AnError)
 
-	body := `{"user_id": 123, "message": "Hello", "save_to_history": true}`
+	body := `{"user_id": "123", "message": "Hello", "save_to_history": true}`
 	req, err := http.NewRequest("POST", "/ui/debug/chat/send", bytes.NewBufferString(body))
 	assert.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")

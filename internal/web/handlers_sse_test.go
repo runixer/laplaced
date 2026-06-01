@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/runixer/laplaced/internal/storage"
+
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/testutil"
@@ -68,7 +70,7 @@ func TestSessionsProcessSSEHandler_Success(t *testing.T) {
 			}},
 		}
 
-		mockBot.On("ForceCloseSessionWithProgress", mock.Anything, int64(123), mock.Anything).
+		mockBot.On("ForceCloseSessionWithProgress", mock.Anything, storage.ScopeID("123"), mock.Anything).
 			Run(func(args mock.Arguments) {
 				onProgress := args.Get(2).(rag.ProgressCallback)
 				for _, event := range progressEvents {
@@ -122,7 +124,7 @@ func TestSessionsProcessSSEHandler_Success(t *testing.T) {
 	t.Run("processing with timeout context", func(t *testing.T) {
 		server, _, mockBot := setupTestServerForSSE(t)
 
-		mockBot.On("ForceCloseSessionWithProgress", mock.Anything, int64(123), mock.Anything).
+		mockBot.On("ForceCloseSessionWithProgress", mock.Anything, storage.ScopeID("123"), mock.Anything).
 			Run(func(args mock.Arguments) {
 				onProgress := args.Get(2).(rag.ProgressCallback)
 				onProgress(rag.ProgressEvent{Stage: "done", Complete: true})
@@ -148,7 +150,7 @@ func TestSessionsProcessSSEHandler_Error(t *testing.T) {
 	t.Run("returns error event on processing failure", func(t *testing.T) {
 		server, _, mockBot := setupTestServerForSSE(t)
 
-		mockBot.On("ForceCloseSessionWithProgress", mock.Anything, int64(123), mock.Anything).
+		mockBot.On("ForceCloseSessionWithProgress", mock.Anything, storage.ScopeID("123"), mock.Anything).
 			Return((*rag.ProcessingStats)(nil), assert.AnError)
 
 		req := testutil.NewTestRequest(t, "GET", "/ui/debug/sessions/process?user_id=123", nil)
@@ -185,7 +187,7 @@ func TestSessionsProcessSSEHandler_Error(t *testing.T) {
 			FactsCreated:      0,
 		}
 
-		mockBot.On("ForceCloseSessionWithProgress", mock.Anything, int64(123), mock.Anything).
+		mockBot.On("ForceCloseSessionWithProgress", mock.Anything, storage.ScopeID("123"), mock.Anything).
 			Return(partialStats, assert.AnError)
 
 		req := testutil.NewTestRequest(t, "GET", "/ui/debug/sessions/process?user_id=123", nil)
@@ -216,7 +218,7 @@ func TestSessionsProcessSSEHandler_ContextCancellation(t *testing.T) {
 	server, _, mockBot := setupTestServerForSSE(t)
 
 	// Simulate long-running operation that gets cancelled
-	mockBot.On("ForceCloseSessionWithProgress", mock.Anything, int64(123), mock.Anything).
+	mockBot.On("ForceCloseSessionWithProgress", mock.Anything, storage.ScopeID("123"), mock.Anything).
 		Run(func(args mock.Arguments) {
 			onProgress := args.Get(2).(rag.ProgressCallback)
 			onProgress(rag.ProgressEvent{Stage: "processing", Complete: false})
@@ -242,7 +244,7 @@ func TestSessionsProcessSSEHandler_ContextCancellation(t *testing.T) {
 func TestSessionsProcessSSEHandler_EmptyProgress(t *testing.T) {
 	server, _, mockBot := setupTestServerForSSE(t)
 
-	mockBot.On("ForceCloseSessionWithProgress", mock.Anything, int64(123), mock.Anything).
+	mockBot.On("ForceCloseSessionWithProgress", mock.Anything, storage.ScopeID("123"), mock.Anything).
 		Return(&rag.ProcessingStats{}, nil)
 
 	req := testutil.NewTestRequest(t, "GET", "/ui/debug/sessions/process?user_id=123", nil)
@@ -272,7 +274,7 @@ func TestSessionsProcessSSEHandler_LargePayload(t *testing.T) {
 		EmbeddingTokens:   2000,
 	}
 
-	mockBot.On("ForceCloseSessionWithProgress", mock.Anything, int64(123), mock.Anything).
+	mockBot.On("ForceCloseSessionWithProgress", mock.Anything, storage.ScopeID("123"), mock.Anything).
 		Run(func(args mock.Arguments) {
 			onProgress := args.Get(2).(rag.ProgressCallback)
 			onProgress(rag.ProgressEvent{Stage: "done", Complete: true, Stats: largeStats})
@@ -304,7 +306,7 @@ func TestSessionsProcessSSEHandler_MultipleSequentialEvents(t *testing.T) {
 	server, _, mockBot := setupTestServerForSSE(t)
 
 	eventCount := 20
-	mockBot.On("ForceCloseSessionWithProgress", mock.Anything, int64(123), mock.Anything).
+	mockBot.On("ForceCloseSessionWithProgress", mock.Anything, storage.ScopeID("123"), mock.Anything).
 		Run(func(args mock.Arguments) {
 			onProgress := args.Get(2).(rag.ProgressCallback)
 			for i := 0; i < eventCount; i++ {
@@ -338,7 +340,7 @@ func TestSessionsProcessSSEHandler_MultipleSequentialEvents(t *testing.T) {
 func TestSessionsProcessSSEHandler_FlushTracking(t *testing.T) {
 	server, _, mockBot := setupTestServerForSSE(t)
 
-	mockBot.On("ForceCloseSessionWithProgress", mock.Anything, int64(123), mock.Anything).
+	mockBot.On("ForceCloseSessionWithProgress", mock.Anything, storage.ScopeID("123"), mock.Anything).
 		Run(func(args mock.Arguments) {
 			onProgress := args.Get(2).(rag.ProgressCallback)
 			// Send 3 events
@@ -371,7 +373,7 @@ func TestSessionsProcessSSEHandler_FlushTracking(t *testing.T) {
 func TestSessionsProcessSSEHandler_ProgressEventStructure(t *testing.T) {
 	server, _, mockBot := setupTestServerForSSE(t)
 
-	mockBot.On("ForceCloseSessionWithProgress", mock.Anything, int64(123), mock.Anything).
+	mockBot.On("ForceCloseSessionWithProgress", mock.Anything, storage.ScopeID("123"), mock.Anything).
 		Run(func(args mock.Arguments) {
 			onProgress := args.Get(2).(rag.ProgressCallback)
 			onProgress(rag.ProgressEvent{
@@ -412,7 +414,7 @@ func TestSessionsProcessSSEHandler_MarshalError(t *testing.T) {
 	server, _, mockBot := setupTestServerForSSE(t)
 
 	// Create a channel that can't be marshaled to JSON (channels are not JSON-serializable)
-	mockBot.On("ForceCloseSessionWithProgress", mock.Anything, int64(123), mock.Anything).
+	mockBot.On("ForceCloseSessionWithProgress", mock.Anything, storage.ScopeID("123"), mock.Anything).
 		Run(func(args mock.Arguments) {
 			onProgress := args.Get(2).(rag.ProgressCallback)
 			// Send valid event first

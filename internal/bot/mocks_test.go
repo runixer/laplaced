@@ -14,10 +14,10 @@ import (
 // Not moved to testutil due to import cycle: testutil → rag → testutil (in tests).
 type mockMemoryService struct{}
 
-func (m *mockMemoryService) ProcessSession(ctx context.Context, userID int64, messages []storage.Message, topicDate time.Time, topicID int64) error {
+func (m *mockMemoryService) ProcessSession(ctx context.Context, userID storage.ScopeID, messages []storage.Message, topicDate time.Time, topicID int64) error {
 	return nil
 }
 
-func (m *mockMemoryService) ProcessSessionWithStats(ctx context.Context, userID int64, messages []storage.Message, topicDate time.Time, topicID int64) (memory.FactStats, error) {
+func (m *mockMemoryService) ProcessSessionWithStats(ctx context.Context, userID storage.ScopeID, messages []storage.Message, topicDate time.Time, topicID int64) (memory.FactStats, error) {
 	return memory.FactStats{}, nil
 }

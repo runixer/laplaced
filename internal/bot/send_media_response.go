@@ -29,7 +29,7 @@ import (
 // Returns total send duration and count of transport calls made.
 func (b *Bot) sendResponseWithGeneratedImages(
 	ctx context.Context,
-	userID int64,
+	userID storage.ScopeID,
 	convID, threadRoot, replyTo string,
 	responseText string,
 	artifactIDs []int64,
@@ -118,7 +118,7 @@ func (b *Bot) sendResponseWithGeneratedImages(
 func (b *Bot) sendTextOnlyFallback(
 	ctx context.Context,
 	convID, threadRoot, replyTo string,
-	userID int64,
+	userID storage.ScopeID,
 	responseText string,
 	logger *slog.Logger,
 ) (time.Duration, int) {
@@ -139,7 +139,7 @@ type loadedArtifact struct {
 // loadArtifactBytes resolves each artifact by ID (user-isolated) and reads
 // its file bytes. Artifacts that fail to load are skipped with a warning —
 // the caller decides what to do with an empty result.
-func (b *Bot) loadArtifactBytes(userID int64, ids []int64, logger *slog.Logger) []loadedArtifact {
+func (b *Bot) loadArtifactBytes(userID storage.ScopeID, ids []int64, logger *slog.Logger) []loadedArtifact {
 	out := make([]loadedArtifact, 0, len(ids))
 	for _, id := range ids {
 		art, err := b.artifactRepo.GetArtifact(userID, id)

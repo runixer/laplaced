@@ -41,7 +41,7 @@ func TestPerformAddFact_Success(t *testing.T) {
 		Content: "Test fact content",
 	}
 
-	result, err := exec.performAddFact(ctx, 123, params)
+	result, err := exec.performAddFact(ctx, "123", params)
 
 	assert.NoError(t, err)
 	assert.Contains(t, result, "Fact added successfully")
@@ -81,7 +81,7 @@ func TestPerformAddFact_WithCustomFields(t *testing.T) {
 		Reason:     "User explicitly stated this",
 	}
 
-	result, err := exec.performAddFact(ctx, 123, params)
+	result, err := exec.performAddFact(ctx, "123", params)
 
 	assert.NoError(t, err)
 	assert.Contains(t, result, "Fact added successfully")
@@ -103,7 +103,7 @@ func TestPerformAddFact_EmptyContent(t *testing.T) {
 		Content: "",
 	}
 
-	result, err := exec.performAddFact(ctx, 123, params)
+	result, err := exec.performAddFact(ctx, "123", params)
 
 	assert.Error(t, err)
 	assert.Empty(t, result)
@@ -126,7 +126,7 @@ func TestPerformAddFact_EmbeddingAPIError(t *testing.T) {
 		Content: "Test fact",
 	}
 
-	result, err := exec.performAddFact(ctx, 123, params)
+	result, err := exec.performAddFact(ctx, "123", params)
 
 	assert.Error(t, err)
 	assert.Empty(t, result)
@@ -149,7 +149,7 @@ func TestPerformAddFact_EmbeddingError(t *testing.T) {
 		Content: "Test fact",
 	}
 
-	result, err := exec.performAddFact(ctx, 123, params)
+	result, err := exec.performAddFact(ctx, "123", params)
 
 	assert.Error(t, err)
 	assert.Empty(t, result)
@@ -176,7 +176,7 @@ func TestPerformAddFact_StorageError(t *testing.T) {
 		Content: "Test fact",
 	}
 
-	result, err := exec.performAddFact(ctx, 123, params)
+	result, err := exec.performAddFact(ctx, "123", params)
 
 	assert.Error(t, err)
 	assert.Empty(t, result)
@@ -189,15 +189,15 @@ func TestPerformDeleteFact_Success(t *testing.T) {
 
 	oldFact := storage.Fact{
 		ID:         42,
-		UserID:     123,
+		UserID:     "123",
 		Content:    "Old fact to delete",
 		Category:   "test",
 		Relation:   "related_to",
 		Importance: 70,
 	}
 
-	mockStore.On("GetFactsByIDs", int64(123), []int64{42}).Return([]storage.Fact{oldFact}, nil)
-	mockStore.On("DeleteFact", int64(123), int64(42)).Return(nil)
+	mockStore.On("GetFactsByIDs", storage.ScopeID("123"), []int64{42}).Return([]storage.Fact{oldFact}, nil)
+	mockStore.On("DeleteFact", storage.ScopeID("123"), int64(42)).Return(nil)
 	mockStore.On("AddFactHistory", mock.MatchedBy(func(h storage.FactHistory) bool {
 		return h.FactID == 42 && h.Action == "delete"
 	})).Return(nil)
@@ -211,7 +211,7 @@ func TestPerformDeleteFact_Success(t *testing.T) {
 		Reason: "No longer relevant",
 	}
 
-	result, err := exec.performDeleteFact(ctx, 123, params)
+	result, err := exec.performDeleteFact(ctx, "123", params)
 
 	assert.NoError(t, err)
 	assert.Contains(t, result, "Fact deleted successfully")
@@ -231,7 +231,7 @@ func TestPerformDeleteFact_MissingFactID(t *testing.T) {
 		// FactID is 0
 	}
 
-	result, err := exec.performDeleteFact(ctx, 123, params)
+	result, err := exec.performDeleteFact(ctx, "123", params)
 
 	assert.Error(t, err)
 	assert.Empty(t, result)
@@ -242,8 +242,8 @@ func TestPerformDeleteFact_MissingFactID(t *testing.T) {
 func TestPerformDeleteFact_StorageError(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 
-	mockStore.On("GetFactsByIDs", int64(123), []int64{42}).Return([]storage.Fact{{ID: 42}}, nil)
-	mockStore.On("DeleteFact", int64(123), int64(42)).Return(errors.New("database error"))
+	mockStore.On("GetFactsByIDs", storage.ScopeID("123"), []int64{42}).Return([]storage.Fact{{ID: 42}}, nil)
+	mockStore.On("DeleteFact", storage.ScopeID("123"), int64(42)).Return(errors.New("database error"))
 
 	exec := NewToolExecutor(nil, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 
@@ -253,7 +253,7 @@ func TestPerformDeleteFact_StorageError(t *testing.T) {
 		FactID: 42,
 	}
 
-	result, err := exec.performDeleteFact(ctx, 123, params)
+	result, err := exec.performDeleteFact(ctx, "123", params)
 
 	assert.Error(t, err)
 	assert.Empty(t, result)
@@ -278,7 +278,7 @@ func TestPerformUpdateFact_Success(t *testing.T) {
 		Importance: 50,
 	}
 
-	mockStore.On("GetFactsByIDs", int64(123), []int64{42}).Return([]storage.Fact{oldFact}, nil)
+	mockStore.On("GetFactsByIDs", storage.ScopeID("123"), []int64{42}).Return([]storage.Fact{oldFact}, nil)
 	mockStore.On("UpdateFact", mock.MatchedBy(func(f storage.Fact) bool {
 		return f.ID == 42 && f.Content == "Updated content"
 	})).Return(nil)
@@ -296,7 +296,7 @@ func TestPerformUpdateFact_Success(t *testing.T) {
 		Reason:  "Correction needed",
 	}
 
-	result, err := exec.performUpdateFact(ctx, 123, params)
+	result, err := exec.performUpdateFact(ctx, "123", params)
 
 	assert.NoError(t, err)
 	assert.Contains(t, result, "Fact updated successfully")
@@ -315,7 +315,7 @@ func TestPerformUpdateFact_WithCustomTypeAndImportance(t *testing.T) {
 		Data: []openrouter.EmbeddingObject{{Embedding: embedding}},
 	}, nil)
 
-	mockStore.On("GetFactsByIDs", int64(123), []int64{42}).Return([]storage.Fact{{ID: 42}}, nil)
+	mockStore.On("GetFactsByIDs", storage.ScopeID("123"), []int64{42}).Return([]storage.Fact{{ID: 42}}, nil)
 	mockStore.On("UpdateFact", mock.MatchedBy(func(f storage.Fact) bool {
 		return f.Type == "identity" && f.Importance == 80
 	})).Return(nil)
@@ -332,7 +332,7 @@ func TestPerformUpdateFact_WithCustomTypeAndImportance(t *testing.T) {
 		Importance: 80,
 	}
 
-	result, err := exec.performUpdateFact(ctx, 123, params)
+	result, err := exec.performUpdateFact(ctx, "123", params)
 
 	assert.NoError(t, err)
 	assert.Contains(t, result, "Fact updated successfully")
@@ -352,7 +352,7 @@ func TestPerformUpdateFact_MissingFactID(t *testing.T) {
 		// FactID is 0
 	}
 
-	result, err := exec.performUpdateFact(ctx, 123, params)
+	result, err := exec.performUpdateFact(ctx, "123", params)
 
 	assert.Error(t, err)
 	assert.Empty(t, result)
@@ -376,7 +376,7 @@ func TestPerformUpdateFact_EmbeddingError(t *testing.T) {
 		Content: "Updated",
 	}
 
-	result, err := exec.performUpdateFact(ctx, 123, params)
+	result, err := exec.performUpdateFact(ctx, "123", params)
 
 	assert.Error(t, err)
 	assert.Empty(t, result)
@@ -403,7 +403,7 @@ func TestPerformManageMemory_SingleOperation(t *testing.T) {
 		"query": `{"action":"add","content":"Test fact"}`,
 	}
 
-	result, err := exec.performManageMemory(ctx, 123, args)
+	result, err := exec.performManageMemory(ctx, "123", args)
 
 	assert.NoError(t, err)
 	assert.Contains(t, result, "Successfully processed 1 operations")
@@ -436,7 +436,7 @@ func TestPerformManageMemory_BatchOperations(t *testing.T) {
 			`]}`,
 	}
 
-	result, err := exec.performManageMemory(ctx, 123, args)
+	result, err := exec.performManageMemory(ctx, "123", args)
 
 	assert.NoError(t, err)
 	assert.Contains(t, result, "Successfully processed 2 operations")
@@ -456,7 +456,7 @@ func TestPerformManageMemory_InvalidJSON(t *testing.T) {
 		"query": `{invalid json`,
 	}
 
-	result, err := exec.performManageMemory(ctx, 123, args)
+	result, err := exec.performManageMemory(ctx, "123", args)
 
 	assert.Error(t, err)
 	assert.Empty(t, result)
@@ -473,7 +473,7 @@ func TestPerformManageMemory_MissingQuery(t *testing.T) {
 	ctx := context.Background()
 	args := map[string]interface{}{} // no query
 
-	result, err := exec.performManageMemory(ctx, 123, args)
+	result, err := exec.performManageMemory(ctx, "123", args)
 
 	assert.Error(t, err)
 	assert.Empty(t, result)
@@ -485,8 +485,8 @@ func TestPerformManageMemory_DeleteOperation(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
 
-	mockStore.On("GetFactsByIDs", int64(123), []int64{42}).Return([]storage.Fact{{ID: 42}}, nil)
-	mockStore.On("DeleteFact", int64(123), int64(42)).Return(nil)
+	mockStore.On("GetFactsByIDs", storage.ScopeID("123"), []int64{42}).Return([]storage.Fact{{ID: 42}}, nil)
+	mockStore.On("DeleteFact", storage.ScopeID("123"), int64(42)).Return(nil)
 	mockStore.On("AddFactHistory", mock.Anything).Return(nil)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
@@ -496,7 +496,7 @@ func TestPerformManageMemory_DeleteOperation(t *testing.T) {
 		"query": `{"action":"delete","fact_id":"Fact:42"}`,
 	}
 
-	result, err := exec.performManageMemory(ctx, 123, args)
+	result, err := exec.performManageMemory(ctx, "123", args)
 
 	assert.NoError(t, err)
 	assert.Contains(t, result, "Success")
@@ -514,7 +514,7 @@ func TestPerformManageMemory_UpdateOperation(t *testing.T) {
 		Data: []openrouter.EmbeddingObject{{Embedding: embedding}},
 	}, nil)
 
-	mockStore.On("GetFactsByIDs", int64(123), []int64{42}).Return([]storage.Fact{{ID: 42}}, nil)
+	mockStore.On("GetFactsByIDs", storage.ScopeID("123"), []int64{42}).Return([]storage.Fact{{ID: 42}}, nil)
 	mockStore.On("UpdateFact", mock.Anything).Return(nil)
 	mockStore.On("AddFactHistory", mock.Anything).Return(nil)
 
@@ -525,7 +525,7 @@ func TestPerformManageMemory_UpdateOperation(t *testing.T) {
 		"query": `{"action":"update","fact_id":"Fact:42","content":"Updated content"}`,
 	}
 
-	result, err := exec.performManageMemory(ctx, 123, args)
+	result, err := exec.performManageMemory(ctx, "123", args)
 
 	assert.NoError(t, err)
 	assert.Contains(t, result, "Success")
@@ -546,7 +546,7 @@ func TestPerformManageMemory_UnknownAction(t *testing.T) {
 		"query": `{"action":"unknown","content":"test"}`,
 	}
 
-	result, err := exec.performManageMemory(ctx, 123, args)
+	result, err := exec.performManageMemory(ctx, "123", args)
 
 	assert.Error(t, err)
 	assert.Empty(t, result)
@@ -579,7 +579,7 @@ func TestPerformManageMemory_MixedSuccessFailure(t *testing.T) {
 			`]}`,
 	}
 
-	result, err := exec.performManageMemory(ctx, 123, args)
+	result, err := exec.performManageMemory(ctx, "123", args)
 
 	assert.Error(t, err)
 	assert.Empty(t, result)
@@ -591,8 +591,8 @@ func TestPerformManageMemory_NumericFactID(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
 
-	mockStore.On("GetFactsByIDs", int64(123), []int64{42}).Return([]storage.Fact{{ID: 42}}, nil)
-	mockStore.On("DeleteFact", int64(123), int64(42)).Return(nil)
+	mockStore.On("GetFactsByIDs", storage.ScopeID("123"), []int64{42}).Return([]storage.Fact{{ID: 42}}, nil)
+	mockStore.On("DeleteFact", storage.ScopeID("123"), int64(42)).Return(nil)
 	mockStore.On("AddFactHistory", mock.Anything).Return(nil)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
@@ -602,7 +602,7 @@ func TestPerformManageMemory_NumericFactID(t *testing.T) {
 		"query": `{"action":"delete","fact_id":42}`, // numeric instead of "Fact:42"
 	}
 
-	result, err := exec.performManageMemory(ctx, 123, args)
+	result, err := exec.performManageMemory(ctx, "123", args)
 
 	assert.NoError(t, err)
 	assert.Contains(t, result, "Success")

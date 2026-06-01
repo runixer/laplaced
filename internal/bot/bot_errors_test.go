@@ -87,7 +87,7 @@ func setupBotForErrorTests(t *testing.T) (*Bot, *testutil.MockStorage, *testutil
 func TestProcessMessageGroup_EmptyMessageGroup_ReturnsEarly(t *testing.T) {
 	bot, _, _, _ := setupBotForErrorTests(t)
 
-	group := tgGroup(bot, 123)
+	group := tgGroup(bot, "123")
 
 	// Should not panic or call any repos
 	assert.NotPanics(t, func() {
@@ -99,12 +99,12 @@ func TestProcessMessageGroup_EmptyMessageGroup_ReturnsEarly(t *testing.T) {
 func TestProcessMessageGroup_UnsupportedFileType_SendsErrorMessage(t *testing.T) {
 	bot, mockStore, _, mockAPI := setupBotForErrorTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	chatID := int64(456)
 
 	group := tgGroup(bot, userID, &telegram.Message{
 		MessageID: 1,
-		From:      &telegram.User{ID: userID, FirstName: "Test"},
+		From:      &telegram.User{ID: 123, FirstName: "Test"},
 		Chat:      &telegram.Chat{ID: chatID},
 		Date:      int(time.Now().Unix()),
 		Document: &telegram.Document{
@@ -132,12 +132,12 @@ func TestProcessMessageGroup_UnsupportedFileType_SendsErrorMessage(t *testing.T)
 func TestProcessMessageGroup_FileTooLarge_SendsErrorMessage(t *testing.T) {
 	bot, mockStore, _, mockAPI := setupBotForErrorTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	chatID := int64(456)
 
 	group := tgGroup(bot, userID, &telegram.Message{
 		MessageID: 1,
-		From:      &telegram.User{ID: userID, FirstName: "Test"},
+		From:      &telegram.User{ID: 123, FirstName: "Test"},
 		Chat:      &telegram.Chat{ID: chatID},
 		Date:      int(time.Now().Unix()),
 		Document: &telegram.Document{
@@ -165,12 +165,12 @@ func TestProcessMessageGroup_FileTooLarge_SendsErrorMessage(t *testing.T) {
 func TestProcessMessageGroup_AddMessageToHistoryError_ReturnsEarly(t *testing.T) {
 	bot, mockStore, _, _ := setupBotForErrorTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	chatID := int64(456)
 
 	group := tgGroup(bot, userID, &telegram.Message{
 		MessageID: 1,
-		From:      &telegram.User{ID: userID, FirstName: "Test"},
+		From:      &telegram.User{ID: 123, FirstName: "Test"},
 		Chat:      &telegram.Chat{ID: chatID},
 		Text:      "Hello",
 		Date:      int(time.Now().Unix()),
@@ -198,12 +198,12 @@ func TestProcessMessageGroup_LaplaceAgentNil_SendsGenericError(t *testing.T) {
 	// Set laplaceAgent to nil
 	bot.laplaceAgent = nil
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	chatID := int64(456)
 
 	group := tgGroup(bot, userID, &telegram.Message{
 		MessageID: 1,
-		From:      &telegram.User{ID: userID, FirstName: "Test"},
+		From:      &telegram.User{ID: 123, FirstName: "Test"},
 		Chat:      &telegram.Chat{ID: chatID},
 		Text:      "Hello",
 		Date:      int(time.Now().Unix()),
@@ -227,12 +227,12 @@ func TestProcessMessageGroup_LaplaceAgentNil_SendsGenericError(t *testing.T) {
 func TestProcessMessageGroup_LLMExecutionError_SendsErrorMessage(t *testing.T) {
 	bot, mockStore, mockORClient, _ := setupBotForErrorTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	chatID := int64(456)
 
 	group := tgGroup(bot, userID, &telegram.Message{
 		MessageID: 1,
-		From:      &telegram.User{ID: userID, FirstName: "Test"},
+		From:      &telegram.User{ID: 123, FirstName: "Test"},
 		Chat:      &telegram.Chat{ID: chatID},
 		Text:      "Hello",
 		Date:      int(time.Now().Unix()),
@@ -263,12 +263,12 @@ func TestProcessMessageGroup_LLMExecutionError_SendsErrorMessage(t *testing.T) {
 func TestProcessMessageGroup_AddStatFailure_Continues(t *testing.T) {
 	bot, mockStore, mockORClient, _ := setupBotForErrorTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	chatID := int64(456)
 
 	group := tgGroup(bot, userID, &telegram.Message{
 		MessageID: 1,
-		From:      &telegram.User{ID: userID, FirstName: "Test"},
+		From:      &telegram.User{ID: 123, FirstName: "Test"},
 		Chat:      &telegram.Chat{ID: chatID},
 		Text:      "Hello",
 		Date:      int(time.Now().Unix()),
@@ -305,12 +305,12 @@ func TestProcessMessageGroup_AddStatFailure_Continues(t *testing.T) {
 func TestProcessMessageGroup_ContextCancellation_CompletesProcessing(t *testing.T) {
 	bot, mockStore, mockORClient, _ := setupBotForErrorTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	chatID := int64(456)
 
 	group := tgGroup(bot, userID, &telegram.Message{
 		MessageID: 1,
-		From:      &telegram.User{ID: userID, FirstName: "Test"},
+		From:      &telegram.User{ID: 123, FirstName: "Test"},
 		Chat:      &telegram.Chat{ID: chatID},
 		Text:      "Hello",
 		Date:      int(time.Now().Unix()),

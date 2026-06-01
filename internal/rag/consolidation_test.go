@@ -18,7 +18,7 @@ import (
 )
 
 func TestFindMergeCandidates(t *testing.T) {
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	t.Run("filters out low similarity candidates", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
@@ -197,26 +197,26 @@ func TestMergeTopics(t *testing.T) {
 		mockStore.On("AddTopicWithoutMessageUpdate", mock.Anything).Return(int64(100), nil)
 
 		// UpdateMessagesTopicInRange for each old topic's messages (now includes userID)
-		mockStore.On("UpdateMessagesTopicInRange", mock.Anything, int64(123), int64(1), int64(10), int64(100)).Return(nil)
-		mockStore.On("UpdateMessagesTopicInRange", mock.Anything, int64(123), int64(11), int64(20), int64(100)).Return(nil)
+		mockStore.On("UpdateMessagesTopicInRange", mock.Anything, storage.ScopeID("123"), int64(1), int64(10), int64(100)).Return(nil)
+		mockStore.On("UpdateMessagesTopicInRange", mock.Anything, storage.ScopeID("123"), int64(11), int64(20), int64(100)).Return(nil)
 
 		// Update fact references
-		mockStore.On("UpdateFactsTopic", int64(123), int64(1), int64(100)).Return(nil)
-		mockStore.On("UpdateFactsTopic", int64(123), int64(2), int64(100)).Return(nil)
+		mockStore.On("UpdateFactsTopic", storage.ScopeID("123"), int64(1), int64(100)).Return(nil)
+		mockStore.On("UpdateFactsTopic", storage.ScopeID("123"), int64(2), int64(100)).Return(nil)
 
 		// Update fact history references
 		mockStore.On("UpdateFactHistoryTopic", int64(1), int64(100)).Return(nil)
 		mockStore.On("UpdateFactHistoryTopic", int64(2), int64(100)).Return(nil)
 
 		// Delete old topics
-		mockStore.On("DeleteTopicCascade", int64(123), int64(1)).Return(nil)
-		mockStore.On("DeleteTopicCascade", int64(123), int64(2)).Return(nil)
+		mockStore.On("DeleteTopicCascade", storage.ScopeID("123"), int64(1)).Return(nil)
+		mockStore.On("DeleteTopicCascade", storage.ScopeID("123"), int64(2)).Return(nil)
 
 		svc := newTestRAGService(t, mockStore, mockClient)
 
 		candidate := storage.MergeCandidate{
-			Topic1: storage.Topic{ID: 1, UserID: 123, StartMsgID: 1, EndMsgID: 10},
-			Topic2: storage.Topic{ID: 2, UserID: 123, StartMsgID: 11, EndMsgID: 20},
+			Topic1: storage.Topic{ID: 1, UserID: "123", StartMsgID: 1, EndMsgID: 10},
+			Topic2: storage.Topic{ID: 2, UserID: "123", StartMsgID: 11, EndMsgID: 20},
 		}
 
 		newTopicID, _, err := svc.mergeTopics(context.Background(), candidate, "Merged summary")
@@ -234,8 +234,8 @@ func TestMergeTopics(t *testing.T) {
 		svc := newTestRAGService(t, mockStore, mockClient)
 
 		candidate := storage.MergeCandidate{
-			Topic1: storage.Topic{ID: 1, UserID: 123, StartMsgID: 1, EndMsgID: 10},
-			Topic2: storage.Topic{ID: 2, UserID: 123, StartMsgID: 11, EndMsgID: 20},
+			Topic1: storage.Topic{ID: 1, UserID: "123", StartMsgID: 1, EndMsgID: 10},
+			Topic2: storage.Topic{ID: 2, UserID: "123", StartMsgID: 11, EndMsgID: 20},
 		}
 
 		newTopicID, _, err := svc.mergeTopics(context.Background(), candidate, "Merged summary")
@@ -258,8 +258,8 @@ func TestMergeTopics(t *testing.T) {
 		svc := newTestRAGService(t, mockStore, mockClient)
 
 		candidate := storage.MergeCandidate{
-			Topic1: storage.Topic{ID: 1, UserID: 123, StartMsgID: 1, EndMsgID: 10},
-			Topic2: storage.Topic{ID: 2, UserID: 123, StartMsgID: 11, EndMsgID: 20},
+			Topic1: storage.Topic{ID: 1, UserID: "123", StartMsgID: 1, EndMsgID: 10},
+			Topic2: storage.Topic{ID: 2, UserID: "123", StartMsgID: 11, EndMsgID: 20},
 		}
 
 		newTopicID, _, err := svc.mergeTopics(context.Background(), candidate, "Merged summary")
@@ -284,8 +284,8 @@ func TestMergeTopics(t *testing.T) {
 		svc := newTestRAGService(t, mockStore, mockClient)
 
 		candidate := storage.MergeCandidate{
-			Topic1: storage.Topic{ID: 1, UserID: 123, StartMsgID: 1, EndMsgID: 10},
-			Topic2: storage.Topic{ID: 2, UserID: 123, StartMsgID: 11, EndMsgID: 20},
+			Topic1: storage.Topic{ID: 1, UserID: "123", StartMsgID: 1, EndMsgID: 10},
+			Topic2: storage.Topic{ID: 2, UserID: "123", StartMsgID: 11, EndMsgID: 20},
 		}
 
 		newTopicID, _, err := svc.mergeTopics(context.Background(), candidate, "Merged summary")
@@ -301,15 +301,15 @@ func TestRunConsolidationSync(t *testing.T) {
 		mockClient := new(testutil.MockOpenRouterClient)
 
 		// No candidates
-		mockStore.On("GetMergeCandidates", int64(123), mock.Anything).Return([]storage.MergeCandidate{}, nil)
-		mockStore.On("SetTopicConsolidationChecked", int64(123), mock.Anything, true).Return(nil).Maybe()
+		mockStore.On("GetMergeCandidates", storage.ScopeID("123"), mock.Anything).Return([]storage.MergeCandidate{}, nil)
+		mockStore.On("SetTopicConsolidationChecked", storage.ScopeID("123"), mock.Anything, true).Return(nil).Maybe()
 
 		svc := newTestRAGService(t, mockStore, mockClient, func(cfg *config.Config) {
 			cfg.RAG.SimilarityThreshold = 0.85
 		})
 
 		stats := &ProcessingStats{}
-		mergedIDs := svc.runConsolidationSync(context.Background(), 123, []int64{1, 2}, stats)
+		mergedIDs := svc.runConsolidationSync(context.Background(), "123", []int64{1, 2}, stats)
 
 		assert.Empty(t, mergedIDs)
 		mockStore.AssertExpectations(t)
@@ -319,15 +319,15 @@ func TestRunConsolidationSync(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
-		mockStore.On("GetMergeCandidates", int64(123), mock.Anything).Return([]storage.MergeCandidate{}, assert.AnError)
-		mockStore.On("SetTopicConsolidationChecked", int64(123), mock.Anything, true).Return(nil).Maybe()
+		mockStore.On("GetMergeCandidates", storage.ScopeID("123"), mock.Anything).Return([]storage.MergeCandidate{}, assert.AnError)
+		mockStore.On("SetTopicConsolidationChecked", storage.ScopeID("123"), mock.Anything, true).Return(nil).Maybe()
 
 		svc := newTestRAGService(t, mockStore, mockClient, func(cfg *config.Config) {
 			cfg.RAG.SimilarityThreshold = 0.85
 		})
 
 		stats := &ProcessingStats{}
-		mergedIDs := svc.runConsolidationSync(context.Background(), 123, []int64{1}, stats)
+		mergedIDs := svc.runConsolidationSync(context.Background(), "123", []int64{1}, stats)
 
 		assert.Empty(t, mergedIDs)
 	})
@@ -336,12 +336,12 @@ func TestRunConsolidationSync(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
-		topic1 := storage.Topic{ID: 1, UserID: 123}
-		topic2 := storage.Topic{ID: 2, UserID: 123}
+		topic1 := storage.Topic{ID: 1, UserID: "123"}
+		topic2 := storage.Topic{ID: 2, UserID: "123"}
 		candidates := []storage.MergeCandidate{{Topic1: topic1, Topic2: topic2}}
 
-		mockStore.On("GetMergeCandidates", int64(123), mock.Anything).Return(candidates, nil)
-		mockStore.On("SetTopicConsolidationChecked", int64(123), mock.Anything, true).Return(nil).Maybe()
+		mockStore.On("GetMergeCandidates", storage.ScopeID("123"), mock.Anything).Return(candidates, nil)
+		mockStore.On("SetTopicConsolidationChecked", storage.ScopeID("123"), mock.Anything, true).Return(nil).Maybe()
 
 		svc := newTestRAGService(t, mockStore, mockClient, func(cfg *config.Config) {
 			cfg.RAG.SimilarityThreshold = 0.85
@@ -352,7 +352,7 @@ func TestRunConsolidationSync(t *testing.T) {
 		cancel()
 
 		stats := &ProcessingStats{}
-		mergedIDs := svc.runConsolidationSync(ctx, 123, []int64{1}, stats)
+		mergedIDs := svc.runConsolidationSync(ctx, "123", []int64{1}, stats)
 
 		assert.Empty(t, mergedIDs)
 	})
@@ -363,10 +363,10 @@ func TestMarkOrphanTopicsChecked(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
-		mockStore.On("GetTopicsPendingFacts", int64(123)).Return([]storage.Topic{}, assert.AnError)
+		mockStore.On("GetTopicsPendingFacts", storage.ScopeID("123")).Return([]storage.Topic{}, assert.AnError)
 
 		svc := newTestRAGService(t, mockStore, mockClient)
-		svc.markOrphanTopicsChecked(123) // Should not panic
+		svc.markOrphanTopicsChecked("123") // Should not panic
 
 		mockStore.AssertExpectations(t)
 	})
@@ -377,14 +377,14 @@ func TestMarkOrphanTopicsChecked(t *testing.T) {
 
 		// Only one topic - automatically an orphan
 		pendingTopics := []storage.Topic{
-			{ID: 1, UserID: 123, StartMsgID: 1, EndMsgID: 10, ConsolidationChecked: false},
+			{ID: 1, UserID: "123", StartMsgID: 1, EndMsgID: 10, ConsolidationChecked: false},
 		}
 
-		mockStore.On("GetTopicsPendingFacts", int64(123)).Return(pendingTopics, nil)
-		mockStore.On("SetTopicConsolidationChecked", int64(123), int64(1), true).Return(nil)
+		mockStore.On("GetTopicsPendingFacts", storage.ScopeID("123")).Return(pendingTopics, nil)
+		mockStore.On("SetTopicConsolidationChecked", storage.ScopeID("123"), int64(1), true).Return(nil)
 
 		svc := newTestRAGService(t, mockStore, mockClient)
-		svc.markOrphanTopicsChecked(123)
+		svc.markOrphanTopicsChecked("123")
 
 		mockStore.AssertExpectations(t)
 	})
@@ -392,7 +392,7 @@ func TestMarkOrphanTopicsChecked(t *testing.T) {
 
 // TestFindMergeCandidates_SizeLimit tests filtering by combined size.
 func TestFindMergeCandidates_SizeLimit(t *testing.T) {
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
 
@@ -420,7 +420,7 @@ func TestFindMergeCandidates_SizeLimit(t *testing.T) {
 
 // TestFindMergeCandidates_AlreadyChecked tests topics already marked as checked.
 func TestFindMergeCandidates_AlreadyChecked(t *testing.T) {
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
 
@@ -468,7 +468,7 @@ func TestProcessConsolidation_ShouldNotMerge(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	// Topics with embeddings and small enough to pass size check
 	topic1 := storage.Topic{ID: 1, UserID: userID, Summary: "Topic 1", ConsolidationChecked: false, Embedding: []float32{1.0, 0.0, 0.0}, SizeChars: 1000}
 	topic2 := storage.Topic{ID: 2, UserID: userID, Summary: "Topic 2", ConsolidationChecked: false, Embedding: []float32{0.95, 0.05, 0.0}, SizeChars: 1000}
@@ -496,7 +496,7 @@ func TestProcessConsolidation_ShouldNotMerge(t *testing.T) {
 	svc := newTestRAGServiceWithSetup(t, mockStore, mockClient, func(svc *Service, memSvc *memory.Service) {
 		svc.SetMergerAgent(mockMerger)
 		// Set AllowedUserIDs so processConsolidation actually runs
-		svc.cfg.Bot.AllowedUserIDs = []int64{userID}
+		svc.cfg.Bot.AllowedUserIDs = []int64{123}
 	})
 
 	svc.processConsolidation(context.Background())
@@ -509,7 +509,7 @@ func TestProcessConsolidation_SetTopicCheckedError(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	// Topics with embeddings and small enough to pass size check
 	topic1 := storage.Topic{ID: 1, UserID: userID, Summary: "Topic 1", ConsolidationChecked: false, Embedding: []float32{1.0, 0.0, 0.0}, SizeChars: 1000}
 	topic2 := storage.Topic{ID: 2, UserID: userID, Summary: "Topic 2", ConsolidationChecked: false, Embedding: []float32{0.95, 0.05, 0.0}, SizeChars: 1000}
@@ -537,7 +537,7 @@ func TestProcessConsolidation_SetTopicCheckedError(t *testing.T) {
 	svc := newTestRAGServiceWithSetup(t, mockStore, mockClient, func(svc *Service, memSvc *memory.Service) {
 		svc.SetMergerAgent(mockMerger)
 		// Set AllowedUserIDs so processConsolidation actually runs
-		svc.cfg.Bot.AllowedUserIDs = []int64{userID}
+		svc.cfg.Bot.AllowedUserIDs = []int64{123}
 	})
 
 	// Should not panic, just log error
@@ -551,7 +551,7 @@ func TestProcessConsolidation_VerifyMergeError(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	// Topics with embeddings and small enough to pass size check
 	topic1 := storage.Topic{ID: 1, UserID: userID, Summary: "Topic 1", ConsolidationChecked: false, Embedding: []float32{1.0, 0.0, 0.0}, SizeChars: 1000}
 	topic2 := storage.Topic{ID: 2, UserID: userID, Summary: "Topic 2", ConsolidationChecked: false, Embedding: []float32{0.95, 0.05, 0.0}, SizeChars: 1000}
@@ -573,7 +573,7 @@ func TestProcessConsolidation_VerifyMergeError(t *testing.T) {
 	svc := newTestRAGServiceWithSetup(t, mockStore, mockClient, func(svc *Service, memSvc *memory.Service) {
 		svc.SetMergerAgent(mockMerger)
 		// Set AllowedUserIDs so processConsolidation actually runs
-		svc.cfg.Bot.AllowedUserIDs = []int64{userID}
+		svc.cfg.Bot.AllowedUserIDs = []int64{123}
 	})
 
 	// Should not panic, just log error and continue
@@ -587,7 +587,7 @@ func TestMarkOrphanTopicsChecked_HasPartner(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 
 	// Three topics - first two are close (have partners), third is alone
 	pendingTopics := []storage.Topic{
@@ -613,7 +613,7 @@ func TestMarkOrphanTopicsChecked_NoPartner(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 
 	// Two topics far apart (gap > DefaultMergeGapThreshold)
 	pendingTopics := []storage.Topic{
@@ -636,7 +636,7 @@ func TestMarkOrphanTopicsChecked_LastTopicAlreadyChecked(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 
 	// Both topics already checked
 	pendingTopics := []storage.Topic{
@@ -664,7 +664,7 @@ func TestProcessConsolidation_ShouldMerge_Success(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 
 	// Topics with embeddings and small enough to pass size check
 	topic1 := storage.Topic{ID: 1, UserID: userID, Summary: "Topic 1", ConsolidationChecked: false, Embedding: []float32{1.0, 0.0, 0.0}, SizeChars: 1000, StartMsgID: 1, EndMsgID: 5}
@@ -715,20 +715,20 @@ func TestProcessConsolidation_ShouldMerge_Success(t *testing.T) {
 	mockStore.On("AddTopicWithoutMessageUpdate", mock.Anything).Return(int64(100), nil).Once()
 
 	// UpdateMessagesTopicInRange for each old topic's messages
-	mockStore.On("UpdateMessagesTopicInRange", mock.Anything, int64(123), int64(1), int64(5), int64(100)).Return(nil).Once()
-	mockStore.On("UpdateMessagesTopicInRange", mock.Anything, int64(123), int64(11), int64(15), int64(100)).Return(nil).Once()
+	mockStore.On("UpdateMessagesTopicInRange", mock.Anything, storage.PassthroughScopeID("telegram", "123"), int64(1), int64(5), int64(100)).Return(nil).Once()
+	mockStore.On("UpdateMessagesTopicInRange", mock.Anything, storage.PassthroughScopeID("telegram", "123"), int64(11), int64(15), int64(100)).Return(nil).Once()
 
 	// Update fact references
-	mockStore.On("UpdateFactsTopic", int64(123), int64(1), int64(100)).Return(nil).Maybe()
-	mockStore.On("UpdateFactsTopic", int64(123), int64(2), int64(100)).Return(nil).Maybe()
+	mockStore.On("UpdateFactsTopic", storage.PassthroughScopeID("telegram", "123"), int64(1), int64(100)).Return(nil).Maybe()
+	mockStore.On("UpdateFactsTopic", storage.PassthroughScopeID("telegram", "123"), int64(2), int64(100)).Return(nil).Maybe()
 
 	// Update fact history references
 	mockStore.On("UpdateFactHistoryTopic", int64(1), int64(100)).Return(nil).Maybe()
 	mockStore.On("UpdateFactHistoryTopic", int64(2), int64(100)).Return(nil).Maybe()
 
 	// Delete old topics
-	mockStore.On("DeleteTopicCascade", int64(123), int64(1)).Return(nil).Once()
-	mockStore.On("DeleteTopicCascade", int64(123), int64(2)).Return(nil).Once()
+	mockStore.On("DeleteTopicCascade", storage.PassthroughScopeID("telegram", "123"), int64(1)).Return(nil).Once()
+	mockStore.On("DeleteTopicCascade", storage.PassthroughScopeID("telegram", "123"), int64(2)).Return(nil).Once()
 
 	// ReloadVectors will be called (for goroutine)
 	mockStore.On("GetAllTopics").Return([]storage.Topic{}, nil).Maybe()
@@ -741,7 +741,7 @@ func TestProcessConsolidation_ShouldMerge_Success(t *testing.T) {
 	// Use NoStart to avoid background consolidation loop interference
 	svc := newTestRAGServiceNoStart(t, mockStore, mockClient)
 	svc.SetMergerAgent(mockMerger)
-	svc.cfg.Bot.AllowedUserIDs = []int64{userID}
+	svc.cfg.Bot.AllowedUserIDs = []int64{123}
 
 	svc.processConsolidation(context.Background())
 

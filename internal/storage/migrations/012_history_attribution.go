@@ -16,7 +16,7 @@ func init() {
 //
 // All columns are NULL for existing rows and for the single-user Telegram DM
 // and Mattermost DM PoC paths, so this is purely additive — no behavior change
-// on the home path:
+// on the Telegram path:
 //
 //   - author          : display/handle of the message author within the scope
 //     (NULL in DMs where the scope IS the author)

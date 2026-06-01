@@ -6,6 +6,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/runixer/laplaced/internal/storage"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -57,7 +59,7 @@ func TestReranker_RecordsSpan_EarlyFallback(t *testing.T) {
 			ParamContextualizedQuery: "ctx",
 			ParamOriginalQuery:       "orig",
 			ParamCurrentMessages:     "msgs",
-			"user_id":                int64(7777),
+			"user_id":                storage.ScopeID("7777"),
 		},
 	}
 
@@ -73,7 +75,7 @@ func TestReranker_RecordsSpan_EarlyFallback(t *testing.T) {
 	for _, kv := range span.Attributes {
 		attrs[kv.Key] = kv.Value
 	}
-	assert.Equal(t, int64(7777), attrs["user.id"].AsInt64())
+	assert.Equal(t, "7777", attrs["user.id"].AsString())
 	assert.Equal(t, int64(0), attrs["reranker.tool_calls"].AsInt64(),
 		"no tool calls in early-fallback path")
 	assert.Equal(t, int64(0), attrs["reranker.llm_calls"].AsInt64())
@@ -304,7 +306,7 @@ func TestReranker_RecordsSessionInputCount(t *testing.T) {
 			ParamContextualizedQuery: "ctx",
 			ParamOriginalQuery:       "orig",
 			ParamCurrentMessages:     "msgs",
-			"user_id":                int64(7777),
+			"user_id":                storage.ScopeID("7777"),
 		},
 	}
 

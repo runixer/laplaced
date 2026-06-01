@@ -12,7 +12,7 @@ import (
 
 // Request contains all inputs for Laplace agent execution.
 type Request struct {
-	UserID int64
+	UserID storage.ScopeID
 
 	// Message content
 	HistoryContent      string        // Full message content for history storage
@@ -90,7 +90,7 @@ type Response struct {
 // and any image parts from the current user message (so tools that edit/combine
 // images — e.g. generate_image — can access attached photos automatically).
 type ToolCallContext struct {
-	UserID               int64
+	UserID               storage.ScopeID
 	CurrentMessageImages []openrouter.FilePart
 	// Iteration is the 1-based tool-loop iteration this dispatch belongs
 	// to. Recorded on the tool_executor span as tool.iteration so traces
@@ -118,7 +118,7 @@ type ToolHandler interface {
 // ContextData contains pre-built context for LLM.
 type ContextData struct {
 	// User identification
-	UserID int64 // v0.6.0: User ID for artifact loading
+	UserID storage.ScopeID // v0.6.0: User ID for artifact loading
 
 	// System prompt components
 	BaseSystemPrompt string

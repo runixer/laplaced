@@ -56,7 +56,7 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 	}
 	bot.messageGrouper = NewMessageGrouper(bot, logger, 0, bot.processMessageGroup)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	chatID := int64(456)
 	now := int(time.Now().Unix())
 	forwarderUser := &telegram.User{ID: 789, FirstName: "Forwarder", Username: "fwd_user"}
@@ -66,12 +66,12 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 	messages := []*telegram.Message{
 		{
 			MessageID: 1, Text: "Original message 1",
-			From: &telegram.User{ID: userID, FirstName: "User", Username: "testuser"},
+			From: &telegram.User{ID: 123, FirstName: "User", Username: "testuser"},
 			Chat: &telegram.Chat{ID: chatID}, Date: now,
 		},
 		{
 			MessageID: 2, Text: "Forwarded from user",
-			From: &telegram.User{ID: userID, FirstName: "User", Username: "testuser"},
+			From: &telegram.User{ID: 123, FirstName: "User", Username: "testuser"},
 			Chat: &telegram.Chat{ID: chatID}, Date: now,
 			ForwardOrigin: &telegram.MessageOrigin{
 				Type:       "user",
@@ -81,7 +81,7 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 		},
 		{
 			MessageID: 3, Text: "Forwarded from channel",
-			From: &telegram.User{ID: userID, FirstName: "User", Username: "testuser"},
+			From: &telegram.User{ID: 123, FirstName: "User", Username: "testuser"},
 			Chat: &telegram.Chat{ID: chatID}, Date: now,
 			ForwardOrigin: &telegram.MessageOrigin{
 				Type:       "channel",
@@ -204,7 +204,7 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 	}
 	bot.messageGrouper = NewMessageGrouper(bot, logger, 0, bot.processMessageGroup)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	chatID := int64(456)
 	now := int(time.Now().Unix())
 	photoFileID := "photo_file_id_123"
@@ -215,7 +215,7 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 		{
 			MessageID: 1,
 			Caption:   "Check out this photo!",
-			From:      &telegram.User{ID: userID, FirstName: "User", Username: "testuser"},
+			From:      &telegram.User{ID: 123, FirstName: "User", Username: "testuser"},
 			Chat:      &telegram.Chat{ID: chatID},
 			Date:      now,
 			Photo: []telegram.PhotoSize{
@@ -337,7 +337,7 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 	}
 	bot.messageGrouper = NewMessageGrouper(bot, logger, 0, bot.processMessageGroup)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	chatID := int64(456)
 	now := int(time.Now().Unix())
 	docFileID := "doc_file_id_456"
@@ -348,7 +348,7 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 		{
 			MessageID: 1,
 			Caption:   "Check out this document image!",
-			From:      &telegram.User{ID: userID, FirstName: "User", Username: "testuser"},
+			From:      &telegram.User{ID: 123, FirstName: "User", Username: "testuser"},
 			Chat:      &telegram.Chat{ID: chatID},
 			Date:      now,
 			Document: &telegram.Document{
@@ -472,7 +472,7 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 	}
 	bot.messageGrouper = NewMessageGrouper(bot, logger, 0, bot.processMessageGroup)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	chatID := int64(456)
 	now := int(time.Now().Unix())
 	pdfFileID := "pdf_file_id_789"
@@ -483,7 +483,7 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 		{
 			MessageID: 1,
 			Caption:   "Check out this PDF!",
-			From:      &telegram.User{ID: userID, FirstName: "User", Username: "testuser"},
+			From:      &telegram.User{ID: 123, FirstName: "User", Username: "testuser"},
 			Chat:      &telegram.Chat{ID: chatID},
 			Date:      now,
 			Document: &telegram.Document{
@@ -611,7 +611,7 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 	}
 	bot.messageGrouper = NewMessageGrouper(bot, logger, 0, bot.processMessageGroup)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	chatID := int64(456)
 	now := int(time.Now().Unix())
 	docFileID := "doc_file_id_txt"
@@ -623,7 +623,7 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 		{
 			MessageID: 1,
 			Caption:   "What is in this file?",
-			From:      &telegram.User{ID: userID, FirstName: "User", Username: "testuser"},
+			From:      &telegram.User{ID: 123, FirstName: "User", Username: "testuser"},
 			Chat:      &telegram.Chat{ID: chatID},
 			Date:      now,
 			Document: &telegram.Document{
@@ -753,7 +753,7 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 	}
 	bot.messageGrouper = NewMessageGrouper(bot, logger, 0, bot.processMessageGroup)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	chatID := int64(456)
 	now := int(time.Now().Unix())
 	voiceFileID := "voice_file_id_789"
@@ -761,7 +761,7 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 
 	msg := &telegram.Message{
 		MessageID: 1,
-		From:      &telegram.User{ID: userID, FirstName: "User", Username: "testuser"},
+		From:      &telegram.User{ID: 123, FirstName: "User", Username: "testuser"},
 		Chat:      &telegram.Chat{ID: chatID},
 		Date:      now,
 		Voice:     &telegram.Voice{FileID: voiceFileID, MimeType: "audio/ogg"},
@@ -873,7 +873,7 @@ func TestProcessUpdate(t *testing.T) {
 
 	// Expectations
 	mockStore.On("UpsertUser", mock.MatchedBy(func(u storage.User) bool {
-		return u.ID == 123 && u.Username == "user"
+		return u.ID == storage.PassthroughScopeID("telegram", "123") && u.Username == "user"
 	})).Return(nil)
 
 	// Execute
@@ -1036,7 +1036,7 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 		laplaceAgent:    laplaceAgent,
 	}
 
-	userID := int64(1)
+	userID := storage.ScopeID("1")
 	chatID := int64(1)
 	now := int(time.Now().Unix())
 
@@ -1051,7 +1051,7 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 	// New message to process
 	newMessage := &telegram.Message{
 		MessageID: 100, Text: "What was the first thing I said?",
-		From: &telegram.User{ID: userID, FirstName: "User1", Username: "user1"},
+		From: &telegram.User{ID: 123, FirstName: "User1", Username: "user1"},
 		Chat: &telegram.Chat{ID: chatID}, Date: now,
 	}
 
@@ -1329,7 +1329,7 @@ func TestSendTestMessage_Success(t *testing.T) {
 		laplaceAgent:    laplaceAgent,
 	}
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	testMessage := "Hello, bot!"
 
 	// Mock storage calls
@@ -1413,7 +1413,7 @@ func TestSendTestMessage_SaveToHistoryFalse(t *testing.T) {
 		laplaceAgent:    laplaceAgent,
 	}
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	testMessage := "Hello, bot!"
 
 	// When saveToHistory is false, AddMessageToHistory should NOT be called
@@ -1486,7 +1486,7 @@ func TestSendTestMessage_OpenRouterError(t *testing.T) {
 		laplaceAgent:    laplaceAgent,
 	}
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	testMessage := "Hello, bot!"
 
 	// Mock storage calls
@@ -1527,7 +1527,7 @@ func TestLogExecution_WithError(t *testing.T) {
 	laplaceAgent := laplace.New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, logger)
 	laplaceAgent.SetAgentLogger(agentLogger)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	cost := 0.05
 
 	// Create a partial response with error (simulating "max empty response retries")
@@ -1602,13 +1602,13 @@ func TestPrepareUserMessage_UnsupportedFormat(t *testing.T) {
 		translator:      translator,
 	}
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	chatID := int64(456)
 
 	// Create message group with unsupported file format (.docx)
 	group := tgGroup(bot, userID, &telegram.Message{
 		MessageID: 1,
-		From:      &telegram.User{ID: userID, FirstName: "Test", LastName: "User"},
+		From:      &telegram.User{ID: 123, FirstName: "Test", LastName: "User"},
 		Chat:      &telegram.Chat{ID: chatID},
 		Date:      int(time.Now().Unix()),
 		Document: &telegram.Document{
@@ -1659,13 +1659,13 @@ func TestPrepareUserMessage_FileTooLarge(t *testing.T) {
 		translator:      translator,
 	}
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	chatID := int64(456)
 
 	// Create message group with oversized file (25MB > 20MB limit)
 	group := tgGroup(bot, userID, &telegram.Message{
 		MessageID: 1,
-		From:      &telegram.User{ID: userID, FirstName: "Test", LastName: "User"},
+		From:      &telegram.User{ID: 123, FirstName: "Test", LastName: "User"},
 		Chat:      &telegram.Chat{ID: chatID},
 		Date:      int(time.Now().Unix()),
 		Document: &telegram.Document{
@@ -1699,7 +1699,7 @@ func TestSendTestMessage_NilAgent_ReturnsError(t *testing.T) {
 		// laplaceAgent is nil
 	}
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	testMessage := "Hello, bot!"
 
 	_, err := bot.SendTestMessage(context.Background(), userID, testMessage, false)
@@ -1750,7 +1750,7 @@ func TestSendTestMessage_SaveToHistoryError_ReturnsError(t *testing.T) {
 		laplaceAgent:    laplaceAgent,
 	}
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	testMessage := "Hello, bot!"
 
 	// AddMessageToHistory fails

@@ -109,7 +109,7 @@ func (c *clientImpl) CreateChatCompletionStream(ctx context.Context, req ChatCom
 		trace.WithAttributes(
 			attribute.String("gen_ai.system", "openrouter"),
 			attribute.String("gen_ai.request.model", req.Model),
-			attribute.Int64("user.id", req.UserID),
+			attribute.String("user.id", req.UserID),
 			attribute.String("job.type", jt),
 			attribute.Int("prompt.media.filename_collisions", countFilenameCollisions(req.Messages)),
 		),
@@ -196,7 +196,7 @@ func (c *clientImpl) openStream(
 	endpoint string,
 	body []byte,
 	model string,
-	userID int64,
+	userID string,
 	jt string,
 	startTime time.Time,
 ) (*http.Response, int, []int64, error) {

@@ -66,7 +66,7 @@ func usageChunk(prompt, completion int) openrouter.ChatCompletionChunk {
 func TestStreaming_ContentDeltasForwarded(t *testing.T) {
 	cfg, _, agent, mockStore, mockOR, handler := setupExecuteTest(t)
 	_ = cfg
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
@@ -108,7 +108,7 @@ func TestStreaming_ContentDeltasForwarded(t *testing.T) {
 func TestStreaming_ToolCallSuppressesContentForwarding(t *testing.T) {
 	cfg, _, agent, mockStore, mockOR, handler := setupExecuteTest(t)
 	_ = cfg
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
@@ -172,7 +172,7 @@ func TestStreaming_ToolCallSuppressesContentForwarding(t *testing.T) {
 func TestStreaming_ReasoningDetailsAccumulated(t *testing.T) {
 	cfg, _, agent, mockStore, mockOR, handler := setupExecuteTest(t)
 	_ = cfg
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
@@ -242,7 +242,7 @@ func TestStreaming_ReasoningDetailsAccumulated(t *testing.T) {
 func TestStreaming_ToolCallArgumentsConcatenated(t *testing.T) {
 	cfg, _, agent, mockStore, mockOR, handler := setupExecuteTest(t)
 	_ = cfg
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
@@ -288,7 +288,7 @@ func TestStreaming_ToolCallArgumentsConcatenated(t *testing.T) {
 func TestStreaming_OnToolStartReceivesToolName(t *testing.T) {
 	cfg, _, agent, mockStore, mockOR, handler := setupExecuteTest(t)
 	_ = cfg
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
@@ -340,7 +340,7 @@ func TestStreaming_DebugBodiesShapeForAgentLog(t *testing.T) {
 	cfg, _, agent, mockStore, mockOR, handler := setupExecuteTest(t)
 	_ = cfg
 	_ = handler
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)

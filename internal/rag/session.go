@@ -16,7 +16,7 @@ import (
 
 // ActiveSessionInfo contains information about unprocessed messages for a user.
 type ActiveSessionInfo struct {
-	UserID           int64
+	UserID           storage.ScopeID
 	MessageCount     int
 	FirstMessageTime time.Time
 	LastMessageTime  time.Time
@@ -57,7 +57,7 @@ func (s *Service) GetActiveSessions() ([]ActiveSessionInfo, error) {
 	return sessions, nil
 }
 
-func (s *Service) ForceProcessUser(ctx context.Context, userID int64) (int, error) {
+func (s *Service) ForceProcessUser(ctx context.Context, userID storage.ScopeID) (int, error) {
 	// Mark as background job for metrics (force processing is a maintenance task)
 	ctx = jobtype.WithJobType(ctx, jobtype.Background)
 
@@ -106,14 +106,14 @@ func (s *Service) ForceProcessUser(ctx context.Context, userID int64) (int, erro
 // forced-process path (testbot send --process-session, /forceclose) emits the
 // same tracing shape as the background loop. The kind attribute distinguishes
 // "background chunk" vs "forced" in TraceQL filters.
-func (s *Service) processChunkWithSpan(ctx context.Context, userID int64, chunk []storage.Message, kind string) error {
+func (s *Service) processChunkWithSpan(ctx context.Context, userID storage.ScopeID, chunk []storage.Message, kind string) error {
 	if len(chunk) == 0 {
 		return nil
 	}
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/rag").Start(
 		ctx, "rag.processChunk",
 		trace.WithAttributes(
-			attribute.Int64("user.id", userID),
+			attribute.String("user.id", string(userID)),
 			attribute.Int64("chunk.start_id", chunk[0].ID),
 			attribute.Int64("chunk.end_id", chunk[len(chunk)-1].ID),
 			attribute.Int("chunk.message_count", len(chunk)),
@@ -129,7 +129,7 @@ func (s *Service) processChunkWithSpan(ctx context.Context, userID int64, chunk 
 
 // ForceProcessUserWithProgress processes all unprocessed messages for a user with progress reporting.
 // Unlike ForceProcessUser, this runs consolidation and fact extraction synchronously.
-func (s *Service) ForceProcessUserWithProgress(ctx context.Context, userID int64, onProgress ProgressCallback) (*ProcessingStats, error) {
+func (s *Service) ForceProcessUserWithProgress(ctx context.Context, userID storage.ScopeID, onProgress ProgressCallback) (*ProcessingStats, error) {
 	// Mark as background job for metrics (force processing is a maintenance task)
 	ctx = jobtype.WithJobType(ctx, jobtype.Background)
 
@@ -168,7 +168,7 @@ func (s *Service) ForceProcessUserWithProgress(ctx context.Context, userID int64
 	chunkCtx, span := otel.Tracer("github.com/runixer/laplaced/internal/rag").Start(
 		ctx, "rag.processChunk",
 		trace.WithAttributes(
-			attribute.Int64("user.id", userID),
+			attribute.String("user.id", string(userID)),
 			attribute.Int64("chunk.start_id", messages[0].ID),
 			attribute.Int64("chunk.end_id", messages[len(messages)-1].ID),
 			attribute.Int("chunk.message_count", len(messages)),

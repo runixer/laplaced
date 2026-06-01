@@ -15,7 +15,7 @@ import (
 // string for people).
 type ReembedCandidate struct {
 	ID      int64
-	UserID  int64
+	UserID  ScopeID
 	Content string
 }
 
@@ -24,7 +24,7 @@ type ReembedCandidate struct {
 // strict: NULL or a string different from expectedVersion both qualify.
 //
 // limit == 0 means unlimited.
-func (s *SQLiteStore) reembedSelect(table, contentExpr, expectedVersion string, limit int) ([]ReembedCandidate, error) {
+func (s *Store) reembedSelect(table, contentExpr, expectedVersion string, limit int) ([]ReembedCandidate, error) {
 	// #nosec G201 -- `table` and `contentExpr` are internal constants from this package, never user input
 	q := fmt.Sprintf(
 		`SELECT id, user_id, %s FROM %s
@@ -36,9 +36,9 @@ func (s *SQLiteStore) reembedSelect(table, contentExpr, expectedVersion string, 
 	var rows *sql.Rows
 	var err error
 	if limit > 0 {
-		rows, err = s.db.Query(q+" LIMIT ?", expectedVersion, limit)
+		rows, err = s.query(q+" LIMIT ?", expectedVersion, limit)
 	} else {
-		rows, err = s.db.Query(q, expectedVersion)
+		rows, err = s.query(q, expectedVersion)
 	}
 	if err != nil {
 		return nil, err
@@ -60,14 +60,14 @@ func (s *SQLiteStore) reembedSelect(table, contentExpr, expectedVersion string, 
 
 // reembedUpdate writes a freshly-computed embedding + version tag to one row.
 // Uses JSON text representation to stay compatible with existing readers.
-func (s *SQLiteStore) reembedUpdate(table string, id int64, emb []float32, version string) error {
+func (s *Store) reembedUpdate(table string, id int64, emb []float32, version string) error {
 	embBytes, err := json.Marshal(emb)
 	if err != nil {
 		return err
 	}
 	// #nosec G201 -- `table` is an internal constant from this package, never user input
 	q := fmt.Sprintf(`UPDATE %s SET embedding = ?, embedding_version = ? WHERE id = ?`, table)
-	_, err = s.db.Exec(q, embBytes, version, id)
+	_, err = s.exec(q, embBytes, version, id)
 	return err
 }
 
@@ -75,21 +75,21 @@ func (s *SQLiteStore) reembedUpdate(table string, id int64, emb []float32, versi
 
 // GetTopicsNeedingReembed returns topics whose embedding_version is not the
 // expected one. Content is the topic summary.
-func (s *SQLiteStore) GetTopicsNeedingReembed(expectedVersion string, limit int) ([]ReembedCandidate, error) {
+func (s *Store) GetTopicsNeedingReembed(expectedVersion string, limit int) ([]ReembedCandidate, error) {
 	return s.reembedSelect("topics", "COALESCE(summary, '')", expectedVersion, limit)
 }
 
-func (s *SQLiteStore) UpdateTopicEmbeddingVersion(id int64, emb []float32, version string) error {
+func (s *Store) UpdateTopicEmbeddingVersion(id int64, emb []float32, version string) error {
 	return s.reembedUpdate("topics", id, emb, version)
 }
 
 // --- Facts ---
 
-func (s *SQLiteStore) GetFactsNeedingReembed(expectedVersion string, limit int) ([]ReembedCandidate, error) {
+func (s *Store) GetFactsNeedingReembed(expectedVersion string, limit int) ([]ReembedCandidate, error) {
 	return s.reembedSelect("structured_facts", "COALESCE(content, '')", expectedVersion, limit)
 }
 
-func (s *SQLiteStore) UpdateFactEmbeddingVersion(id int64, emb []float32, version string) error {
+func (s *Store) UpdateFactEmbeddingVersion(id int64, emb []float32, version string) error {
 	return s.reembedUpdate("structured_facts", id, emb, version)
 }
 
@@ -97,7 +97,7 @@ func (s *SQLiteStore) UpdateFactEmbeddingVersion(id int64, emb []float32, versio
 
 // GetPeopleNeedingReembed composes the search text inline, mirroring
 // `internal/bot/tools/people.go`: display name + aliases (JSON) + bio.
-func (s *SQLiteStore) GetPeopleNeedingReembed(expectedVersion string, limit int) ([]ReembedCandidate, error) {
+func (s *Store) GetPeopleNeedingReembed(expectedVersion string, limit int) ([]ReembedCandidate, error) {
 	q := `SELECT id, user_id, display_name, aliases, bio FROM people
 	      WHERE embedding IS NOT NULL
 	        AND (embedding_version IS NULL OR embedding_version != ?)
@@ -105,9 +105,9 @@ func (s *SQLiteStore) GetPeopleNeedingReembed(expectedVersion string, limit int)
 	var rows *sql.Rows
 	var err error
 	if limit > 0 {
-		rows, err = s.db.Query(q+" LIMIT ?", expectedVersion, limit)
+		rows, err = s.query(q+" LIMIT ?", expectedVersion, limit)
 	} else {
-		rows, err = s.db.Query(q, expectedVersion)
+		rows, err = s.query(q, expectedVersion)
 	}
 	if err != nil {
 		return nil, err
@@ -150,16 +150,16 @@ func composePersonEmbeddingText(name, aliasesJSON, bio *string) string {
 	return s
 }
 
-func (s *SQLiteStore) UpdatePersonEmbeddingVersion(id int64, emb []float32, version string) error {
+func (s *Store) UpdatePersonEmbeddingVersion(id int64, emb []float32, version string) error {
 	return s.reembedUpdate("people", id, emb, version)
 }
 
 // --- Artifacts ---
 
-func (s *SQLiteStore) GetArtifactsNeedingReembed(expectedVersion string, limit int) ([]ReembedCandidate, error) {
+func (s *Store) GetArtifactsNeedingReembed(expectedVersion string, limit int) ([]ReembedCandidate, error) {
 	return s.reembedSelect("artifacts", "COALESCE(summary, '')", expectedVersion, limit)
 }
 
-func (s *SQLiteStore) UpdateArtifactEmbeddingVersion(id int64, emb []float32, version string) error {
+func (s *Store) UpdateArtifactEmbeddingVersion(id int64, emb []float32, version string) error {
 	return s.reembedUpdate("artifacts", id, emb, version)
 }

@@ -97,15 +97,15 @@ type BotInterface interface {
 	HandleUpdateAsync(ctx context.Context, update json.RawMessage, remoteAddr string)
 	API() telegram.BotAPI
 	GetActiveSessions() ([]rag.ActiveSessionInfo, error)
-	ForceCloseSession(ctx context.Context, userID int64) (int, error)
-	ForceCloseSessionWithProgress(ctx context.Context, userID int64, onProgress rag.ProgressCallback) (*rag.ProcessingStats, error)
-	SendTestMessage(ctx context.Context, userID int64, text string, saveToHistory bool) (*rag.TestMessageResult, error)
+	ForceCloseSession(ctx context.Context, userID storage.ScopeID) (int, error)
+	ForceCloseSessionWithProgress(ctx context.Context, userID storage.ScopeID, onProgress rag.ProgressCallback) (*rag.ProcessingStats, error)
+	SendTestMessage(ctx context.Context, userID storage.ScopeID, text string, saveToHistory bool) (*rag.TestMessageResult, error)
 }
 
 // dashboardStatsCache holds cached dashboard stats with TTL
 type dashboardStatsCache struct {
 	mu      sync.RWMutex
-	entries map[int64]*dashboardStatsCacheEntry
+	entries map[storage.ScopeID]*dashboardStatsCacheEntry
 	ttl     time.Duration
 }
 
@@ -116,12 +116,12 @@ type dashboardStatsCacheEntry struct {
 
 func newDashboardStatsCache(ttl time.Duration) *dashboardStatsCache {
 	return &dashboardStatsCache{
-		entries: make(map[int64]*dashboardStatsCacheEntry),
+		entries: make(map[storage.ScopeID]*dashboardStatsCacheEntry),
 		ttl:     ttl,
 	}
 }
 
-func (c *dashboardStatsCache) Get(userID int64) (*storage.DashboardStats, bool) {
+func (c *dashboardStatsCache) Get(userID storage.ScopeID) (*storage.DashboardStats, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -132,7 +132,7 @@ func (c *dashboardStatsCache) Get(userID int64) (*storage.DashboardStats, bool) 
 	return entry.stats, true
 }
 
-func (c *dashboardStatsCache) Set(userID int64, stats *storage.DashboardStats) {
+func (c *dashboardStatsCache) Set(userID storage.ScopeID, stats *storage.DashboardStats) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -201,7 +201,7 @@ func (s *Server) SetPeopleRepository(repo storage.PeopleRepository) {
 
 // SetScopeRepository sets the scope repository, letting the dashboard label
 // channel scopes (Time O/P/G) distinctly from person scopes. Optional: when
-// unset (home/simple), every scope renders as a user.
+// unset (no resolver), every scope renders as a user.
 func (s *Server) SetScopeRepository(repo storage.ScopeRepository) {
 	s.scopeRepo = repo
 }
@@ -353,13 +353,13 @@ func (s *Server) updateMetrics() {
 
 	// Update user info metric (for label joins in Grafana)
 	for _, user := range users {
-		userIDStr := fmt.Sprintf("%d", user.ID)
+		userIDStr := user.ID.String()
 		userInfo.WithLabelValues(userIDStr, user.Username, user.FirstName).Set(1)
 	}
 
 	// Update facts count and staleness per user
 	for _, user := range users {
-		userIDStr := fmt.Sprintf("%d", user.ID)
+		userIDStr := user.ID.String()
 		stats, err := s.factRepo.GetFactStatsByUser(user.ID)
 		if err != nil {
 			s.logger.Error("failed to get facts stats for user", "user_id", user.ID, "error", err)
@@ -484,20 +484,20 @@ func (s *Server) getCommonData(r *http.Request) (ui.PageData, error) {
 		return ui.PageData{}, err
 	}
 
-	var selectedUserID int64
+	var selectedUserID storage.ScopeID
 	if idStr := r.URL.Query().Get("user_id"); idStr != "" {
-		_, _ = fmt.Sscanf(idStr, "%d", &selectedUserID)
+		selectedUserID = storage.ScopeID(idStr)
 	}
 
 	// Default to first user if none selected
-	if selectedUserID == 0 && len(users) > 0 {
+	if selectedUserID == "" && len(users) > 0 {
 		selectedUserID = users[0].ID
 	}
 
 	// Mark which scopes are channels (Time O/P/G) so the selector can label them
-	// distinctly. IsChannelScope is cached; absent scopeRepo (home/simple) leaves
+	// distinctly. IsChannelScope is cached; absent scopeRepo (no resolver) leaves
 	// the map empty → everything renders as a user.
-	channelScopes := make(map[int64]bool, len(users))
+	channelScopes := make(map[storage.ScopeID]bool, len(users))
 	if s.scopeRepo != nil {
 		for _, u := range users {
 			if isCh, err := s.scopeRepo.IsChannelScope(u.ID); err == nil && isCh {
@@ -544,7 +544,7 @@ func (s *Server) statsHandler(w http.ResponseWriter, r *http.Request) {
 	// Convert map to slice for stable sorting
 	statsSlice := make([]storage.Stat, 0, len(statsMap))
 	for _, stat := range statsMap {
-		if pageData.SelectedUserID != 0 && stat.UserID != pageData.SelectedUserID {
+		if pageData.SelectedUserID != "" && stat.UserID != pageData.SelectedUserID {
 			continue
 		}
 		statsSlice = append(statsSlice, stat)
@@ -592,8 +592,8 @@ func (s *Server) sessionsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		userIDStr := r.FormValue("user_id")
-		var userID int64
-		if _, err := fmt.Sscanf(userIDStr, "%d", &userID); err != nil {
+		var userID = storage.ScopeID(userIDStr)
+		if userID == "" {
 			http.Error(w, "Invalid user ID", http.StatusBadRequest)
 			return
 		}
@@ -629,7 +629,7 @@ func (s *Server) sessionsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build user lookup map from pageData.Users
-	userMap := make(map[int64]storage.User)
+	userMap := make(map[storage.ScopeID]storage.User)
 	for _, u := range pageData.Users {
 		userMap[u.ID] = u
 	}
@@ -638,7 +638,7 @@ func (s *Server) sessionsHandler(w http.ResponseWriter, r *http.Request) {
 	chunkInterval := s.cfg.RAG.GetChunkDuration()
 
 	type sessionDisplayData struct {
-		UserID          int64
+		UserID          storage.ScopeID
 		UserName        string
 		MessageCount    int
 		FirstMessageISO string // ISO 8601 for JS parsing
@@ -649,7 +649,7 @@ func (s *Server) sessionsHandler(w http.ResponseWriter, r *http.Request) {
 
 	displaySessions := make([]sessionDisplayData, 0, len(sessions))
 	for _, sess := range sessions {
-		userName := fmt.Sprintf("User %d", sess.UserID)
+		userName := fmt.Sprintf("User %s", sess.UserID)
 		if u, ok := userMap[sess.UserID]; ok {
 			switch {
 			case pageData.ChannelScopes[sess.UserID] && u.Username != "":
@@ -693,8 +693,8 @@ func (s *Server) sessionsProcessSSEHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	userIDStr := r.URL.Query().Get("user_id")
-	var userID int64
-	if _, err := fmt.Sscanf(userIDStr, "%d", &userID); err != nil {
+	var userID = storage.ScopeID(userIDStr)
+	if userID == "" {
 		http.Error(w, "Invalid user ID", http.StatusBadRequest)
 		return
 	}
@@ -832,7 +832,7 @@ func (s *Server) debugChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Get recent messages for selected user
 	var messages []storage.Message
-	if pageData.SelectedUserID > 0 {
+	if pageData.SelectedUserID != "" {
 		messages, err = s.msgRepo.GetUnprocessedMessages(pageData.SelectedUserID)
 		if err != nil {
 			s.logger.Error("failed to get messages", "error", err)
@@ -852,9 +852,9 @@ func (s *Server) debugChatHandler(w http.ResponseWriter, r *http.Request) {
 
 // debugChatSendRequest is the request body for POST /ui/debug/chat/send.
 type debugChatSendRequest struct {
-	UserID        int64  `json:"user_id"`
-	Message       string `json:"message"`
-	SaveToHistory bool   `json:"save_to_history"`
+	UserID        storage.ScopeID `json:"user_id"`
+	Message       string          `json:"message"`
+	SaveToHistory bool            `json:"save_to_history"`
 }
 
 // debugChatSendResponse is the response body for POST /ui/debug/chat/send.
@@ -887,8 +887,8 @@ func (s *Server) splitTopicsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		UserID         int64 `json:"user_id"`
-		ThresholdChars int   `json:"threshold_chars"`
+		UserID         storage.ScopeID `json:"user_id"`
+		ThresholdChars int             `json:"threshold_chars"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -957,9 +957,9 @@ func (s *Server) databaseHealthHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var userID int64
+	var userID storage.ScopeID
 	if idStr := r.URL.Query().Get("user_id"); idStr != "" {
-		_, _ = fmt.Sscanf(idStr, "%d", &userID)
+		userID = storage.ScopeID(idStr)
 	}
 	// userID=0 means all users
 
@@ -994,8 +994,8 @@ func (s *Server) databaseRepairHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		UserID int64 `json:"user_id"`
-		DryRun bool  `json:"dry_run"`
+		UserID storage.ScopeID `json:"user_id"`
+		DryRun bool            `json:"dry_run"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1037,9 +1037,9 @@ func (s *Server) databaseContaminationHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	var userID int64
+	var userID storage.ScopeID
 	if idStr := r.URL.Query().Get("user_id"); idStr != "" {
-		_, _ = fmt.Sscanf(idStr, "%d", &userID)
+		userID = storage.ScopeID(idStr)
 	}
 	// userID=0 means all users
 
@@ -1070,8 +1070,8 @@ func (s *Server) databaseContaminationFixHandler(w http.ResponseWriter, r *http.
 	}
 
 	var req struct {
-		UserID int64 `json:"user_id"`
-		DryRun bool  `json:"dry_run"`
+		UserID storage.ScopeID `json:"user_id"`
+		DryRun bool            `json:"dry_run"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1193,7 +1193,7 @@ func (s *Server) debugChatSendHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.UserID == 0 {
+	if req.UserID == "" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(debugChatSendResponse{Error: "user_id is required"})
@@ -1320,8 +1320,8 @@ func (s *Server) agentLogDetailHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var userID int64
-	if _, err := fmt.Sscanf(userIDStr, "%d", &userID); err != nil {
+	var userID = storage.ScopeID(userIDStr)
+	if userID == "" {
 		http.Error(w, "Invalid user_id", http.StatusBadRequest)
 		return
 	}
@@ -1425,7 +1425,7 @@ func (s *Server) factsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var facts []storage.Fact
-	if pageData.SelectedUserID != 0 {
+	if pageData.SelectedUserID != "" {
 		facts, err = s.factRepo.GetFacts(pageData.SelectedUserID)
 		if err != nil {
 			s.logger.Error("failed to get facts", "error", err, "user_id", pageData.SelectedUserID)
@@ -1647,7 +1647,7 @@ func (s *Server) artifactsHandler(w http.ResponseWriter, r *http.Request) {
 		Total          int64
 		Page           int
 		Pages          int
-		SelectedUserID int64
+		SelectedUserID storage.ScopeID
 		Stats          struct {
 			Total   int64
 			Pending int64
@@ -1699,8 +1699,8 @@ func (s *Server) artifactDownloadHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var userID int64
-	if _, err := fmt.Sscanf(userIDStr, "%d", &userID); err != nil {
+	var userID = storage.ScopeID(userIDStr)
+	if userID == "" {
 		http.Error(w, "Invalid user_id", http.StatusBadRequest)
 		return
 	}
@@ -1708,7 +1708,7 @@ func (s *Server) artifactDownloadHandler(w http.ResponseWriter, r *http.Request)
 	// Validate user_id is in allowed list (CRIT-5 security fix)
 	userAllowed := false
 	for _, allowedID := range s.cfg.Bot.AllowedUserIDs {
-		if allowedID == userID {
+		if storage.PassthroughScopeID("telegram", strconv.FormatInt(allowedID, 10)) == userID {
 			userAllowed = true
 			break
 		}
@@ -1762,7 +1762,7 @@ func (s *Server) artifactDownloadHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Read file
-	fileData, err := os.ReadFile(fullPath)
+	fileData, err := os.ReadFile(fullPath) //nolint:gosec // G703: fullPath validated against storage dir by the containment check above
 	if err != nil {
 		s.logger.Error("failed to read artifact file", "artifact_id", artifactID, "path", fullPath, "error", err)
 		http.Error(w, "Failed to read file", http.StatusInternalServerError)
@@ -1781,7 +1781,7 @@ func (s *Server) artifactDownloadHandler(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(fileData)))
 
 	// Write file data
-	if _, err := w.Write(fileData); err != nil {
+	if _, err := w.Write(fileData); err != nil { //nolint:gosec // G705: artifact download (Content-Disposition: attachment), not HTML
 		s.logger.Error("failed to write file response", "error", err)
 	}
 }

@@ -36,8 +36,8 @@ func (b *Bot) incomingContent(im IncomingMessage) string {
 }
 
 // firstFileKind returns the Kind of the first attachment, or "" when none.
-// Telegram messages carry at most one file, so this is unambiguous on the home
-// path.
+// Telegram messages carry at most one file, so this is unambiguous on the
+// Telegram path.
 func firstFileKind(fs []files.IncomingFile) files.FileType {
 	if len(fs) == 0 {
 		return ""

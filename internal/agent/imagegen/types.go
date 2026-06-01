@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/storage"
 )
 
 // FailureKind classifies why an image-generation call did not produce an image.
@@ -105,7 +106,7 @@ func (f *ImagegenFailure) Unwrap() error { return f.Cause }
 
 // Request parameters for a single image generation call.
 type Request struct {
-	UserID int64
+	UserID storage.ScopeID
 
 	// Prompt is the text description of the image to generate, in any language.
 	Prompt string

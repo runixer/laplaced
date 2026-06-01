@@ -327,7 +327,7 @@ func TestFilterValidTopics(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			filtered := filterValidTopics(123, tt.result, candidateMap, logger)
+			filtered := filterValidTopics("123", tt.result, candidateMap, logger)
 			assert.Equal(t, tt.wantTopics, filtered.Topics)
 		})
 	}
@@ -579,7 +579,7 @@ func TestLoadTopicsContent(t *testing.T) {
 
 	tr := &trace{candidates: []storage.RerankerCandidate{{TopicID: 1}, {TopicID: 2}}}
 
-	content := loadTopicsContent(context.Background(), 123, []int64{1, 2}, candidateMap, mockRepo, logger, tr)
+	content := loadTopicsContent(context.Background(), "123", []int64{1, 2}, candidateMap, mockRepo, logger, tr)
 
 	assert.Contains(t, content, "=== Topic 1 ===")
 	assert.Contains(t, content, "=== Topic 2 ===")
@@ -669,7 +669,7 @@ func TestFilterValidTopics_InvalidIDFormat(t *testing.T) {
 		},
 	}
 
-	filtered := filterValidTopics(123, result, candidateMap, logger)
+	filtered := filterValidTopics("123", result, candidateMap, logger)
 	assert.Equal(t, []int64{1, 2}, filtered.TopicIDs())
 	assert.Len(t, filtered.Topics, 2)
 }
@@ -694,7 +694,7 @@ func TestFilterValidTopics_MixedValidAndInvalid(t *testing.T) {
 		},
 	}
 
-	filtered := filterValidTopics(123, result, candidateMap, logger)
+	filtered := filterValidTopics("123", result, candidateMap, logger)
 	assert.Equal(t, []int64{1, 3, 5}, filtered.TopicIDs())
 	assert.Len(t, filtered.Topics, 3)
 }
@@ -716,7 +716,7 @@ func TestFilterValidPeople_AllValid(t *testing.T) {
 		Artifacts: []ArtifactSelection{{ID: "Artifact:1", Reason: "a1"}},
 	}
 
-	filtered := filterValidPeople(123, result, peopleMap, logger)
+	filtered := filterValidPeople("123", result, peopleMap, logger)
 	assert.Equal(t, []int64{1, 2}, filtered.PeopleIDs())
 	assert.Len(t, filtered.People, 2)
 	// Other fields preserved
@@ -741,7 +741,7 @@ func TestFilterValidPeople_SomeHallucinated(t *testing.T) {
 		},
 	}
 
-	filtered := filterValidPeople(123, result, peopleMap, logger)
+	filtered := filterValidPeople("123", result, peopleMap, logger)
 	assert.Equal(t, []int64{1, 3}, filtered.PeopleIDs())
 	assert.Len(t, filtered.People, 2)
 }
@@ -761,7 +761,7 @@ func TestFilterValidPeople_AllHallucinated(t *testing.T) {
 		},
 	}
 
-	filtered := filterValidPeople(123, result, peopleMap, logger)
+	filtered := filterValidPeople("123", result, peopleMap, logger)
 	assert.Empty(t, filtered.PeopleIDs())
 	assert.Nil(t, filtered.People)
 }
@@ -778,7 +778,7 @@ func TestFilterValidPeople_EmptyInput(t *testing.T) {
 		People: []PersonSelection{},
 	}
 
-	filtered := filterValidPeople(123, result, peopleMap, logger)
+	filtered := filterValidPeople("123", result, peopleMap, logger)
 	assert.Empty(t, filtered.PeopleIDs())
 }
 
@@ -797,7 +797,7 @@ func TestFilterValidPeople_InvalidIDFormat(t *testing.T) {
 		},
 	}
 
-	filtered := filterValidPeople(123, result, peopleMap, logger)
+	filtered := filterValidPeople("123", result, peopleMap, logger)
 	assert.Equal(t, []int64{1}, filtered.PeopleIDs())
 }
 
@@ -818,7 +818,7 @@ func TestFilterValidArtifacts_AllValid(t *testing.T) {
 		Artifacts: []ArtifactSelection{{ID: "Artifact:1", Reason: "a1"}, {ID: "Artifact:2", Reason: "a2"}},
 	}
 
-	filtered := filterValidArtifacts(123, result, artifactsMap, logger)
+	filtered := filterValidArtifacts("123", result, artifactsMap, logger)
 	assert.Equal(t, []int64{1, 2}, filtered.ArtifactIDs())
 	assert.Len(t, filtered.Artifacts, 2)
 }
@@ -840,7 +840,7 @@ func TestFilterValidArtifacts_SomeHallucinated(t *testing.T) {
 		},
 	}
 
-	filtered := filterValidArtifacts(123, result, artifactsMap, logger)
+	filtered := filterValidArtifacts("123", result, artifactsMap, logger)
 	assert.Equal(t, []int64{1, 3}, filtered.ArtifactIDs())
 	assert.Len(t, filtered.Artifacts, 2)
 }
@@ -860,7 +860,7 @@ func TestFilterValidArtifacts_AllHallucinated(t *testing.T) {
 		},
 	}
 
-	filtered := filterValidArtifacts(123, result, artifactsMap, logger)
+	filtered := filterValidArtifacts("123", result, artifactsMap, logger)
 	assert.Empty(t, filtered.ArtifactIDs())
 	assert.Nil(t, filtered.Artifacts)
 }
@@ -877,7 +877,7 @@ func TestFilterValidArtifacts_EmptyInput(t *testing.T) {
 		Artifacts: []ArtifactSelection{},
 	}
 
-	filtered := filterValidArtifacts(123, result, artifactsMap, logger)
+	filtered := filterValidArtifacts("123", result, artifactsMap, logger)
 	assert.Empty(t, filtered.ArtifactIDs())
 }
 
@@ -896,7 +896,7 @@ func TestFilterValidArtifacts_InvalidIDFormat(t *testing.T) {
 		},
 	}
 
-	filtered := filterValidArtifacts(123, result, artifactsMap, logger)
+	filtered := filterValidArtifacts("123", result, artifactsMap, logger)
 	assert.Equal(t, []int64{1}, filtered.ArtifactIDs())
 }
 

@@ -48,7 +48,7 @@ func setupBotForExtractedPeopleTests(t *testing.T) (*Bot, *testutil.MockStorage)
 func TestExtractForwardedPeople_NewPerson_CreatesPerson(t *testing.T) {
 	bot, mockStore := setupBotForExtractedPeopleTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	forwarderID := int64(789)
 	forwarderUsername := "forwarded_user"
 
@@ -57,8 +57,8 @@ func TestExtractForwardedPeople_NewPerson_CreatesPerson(t *testing.T) {
 	messages := []*telegram.Message{
 		{
 			MessageID: 1,
-			From:      &telegram.User{ID: userID, FirstName: "User"},
-			Chat:      &telegram.Chat{ID: userID},
+			From:      &telegram.User{ID: 123, FirstName: "User"},
+			Chat:      &telegram.Chat{ID: 123},
 			Date:      now,
 			ForwardOrigin: &telegram.MessageOrigin{
 				Type: "user",
@@ -101,7 +101,7 @@ func TestExtractForwardedPeople_NewPerson_CreatesPerson(t *testing.T) {
 func TestExtractForwardedPeople_ExistingPersonByTelegramID_UpdatesPerson(t *testing.T) {
 	bot, mockStore := setupBotForExtractedPeopleTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	forwarderID := int64(789)
 
 	now := int(time.Now().Unix())
@@ -109,8 +109,8 @@ func TestExtractForwardedPeople_ExistingPersonByTelegramID_UpdatesPerson(t *test
 	messages := []*telegram.Message{
 		{
 			MessageID: 1,
-			From:      &telegram.User{ID: userID, FirstName: "User"},
-			Chat:      &telegram.Chat{ID: userID},
+			From:      &telegram.User{ID: 123, FirstName: "User"},
+			Chat:      &telegram.Chat{ID: 123},
 			Date:      now,
 			ForwardOrigin: &telegram.MessageOrigin{
 				Type: "user",
@@ -151,7 +151,7 @@ func TestExtractForwardedPeople_ExistingPersonByTelegramID_UpdatesPerson(t *test
 func TestExtractForwardedPerson_ExistingPersonByUsername_AddsTelegramID(t *testing.T) {
 	bot, mockStore := setupBotForExtractedPeopleTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	forwarderID := int64(789)
 	forwarderUsername := "fwd_user"
 
@@ -160,8 +160,8 @@ func TestExtractForwardedPerson_ExistingPersonByUsername_AddsTelegramID(t *testi
 	messages := []*telegram.Message{
 		{
 			MessageID: 1,
-			From:      &telegram.User{ID: userID, FirstName: "User"},
-			Chat:      &telegram.Chat{ID: userID},
+			From:      &telegram.User{ID: 123, FirstName: "User"},
+			Chat:      &telegram.Chat{ID: 123},
 			Date:      now,
 			ForwardOrigin: &telegram.MessageOrigin{
 				Type: "user",
@@ -203,7 +203,7 @@ func TestExtractForwardedPerson_ExistingPersonByUsername_AddsTelegramID(t *testi
 func TestExtractForwardedPerson_ExistingPersonByName_AddsTelegramID(t *testing.T) {
 	bot, mockStore := setupBotForExtractedPeopleTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	forwarderID := int64(789)
 	displayName := "John Doe"
 
@@ -212,8 +212,8 @@ func TestExtractForwardedPerson_ExistingPersonByName_AddsTelegramID(t *testing.T
 	messages := []*telegram.Message{
 		{
 			MessageID: 1,
-			From:      &telegram.User{ID: userID, FirstName: "User"},
-			Chat:      &telegram.Chat{ID: userID},
+			From:      &telegram.User{ID: 123, FirstName: "User"},
+			Chat:      &telegram.Chat{ID: 123},
 			Date:      now,
 			ForwardOrigin: &telegram.MessageOrigin{
 				Type: "user",
@@ -257,15 +257,15 @@ func TestExtractForwardedPerson_ExistingPersonByName_AddsTelegramID(t *testing.T
 func TestExtractForwardedPeople_ChannelForward_Ignored(t *testing.T) {
 	bot, mockStore := setupBotForExtractedPeopleTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	now := int(time.Now().Unix())
 
 	messages := []*telegram.Message{
 		{
 			MessageID: 1,
-			From:      &telegram.User{ID: userID, FirstName: "User"},
-			Chat:      &telegram.Chat{ID: userID},
+			From:      &telegram.User{ID: 123, FirstName: "User"},
+			Chat:      &telegram.Chat{ID: 123},
 			Date:      now,
 			ForwardOrigin: &telegram.MessageOrigin{
 				Type: "channel",
@@ -290,7 +290,7 @@ func TestExtractForwardedPeople_ChannelForward_Ignored(t *testing.T) {
 func TestExtractForwardedPeople_BotForward_Ignored(t *testing.T) {
 	bot, mockStore := setupBotForExtractedPeopleTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	botID := int64(789)
 
 	now := int(time.Now().Unix())
@@ -298,8 +298,8 @@ func TestExtractForwardedPeople_BotForward_Ignored(t *testing.T) {
 	messages := []*telegram.Message{
 		{
 			MessageID: 1,
-			From:      &telegram.User{ID: userID, FirstName: "User"},
-			Chat:      &telegram.Chat{ID: userID},
+			From:      &telegram.User{ID: 123, FirstName: "User"},
+			Chat:      &telegram.Chat{ID: 123},
 			Date:      now,
 			ForwardOrigin: &telegram.MessageOrigin{
 				Type: "user",
@@ -324,21 +324,21 @@ func TestExtractForwardedPeople_BotForward_Ignored(t *testing.T) {
 func TestExtractForwardedPeople_SelfForward_Ignored(t *testing.T) {
 	bot, mockStore := setupBotForExtractedPeopleTests(t)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 
 	now := int(time.Now().Unix())
 
 	messages := []*telegram.Message{
 		{
 			MessageID: 1,
-			From:      &telegram.User{ID: userID, FirstName: "User"},
-			Chat:      &telegram.Chat{ID: userID},
+			From:      &telegram.User{ID: 123, FirstName: "User"},
+			Chat:      &telegram.Chat{ID: 123},
 			Date:      now,
 			ForwardOrigin: &telegram.MessageOrigin{
 				Type: "user",
 				Date: now - 3600,
 				SenderUser: &telegram.User{
-					ID:        userID, // Same as From.ID
+					ID:        123, // Same as From.ID
 					FirstName: "User",
 				},
 			},
@@ -356,15 +356,15 @@ func TestExtractForwardedPeople_SelfForward_Ignored(t *testing.T) {
 func TestExtractForwardedPeople_NoForwardOrigin_Skips(t *testing.T) {
 	bot, mockStore := setupBotForExtractedPeopleTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	now := int(time.Now().Unix())
 
 	messages := []*telegram.Message{
 		{
 			MessageID: 1,
-			From:      &telegram.User{ID: userID, FirstName: "User"},
-			Chat:      &telegram.Chat{ID: userID},
+			From:      &telegram.User{ID: 123, FirstName: "User"},
+			Chat:      &telegram.Chat{ID: 123},
 			Text:      "Regular message",
 			Date:      now,
 			// No ForwardOrigin
@@ -397,14 +397,14 @@ func TestExtractForwardedPeople_NilPeopleRepo_DoesNothing(t *testing.T) {
 		// peopleRepo is nil
 	}
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	now := int(time.Now().Unix())
 
 	messages := []*telegram.Message{
 		{
 			MessageID: 1,
-			From:      &telegram.User{ID: userID, FirstName: "User"},
-			Chat:      &telegram.Chat{ID: userID},
+			From:      &telegram.User{ID: 123, FirstName: "User"},
+			Chat:      &telegram.Chat{ID: 123},
 			Date:      now,
 			ForwardOrigin: &telegram.MessageOrigin{
 				Type: "user",
@@ -427,7 +427,7 @@ func TestExtractForwardedPeople_NilPeopleRepo_DoesNothing(t *testing.T) {
 func TestExtractForwardedPeople_DisplayNameFromUsername(t *testing.T) {
 	bot, mockStore := setupBotForExtractedPeopleTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	forwarderID := int64(789)
 	forwarderUsername := "username_only"
 
@@ -436,8 +436,8 @@ func TestExtractForwardedPeople_DisplayNameFromUsername(t *testing.T) {
 	messages := []*telegram.Message{
 		{
 			MessageID: 1,
-			From:      &telegram.User{ID: userID, FirstName: "User"},
-			Chat:      &telegram.Chat{ID: userID},
+			From:      &telegram.User{ID: 123, FirstName: "User"},
+			Chat:      &telegram.Chat{ID: 123},
 			Date:      now,
 			ForwardOrigin: &telegram.MessageOrigin{
 				Type: "user",
@@ -468,7 +468,7 @@ func TestExtractForwardedPeople_DisplayNameFromUsername(t *testing.T) {
 func TestExtractForwardedPeople_MultipleMessages_ProcessesAll(t *testing.T) {
 	bot, mockStore := setupBotForExtractedPeopleTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	forwarder1ID := int64(789)
 	forwarder2ID := int64(790)
 
@@ -477,8 +477,8 @@ func TestExtractForwardedPeople_MultipleMessages_ProcessesAll(t *testing.T) {
 	messages := []*telegram.Message{
 		{
 			MessageID: 1,
-			From:      &telegram.User{ID: userID, FirstName: "User"},
-			Chat:      &telegram.Chat{ID: userID},
+			From:      &telegram.User{ID: 123, FirstName: "User"},
+			Chat:      &telegram.Chat{ID: 123},
 			Date:      now,
 			ForwardOrigin: &telegram.MessageOrigin{
 				Type: "user",
@@ -491,8 +491,8 @@ func TestExtractForwardedPeople_MultipleMessages_ProcessesAll(t *testing.T) {
 		},
 		{
 			MessageID: 2,
-			From:      &telegram.User{ID: userID, FirstName: "User"},
-			Chat:      &telegram.Chat{ID: userID},
+			From:      &telegram.User{ID: 123, FirstName: "User"},
+			Chat:      &telegram.Chat{ID: 123},
 			Date:      now,
 			ForwardOrigin: &telegram.MessageOrigin{
 				Type: "user",
@@ -528,7 +528,7 @@ func TestExtractForwardedPeople_MultipleMessages_ProcessesAll(t *testing.T) {
 func TestExtractForwardedPeople_DuplicateForwards_Deduplicates(t *testing.T) {
 	bot, mockStore := setupBotForExtractedPeopleTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	forwarderID := int64(789)
 
 	now := int(time.Now().Unix())
@@ -536,8 +536,8 @@ func TestExtractForwardedPeople_DuplicateForwards_Deduplicates(t *testing.T) {
 	messages := []*telegram.Message{
 		{
 			MessageID: 1,
-			From:      &telegram.User{ID: userID, FirstName: "User"},
-			Chat:      &telegram.Chat{ID: userID},
+			From:      &telegram.User{ID: 123, FirstName: "User"},
+			Chat:      &telegram.Chat{ID: 123},
 			Date:      now,
 			ForwardOrigin: &telegram.MessageOrigin{
 				Type: "user",
@@ -550,8 +550,8 @@ func TestExtractForwardedPeople_DuplicateForwards_Deduplicates(t *testing.T) {
 		},
 		{
 			MessageID: 2,
-			From:      &telegram.User{ID: userID, FirstName: "User"},
-			Chat:      &telegram.Chat{ID: userID},
+			From:      &telegram.User{ID: 123, FirstName: "User"},
+			Chat:      &telegram.Chat{ID: 123},
 			Date:      now,
 			ForwardOrigin: &telegram.MessageOrigin{
 				Type: "user",
@@ -589,7 +589,7 @@ func TestExtractForwardedPeople_DuplicateForwards_Deduplicates(t *testing.T) {
 func TestExtractForwardedPeople_UpdateError_Continues(t *testing.T) {
 	bot, mockStore := setupBotForExtractedPeopleTests(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	forwarderID := int64(789)
 
 	now := int(time.Now().Unix())
@@ -597,8 +597,8 @@ func TestExtractForwardedPeople_UpdateError_Continues(t *testing.T) {
 	messages := []*telegram.Message{
 		{
 			MessageID: 1,
-			From:      &telegram.User{ID: userID, FirstName: "User"},
-			Chat:      &telegram.Chat{ID: userID},
+			From:      &telegram.User{ID: 123, FirstName: "User"},
+			Chat:      &telegram.Chat{ID: 123},
 			Date:      now,
 			ForwardOrigin: &telegram.MessageOrigin{
 				Type: "user",

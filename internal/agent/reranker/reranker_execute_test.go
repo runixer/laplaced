@@ -31,7 +31,7 @@ func TestExecute_MissingCandidatesParam(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -66,7 +66,7 @@ func TestExecute_EmptyCandidatesWithPeopleOnly(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -102,7 +102,7 @@ func TestExecute_EmptyCandidatesWithArtifactsOnly(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -179,7 +179,7 @@ func TestExecute_SharedContextTakesPriority(t *testing.T) {
 			ParamCurrentMessages:     "recent messages",
 		},
 		Shared: &agent.SharedContext{
-			UserID: 123, // This should be used
+			UserID: "123", // This should be used
 		},
 	}
 
@@ -214,7 +214,7 @@ func TestExecute_DisabledReranker_FallbackToVectorTop(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -265,7 +265,7 @@ func TestRerank_Success_ToolCallThenJSON(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -308,7 +308,7 @@ func TestRerank_Success_NoTopicsOnlyArtifacts(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -363,7 +363,7 @@ func TestRerank_Success_AllThreeTypes(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -414,7 +414,7 @@ func TestRerank_OldFormatResponse(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -451,7 +451,7 @@ func TestRerank_NewFormatWithReasons(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -489,7 +489,7 @@ func TestRerank_BareArrayFormat(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -530,7 +530,7 @@ func TestRerank_WrappedInArray(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -579,7 +579,7 @@ func TestRerank_WithPeopleAndArtifacts(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -633,7 +633,7 @@ func TestRerank_MultipleToolCalls(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -687,7 +687,7 @@ func TestRerank_MaxToolCallsReached(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -726,7 +726,7 @@ func TestRerank_LLMError_Timeout(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -760,7 +760,7 @@ func TestRerank_LLMError_GenericError(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -793,7 +793,7 @@ func TestRerank_EmptyResponse(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -829,7 +829,7 @@ func TestRerank_ProtocolViolation_NoToolCallFirstTurn(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -868,7 +868,7 @@ func TestRerank_ParseError_InvalidJSON(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -910,7 +910,7 @@ func TestRerank_AllHallucinated_ReturnsEmpty(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -964,7 +964,7 @@ func TestRerank_ModelEmpty_ReturnsEmpty(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -1009,7 +1009,7 @@ func TestRerank_Fallback_UsesRequestedIDs(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -1046,7 +1046,7 @@ func TestRerank_Fallback_VectorTopWhenNoState(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -1089,7 +1089,7 @@ func TestRerank_SomeHallucinatedTopics(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -1141,7 +1141,7 @@ func TestExecute_WithMediaParts(t *testing.T) {
 			ParamCurrentMessages:     "recent messages",
 			ParamMediaParts:          mediaParts,
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -1177,7 +1177,7 @@ func TestRerank_OnlyPeopleNoTopics(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -1214,7 +1214,7 @@ func TestRerank_OnlyArtifactsNoTopics(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)
@@ -1263,7 +1263,7 @@ func TestRerank_ResponseMetadata(t *testing.T) {
 			ParamOriginalQuery:       "original",
 			ParamCurrentMessages:     "recent messages",
 		},
-		Shared: &agent.SharedContext{UserID: 123},
+		Shared: &agent.SharedContext{UserID: "123"},
 	}
 
 	resp, err := reranker.Execute(context.Background(), req)

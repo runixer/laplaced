@@ -5,6 +5,8 @@ import (
 	"math"
 	"sort"
 	"strings"
+
+	"github.com/runixer/laplaced/internal/storage"
 )
 
 // AnalysisReport summarises the no-LLM-required statistics over a batch of
@@ -53,18 +55,18 @@ type Numeric struct {
 
 // PerTraceSnapshot is a one-line digest used for `--per-trace` listing.
 type PerTraceSnapshot struct {
-	TraceID    string  `json:"trace_id"`
-	UserID     int64   `json:"user_id"`
-	Fallback   string  `json:"fallback,omitempty"`
-	TopicsIn   int     `json:"topics_in"`
-	TopicsKept int     `json:"topics_kept"`
-	PeopleIn   int     `json:"people_in"`
-	PeopleKept int     `json:"people_kept"`
-	ArtIn      int     `json:"artifacts_in"`
-	ArtKept    int     `json:"artifacts_kept"`
-	CostUSD    float64 `json:"cost_usd"`
-	DurationMs int64   `json:"duration_ms"`
-	ToolCalls  int     `json:"tool_calls"`
+	TraceID    string          `json:"trace_id"`
+	UserID     storage.ScopeID `json:"user_id"`
+	Fallback   string          `json:"fallback,omitempty"`
+	TopicsIn   int             `json:"topics_in"`
+	TopicsKept int             `json:"topics_kept"`
+	PeopleIn   int             `json:"people_in"`
+	PeopleKept int             `json:"people_kept"`
+	ArtIn      int             `json:"artifacts_in"`
+	ArtKept    int             `json:"artifacts_kept"`
+	CostUSD    float64         `json:"cost_usd"`
+	DurationMs int64           `json:"duration_ms"`
+	ToolCalls  int             `json:"tool_calls"`
 }
 
 // AnalyzeSpans walks the spans once, collects per-trace floats, then computes

@@ -72,19 +72,19 @@ func TestGracefulShutdown(t *testing.T) {
 		// ... we need a gap > 1h (default chunk duration)
 		{ID: 3, CreatedAt: time.Now().Add(-1 * time.Hour), Content: "Msg 3"}, // Diff 8h -> Trigger chunk [1, 2]
 	}
-	mockStore.On("GetUnprocessedMessages", int64(123)).Return(msgs, nil)
+	mockStore.On("GetUnprocessedMessages", storage.PassthroughScopeID("telegram", "123")).Return(msgs, nil)
 
 	// Fact extraction loop calls GetTopicsPendingFacts
-	topic := storage.Topic{ID: 1, UserID: 123, StartMsgID: 1, EndMsgID: 3, CreatedAt: time.Now(), ConsolidationChecked: true}
-	mockStore.On("GetTopicsPendingFacts", int64(123)).Return([]storage.Topic{topic}, nil)
-	mockStore.On("SetTopicFactsExtracted", int64(123), int64(1), true).Return(nil)
+	topic := storage.Topic{ID: 1, UserID: storage.PassthroughScopeID("telegram", "123"), StartMsgID: 1, EndMsgID: 3, CreatedAt: time.Now(), ConsolidationChecked: true}
+	mockStore.On("GetTopicsPendingFacts", storage.PassthroughScopeID("telegram", "123")).Return([]storage.Topic{topic}, nil)
+	mockStore.On("SetTopicFactsExtracted", storage.PassthroughScopeID("telegram", "123"), int64(1), true).Return(nil)
 
 	// It calls GetMessagesByTopicID (from processFactExtraction)
 	mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return(msgs, nil)
 
 	// Consolidation loop calls GetTopics
-	mockStore.On("GetTopics", int64(123)).Return([]storage.Topic{}, nil).Maybe()
-	mockStore.On("GetMergeCandidates", int64(123)).Return([]storage.MergeCandidate{}, nil).Maybe()
+	mockStore.On("GetTopics", storage.PassthroughScopeID("telegram", "123")).Return([]storage.Topic{}, nil).Maybe()
+	mockStore.On("GetMergeCandidates", storage.PassthroughScopeID("telegram", "123")).Return([]storage.MergeCandidate{}, nil).Maybe()
 
 	// Mock AddRAGLog for topic extraction logging
 	mockStore.On("AddRAGLog", mock.Anything).Return(nil).Maybe()
@@ -105,7 +105,7 @@ func TestGracefulShutdown(t *testing.T) {
 	mockStore.On("GetAllUsers").Return([]storage.User{}, nil).Maybe()
 
 	// Mock GetFacts for memory service
-	mockStore.On("GetFacts", int64(123)).Return([]storage.Fact{}, nil).Maybe()
+	mockStore.On("GetFacts", storage.PassthroughScopeID("telegram", "123")).Return([]storage.Fact{}, nil).Maybe()
 
 	// Create services
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)

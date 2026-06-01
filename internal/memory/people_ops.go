@@ -15,7 +15,7 @@ import (
 // applyPeopleAdded handles creation of new people with deduplication.
 // Converts to UPDATE if duplicate detected via prefix matching.
 // Returns stats, list of newly added people (for subsequent lookups), and error.
-func (s *Service) applyPeopleAdded(ctx context.Context, userID int64, added []archivist.AddedPerson, currentPeople []storage.Person, referenceDate time.Time) (PeopleStats, []storage.Person, error) {
+func (s *Service) applyPeopleAdded(ctx context.Context, userID storage.ScopeID, added []archivist.AddedPerson, currentPeople []storage.Person, referenceDate time.Time) (PeopleStats, []storage.Person, error) {
 	var stats PeopleStats
 	var addedPeople []storage.Person
 
@@ -158,7 +158,7 @@ func (s *Service) applyPeopleAdded(ctx context.Context, userID int64, added []ar
 
 // applyPeopleUpdated applies field changes to existing people.
 // Handles ID/name lookup with fallbacks, conditional re-embedding.
-func (s *Service) applyPeopleUpdated(ctx context.Context, userID int64, updated []archivist.UpdatedPerson, currentPeople []storage.Person, referenceDate time.Time) (PeopleStats, error) {
+func (s *Service) applyPeopleUpdated(ctx context.Context, userID storage.ScopeID, updated []archivist.UpdatedPerson, currentPeople []storage.Person, referenceDate time.Time) (PeopleStats, error) {
 	var stats PeopleStats
 
 	for _, upd := range updated {
@@ -207,7 +207,7 @@ func (s *Service) applyPeopleUpdated(ctx context.Context, userID int64, updated 
 
 // applyPeopleMerged consolidates duplicate people records.
 // Merges bio, aliases, username, telegram_id; deletes source.
-func (s *Service) applyPeopleMerged(ctx context.Context, userID int64, merged []archivist.MergedPerson, currentPeople []storage.Person) (PeopleStats, error) {
+func (s *Service) applyPeopleMerged(ctx context.Context, userID storage.ScopeID, merged []archivist.MergedPerson, currentPeople []storage.Person) (PeopleStats, error) {
 	var stats PeopleStats
 
 	for _, m := range merged {

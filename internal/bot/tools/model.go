@@ -6,10 +6,11 @@ import (
 
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/storage"
 )
 
 // performModelTool executes a custom LLM model call.
-func (e *ToolExecutor) performModelTool(ctx context.Context, userID int64, modelName string, args map[string]interface{}) (string, error) {
+func (e *ToolExecutor) performModelTool(ctx context.Context, userID storage.ScopeID, modelName string, args map[string]interface{}) (string, error) {
 	query, _ := args["query"].(string)
 
 	startTime := time.Now()
@@ -24,7 +25,7 @@ func (e *ToolExecutor) performModelTool(ctx context.Context, userID int64, model
 				},
 			},
 		},
-		UserID: userID,
+		UserID: string(userID),
 	}
 
 	resp, err := e.orClient.CreateChatCompletion(ctx, req)

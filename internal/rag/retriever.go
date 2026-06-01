@@ -10,8 +10,8 @@ import (
 // This allows agents to be tested with mocks instead of the full Service.
 type Retriever interface {
 	// GetRecentTopics returns the N most recent topics for a user with message counts.
-	GetRecentTopics(userID int64, limit int) ([]storage.TopicExtended, error)
+	GetRecentTopics(userID storage.ScopeID, limit int) ([]storage.TopicExtended, error)
 
 	// Retrieve performs RAG retrieval for a query.
-	Retrieve(ctx context.Context, userID int64, query string, opts *RetrievalOptions) (*RetrievalResult, *RetrievalDebugInfo, error)
+	Retrieve(ctx context.Context, userID storage.ScopeID, query string, opts *RetrievalOptions) (*RetrievalResult, *RetrievalDebugInfo, error)
 }

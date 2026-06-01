@@ -100,7 +100,7 @@ func (s *Splitter) Execute(ctx context.Context, req *agent.Request) (response *a
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/splitter").Start(
 		ctx, "splitter.Execute",
 		trace.WithAttributes(
-			attribute.Int64("user.id", userID),
+			attribute.String("user.id", string(userID)),
 			attribute.Int("splitter.input_count", len(messages)),
 			attribute.Int("splitter.input_total_chars", inputTotalChars),
 		),
@@ -155,7 +155,7 @@ func (s *Splitter) Execute(ctx context.Context, req *agent.Request) (response *a
 			{Role: "user", Content: userMessage},
 		},
 		ResponseFormat: schema,
-		UserID:         userID,
+		UserID:         string(userID),
 	})
 	duration := time.Since(start)
 
@@ -226,12 +226,12 @@ func (s *Splitter) getMessages(req *agent.Request) []storage.Message {
 }
 
 // getUserID extracts user ID from request.
-func (s *Splitter) getUserID(req *agent.Request) int64 {
+func (s *Splitter) getUserID(req *agent.Request) storage.ScopeID {
 	return agent.GetUserID(req)
 }
 
 // getContext returns profile and recent topics.
-func (s *Splitter) getContext(ctx context.Context, req *agent.Request, userID int64) (profile, recentTopics string) {
+func (s *Splitter) getContext(ctx context.Context, req *agent.Request, userID storage.ScopeID) (profile, recentTopics string) {
 	// Try SharedContext first
 	profile, recentTopics, _ = agent.GetSharedContext(ctx, req)
 
@@ -241,14 +241,14 @@ func (s *Splitter) getContext(ctx context.Context, req *agent.Request, userID in
 	}
 
 	// Fallback: load directly for background jobs
-	if s.factRepo != nil && userID > 0 {
+	if s.factRepo != nil && userID != "" {
 		facts, err := s.factRepo.GetFacts(userID)
 		if err == nil {
 			profile = storage.FormatUserProfile(storage.FilterProfileFacts(facts))
 		}
 	}
 
-	if s.topicRepo != nil && userID > 0 {
+	if s.topicRepo != nil && userID != "" {
 		recentTopicsCount := s.cfg.RAG.GetRecentTopicsInContext()
 		if recentTopicsCount > 0 {
 			filter := storage.TopicFilter{UserID: userID}

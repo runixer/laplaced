@@ -34,7 +34,7 @@ func (m *mockAgentLogRepository) AddAgentLog(log storage.AgentLog) error {
 	return nil
 }
 
-func (m *mockAgentLogRepository) GetAgentLogs(agentType string, userID int64, limit int) ([]storage.AgentLog, error) {
+func (m *mockAgentLogRepository) GetAgentLogs(agentType string, userID storage.ScopeID, limit int) ([]storage.AgentLog, error) {
 	return nil, nil
 }
 
@@ -42,7 +42,7 @@ func (m *mockAgentLogRepository) GetAgentLogsExtended(filter storage.AgentLogFil
 	return storage.AgentLogResult{}, nil
 }
 
-func (m *mockAgentLogRepository) GetAgentLogFull(ctx context.Context, id int64, userID int64) (*storage.AgentLog, error) {
+func (m *mockAgentLogRepository) GetAgentLogFull(ctx context.Context, id int64, userID storage.ScopeID) (*storage.AgentLog, error) {
 	return nil, nil
 }
 
@@ -107,7 +107,7 @@ func TestLogger_Log_Enabled(t *testing.T) {
 
 	cost := 0.001
 	entry := agentlog.Entry{
-		UserID:           123,
+		UserID:           "123",
 		AgentType:        agentlog.AgentLaplace,
 		InputPrompt:      "test prompt",
 		InputContext:     map[string]interface{}{"key": "value"},
@@ -128,7 +128,7 @@ func TestLogger_Log_Enabled(t *testing.T) {
 
 	// Verify AddAgentLog was called
 	assert.NotNil(t, repo.capturedLog)
-	assert.Equal(t, int64(123), repo.capturedLog.UserID)
+	assert.Equal(t, storage.ScopeID("123"), repo.capturedLog.UserID)
 	assert.Equal(t, "laplace", repo.capturedLog.AgentType)
 	assert.True(t, repo.capturedLog.Success)
 }
@@ -138,7 +138,7 @@ func TestLogger_Log_Disabled(t *testing.T) {
 	logger := agentlog.NewLogger(repo, slog.Default(), false)
 
 	entry := agentlog.Entry{
-		UserID:    123,
+		UserID:    "123",
 		AgentType: agentlog.AgentLaplace,
 		Success:   true,
 	}
@@ -154,7 +154,7 @@ func TestLogger_Log_NilRepo(t *testing.T) {
 	logger := agentlog.NewLogger(nil, slog.Default(), true)
 
 	entry := agentlog.Entry{
-		UserID:    123,
+		UserID:    "123",
 		AgentType: agentlog.AgentLaplace,
 		Success:   true,
 	}
@@ -172,7 +172,7 @@ func TestLogger_LogSuccess(t *testing.T) {
 	// Call LogSuccess with all parameters
 	logger.LogSuccess(
 		context.Background(),
-		456,
+		"456",
 		agentlog.AgentReranker,
 		"test input prompt",
 		map[string]interface{}{"input": "context"},
@@ -189,7 +189,7 @@ func TestLogger_LogSuccess(t *testing.T) {
 
 	// Verify AddAgentLog was called
 	assert.NotNil(t, repo.capturedLog)
-	assert.Equal(t, int64(456), repo.capturedLog.UserID)
+	assert.Equal(t, storage.ScopeID("456"), repo.capturedLog.UserID)
 	assert.Equal(t, "reranker", repo.capturedLog.AgentType)
 	assert.True(t, repo.capturedLog.Success)
 	assert.Equal(t, "test input prompt", repo.capturedLog.InputPrompt)
@@ -203,7 +203,7 @@ func TestLogger_LogSuccess_WithNilCost(t *testing.T) {
 	// Call LogSuccess with nil cost
 	logger.LogSuccess(
 		context.Background(),
-		456,
+		"456",
 		agentlog.AgentReranker,
 		"test input prompt",
 		map[string]interface{}{"input": "context"},
@@ -230,7 +230,7 @@ func TestLogger_LogError(t *testing.T) {
 	// Call LogError with error parameters
 	logger.LogError(
 		context.Background(),
-		789,
+		"789",
 		agentlog.AgentSplitter,
 		"test input prompt",
 		map[string]interface{}{"input": "context"},
@@ -242,7 +242,7 @@ func TestLogger_LogError(t *testing.T) {
 
 	// Verify AddAgentLog was called
 	assert.NotNil(t, repo.capturedLog)
-	assert.Equal(t, int64(789), repo.capturedLog.UserID)
+	assert.Equal(t, storage.ScopeID("789"), repo.capturedLog.UserID)
 	assert.Equal(t, "splitter", repo.capturedLog.AgentType)
 	assert.False(t, repo.capturedLog.Success)
 	assert.Equal(t, "something went wrong", repo.capturedLog.ErrorMessage)
@@ -255,7 +255,7 @@ func TestLogger_LogError_WithNilContext(t *testing.T) {
 	// Call LogError with minimal parameters
 	logger.LogError(
 		context.Background(),
-		789,
+		"789",
 		agentlog.AgentSplitter,
 		"test input prompt",
 		nil,
@@ -639,7 +639,7 @@ func TestConversationTurns_Structure(t *testing.T) {
 func TestEntry_Structure(t *testing.T) {
 	cost := 0.01
 	entry := agentlog.Entry{
-		UserID:           123,
+		UserID:           "123",
 		AgentType:        agentlog.AgentLaplace,
 		InputPrompt:      "test prompt",
 		InputContext:     map[string]string{"key": "value"},
@@ -679,7 +679,7 @@ func TestEntry_AllAgentTypes(t *testing.T) {
 	for _, at := range agentTypes {
 		t.Run(string(at), func(t *testing.T) {
 			entry := agentlog.Entry{
-				UserID:    123,
+				UserID:    "123",
 				AgentType: at,
 				Success:   true,
 			}
@@ -705,7 +705,7 @@ func TestLogger_Log_AllFields(t *testing.T) {
 	}
 
 	entry := agentlog.Entry{
-		UserID:           999,
+		UserID:           "999",
 		AgentType:        agentlog.AgentReranker,
 		InputPrompt:      "What is X?",
 		InputContext:     map[string]string{"context": "value"},
@@ -726,7 +726,7 @@ func TestLogger_Log_AllFields(t *testing.T) {
 	logger.Log(context.Background(), entry)
 
 	assert.NotNil(t, repo.capturedLog)
-	assert.Equal(t, int64(999), repo.capturedLog.UserID)
+	assert.Equal(t, storage.ScopeID("999"), repo.capturedLog.UserID)
 	assert.True(t, repo.capturedLog.Success)
 }
 
@@ -748,7 +748,7 @@ func TestLogger_Log_WithConversationTurns(t *testing.T) {
 	}
 
 	entry := agentlog.Entry{
-		UserID:            777,
+		UserID:            "777",
 		AgentType:         agentlog.AgentReranker,
 		InputPrompt:       "reranker query",
 		OutputResponse:    "final answer",
@@ -775,7 +775,7 @@ func TestLogger_Log_UnmarshalableMetadata(t *testing.T) {
 
 	// Channel cannot be marshaled to JSON
 	entry := agentlog.Entry{
-		UserID:    123,
+		UserID:    "123",
 		AgentType: agentlog.AgentLaplace,
 		Success:   true,
 		Metadata:  make(chan int),
@@ -794,7 +794,7 @@ func TestLogger_Log_UnmarshalableInputContext(t *testing.T) {
 	logger := agentlog.NewLogger(repo, slog.Default(), true)
 
 	entry := agentlog.Entry{
-		UserID:       123,
+		UserID:       "123",
 		AgentType:    agentlog.AgentLaplace,
 		InputContext: make(chan int),
 		Success:      true,
@@ -818,7 +818,7 @@ func TestLogger_Log_WithStringMetadata(t *testing.T) {
 	logger := agentlog.NewLogger(repo, slog.Default(), true)
 
 	entry := agentlog.Entry{
-		UserID:    123,
+		UserID:    "123",
 		AgentType: agentlog.AgentLaplace,
 		Success:   true,
 		Metadata:  "already a string",
@@ -837,7 +837,7 @@ func TestLogger_Log_WithStringContexts(t *testing.T) {
 	logger := agentlog.NewLogger(repo, slog.Default(), true)
 
 	entry := agentlog.Entry{
-		UserID:        123,
+		UserID:        "123",
 		AgentType:     agentlog.AgentLaplace,
 		Success:       true,
 		InputContext:  "{\"already\":\"json\"}",
@@ -859,7 +859,7 @@ func TestLogger_Log_NilPointerFields(t *testing.T) {
 
 	var nilPtr *struct{ Field string }
 	entry := agentlog.Entry{
-		UserID:        123,
+		UserID:        "123",
 		AgentType:     agentlog.AgentLaplace,
 		Success:       true,
 		InputContext:  nilPtr,
@@ -1050,7 +1050,7 @@ func TestLogger_Log_ErrorFromRepo(t *testing.T) {
 	logger := agentlog.NewLogger(repo, slog.Default(), true)
 
 	entry := agentlog.Entry{
-		UserID:    123,
+		UserID:    "123",
 		AgentType: agentlog.AgentLaplace,
 		Success:   true,
 	}

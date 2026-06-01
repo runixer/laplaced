@@ -24,7 +24,7 @@ func TestExecutor_ExecuteSingleShot(t *testing.T) {
 			name: "successful execution",
 			req: SingleShotRequest{
 				AgentType:    TypeEnricher,
-				UserID:       123,
+				UserID:       "123",
 				Model:        "test-model",
 				SystemPrompt: "You are a helpful assistant",
 				UserPrompt:   "Hello",
@@ -37,7 +37,7 @@ func TestExecutor_ExecuteSingleShot(t *testing.T) {
 			name: "handles LLM error",
 			req: SingleShotRequest{
 				AgentType:    TypeEnricher,
-				UserID:       123,
+				UserID:       "123",
 				Model:        "test-model",
 				SystemPrompt: "test",
 				UserPrompt:   "test",
@@ -50,7 +50,7 @@ func TestExecutor_ExecuteSingleShot(t *testing.T) {
 			name: "handles empty response",
 			req: SingleShotRequest{
 				AgentType:    TypeEnricher,
-				UserID:       123,
+				UserID:       "123",
 				Model:        "test-model",
 				SystemPrompt: "test",
 				UserPrompt:   "test",
@@ -98,7 +98,7 @@ func TestExecutor_ExecuteSingleShot_JSONMode(t *testing.T) {
 
 	resp, err := executor.ExecuteSingleShot(context.Background(), SingleShotRequest{
 		AgentType:    TypeArchivist,
-		UserID:       123,
+		UserID:       "123",
 		Model:        "test-model",
 		SystemPrompt: "You are a JSON generator",
 		UserPrompt:   "Generate JSON",
@@ -120,7 +120,7 @@ func TestExecutor_ExecuteSingleShot_WithMessages(t *testing.T) {
 
 	resp, err := executor.ExecuteSingleShot(context.Background(), SingleShotRequest{
 		AgentType: TypeLaplace,
-		UserID:    123,
+		UserID:    "123",
 		Model:     "test-model",
 		Messages: []openrouter.Message{
 			{Role: "system", Content: "You are helpful"},
@@ -162,7 +162,7 @@ func TestExecutor_ExecuteAgentic(t *testing.T) {
 			name: "single turn without tool calls",
 			req: SingleShotRequest{
 				AgentType:    TypeReranker,
-				UserID:       123,
+				UserID:       "123",
 				Model:        "test-model",
 				SystemPrompt: "You are a helpful assistant",
 				UserPrompt:   "Hello",
@@ -181,7 +181,7 @@ func TestExecutor_ExecuteAgentic(t *testing.T) {
 			name: "multi turn with tool call then finish",
 			req: SingleShotRequest{
 				AgentType:    TypeReranker,
-				UserID:       123,
+				UserID:       "123",
 				Model:        "test-model",
 				SystemPrompt: "test",
 				UserPrompt:   "search",
@@ -223,7 +223,7 @@ func TestExecutor_ExecuteAgentic(t *testing.T) {
 			name: "max turns exceeded",
 			req: SingleShotRequest{
 				AgentType:    TypeReranker,
-				UserID:       123,
+				UserID:       "123",
 				Model:        "test-model",
 				SystemPrompt: "test",
 				UserPrompt:   "keep calling tools",
@@ -259,7 +259,7 @@ func TestExecutor_ExecuteAgentic(t *testing.T) {
 			name: "LLM error on first turn",
 			req: SingleShotRequest{
 				AgentType:    TypeReranker,
-				UserID:       123,
+				UserID:       "123",
 				Model:        "test-model",
 				SystemPrompt: "test",
 				UserPrompt:   "error",
@@ -278,7 +278,7 @@ func TestExecutor_ExecuteAgentic(t *testing.T) {
 			name: "empty response from LLM",
 			req: SingleShotRequest{
 				AgentType:    TypeReranker,
-				UserID:       123,
+				UserID:       "123",
 				Model:        "test-model",
 				SystemPrompt: "test",
 				UserPrompt:   "empty",
@@ -299,7 +299,7 @@ func TestExecutor_ExecuteAgentic(t *testing.T) {
 			name: "with timeout",
 			req: SingleShotRequest{
 				AgentType:    TypeReranker,
-				UserID:       123,
+				UserID:       "123",
 				Model:        "test-model",
 				SystemPrompt: "test",
 				UserPrompt:   "quick",
@@ -363,7 +363,7 @@ func TestExecutor_ExecuteAgentic_ToolChoice(t *testing.T) {
 
 	resp, err := executor.ExecuteAgentic(context.Background(), SingleShotRequest{
 		AgentType:    TypeReranker,
-		UserID:       123,
+		UserID:       "123",
 		Model:        "test-model",
 		SystemPrompt: "test",
 		UserPrompt:   "test",
@@ -410,7 +410,7 @@ func TestExecutor_ExecuteAgentic_NoToolHandler(t *testing.T) {
 
 	resp, err := executor.ExecuteAgentic(context.Background(), SingleShotRequest{
 		AgentType:    TypeReranker,
-		UserID:       123,
+		UserID:       "123",
 		Model:        "test-model",
 		SystemPrompt: "test",
 		UserPrompt:   "test",

@@ -28,7 +28,7 @@ func TestExecuteToolCall_UnknownTool_RecordsSpan(t *testing.T) {
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, cfg, testutil.TestLogger())
 
-	_, err := exec.ExecuteToolCall(context.Background(), CallContext{UserID: 99}, "missing_tool", `{}`)
+	_, err := exec.ExecuteToolCall(context.Background(), CallContext{UserID: "99"}, "missing_tool", `{}`)
 	require.Error(t, err)
 
 	spans := getSpans()
@@ -41,7 +41,7 @@ func TestExecuteToolCall_UnknownTool_RecordsSpan(t *testing.T) {
 		attrs[kv.Key] = kv.Value
 	}
 	assert.Equal(t, "missing_tool", attrs["tool.name"].AsString())
-	assert.Equal(t, int64(99), attrs["user.id"].AsInt64())
+	assert.Equal(t, "99", attrs["user.id"].AsString())
 	assert.False(t, attrs["tool.ok"].AsBool(), "unknown tool must flip tool.ok to false")
 	assert.Equal(t, sdkcodes.Error, span.Status.Code, "err-return path must set Error status")
 }
@@ -55,7 +55,7 @@ func TestExecuteToolCall_ContentEventsGatedByToggle(t *testing.T) {
 
 	run := func() []string {
 		getSpans := testutil.WithTracingCapture(t)
-		_, _ = exec.ExecuteToolCall(context.Background(), CallContext{UserID: 1}, "missing", `{"foo":"bar"}`)
+		_, _ = exec.ExecuteToolCall(context.Background(), CallContext{UserID: "1"}, "missing", `{"foo":"bar"}`)
 		spans := getSpans()
 		require.Len(t, spans, 1)
 		names := make([]string, 0, len(spans[0].Events))

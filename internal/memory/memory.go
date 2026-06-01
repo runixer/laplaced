@@ -22,7 +22,7 @@ import (
 )
 
 type VectorSearcher interface {
-	FindSimilarFacts(ctx context.Context, userID int64, embedding []float32, threshold float32) ([]storage.Fact, error)
+	FindSimilarFacts(ctx context.Context, userID storage.ScopeID, embedding []float32, threshold float32) ([]storage.Fact, error)
 }
 
 type Service struct {
@@ -38,7 +38,7 @@ type Service struct {
 	vectorSearcher  VectorSearcher
 	agentLogger     *agentlog.Logger
 	archivistAgent  agent.Agent             // Fact extraction agent
-	scopeRepo       storage.ScopeRepository // channel-scope detection (Phase 6); nil on home
+	scopeRepo       storage.ScopeRepository // channel-scope detection (Phase 6); nil without a resolver (Telegram-only path)
 }
 
 func NewService(logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, factHistoryRepo storage.FactHistoryRepository, orClient openrouter.Client, translator *i18n.Translator) *Service {
@@ -83,7 +83,7 @@ func (s *Service) SetScopeRepository(sr storage.ScopeRepository) {
 
 // isChannelScope reports whether userID is a channel scope, defaulting to false
 // (DM) when the repo is absent or the lookup fails.
-func (s *Service) isChannelScope(userID int64) bool {
+func (s *Service) isChannelScope(userID storage.ScopeID) bool {
 	if s.scopeRepo == nil {
 		return false
 	}
@@ -157,13 +157,13 @@ func (s *FactStats) AddEmbeddingUsage(tokens int, cost *float64) {
 	}
 }
 
-func (s *Service) ProcessSession(ctx context.Context, userID int64, messages []storage.Message, referenceDate time.Time, topicID int64) error {
+func (s *Service) ProcessSession(ctx context.Context, userID storage.ScopeID, messages []storage.Message, referenceDate time.Time, topicID int64) error {
 	_, err := s.ProcessSessionWithStats(ctx, userID, messages, referenceDate, topicID)
 	return err
 }
 
 // ProcessSessionWithStats processes a session and returns statistics about fact changes.
-func (s *Service) ProcessSessionWithStats(ctx context.Context, userID int64, messages []storage.Message, referenceDate time.Time, topicID int64) (stats FactStats, err error) {
+func (s *Service) ProcessSessionWithStats(ctx context.Context, userID storage.ScopeID, messages []storage.Message, referenceDate time.Time, topicID int64) (stats FactStats, err error) {
 	// Mark as background job for metrics (archiver is a maintenance task)
 	ctx = jobtype.WithJobType(ctx, jobtype.Background)
 
@@ -177,7 +177,7 @@ func (s *Service) ProcessSessionWithStats(ctx context.Context, userID int64, mes
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/memory").Start(
 		ctx, "memory.ProcessSession",
 		trace.WithAttributes(
-			attribute.Int64("user.id", userID),
+			attribute.String("user.id", string(userID)),
 			attribute.Int64("memory.topic_id", topicID),
 			attribute.Int("memory.message_count", len(messages)),
 			attribute.String("job.type", jobtype.Background.String()),
@@ -260,7 +260,7 @@ func (s *Service) ProcessSessionWithStats(ctx context.Context, userID int64, mes
 	return stats, nil
 }
 
-func (s *Service) extractMemoryUpdate(ctx context.Context, userID int64, session []storage.Message, facts []storage.Fact, people []storage.Person, referenceDate time.Time, user *storage.User) (*archivist.Result, string, chatUsage, error) {
+func (s *Service) extractMemoryUpdate(ctx context.Context, userID storage.ScopeID, session []storage.Message, facts []storage.Fact, people []storage.Person, referenceDate time.Time, user *storage.User) (*archivist.Result, string, chatUsage, error) {
 	if s.archivistAgent == nil {
 		return nil, "", chatUsage{}, fmt.Errorf("archivist agent not configured")
 	}
@@ -268,7 +268,7 @@ func (s *Service) extractMemoryUpdate(ctx context.Context, userID int64, session
 }
 
 // extractMemoryUpdateViaAgent delegates fact and people extraction to the Archivist agent.
-func (s *Service) extractMemoryUpdateViaAgent(ctx context.Context, userID int64, session []storage.Message, facts []storage.Fact, people []storage.Person, referenceDate time.Time, user *storage.User) (*archivist.Result, string, chatUsage, error) {
+func (s *Service) extractMemoryUpdateViaAgent(ctx context.Context, userID storage.ScopeID, session []storage.Message, facts []storage.Fact, people []storage.Person, referenceDate time.Time, user *storage.User) (*archivist.Result, string, chatUsage, error) {
 	startTime := time.Now()
 	defer func() {
 		RecordMemoryExtraction(time.Since(startTime).Seconds())
@@ -371,7 +371,7 @@ func convertArchivistResult(result *archivist.Result) *MemoryUpdate {
 	return update
 }
 
-func (s *Service) applyUpdateWithStats(ctx context.Context, userID int64, update *MemoryUpdate, currentFacts []storage.Fact, referenceDate time.Time, topicID int64, requestInput string) (FactStats, error) {
+func (s *Service) applyUpdateWithStats(ctx context.Context, userID storage.ScopeID, update *MemoryUpdate, currentFacts []storage.Fact, referenceDate time.Time, topicID int64, requestInput string) (FactStats, error) {
 	var stats FactStats
 
 	// Handle Added
@@ -619,7 +619,7 @@ func buildPersonEmbeddingText(displayName string, username *string, aliases []st
 
 // applyPeopleUpdates applies people changes from the archivist result.
 // Coordinator function that delegates to specific operation handlers.
-func (s *Service) applyPeopleUpdates(ctx context.Context, userID int64, peopleResult archivist.PeopleResult, currentPeople []storage.Person, referenceDate time.Time) (PeopleStats, error) {
+func (s *Service) applyPeopleUpdates(ctx context.Context, userID storage.ScopeID, peopleResult archivist.PeopleResult, currentPeople []storage.Person, referenceDate time.Time) (PeopleStats, error) {
 	var totalStats PeopleStats
 
 	// Handle Added people

@@ -3,14 +3,15 @@ package bot
 import (
 	"context"
 	"log/slog"
-	"strconv"
 	"sync"
 	"time"
+
+	"github.com/runixer/laplaced/internal/storage"
 )
 
 // SessionInfo represents information about an active message grouping session.
 type SessionInfo struct {
-	UserID       int64
+	UserID       storage.ScopeID
 	MessageCount int
 	StartedAt    time.Time
 	LastMessage  time.Time
@@ -24,7 +25,7 @@ type MessageGroup struct {
 	Messages   []IncomingMessage
 	Timer      *time.Timer
 	CancelFunc context.CancelFunc
-	UserID     int64
+	UserID     storage.ScopeID
 	StartedAt  time.Time // When the first message in this group was received
 }
 
@@ -33,8 +34,8 @@ type MessageGroup struct {
 // (key = scope id + sender), so two people @mentioning the bot within turnWait
 // get separate replies instead of being merged into one turn. The storage scope
 // (MessageGroup.UserID) stays the scope id in both cases.
-func groupKeyFor(scopeID int64, im IncomingMessage) string {
-	key := strconv.FormatInt(scopeID, 10)
+func groupKeyFor(scopeID storage.ScopeID, im IncomingMessage) string {
+	key := string(scopeID)
 	if im.IsDirect {
 		return key
 	}
@@ -125,7 +126,7 @@ func (mg *MessageGrouper) Stop() {
 			}()
 
 			mg.logger.Info("processing message group on shutdown",
-				slog.Int64("user_id", g.UserID),
+				slog.String("user_id", string(g.UserID)),
 				slog.Int("message_count", len(g.Messages)))
 			// Use background context since we're shutting down
 			mg.onGroupReady(context.Background(), g)
@@ -144,7 +145,7 @@ func (mg *MessageGrouper) Stop() {
 // AddMessage adds a new message to its group. scopeID is the resolved internal
 // scope id (storage partition key); the grouping key is derived from it and the
 // message (per-sender in channels — see groupKeyFor).
-func (mg *MessageGrouper) AddMessage(scopeID int64, im IncomingMessage) {
+func (mg *MessageGrouper) AddMessage(scopeID storage.ScopeID, im IncomingMessage) {
 	mg.mu.Lock()
 	defer mg.mu.Unlock()
 
@@ -249,7 +250,7 @@ func (mg *MessageGrouper) processGroup(ctx context.Context, key string) {
 		userLock.mu.Unlock()
 	}()
 
-	mg.logger.Info("processing message group", slog.Int64("user_id", processingGroup.UserID), slog.Int("message_count", len(processingGroup.Messages)))
+	mg.logger.Info("processing message group", slog.String("user_id", string(processingGroup.UserID)), slog.Int("message_count", len(processingGroup.Messages)))
 
 	// Pass the context down to the handler.
 	mg.onGroupReady(ctx, processingGroup)
@@ -284,7 +285,7 @@ func (mg *MessageGrouper) GetActiveSessions() []SessionInfo {
 // ForceCloseSession immediately processes and closes any active groups for the
 // given scope id. Returns true if at least one group was found and closed. In a
 // channel a scope may have several per-sender groups; all are closed.
-func (mg *MessageGrouper) ForceCloseSession(scopeID int64) bool {
+func (mg *MessageGrouper) ForceCloseSession(scopeID storage.ScopeID) bool {
 	mg.mu.Lock()
 
 	type pending struct {

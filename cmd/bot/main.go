@@ -246,7 +246,18 @@ func run() int {
 		logger.Warn("Language not specified in config, defaulting to 'en'")
 	}
 
-	store, err := storage.NewSQLiteStore(logger, cfg.Database.Path)
+	store, err := storage.NewStore(storage.Config{
+		Driver: cfg.Database.Driver,
+		Path:   cfg.Database.Path,
+		Postgres: storage.PostgresConfig{
+			Host:     cfg.Database.Postgres.Host,
+			Port:     cfg.Database.Postgres.Port,
+			Database: cfg.Database.Postgres.Database,
+			User:     cfg.Database.Postgres.User,
+			Password: cfg.Database.Postgres.Password,
+			SSLMode:  cfg.Database.Postgres.SSLMode,
+		},
+	}, logger)
 	if err != nil {
 		logger.Error("failed to create storage", "error", err)
 		return 1
@@ -391,7 +402,7 @@ func run() int {
 	// (Telegram polling goroutine, or Mattermost WS goroutine).
 	ingestionDone := make(chan struct{})
 
-	if cfg.Transport == "time" {
+	if cfg.Transport == "mattermost" {
 		mmClient, err := mattermost.NewClient(ctx, mattermost.Config{
 			ServerURL: cfg.Mattermost.ServerURL,
 			BotToken:  cfg.Mattermost.BotToken,
@@ -404,6 +415,15 @@ func run() int {
 		b.SetScopeRepository(store)
 		b.SetTransport(bot.NewMattermostTransport(mmClient, cfg, logger))
 		b.SetRenderer(bot.NewMattermostRenderer(mmClient.MaxPostSize(), logger))
+
+		// Principal identity resolution is organic: wired only when the transport
+		// config carries a principal_resolver block. Absent → passthrough (DMs get
+		// their own isolated scope, today's behavior). Present → federated-passive
+		// linkage (trust gate = auth_service, never email).
+		if pr := cfg.Mattermost.PrincipalResolver; pr != nil {
+			b.SetPrincipalResolver(bot.NewMattermostPrincipalResolver(mmClient, pr.TrustedAuthServices, logger))
+			logger.Info("principal resolution enabled", "trusted_auth_services", pr.TrustedAuthServices)
+		}
 		logger.Info("Mattermost/Time transport active", "server", cfg.Mattermost.ServerURL)
 
 		// WS loop closes mmClient.Events() on ctx cancel; ingestion ranges over it

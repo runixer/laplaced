@@ -23,7 +23,7 @@ import (
 func TestStatsHandler_ErrorPaths(t *testing.T) {
 	t.Run("GetStats error", func(t *testing.T) {
 		server, mockStorage, _ := setupTestServer(t)
-		mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
+		mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
 		mockStorage.On("GetStats").Return(nil, assert.AnError)
 
 		req := testutil.NewTestRequest(t, "GET", "/ui/stats?user_id=123", nil)
@@ -37,10 +37,10 @@ func TestStatsHandler_ErrorPaths(t *testing.T) {
 func TestStatsHandler_CacheHit(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
 	stats := &storage.DashboardStats{TotalTopics: 10, TotalFacts: 5}
-	server.statsCache.Set(123, stats)
+	server.statsCache.Set("123", stats)
 
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
-	mockStorage.On("GetStats").Return(map[int64]storage.Stat{123: {TokensUsed: 100}}, nil)
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
+	mockStorage.On("GetStats").Return(map[storage.ScopeID]storage.Stat{"123": {TokensUsed: 100}}, nil)
 
 	req := testutil.NewTestRequest(t, "GET", "/ui/stats?user_id=123", nil)
 	rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.statsHandler), req)
@@ -52,7 +52,7 @@ func TestStatsHandler_CacheHit(t *testing.T) {
 func TestSessionsHandler_NoSessions(t *testing.T) {
 	server, mockStorage, mockBot := setupTestServer(t)
 	mockBot.On("GetActiveSessions").Return([]rag.ActiveSessionInfo{}, nil)
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123, FirstName: "Test"}}, nil)
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123", FirstName: "Test"}}, nil)
 
 	req := testutil.NewTestRequest(t, "GET", "/ui/debug/sessions", nil)
 	rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.sessionsHandler), req)
@@ -64,10 +64,10 @@ func TestSessionsHandler_NoSessions(t *testing.T) {
 func TestSessionsHandler_UsernameFallback(t *testing.T) {
 	server, mockStorage, mockBot := setupTestServer(t)
 	sessions := []rag.ActiveSessionInfo{
-		{UserID: 123, MessageCount: 1, FirstMessageTime: time.Now(), LastMessageTime: time.Now(), ContextSize: 100},
+		{UserID: "123", MessageCount: 1, FirstMessageTime: time.Now(), LastMessageTime: time.Now(), ContextSize: 100},
 	}
 	mockBot.On("GetActiveSessions").Return(sessions, nil)
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123, Username: "testuser"}}, nil)
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123", Username: "testuser"}}, nil)
 
 	req := testutil.NewTestRequest(t, "GET", "/ui/debug/sessions", nil)
 	rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.sessionsHandler), req)
@@ -87,7 +87,7 @@ func TestSessionsProcessSSEHandler_Validation(t *testing.T) {
 	})
 
 	t.Run("invalid user_id", func(t *testing.T) {
-		req := testutil.NewTestRequest(t, "GET", "/ui/debug/sessions/process?user_id=invalid", nil)
+		req := testutil.NewTestRequest(t, "GET", "/ui/debug/sessions/process?user_id=", nil)
 		rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.sessionsProcessSSEHandler), req)
 		assert.Equal(t, http.StatusBadRequest, rr.Code)
 	})
@@ -112,8 +112,8 @@ func TestDebugChatHandler_Validation(t *testing.T) {
 
 	t.Run("get messages error", func(t *testing.T) {
 		server, mockStorage, _ := setupTestServer(t)
-		mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
-		mockStorage.On("GetUnprocessedMessages", int64(123)).Return([]storage.Message{}, assert.AnError)
+		mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
+		mockStorage.On("GetUnprocessedMessages", storage.ScopeID("123")).Return([]storage.Message{}, assert.AnError)
 
 		req := testutil.NewTestRequest(t, "GET", "/ui/debug/chat?user_id=123", nil)
 		rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.debugChatHandler), req)
@@ -134,7 +134,7 @@ func TestDebugChatSendHandler_Validation(t *testing.T) {
 	})
 
 	t.Run("empty message", func(t *testing.T) {
-		body := map[string]any{"user_id": 123, "message": "", "save_to_history": true}
+		body := map[string]any{"user_id": "123", "message": "", "save_to_history": true}
 		req := testutil.NewTestRequest(t, "POST", "/ui/debug/chat/send", body)
 		rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.debugChatSendHandler), req)
 		assert.Equal(t, http.StatusBadRequest, rr.Code)
@@ -155,8 +155,8 @@ func TestUpdateMetrics_ErrorHandling(t *testing.T) {
 		server, mockStorage, _ := setupTestServer(t)
 		server.bot = nil
 		server.maintenanceRepo = nil // Skip storage metrics
-		mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
-		mockStorage.On("GetFactStatsByUser", int64(123)).Return(storage.FactStats{CountByType: map[string]int{"identity": 10}}, nil)
+		mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
+		mockStorage.On("GetFactStatsByUser", storage.ScopeID("123")).Return(storage.FactStats{CountByType: map[string]int{"identity": 10}}, nil)
 		mockStorage.On("GetTopicsExtended", mock.Anything, 1, 0, "", "").Return(storage.TopicResult{TotalCount: 5}, nil)
 		// Should not panic
 		server.updateMetrics()
@@ -220,8 +220,8 @@ func TestStart_PasswordGeneration(t *testing.T) {
 
 	// Mock updateMetrics calls
 	mockBot.On("GetActiveSessions").Return([]rag.ActiveSessionInfo{}, nil)
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
-	mockStorage.On("GetFactStatsByUser", int64(123)).Return(storage.FactStats{CountByType: map[string]int{}}, nil)
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
+	mockStorage.On("GetFactStatsByUser", storage.ScopeID("123")).Return(storage.FactStats{CountByType: map[string]int{}}, nil)
 	mockStorage.On("GetTopicsExtended", mock.Anything, 1, 0, "", "").Return(storage.TopicResult{TotalCount: 0}, nil)
 	mockStorage.On("GetDBSize").Return(int64(1024), nil)
 	mockStorage.On("GetTableSizes").Return([]storage.TableSize{}, nil)
@@ -307,13 +307,14 @@ func TestArtifactDownloadHandler_CacheHeaders(t *testing.T) {
 	assert.NoError(t, os.WriteFile(testFile, []byte("test"), 0644))
 	server.cfg.Artifacts.StoragePath = testDir
 
+	scope := storage.PassthroughScopeID("telegram", "123")
 	artifact := &storage.Artifact{
-		ID: 1, UserID: 123, FilePath: "test.txt",
+		ID: 1, UserID: scope, FilePath: "test.txt",
 		OriginalName: "test.txt", MimeType: "text/plain",
 	}
-	mockStorage.On("GetArtifact", int64(123), int64(1)).Return(artifact, nil)
+	mockStorage.On("GetArtifact", scope, int64(1)).Return(artifact, nil)
 
-	req := testutil.NewTestRequest(t, "GET", "/ui/debug/artifacts/download?id=1&user_id=123", nil)
+	req := testutil.NewTestRequest(t, "GET", "/ui/debug/artifacts/download?id=1&user_id="+string(scope), nil)
 	rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.artifactDownloadHandler), req)
 
 	assert.Equal(t, http.StatusOK, rr.Code)
@@ -326,14 +327,14 @@ func TestDashboardStatsCache_Expiration2(t *testing.T) {
 	cache := newDashboardStatsCache(1 * time.Millisecond)
 
 	stats := &storage.DashboardStats{TotalTopics: 10}
-	cache.Set(123, stats)
+	cache.Set("123", stats)
 
-	_, ok := cache.Get(123)
+	_, ok := cache.Get("123")
 	assert.True(t, ok)
 
 	time.Sleep(10 * time.Millisecond)
 
-	_, ok = cache.Get(123)
+	_, ok = cache.Get("123")
 	assert.False(t, ok)
 }
 
@@ -341,8 +342,8 @@ func TestDashboardStatsCache_Expiration2(t *testing.T) {
 func TestFactsHandler_ErrorPaths(t *testing.T) {
 	t.Run("GetFacts error", func(t *testing.T) {
 		server, mockStorage, _ := setupTestServer(t)
-		mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
-		mockStorage.On("GetFacts", int64(123)).Return([]storage.Fact{}, assert.AnError)
+		mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
+		mockStorage.On("GetFacts", storage.ScopeID("123")).Return([]storage.Fact{}, assert.AnError)
 
 		req := testutil.NewTestRequest(t, "GET", "/ui/debug/facts?user_id=123", nil)
 		rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.factsHandler), req)
@@ -355,7 +356,7 @@ func TestFactsHandler_ErrorPaths(t *testing.T) {
 func TestPeopleHandler_ErrorPaths(t *testing.T) {
 	t.Run("GetPeople error", func(t *testing.T) {
 		server, mockStorage, _ := setupTestServer(t)
-		mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
+		mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
 		mockStorage.On("GetPeopleExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(storage.PersonResult{}, assert.AnError)
 
 		req := testutil.NewTestRequest(t, "GET", "/ui/debug/people?user_id=123", nil)
@@ -369,7 +370,7 @@ func TestPeopleHandler_ErrorPaths(t *testing.T) {
 func TestTopicsHandler_ErrorPaths(t *testing.T) {
 	t.Run("GetTopicsExtended error", func(t *testing.T) {
 		server, mockStorage, _ := setupTestServer(t)
-		mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
+		mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
 		mockStorage.On("GetTopicsExtended", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(storage.TopicResult{}, assert.AnError)
 
 		req := testutil.NewTestRequest(t, "GET", "/ui/debug/topics?user_id=123", nil)
@@ -383,7 +384,7 @@ func TestTopicsHandler_ErrorPaths(t *testing.T) {
 func TestArtifactsHandler_ErrorPaths(t *testing.T) {
 	t.Run("GetArtifacts error", func(t *testing.T) {
 		server, mockStorage, _ := setupTestServer(t)
-		mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
+		mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
 		mockStorage.On("GetArtifacts", mock.Anything, mock.Anything, mock.Anything).Return([]storage.Artifact{}, int64(0), assert.AnError)
 
 		req := testutil.NewTestRequest(t, "GET", "/ui/debug/artifacts?user_id=123", nil)
@@ -397,7 +398,7 @@ func TestArtifactsHandler_ErrorPaths(t *testing.T) {
 func TestAgentLogDetailHandler_ErrorPaths(t *testing.T) {
 	t.Run("GetAgentLogFull error", func(t *testing.T) {
 		server, mockStorage, _ := setupTestServer(t)
-		mockStorage.On("GetAgentLogFull", mock.Anything, int64(123), int64(123)).Return(nil, assert.AnError)
+		mockStorage.On("GetAgentLogFull", mock.Anything, int64(123), storage.ScopeID("123")).Return(nil, assert.AnError)
 
 		req := testutil.NewTestRequest(t, "GET", "/api/agent-log/123?user_id=123", nil)
 		rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.agentLogDetailHandler), req)
@@ -419,9 +420,9 @@ func TestAgentLogDetailHandler_ErrorPaths(t *testing.T) {
 // TestStatsHandler_EmptyStats tests stats handler with empty stats.
 func TestStatsHandler_EmptyStats(t *testing.T) {
 	server, mockStorage, _ := setupTestServer(t)
-	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: 123}}, nil)
-	mockStorage.On("GetStats").Return(map[int64]storage.Stat{}, nil)
-	mockStorage.On("GetDashboardStats", int64(123)).Return(&storage.DashboardStats{}, nil)
+	mockStorage.On("GetAllUsers").Return([]storage.User{{ID: "123"}}, nil)
+	mockStorage.On("GetStats").Return(map[storage.ScopeID]storage.Stat{}, nil)
+	mockStorage.On("GetDashboardStats", storage.ScopeID("123")).Return(&storage.DashboardStats{}, nil)
 
 	req := testutil.NewTestRequest(t, "GET", "/ui/stats?user_id=123", nil)
 	rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.statsHandler), req)
@@ -465,7 +466,7 @@ func setupTestServerWithRAG(t *testing.T) (*Server, *testutil.MockStorage, *Mock
 func TestDatabaseHealthHandler_Success(t *testing.T) {
 	server, _, _, mockRAG := setupTestServerWithRAG(t)
 
-	mockRAG.On("GetDatabaseHealth", mock.Anything, int64(123), 25000).
+	mockRAG.On("GetDatabaseHealth", mock.Anything, storage.ScopeID("123"), 25000).
 		Return(&rag.DatabaseHealth{
 			OrphanedTopics:   0,
 			OverlappingPairs: 0,
@@ -483,7 +484,7 @@ func TestDatabaseHealthHandler_Success(t *testing.T) {
 func TestDatabaseHealthHandler_Error(t *testing.T) {
 	server, _, _, mockRAG := setupTestServerWithRAG(t)
 
-	mockRAG.On("GetDatabaseHealth", mock.Anything, int64(123), 25000).
+	mockRAG.On("GetDatabaseHealth", mock.Anything, storage.ScopeID("123"), 25000).
 		Return((*rag.DatabaseHealth)(nil), assert.AnError)
 
 	req := testutil.NewTestRequest(t, "GET", "/ui/debug/database/health?user_id=123", nil)
@@ -496,14 +497,14 @@ func TestDatabaseHealthHandler_Error(t *testing.T) {
 func TestDatabaseRepairHandler_Success(t *testing.T) {
 	server, _, _, mockRAG := setupTestServerWithRAG(t)
 
-	mockRAG.On("RepairDatabase", mock.Anything, int64(123), true).
+	mockRAG.On("RepairDatabase", mock.Anything, storage.ScopeID("123"), true).
 		Return(&rag.RepairStats{
 			OrphanedTopicsDeleted: 5,
 			FactsRelinked:         3,
 		}, nil)
 
 	req := testutil.NewTestRequest(t, "POST", "/ui/debug/database/repair",
-		map[string]any{"user_id": int64(123), "dry_run": true})
+		map[string]any{"user_id": storage.ScopeID("123"), "dry_run": true})
 	rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.databaseRepairHandler), req)
 
 	assert.Equal(t, http.StatusOK, rr.Code)
@@ -515,11 +516,11 @@ func TestDatabaseRepairHandler_Success(t *testing.T) {
 func TestDatabaseRepairHandler_Error(t *testing.T) {
 	server, _, _, mockRAG := setupTestServerWithRAG(t)
 
-	mockRAG.On("RepairDatabase", mock.Anything, int64(123), false).
+	mockRAG.On("RepairDatabase", mock.Anything, storage.ScopeID("123"), false).
 		Return((*rag.RepairStats)(nil), assert.AnError)
 
 	req := testutil.NewTestRequest(t, "POST", "/ui/debug/database/repair",
-		map[string]any{"user_id": int64(123), "dry_run": false})
+		map[string]any{"user_id": storage.ScopeID("123"), "dry_run": false})
 	rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.databaseRepairHandler), req)
 
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
@@ -530,7 +531,7 @@ func TestDatabaseRepairHandler_Error(t *testing.T) {
 func TestDatabaseContaminationHandler_Success(t *testing.T) {
 	server, _, _, mockRAG := setupTestServerWithRAG(t)
 
-	mockRAG.On("GetContaminationInfo", mock.Anything, int64(123)).
+	mockRAG.On("GetContaminationInfo", mock.Anything, storage.ScopeID("123")).
 		Return(&rag.ContaminationInfo{
 			TotalContaminated:  0,
 			ContaminatedTopics: []storage.ContaminatedTopic{},
@@ -547,14 +548,14 @@ func TestDatabaseContaminationHandler_Success(t *testing.T) {
 func TestDatabaseContaminationFixHandler_Success(t *testing.T) {
 	server, _, _, mockRAG := setupTestServerWithRAG(t)
 
-	mockRAG.On("FixContamination", mock.Anything, int64(123), true).
+	mockRAG.On("FixContamination", mock.Anything, storage.ScopeID("123"), true).
 		Return(&rag.ContaminationFixStats{
 			MessagesUnlinked:      10,
 			OrphanedTopicsDeleted: 2,
 		}, nil)
 
 	req := testutil.NewTestRequest(t, "POST", "/ui/debug/database/contamination/fix",
-		map[string]any{"user_id": int64(123), "dry_run": true})
+		map[string]any{"user_id": storage.ScopeID("123"), "dry_run": true})
 	rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.databaseContaminationFixHandler), req)
 
 	assert.Equal(t, http.StatusOK, rr.Code)
@@ -566,7 +567,7 @@ func TestDatabaseContaminationFixHandler_Success(t *testing.T) {
 func TestSplitTopicsHandler_Success(t *testing.T) {
 	server, _, _, mockRAG := setupTestServerWithRAG(t)
 
-	mockRAG.On("SplitLargeTopics", mock.Anything, int64(123), 25000).
+	mockRAG.On("SplitLargeTopics", mock.Anything, storage.ScopeID("123"), 25000).
 		Return(&rag.SplitStats{
 			TopicsProcessed:  2,
 			TopicsCreated:    5,
@@ -577,7 +578,7 @@ func TestSplitTopicsHandler_Success(t *testing.T) {
 		}, nil)
 
 	req := testutil.NewTestRequest(t, "POST", "/ui/debug/split",
-		map[string]any{"user_id": int64(123), "threshold_chars": 25000})
+		map[string]any{"user_id": storage.ScopeID("123"), "threshold_chars": 25000})
 	rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.splitTopicsHandler), req)
 
 	assert.Equal(t, http.StatusOK, rr.Code)
@@ -589,11 +590,11 @@ func TestSplitTopicsHandler_Success(t *testing.T) {
 func TestSplitTopicsHandler_Error(t *testing.T) {
 	server, _, _, mockRAG := setupTestServerWithRAG(t)
 
-	mockRAG.On("SplitLargeTopics", mock.Anything, int64(123), 25000).
+	mockRAG.On("SplitLargeTopics", mock.Anything, storage.ScopeID("123"), 25000).
 		Return((*rag.SplitStats)(nil), assert.AnError)
 
 	req := testutil.NewTestRequest(t, "POST", "/ui/debug/split",
-		map[string]any{"user_id": int64(123), "threshold_chars": 25000})
+		map[string]any{"user_id": storage.ScopeID("123"), "threshold_chars": 25000})
 	rr := testutil.ExecuteRequest(t, http.HandlerFunc(server.splitTopicsHandler), req)
 
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)

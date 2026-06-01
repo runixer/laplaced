@@ -7,8 +7,12 @@ import (
 	"github.com/runixer/laplaced/internal/storage"
 )
 
-// TestUserID is the default user ID for tests.
-const TestUserID int64 = 123
+// TestUserID is the default scope (partition key) for tests — a deterministic
+// passthrough UUID. Named TestUserID for continuity; its type is storage.ScopeID.
+var TestUserID = storage.PassthroughScopeID("telegram", "123")
+
+// TestUserID2 is a second distinct test scope (used for isolation fixtures).
+var TestUserID2 = storage.PassthroughScopeID("telegram", "456")
 
 // TestUser returns a standard test user.
 func TestUser() storage.User {
@@ -25,7 +29,7 @@ func TestUsers() []storage.User {
 	return []storage.User{
 		TestUser(),
 		{
-			ID:        456,
+			ID:        TestUserID2,
 			Username:  "anotheruser",
 			FirstName: "Another",
 			LastName:  "User",

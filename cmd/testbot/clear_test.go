@@ -36,7 +36,7 @@ func TestClearFacts(t *testing.T) {
 	// Create command with testbot in context
 	cmd := clearFactsCmd
 	ctx := context.WithValue(context.Background(), testbotKey, tb)
-	opts := &testbotOptions{userID: testutil.TestUserID}
+	opts := &testbotOptions{userID: 123}
 	ctx = context.WithValue(ctx, optionsKey, opts)
 	cmd.SetContext(ctx)
 
@@ -54,7 +54,7 @@ func TestClearFacts(t *testing.T) {
 	output := buf.String()
 
 	// Verify output
-	assert.Contains(t, output, "Cleared 3 facts for user 123")
+	assert.Contains(t, output, "Cleared 3 facts for user "+string(testutil.TestUserID))
 
 	// Verify facts are cleared
 	facts, err = tb.store.GetFacts(testutil.TestUserID)
@@ -85,7 +85,7 @@ func TestClearTopics(t *testing.T) {
 	// Create command with testbot in context
 	cmd := clearTopicsCmd
 	ctx := context.WithValue(context.Background(), testbotKey, tb)
-	opts := &testbotOptions{userID: testutil.TestUserID}
+	opts := &testbotOptions{userID: 123}
 	ctx = context.WithValue(ctx, optionsKey, opts)
 	cmd.SetContext(ctx)
 
@@ -103,7 +103,7 @@ func TestClearTopics(t *testing.T) {
 	output := buf.String()
 
 	// Verify output
-	assert.Contains(t, output, "Cleared 3 topics for user 123")
+	assert.Contains(t, output, "Cleared 3 topics for user "+string(testutil.TestUserID))
 
 	// Verify topics are cleared
 	topics, err = tb.store.GetTopics(testutil.TestUserID)
@@ -134,7 +134,7 @@ func TestClearPeople(t *testing.T) {
 	// Create command with testbot in context
 	cmd := clearPeopleCmd
 	ctx := context.WithValue(context.Background(), testbotKey, tb)
-	opts := &testbotOptions{userID: testutil.TestUserID}
+	opts := &testbotOptions{userID: 123}
 	ctx = context.WithValue(ctx, optionsKey, opts)
 	cmd.SetContext(ctx)
 
@@ -152,7 +152,7 @@ func TestClearPeople(t *testing.T) {
 	output := buf.String()
 
 	// Verify output
-	assert.Contains(t, output, "Cleared 3 people for user 123")
+	assert.Contains(t, output, "Cleared 3 people for user "+string(testutil.TestUserID))
 
 	// Verify people are cleared
 	people, err = tb.store.GetPeople(testutil.TestUserID)
@@ -164,30 +164,30 @@ func TestClearEmptyData(t *testing.T) {
 	tests := []struct {
 		name        string
 		cmd         *cobra.Command
-		addTestData func(*storage.SQLiteStore) error
+		addTestData func(*storage.Store) error
 		expectedMsg string
 	}{
 		{
 			name:        "clear-facts with empty database",
 			cmd:         clearFactsCmd,
-			addTestData: func(s *storage.SQLiteStore) error { return nil },
-			expectedMsg: "Cleared 0 facts for user 123",
+			addTestData: func(s *storage.Store) error { return nil },
+			expectedMsg: "Cleared 0 facts for user " + string(testutil.TestUserID),
 		},
 		{
 			name: "clear-topics with empty database",
 			cmd:  clearTopicsCmd,
-			addTestData: func(s *storage.SQLiteStore) error {
+			addTestData: func(s *storage.Store) error {
 				return nil
 			},
-			expectedMsg: "Cleared 0 topics for user 123",
+			expectedMsg: "Cleared 0 topics for user " + string(testutil.TestUserID),
 		},
 		{
 			name: "clear-people with empty database",
 			cmd:  clearPeopleCmd,
-			addTestData: func(s *storage.SQLiteStore) error {
+			addTestData: func(s *storage.Store) error {
 				return nil
 			},
-			expectedMsg: "Cleared 0 people for user 123",
+			expectedMsg: "Cleared 0 people for user " + string(testutil.TestUserID),
 		},
 	}
 
@@ -207,7 +207,7 @@ func TestClearEmptyData(t *testing.T) {
 
 			// Create command with testbot in context
 			ctx := context.WithValue(context.Background(), testbotKey, tb)
-			opts := &testbotOptions{userID: testutil.TestUserID}
+			opts := &testbotOptions{userID: 123}
 			ctx = context.WithValue(ctx, optionsKey, opts)
 			tt.cmd.SetContext(ctx)
 
@@ -248,7 +248,7 @@ func TestClearErrors(t *testing.T) {
 
 		cmd := clearFactsCmd
 		ctx := context.WithValue(context.Background(), testbotKey, tb)
-		opts := &testbotOptions{userID: testutil.TestUserID}
+		opts := &testbotOptions{userID: 123}
 		ctx = context.WithValue(ctx, optionsKey, opts)
 		cmd.SetContext(ctx)
 

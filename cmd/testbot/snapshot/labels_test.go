@@ -23,7 +23,7 @@ func TestRenderLabelsTodo_BasicShape(t *testing.T) {
 
 	sp := &RerankerSpanData{
 		TraceID:    "abc12345",
-		UserID:     12345,
+		UserID:     "12345",
 		DurationMs: 5500,
 	}
 	sp.CandidatesIn.Topics = 50
@@ -91,7 +91,7 @@ func TestRenderLabelsTodo_BasicShape(t *testing.T) {
 func TestRenderLabelsTodo_PeopleAndArtifactsTables(t *testing.T) {
 	sp := &RerankerSpanData{
 		TraceID: "withcands",
-		UserID:  42,
+		UserID:  "42",
 		PeopleCandidatesInput: `[Person:304] Наиля (aka Наля) [Work_Outer]: short bio.
 [Person:280] AISHA (@aisha_chi) [Work_Outer]: client since 2025.
 [Person:163] Лиля [Friends]: helper.`,
@@ -127,7 +127,7 @@ func TestRenderLabelsTodo_PeopleAndArtifactsTables(t *testing.T) {
 func TestRenderLabelsTodo_FallbackPath(t *testing.T) {
 	sp := &RerankerSpanData{
 		TraceID:          "c90199c6",
-		UserID:           67890,
+		UserID:           "67890",
 		FallbackReason:   "all_hallucinated",
 		RawQuery:         "поищи в Москве доставки",
 		CandidatesInput:  `[Topic:1995] (0.59) 2025-12-26 | 4 msgs, ~3K chars | Расчёт пельменей`,

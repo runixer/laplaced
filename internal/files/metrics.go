@@ -1,10 +1,9 @@
 package files
 
 import (
-	"strconv"
-
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/runixer/laplaced/internal/storage"
 )
 
 const metricsNamespace = "laplaced"
@@ -67,8 +66,8 @@ const (
 )
 
 // RecordFileDownload records metrics for a file download operation.
-func RecordFileDownload(userID int64, fileType FileType, durationSeconds float64, sizeBytes int64, success bool) {
-	userIDStr := strconv.FormatInt(userID, 10)
+func RecordFileDownload(userID storage.ScopeID, fileType FileType, durationSeconds float64, sizeBytes int64, success bool) {
+	userIDStr := string(userID)
 	fileTypeStr := string(fileType)
 
 	// Record duration

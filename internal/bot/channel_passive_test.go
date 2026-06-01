@@ -46,7 +46,7 @@ func TestStorePassiveChannelMessage_AttributesAuthor(t *testing.T) {
 		IsDirect:       false,
 	}
 
-	mockStore.On("AddMessageToHistory", int64(42), mock.MatchedBy(func(m storage.Message) bool {
+	mockStore.On("AddMessageToHistory", storage.ScopeID("42"), mock.MatchedBy(func(m storage.Message) bool {
 		return m.Role == "user" &&
 			m.Content == "[John (@jdoe) (2026-05-30 12:00:00)]: hello team" &&
 			m.Author != nil && *m.Author == "John (@jdoe)" &&
@@ -54,7 +54,7 @@ func TestStorePassiveChannelMessage_AttributesAuthor(t *testing.T) {
 			m.MessageID != nil && *m.MessageID == "post1"
 	})).Return(nil)
 
-	b.storePassiveChannelMessage(42, im)
+	b.storePassiveChannelMessage("42", im)
 	mockStore.AssertExpectations(t)
 }
 
@@ -64,7 +64,7 @@ func TestStorePassiveChannelMessage_EmptyContentSkipped(t *testing.T) {
 
 	// No text and no files → incomingContent returns "" → nothing stored.
 	im := IncomingMessage{ConversationID: "chan1", SenderID: "u1", IsDirect: false}
-	b.storePassiveChannelMessage(42, im)
+	b.storePassiveChannelMessage("42", im)
 
 	mockStore.AssertNotCalled(t, "AddMessageToHistory")
 	mockStore.AssertExpectations(t)
@@ -73,35 +73,35 @@ func TestStorePassiveChannelMessage_EmptyContentSkipped(t *testing.T) {
 func TestUpsertChannelParticipant(t *testing.T) {
 	t.Run("DM is a no-op", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		b := &Bot{logger: testutil.TestLogger(), peopleRepo: mockStore, transport: &stubTransport{kind: "time"}}
-		b.upsertChannelParticipant(1, IncomingMessage{IsDirect: true, SenderID: "u1"})
+		b := &Bot{logger: testutil.TestLogger(), peopleRepo: mockStore, transport: &stubTransport{kind: "mattermost"}}
+		b.upsertChannelParticipant("1", IncomingMessage{IsDirect: true, SenderID: "u1"})
 		mockStore.AssertNotCalled(t, "FindPersonByExternalID")
 	})
 
 	t.Run("creates a new participant with external id", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		b := &Bot{logger: testutil.TestLogger(), peopleRepo: mockStore, transport: &stubTransport{kind: "time"}}
+		b := &Bot{logger: testutil.TestLogger(), peopleRepo: mockStore, transport: &stubTransport{kind: "mattermost"}}
 		im := IncomingMessage{IsDirect: false, SenderID: "u1", ConversationID: "chanA", SenderDisplay: "Alice (@alice)"}
-		mockStore.On("FindPersonByExternalID", int64(2), "time", "u1").Return(nil, nil)
+		mockStore.On("FindPersonByExternalID", storage.ScopeID("2"), "mattermost", "u1").Return(nil, nil)
 		mockStore.On("AddPerson", mock.MatchedBy(func(p storage.Person) bool {
-			return p.UserID == 2 && p.DisplayName == "Alice (@alice)" && p.Circle == "Other" &&
-				p.ExternalTransport != nil && *p.ExternalTransport == "time" &&
+			return p.UserID == "2" && p.DisplayName == "Alice (@alice)" && p.Circle == "Other" &&
+				p.ExternalTransport != nil && *p.ExternalTransport == "mattermost" &&
 				p.ExternalID != nil && *p.ExternalID == "u1"
 		})).Return(int64(5), nil)
-		b.upsertChannelParticipant(2, im)
+		b.upsertChannelParticipant("2", im)
 		mockStore.AssertExpectations(t)
 	})
 
 	t.Run("touches an existing participant", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		b := &Bot{logger: testutil.TestLogger(), peopleRepo: mockStore, transport: &stubTransport{kind: "time"}}
+		b := &Bot{logger: testutil.TestLogger(), peopleRepo: mockStore, transport: &stubTransport{kind: "mattermost"}}
 		im := IncomingMessage{IsDirect: false, SenderID: "u1", ConversationID: "chanA", SenderDisplay: "Alice"}
-		existing := &storage.Person{ID: 5, UserID: 2, DisplayName: "Alice", MentionCount: 3}
-		mockStore.On("FindPersonByExternalID", int64(2), "time", "u1").Return(existing, nil)
+		existing := &storage.Person{ID: 5, UserID: "2", DisplayName: "Alice", MentionCount: 3}
+		mockStore.On("FindPersonByExternalID", storage.ScopeID("2"), "mattermost", "u1").Return(existing, nil)
 		mockStore.On("UpdatePerson", mock.MatchedBy(func(p storage.Person) bool {
 			return p.ID == 5 && p.MentionCount == 4
 		})).Return(nil)
-		b.upsertChannelParticipant(2, im)
+		b.upsertChannelParticipant("2", im)
 		mockStore.AssertNotCalled(t, "AddPerson")
 		mockStore.AssertExpectations(t)
 	})

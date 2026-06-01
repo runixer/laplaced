@@ -686,10 +686,10 @@ func (m *mockAgent) Execute(_ context.Context, _ *agent.Request) (*agent.Respons
 // Using testutil would be overkill for a 2-method interface.
 type mockMemoryService struct{}
 
-func (m *mockMemoryService) ProcessSession(_ context.Context, _ int64, _ []storage.Message, _ time.Time, _ int64) error {
+func (m *mockMemoryService) ProcessSession(_ context.Context, _ storage.ScopeID, _ []storage.Message, _ time.Time, _ int64) error {
 	return nil
 }
 
-func (m *mockMemoryService) ProcessSessionWithStats(_ context.Context, _ int64, _ []storage.Message, _ time.Time, _ int64) (memory.FactStats, error) {
+func (m *mockMemoryService) ProcessSessionWithStats(_ context.Context, _ storage.ScopeID, _ []storage.Message, _ time.Time, _ int64) (memory.FactStats, error) {
 	return memory.FactStats{}, nil
 }

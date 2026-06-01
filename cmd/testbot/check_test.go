@@ -13,7 +13,7 @@ import (
 )
 
 // setupTestDB creates an in-memory SQLite database with test data
-func setupTestDB(t *testing.T) (*storage.SQLiteStore, func()) {
+func setupTestDB(t *testing.T) (*storage.Store, func()) {
 	t.Helper()
 	store, err := storage.NewSQLiteStore(testutil.TestLogger(), ":memory:")
 	require.NoError(t, err)
@@ -101,7 +101,7 @@ func TestCheckFacts(t *testing.T) {
 			// Create mock command with testbot in context
 			cmd := checkFactsCmd
 			ctx := context.WithValue(context.Background(), testbotKey, tb)
-			opts := &testbotOptions{userID: testutil.TestUserID}
+			opts := &testbotOptions{userID: 123}
 			ctx = context.WithValue(ctx, optionsKey, opts)
 			cmd.SetContext(ctx)
 
@@ -126,7 +126,7 @@ func TestCheckFacts(t *testing.T) {
 				assert.Contains(t, output, `"type": "facts"`)
 				assert.Contains(t, output, `"count": 3`)
 			} else {
-				assert.Contains(t, output, "Facts for user 123:")
+				assert.Contains(t, output, "Facts for user "+string(testutil.TestUserID)+":")
 				if tt.expectCount > 0 {
 					assert.Contains(t, output, "[Fact:")
 					assert.Contains(t, output, "[bio/identity]")
@@ -157,7 +157,7 @@ func TestCheckTopics(t *testing.T) {
 			format: "text",
 			topics: testutil.TestTopics(),
 			checkFn: func(output string) {
-				assert.Contains(t, output, "Topics for user 123:")
+				assert.Contains(t, output, "Topics for user "+string(testutil.TestUserID)+":")
 				assert.Contains(t, output, "Discussion about Go programming")
 			},
 		},
@@ -182,7 +182,7 @@ func TestCheckTopics(t *testing.T) {
 			// Create mock command with testbot in context
 			cmd := checkTopicsCmd
 			ctx := context.WithValue(context.Background(), testbotKey, tb)
-			opts := &testbotOptions{userID: testutil.TestUserID}
+			opts := &testbotOptions{userID: 123}
 			ctx = context.WithValue(ctx, optionsKey, opts)
 			cmd.SetContext(ctx)
 
@@ -225,7 +225,7 @@ func TestCheckPeople(t *testing.T) {
 			name:   "text with people",
 			format: "text",
 			checkFn: func(output string) {
-				assert.Contains(t, output, "People for user 123:")
+				assert.Contains(t, output, "People for user "+string(testutil.TestUserID)+":")
 				assert.Contains(t, output, "Alice Smith")
 				assert.Contains(t, output, "Bob Johnson")
 			},
@@ -251,7 +251,7 @@ func TestCheckPeople(t *testing.T) {
 			// Create mock command with testbot in context
 			cmd := checkPeopleCmd
 			ctx := context.WithValue(context.Background(), testbotKey, tb)
-			opts := &testbotOptions{userID: testutil.TestUserID}
+			opts := &testbotOptions{userID: 123}
 			ctx = context.WithValue(ctx, optionsKey, opts)
 			cmd.SetContext(ctx)
 
@@ -294,7 +294,7 @@ func TestCheckMessages(t *testing.T) {
 			name:   "text with messages",
 			format: "text",
 			checkFn: func(output string) {
-				assert.Contains(t, output, "Messages for user 123:")
+				assert.Contains(t, output, "Messages for user "+string(testutil.TestUserID)+":")
 				assert.Contains(t, output, "Hello, how are you?")
 			},
 		},
@@ -318,7 +318,7 @@ func TestCheckMessages(t *testing.T) {
 			// Create mock command with testbot in context
 			cmd := checkMessagesCmd
 			ctx := context.WithValue(context.Background(), testbotKey, tb)
-			opts := &testbotOptions{userID: testutil.TestUserID}
+			opts := &testbotOptions{userID: 123}
 			ctx = context.WithValue(ctx, optionsKey, opts)
 			cmd.SetContext(ctx)
 
@@ -371,7 +371,7 @@ func TestCheckErrors(t *testing.T) {
 
 		cmd := checkFactsCmd
 		ctx := context.WithValue(context.Background(), testbotKey, tb)
-		opts := &testbotOptions{userID: testutil.TestUserID}
+		opts := &testbotOptions{userID: 123}
 		ctx = context.WithValue(ctx, optionsKey, opts)
 		cmd.SetContext(ctx)
 

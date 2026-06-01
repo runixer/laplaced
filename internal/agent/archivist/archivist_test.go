@@ -50,7 +50,7 @@ func TestArchivist_Execute_AddFacts(t *testing.T) {
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID: 123,
+			UserID: "123",
 		},
 		Params: map[string]any{
 			ParamMessages: []storage.Message{
@@ -110,14 +110,14 @@ func TestArchivist_Execute_UpdateFacts(t *testing.T) {
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID: 123,
+			UserID: "123",
 		},
 		Params: map[string]any{
 			ParamMessages: []storage.Message{
 				{ID: 1, Role: "user", Content: "I just got promoted!", CreatedAt: time.Now()},
 			},
 			ParamFacts: []storage.Fact{
-				{ID: 42, UserID: 123, Relation: "works_as", Content: "Software Engineer", Category: "work", Type: "identity", Importance: 90},
+				{ID: 42, UserID: "123", Relation: "works_as", Content: "Software Engineer", Category: "work", Type: "identity", Importance: 90},
 			},
 			ParamReferenceDate: time.Now(),
 		},
@@ -165,14 +165,14 @@ func TestArchivist_Execute_RemoveFacts(t *testing.T) {
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID: 123,
+			UserID: "123",
 		},
 		Params: map[string]any{
 			ParamMessages: []storage.Message{
 				{ID: 1, Role: "user", Content: "I no longer work there", CreatedAt: time.Now()},
 			},
 			ParamFacts: []storage.Fact{
-				{ID: 99, UserID: 123, Content: "Works at Company X"},
+				{ID: 99, UserID: "123", Content: "Works at Company X"},
 			},
 			ParamReferenceDate: time.Now(),
 		},
@@ -241,7 +241,7 @@ func TestArchivist_Execute_LegacyFormat(t *testing.T) {
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID: 123,
+			UserID: "123",
 		},
 		Params: map[string]any{
 			ParamMessages: []storage.Message{
@@ -303,7 +303,7 @@ func TestArchivist_Execute_ArrayFieldsFormat(t *testing.T) {
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID: 123,
+			UserID: "123",
 		},
 		Params: map[string]any{
 			ParamMessages: []storage.Message{
@@ -357,7 +357,7 @@ func TestArchivist_FormatUserName(t *testing.T) {
 		{
 			name: "full name with username",
 			user: &storage.User{
-				ID:        123,
+				ID:        "123",
 				FirstName: "John",
 				LastName:  "Doe",
 				Username:  "johndoe",
@@ -367,7 +367,7 @@ func TestArchivist_FormatUserName(t *testing.T) {
 		{
 			name: "only first name",
 			user: &storage.User{
-				ID:        123,
+				ID:        "123",
 				FirstName: "John",
 			},
 			expected: "John",
@@ -375,7 +375,7 @@ func TestArchivist_FormatUserName(t *testing.T) {
 		{
 			name: "only username",
 			user: &storage.User{
-				ID:       123,
+				ID:       "123",
 				Username: "johndoe",
 			},
 			expected: "@johndoe",
@@ -383,7 +383,7 @@ func TestArchivist_FormatUserName(t *testing.T) {
 		{
 			name: "only id",
 			user: &storage.User{
-				ID: 123,
+				ID: "123",
 			},
 			expected: "ID:123",
 		},
@@ -467,7 +467,7 @@ func TestArchivist_Execute_PeopleResult(t *testing.T) {
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID: 123,
+			UserID: "123",
 		},
 		Params: map[string]any{
 			ParamMessages: []storage.Message{
@@ -542,7 +542,7 @@ func TestArchivist_Execute_OnlyPeople(t *testing.T) {
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID: 123,
+			UserID: "123",
 		},
 		Params: map[string]any{
 			ParamMessages: []storage.Message{
@@ -602,7 +602,7 @@ func TestArchivist_Execute_PeopleEmptyFields(t *testing.T) {
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID: 123,
+			UserID: "123",
 		},
 		Params: map[string]any{
 			ParamMessages: []storage.Message{
@@ -668,7 +668,7 @@ func TestArchivist_Execute_PeopleAndFacts(t *testing.T) {
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID: 123,
+			UserID: "123",
 		},
 		Params: map[string]any{
 			ParamMessages: []storage.Message{
@@ -741,7 +741,7 @@ func TestArchivist_Execute_RawArraysFormat(t *testing.T) {
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID: 123,
+			UserID: "123",
 		},
 		Params: map[string]any{
 			ParamMessages: []storage.Message{
@@ -1234,7 +1234,7 @@ func TestArchivist_getReferenceDate(t *testing.T) {
 func TestArchivist_getUser(t *testing.T) {
 	t.Helper()
 
-	user := &storage.User{ID: 123, FirstName: "John", Username: "john"}
+	user := &storage.User{ID: "123", FirstName: "John", Username: "john"}
 
 	tests := []struct {
 		name     string
@@ -1282,24 +1282,24 @@ func TestArchivist_getUserID(t *testing.T) {
 	tests := []struct {
 		name     string
 		req      *agent.Request
-		expected int64
+		expected storage.ScopeID
 	}{
 		{
 			name:     "nil request",
 			req:      nil,
-			expected: 0,
+			expected: "",
 		},
 		{
 			name:     "no shared context",
 			req:      &agent.Request{},
-			expected: 0,
+			expected: "",
 		},
 		{
 			name: "with shared context",
 			req: &agent.Request{
-				Shared: &agent.SharedContext{UserID: 789},
+				Shared: &agent.SharedContext{UserID: "789"},
 			},
-			expected: 789,
+			expected: "789",
 		},
 	}
 
@@ -1350,7 +1350,7 @@ func TestArchivist_ParseError(t *testing.T) {
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID: 123,
+			UserID: "123",
 		},
 		Params: map[string]any{
 			ParamMessages: []storage.Message{
@@ -1403,7 +1403,7 @@ func TestArchivist_MaxFacts(t *testing.T) {
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID: 123,
+			UserID: "123",
 		},
 		Params: map[string]any{
 			ParamMessages: []storage.Message{

@@ -28,7 +28,7 @@ import (
 type Config struct {
 	ServerURL string // e.g. https://time.example.com
 	BotToken  string // bot account token; sent as "Authorization: Bearer <token>"
-	ProxyURL  string // explicit per-client proxy (corp proxy); "" = direct
+	ProxyURL  string // explicit per-client proxy (HTTP proxy); "" = direct
 }
 
 // Client talks to the Mattermost v4 REST API over a dedicated, proxy-aware
@@ -55,14 +55,25 @@ type Client struct {
 
 // Wire types (subset of the MM v4 schema we use).
 
-// User is the subset of /users/{id} we read (identity + display name).
+// User is the subset of /users/{id} we read (identity + display name + the
+// federated-identity fields used for principal resolution).
+//
+// AuthService is the trust anchor: "" means a local Mattermost account (never
+// linked to a principal — isolation), a non-empty value (e.g. "saml") means
+// an externally-authenticated account. AuthData carries the external subject
+// (the AD login for SAML); it is the join key, lowercased. Email is stored as a
+// principal attribute only and is NEVER used to link identities (a local account
+// can self-claim an email in a trusted-looking domain).
 type User struct {
-	ID        string `json:"id"`
-	Username  string `json:"username"`
-	FirstName string `json:"first_name"`
-	LastName  string `json:"last_name"`
-	Nickname  string `json:"nickname"`
-	IsBot     bool   `json:"is_bot"`
+	ID          string `json:"id"`
+	Username    string `json:"username"`
+	FirstName   string `json:"first_name"`
+	LastName    string `json:"last_name"`
+	Nickname    string `json:"nickname"`
+	IsBot       bool   `json:"is_bot"`
+	AuthService string `json:"auth_service"`
+	AuthData    string `json:"auth_data"`
+	Email       string `json:"email"`
 }
 
 // Channel is the subset of /channels/{id} we read — the display name used to
@@ -187,7 +198,7 @@ func NewClient(ctx context.Context, cfg Config, logger *slog.Logger) (*Client, e
 		}
 		proxyURL = p
 		// Explicit per-client proxy ONLY — never a process-wide HTTP_PROXY, which
-		// would also route the litellm/openrouter client through the corp proxy.
+		// would also route the litellm/openrouter client through the HTTP proxy.
 		transport.Proxy = http.ProxyURL(proxyURL)
 	}
 

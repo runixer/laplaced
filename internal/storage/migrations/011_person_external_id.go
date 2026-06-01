@@ -15,7 +15,7 @@ func init() {
 // (external_transport, external_id). Additive and backward compatible:
 //
 //   - The legacy `telegram_id` column stays in place and remains the fast-path
-//     for @mention matching on the Telegram/home path (no read-site changes).
+//     for @mention@mention matching on the Telegram path (no read-site changes).
 //   - Existing rows are backfilled to ('telegram', telegram_id) so the new
 //     finder works uniformly across transports.
 //   - Non-Telegram people (e.g. Mattermost channel participants, later) store

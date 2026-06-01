@@ -14,6 +14,7 @@ import (
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/markdown"
+	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
 )
 
@@ -400,7 +401,7 @@ func (s *streamSink) editLocked(text, parseMode string) {
 // caller may need to pass additional context-dependent settings later
 // (e.g. user_id for metrics).
 type finalizeArgs struct {
-	UserID    int64
+	UserID    storage.ScopeID
 	FullText  string
 	HadError  bool
 	ErrorText string // localized error message (used when HadError)

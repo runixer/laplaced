@@ -42,12 +42,12 @@ func TestArtifactVectorItem(t *testing.T) {
 
 	item := ArtifactVectorItem{
 		ArtifactID: 123,
-		UserID:     456,
+		UserID:     "456",
 		Embedding:  embedding,
 	}
 
 	assert.Equal(t, int64(123), item.ArtifactID)
-	assert.Equal(t, int64(456), item.UserID)
+	assert.Equal(t, storage.ScopeID("456"), item.UserID)
 	assert.Equal(t, 10, len(item.Embedding))
 	assert.Equal(t, float32(0.5), item.Embedding[5])
 }
@@ -56,7 +56,7 @@ func TestArtifactVectorItem(t *testing.T) {
 func TestLoadNewArtifactSummaries(t *testing.T) {
 	s := &Service{
 		artifactRepo:        nil, // Would be mocked in real test
-		artifactVectors:     make(map[int64][]ArtifactVectorItem),
+		artifactVectors:     make(map[storage.ScopeID][]ArtifactVectorItem),
 		maxLoadedArtifactID: 0,
 		logger:              testutil.TestLogger(),
 	}
@@ -96,7 +96,7 @@ func TestProcessSingleArtifact_Smoke(t *testing.T) {
 
 	artifact := storage.Artifact{
 		ID:       123,
-		UserID:   456,
+		UserID:   "456",
 		FileType: "document",
 		State:    "pending",
 	}

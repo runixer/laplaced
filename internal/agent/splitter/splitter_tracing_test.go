@@ -68,7 +68,7 @@ func TestSplitter_Execute_RecordsSpan(t *testing.T) {
 	splitter := New(executor, translator, cfg, nil, nil)
 
 	req := &agent.Request{
-		Shared: &agent.SharedContext{UserID: 42},
+		Shared: &agent.SharedContext{UserID: "42"},
 		Params: map[string]any{ParamMessages: messages},
 	}
 	_, err := splitter.Execute(context.Background(), req)
@@ -85,7 +85,7 @@ func TestSplitter_Execute_RecordsSpan(t *testing.T) {
 	}
 	require.NotNil(t, found, "splitter.Execute span not captured")
 	attrs := collectAttrs(found.Attributes)
-	assert.Equal(t, int64(42), attrs["user.id"].AsInt64())
+	assert.Equal(t, "42", attrs["user.id"].AsString())
 	assert.Equal(t, int64(2), attrs["splitter.input_count"].AsInt64())
 	assert.Equal(t, int64(1), attrs["splitter.topics_returned"].AsInt64())
 	assert.False(t, attrs["splitter.parse_error"].AsBool())
@@ -112,7 +112,7 @@ func TestSplitter_Execute_ParseErrorFlag(t *testing.T) {
 	splitter := New(executor, translator, cfg, nil, nil)
 
 	req := &agent.Request{
-		Shared: &agent.SharedContext{UserID: 42},
+		Shared: &agent.SharedContext{UserID: "42"},
 		Params: map[string]any{ParamMessages: messages},
 	}
 	_, err := splitter.Execute(context.Background(), req)

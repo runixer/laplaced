@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/runixer/laplaced/internal/storage"
+
 	"github.com/runixer/laplaced/internal/telegram"
 
 	"github.com/stretchr/testify/assert"
@@ -48,7 +50,7 @@ func TestMessageGrouper_ChannelPerSenderKey(t *testing.T) {
 		mu.Unlock()
 	})
 
-	const chanScope = int64(555)
+	const chanScope = storage.ScopeID("555")
 	ch := func(sender, msgID string) IncomingMessage {
 		return IncomingMessage{IsDirect: false, SenderID: sender, ConversationID: "chan", MessageID: msgID, SentAt: time.Now()}
 	}
@@ -173,9 +175,9 @@ func TestMessageGrouper_Stop_ProcessesPendingGroups(t *testing.T) {
 	var user123Group, user456Group *MessageGroup
 	for _, g := range groupsProcessed {
 		switch g.UserID {
-		case 123:
+		case "123":
 			user123Group = g
-		case 456:
+		case "456":
 			user456Group = g
 		}
 	}
@@ -284,11 +286,11 @@ func TestMessageGrouper_DifferentUsersParallel(t *testing.T) {
 
 	onGroupReady := func(ctx context.Context, group *MessageGroup) {
 		switch group.UserID {
-		case 111:
+		case "111":
 			close(user1Started)
 			// User 1 is slow (e.g., long voice)
 			time.Sleep(200 * time.Millisecond)
-		case 222:
+		case "222":
 			close(user2Started)
 			// User 2 is fast
 			time.Sleep(10 * time.Millisecond)
@@ -430,7 +432,7 @@ func TestMessageGrouper_GetActiveSessions_ReturnsActiveGroups(t *testing.T) {
 	// Find session for user 123
 	var user123Session *SessionInfo
 	for _, s := range sessions {
-		if s.UserID == 123 {
+		if s.UserID == "123" {
 			user123Session = &s
 			break
 		}
@@ -441,7 +443,7 @@ func TestMessageGrouper_GetActiveSessions_ReturnsActiveGroups(t *testing.T) {
 	// Find session for user 456
 	var user456Session *SessionInfo
 	for _, s := range sessions {
-		if s.UserID == 456 {
+		if s.UserID == "456" {
 			user456Session = &s
 			break
 		}
@@ -483,35 +485,35 @@ func TestMessageGrouper_ForceCloseSession_ClosesActiveSession(t *testing.T) {
 	grouper.AddMessage(grpIncoming(msg2))
 
 	// Force close session for user 123
-	closed := grouper.ForceCloseSession(123)
+	closed := grouper.ForceCloseSession("123")
 	assert.True(t, closed, "Should close session for user 123")
 
 	// Verify the group was processed
 	select {
 	case group := <-groupClosed:
-		assert.Equal(t, int64(123), group.UserID)
+		assert.Equal(t, storage.ScopeID("123"), group.UserID)
 		assert.Len(t, group.Messages, 1)
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("Group should have been closed and processed")
 	}
 
 	// Force close same session again - should return false
-	closed = grouper.ForceCloseSession(123)
+	closed = grouper.ForceCloseSession("123")
 	assert.False(t, closed, "Should not close session again (already closed)")
 
 	// Force close session for user 456
-	closed = grouper.ForceCloseSession(456)
+	closed = grouper.ForceCloseSession("456")
 	assert.True(t, closed, "Should close session for user 456")
 
 	select {
 	case group := <-groupClosed:
-		assert.Equal(t, int64(456), group.UserID)
+		assert.Equal(t, storage.ScopeID("456"), group.UserID)
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("Group should have been closed and processed")
 	}
 
 	// Force close non-existent session
-	closed = grouper.ForceCloseSession(999)
+	closed = grouper.ForceCloseSession("999")
 	assert.False(t, closed, "Should not close non-existent session")
 
 	grouper.Stop()
@@ -535,7 +537,7 @@ func TestMessageGrouper_ForceCloseSession_WithRunningTimer(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Force close should stop the timer and process the group
-	closed := grouper.ForceCloseSession(123)
+	closed := grouper.ForceCloseSession("123")
 	assert.True(t, closed, "Should close session with running timer")
 
 	select {

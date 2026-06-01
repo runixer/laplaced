@@ -72,8 +72,8 @@ func TestReembedIfNeeded_TopicsReembedded(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 
 	candidates := []storage.ReembedCandidate{
-		{ID: 10, UserID: 1, Content: "topic one"},
-		{ID: 11, UserID: 1, Content: "topic two"},
+		{ID: 10, UserID: "1", Content: "topic one"},
+		{ID: 11, UserID: "1", Content: "topic two"},
 	}
 	expectedVersion := "new-model:1536"
 
@@ -114,7 +114,7 @@ func TestReembedIfNeeded_EmbedError(t *testing.T) {
 
 	SetupCommonRAGMocks(mockStore)
 
-	candidates := []storage.ReembedCandidate{{ID: 10, UserID: 1, Content: "topic"}}
+	candidates := []storage.ReembedCandidate{{ID: 10, UserID: "1", Content: "topic"}}
 	mockStore.On("GetTopicsNeedingReembed", mock.Anything, 0).Return(candidates, nil).Once()
 	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).
 		Return(openrouter.EmbeddingResponse{}, errors.New("provider down")).Once()

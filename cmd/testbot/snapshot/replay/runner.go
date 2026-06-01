@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/runixer/laplaced/internal/agent"
+	"github.com/runixer/laplaced/internal/storage"
 )
 
 // BuildRequestFunc is the per-agent hook that turns a parsed snapshot trace
@@ -28,7 +29,7 @@ type BuildRequestFunc func(
 // the request to dispatch, the input snapshot for the JSON record, the
 // captured original output to compare against, and any DB lookup misses.
 type BuildResult struct {
-	UserID   int64
+	UserID   storage.ScopeID
 	Request  *agent.Request
 	Input    ReplayInput
 	Original AgentOutput

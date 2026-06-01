@@ -11,7 +11,7 @@ server:
     username: "admin"
     password: ""
 
-# Transport: chat backend. "telegram" (default) | "time" (Mattermost/Time).
+# Transport: chat backend. "telegram" (default) | "mattermost" (Mattermost/Time).
 transport: "telegram"
 
 # Telegram Bot Configuration
@@ -20,7 +20,7 @@ telegram:
   webhook_url: ""
   proxy_url: ""
 
-# Mattermost/Time Configuration (used when transport: "time")
+# Mattermost/Time Configuration (used when transport: "mattermost")
 # server_url/bot_token/allowed_user_ids come from the work overlay + env.
 # proxy_url is the corp proxy (per-client only — never a global HTTP_PROXY).
 mattermost:
@@ -28,6 +28,15 @@ mattermost:
   bot_token: ""
   proxy_url: ""
   allowed_user_ids: []
+  # principal_resolver (optional): its mere presence turns on principal identity
+  # resolution for DMs — many of one person's transport handles share one memory
+  # scope (variant-C). Absent (home/default) = passthrough: every DM sender gets
+  # its own isolated scope, exactly as before. The trust gate is the account's
+  # auth_service (never the self-claimed email); local accounts are never linked.
+  # principal_resolver:
+  #   # Restrict which auth_service values are trusted. Empty = any non-empty
+  #   # auth_service. Local accounts (auth_service == "") are never linked.
+  #   trusted_auth_services: ["saml"]
 
 # OpenRouter API Configuration
 openrouter:
@@ -250,7 +259,17 @@ bot:
 
 # Database Configuration
 database:
+  # driver selects the backend: "sqlite" (default, home) or "postgres" (corp).
+  driver: "sqlite"
   path: "data/laplaced.db"
+  # PostgreSQL backend (driver: postgres). Password MUST come from the env var
+  # LAPLACED_DATABASE_PASSWORD, never a committed literal.
+  # postgres:
+  #   host: "postgresql-ai-dev.service.corp.alfacapital.ru"
+  #   port: 5432
+  #   database: "laplaced"
+  #   user: "laplaced"
+  #   sslmode: "require"
 
 # Telemetry Configuration (OpenTelemetry export)
 # Disabled by default. Flip `enabled: true` (or LAPLACED_TELEMETRY_ENABLED=true)

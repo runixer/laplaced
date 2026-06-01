@@ -44,7 +44,7 @@ func TestSearchTopicCandidates(t *testing.T) {
 		t.Fatalf("failed to build RAG service: %v", err)
 	}
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// Add some topic vectors
 	svc.mu.Lock()
@@ -95,7 +95,7 @@ func TestPrepareRerankerContext_SharedContext(t *testing.T) {
 	}
 	svc.SetPeopleRepository(mockStore)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// Setup SharedContext in context
 	profileFacts := []storage.Fact{
@@ -127,7 +127,7 @@ func TestPrepareRerankerContext_Fallback(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	allFacts := []storage.Fact{
 		{ID: 1, UserID: userID, Content: "Fact 1", Relation: "test", Importance: 50},
@@ -340,7 +340,7 @@ func TestLoadTopicMap(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	topics := []storage.Topic{
 		{ID: 1, UserID: userID, Summary: "Topic 1"},
@@ -571,7 +571,7 @@ func TestExecuteReranker_AgentNil(t *testing.T) {
 	ctx := context.Background()
 	input := rerankerInput{}
 
-	_, err = svc.executeReranker(ctx, 123, input)
+	_, err = svc.executeReranker(ctx, "123", input)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "reranker agent not configured")
@@ -586,7 +586,7 @@ func TestBuildRetrievalResult(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	topicMap := map[int64]storage.Topic{
 		1: {ID: 1, UserID: userID, Summary: "Test Topic"},
@@ -658,7 +658,7 @@ func TestBuildRetrievalResult_WithoutReranker(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	topicMap := map[int64]storage.Topic{
 		1: {ID: 1, UserID: userID, Summary: "Test Topic"},
@@ -732,7 +732,7 @@ func TestSearchPeopleAndArtifacts(t *testing.T) {
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// Setup people search expectations
 	people := []storage.Person{
@@ -815,7 +815,7 @@ func TestSearchPeopleAndArtifacts_SessionMergePrepend(t *testing.T) {
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	// Vector search returns artifact 5 (also exists in session — must dedupe).
 	mockArtifactRepo.On("GetArtifactsByIDs", userID, []int64{5}).Return(
@@ -906,7 +906,7 @@ func TestSearchPeopleAndArtifacts_Disabled(t *testing.T) {
 
 	peopleCandidates, artifactCandidates := svc.searchPeopleAndArtifacts(
 		context.Background(),
-		123,
+		"123",
 		embedding,
 		0.5,
 	)
@@ -975,7 +975,7 @@ func TestVectorItemMethods(t *testing.T) {
 	assert.Equal(t, []float32{0.5, 0.6}, personItem.GetEmbedding())
 
 	// Test ArtifactVectorItem
-	artifactItem := ArtifactVectorItem{ArtifactID: 789, UserID: 999, Embedding: []float32{0.7, 0.8}}
+	artifactItem := ArtifactVectorItem{ArtifactID: 789, UserID: "999", Embedding: []float32{0.7, 0.8}}
 	assert.Equal(t, int64(789), artifactItem.GetID())
 	assert.Equal(t, []float32{0.7, 0.8}, artifactItem.GetEmbedding())
 }
@@ -993,7 +993,7 @@ func TestBuildRetrievalResult_WithArtifacts(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	topicMap := map[int64]storage.Topic{
 		1: {ID: 1, UserID: userID, Summary: "Test Topic"},
@@ -1090,7 +1090,7 @@ func TestBuildRetrievalResult_ArtifactsNoReranker(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	topicMap := map[int64]storage.Topic{
 		1: {ID: 1, UserID: userID, Summary: "Test Topic"},
@@ -1161,7 +1161,7 @@ func TestBuildRetrievalResult_MissingTopicInMap(t *testing.T) {
 	mockClient := new(testutil.MockOpenRouterClient)
 	translator := testutil.TestTranslator(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	topicMap := map[int64]storage.Topic{
 		1: {ID: 1, UserID: userID, Summary: "Test Topic"},

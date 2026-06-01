@@ -49,7 +49,7 @@ func (s *Service) processAllUsers(ctx context.Context) {
 	}
 }
 
-func (s *Service) processTopicChunking(ctx context.Context, userID int64) {
+func (s *Service) processTopicChunking(ctx context.Context, userID storage.ScopeID) {
 	chunkDuration := s.cfg.RAG.GetChunkDuration()
 
 	// 1. Fetch unprocessed messages (topic_id IS NULL)
@@ -108,7 +108,7 @@ func (s *Service) processTopicChunking(ctx context.Context, userID int64) {
 // runChunkWithBreaker wraps processChunk with the circuit breaker. Returns true
 // on success (caller may proceed to the next chunk), false if the chunk was
 // skipped due to cooldown or processing failed.
-func (s *Service) runChunkWithBreaker(_ context.Context, userID int64, chunk []storage.Message, kind string) bool {
+func (s *Service) runChunkWithBreaker(_ context.Context, userID storage.ScopeID, chunk []storage.Message, kind string) bool {
 	if len(chunk) == 0 {
 		return true
 	}
@@ -122,7 +122,7 @@ func (s *Service) runChunkWithBreaker(_ context.Context, userID int64, chunk []s
 		_, skipSpan := otel.Tracer("github.com/runixer/laplaced/internal/rag").Start(
 			context.Background(), "rag.processChunk.cooldown",
 			trace.WithAttributes(
-				attribute.Int64("user.id", userID),
+				attribute.String("user.id", string(userID)),
 				attribute.Int64("chunk.start_id", startID),
 				attribute.String("chunk.kind", kind),
 				attribute.String("job.type", jobtype.Background.String()),
@@ -147,7 +147,7 @@ func (s *Service) runChunkWithBreaker(_ context.Context, userID int64, chunk []s
 	runCtx, span := otel.Tracer("github.com/runixer/laplaced/internal/rag").Start(
 		runCtx, "rag.processChunk",
 		trace.WithAttributes(
-			attribute.Int64("user.id", userID),
+			attribute.String("user.id", string(userID)),
 			attribute.Int64("chunk.start_id", startID),
 			attribute.Int64("chunk.end_id", endID),
 			attribute.Int("chunk.message_count", len(chunk)),

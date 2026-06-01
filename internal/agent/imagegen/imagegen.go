@@ -95,7 +95,7 @@ func (a *Agent) Generate(ctx context.Context, req Request) (resp *Response, err 
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/imagegen").Start(
 		ctx, "imagegen.Generate",
 		trace.WithAttributes(
-			attribute.Int64("user.id", req.UserID),
+			attribute.String("user.id", string(req.UserID)),
 			// imagegen.model is duplicated from the OR-client child span so that
 			// dashboards can slice imagegen outcomes / latency by configured
 			// model without traversing parent→child. imagegen.timeout_seconds
@@ -177,7 +177,7 @@ func (a *Agent) Generate(ctx context.Context, req Request) (resp *Response, err 
 		Messages: []openrouter.Message{
 			{Role: "user", Content: parts},
 		},
-		UserID: req.UserID,
+		UserID: string(req.UserID),
 	}
 
 	start := time.Now()

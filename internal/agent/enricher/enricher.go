@@ -68,7 +68,7 @@ func (e *Enricher) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 	// Span wraps the whole enricher call so the nested openrouter span
 	// attaches at a clear pipeline boundary instead of dangling under
 	// rag.Retrieve. Parallel to reranker.Execute and laplace.Execute.
-	userID := int64(0)
+	var userID storage.ScopeID
 	if req.Shared != nil {
 		userID = req.Shared.UserID
 	}
@@ -76,7 +76,7 @@ func (e *Enricher) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/enricher").Start(
 		ctx, "enricher.Execute",
 		trace.WithAttributes(
-			attribute.Int64("user.id", userID),
+			attribute.String("user.id", string(userID)),
 			attribute.Int("enricher.candidates_in.media", len(mediaParts)),
 		),
 	)

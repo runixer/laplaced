@@ -21,7 +21,7 @@ func TestPerformManagePeople_MissingQuery(t *testing.T) {
 	exec.SetPeopleRepository(mockStore)
 
 	ctx := context.Background()
-	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{})
+	result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{})
 
 	assert.Error(t, err)
 	assert.Empty(t, result)
@@ -37,7 +37,7 @@ func TestPerformManagePeople_InvalidJSON(t *testing.T) {
 	exec.SetPeopleRepository(mockStore)
 
 	ctx := context.Background()
-	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+	result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
 		"query": "{invalid json",
 	})
 
@@ -55,7 +55,7 @@ func TestPerformManagePeople_UnknownOperation(t *testing.T) {
 	exec.SetPeopleRepository(mockStore)
 
 	ctx := context.Background()
-	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+	result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
 		"query": `{"operation":"unknown"}`,
 	})
 
@@ -76,8 +76,8 @@ func TestPerformManagePeople_CreateSuccess(t *testing.T) {
 		Data: []openrouter.EmbeddingObject{{Embedding: embedding}},
 	}, nil)
 
-	mockStore.On("FindPersonByName", int64(123), "Alice").Return(nil, nil)
-	mockStore.On("FindPersonByAlias", int64(123), "Alice").Return([]storage.Person{}, nil)
+	mockStore.On("FindPersonByName", storage.ScopeID("123"), "Alice").Return(nil, nil)
+	mockStore.On("FindPersonByAlias", storage.ScopeID("123"), "Alice").Return([]storage.Person{}, nil)
 	mockStore.On("AddPerson", mock.MatchedBy(func(p storage.Person) bool {
 		return p.DisplayName == "Alice" && p.Circle == "Friends"
 	})).Return(int64(42), nil)
@@ -86,7 +86,7 @@ func TestPerformManagePeople_CreateSuccess(t *testing.T) {
 	exec.SetPeopleRepository(mockStore)
 
 	ctx := context.Background()
-	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+	result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
 		"query": `{"operation":"create","name":"Alice","circle":"Friends"}`,
 	})
 
@@ -108,8 +108,8 @@ func TestPerformManagePeople_CreateWithAllFields(t *testing.T) {
 		Data: []openrouter.EmbeddingObject{{Embedding: embedding}},
 	}, nil)
 
-	mockStore.On("FindPersonByName", int64(123), "Bob").Return(nil, nil)
-	mockStore.On("FindPersonByAlias", int64(123), "Bob").Return([]storage.Person{}, nil)
+	mockStore.On("FindPersonByName", storage.ScopeID("123"), "Bob").Return(nil, nil)
+	mockStore.On("FindPersonByAlias", storage.ScopeID("123"), "Bob").Return([]storage.Person{}, nil)
 	mockStore.On("AddPerson", mock.MatchedBy(func(p storage.Person) bool {
 		return p.DisplayName == "Bob" &&
 			p.Bio == "Software engineer" &&
@@ -122,7 +122,7 @@ func TestPerformManagePeople_CreateWithAllFields(t *testing.T) {
 	exec.SetPeopleRepository(mockStore)
 
 	ctx := context.Background()
-	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+	result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
 		"query": `{"operation":"create","name":"Bob","bio":"Software engineer","username":"@alice","circle":"Work","aliases":["bobby","robert"]}`,
 	})
 
@@ -140,13 +140,13 @@ func TestPerformManagePeople_CreateAlreadyExists(t *testing.T) {
 
 	existingPerson := storage.Person{ID: 42, DisplayName: "Alice"}
 
-	mockStore.On("FindPersonByName", int64(123), "Alice").Return(&existingPerson, nil)
+	mockStore.On("FindPersonByName", storage.ScopeID("123"), "Alice").Return(&existingPerson, nil)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 	exec.SetPeopleRepository(mockStore)
 
 	ctx := context.Background()
-	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+	result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
 		"query": `{"operation":"create","name":"Alice"}`,
 	})
 
@@ -166,7 +166,7 @@ func TestPerformManagePeople_CreateMissingName(t *testing.T) {
 	exec.SetPeopleRepository(mockStore)
 
 	ctx := context.Background()
-	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+	result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
 		"query": `{"operation":"create","circle":"Friends"}`,
 	})
 
@@ -187,13 +187,13 @@ func TestPerformManagePeople_UpdateByID(t *testing.T) {
 
 	existingPerson := storage.Person{
 		ID:          42,
-		UserID:      123,
+		UserID:      "123",
 		DisplayName: "Alice",
 		Bio:         "Old bio",
 		Aliases:     []string{"ally"},
 	}
 
-	mockStore.On("GetPerson", int64(123), int64(42)).Return(&existingPerson, nil)
+	mockStore.On("GetPerson", storage.ScopeID("123"), int64(42)).Return(&existingPerson, nil)
 	mockStore.On("UpdatePerson", mock.MatchedBy(func(p storage.Person) bool {
 		return p.ID == 42 && p.Bio == "Old bio New info"
 	})).Return(nil)
@@ -202,7 +202,7 @@ func TestPerformManagePeople_UpdateByID(t *testing.T) {
 	exec.SetPeopleRepository(mockStore)
 
 	ctx := context.Background()
-	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+	result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
 		"query": `{"operation":"update","person_id":"Person:42","updates":{"bio_append":"New info"}}`,
 	})
 
@@ -220,14 +220,14 @@ func TestPerformManagePeople_UpdateByName(t *testing.T) {
 
 	existingPerson := storage.Person{
 		ID:          42,
-		UserID:      123,
+		UserID:      "123",
 		DisplayName: "Alice",
 		Circle:      "Other",
 	}
 
 	// No person_id provided, so GetPerson is not called
 	// FindPersonByName is called first and finds the person
-	mockStore.On("FindPersonByName", int64(123), "Alice").Return(&existingPerson, nil)
+	mockStore.On("FindPersonByName", storage.ScopeID("123"), "Alice").Return(&existingPerson, nil)
 	mockStore.On("UpdatePerson", mock.MatchedBy(func(p storage.Person) bool {
 		return p.ID == 42 && p.Circle == "Friends"
 	})).Return(nil)
@@ -236,7 +236,7 @@ func TestPerformManagePeople_UpdateByName(t *testing.T) {
 	exec.SetPeopleRepository(mockStore)
 
 	ctx := context.Background()
-	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+	result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
 		"query": `{"operation":"update","name":"Alice","updates":{"circle":"Friends"}}`,
 	})
 
@@ -259,19 +259,19 @@ func TestPerformManagePeople_UpdateWithAliases(t *testing.T) {
 
 	existingPerson := storage.Person{
 		ID:          42,
-		UserID:      123,
+		UserID:      "123",
 		DisplayName: "Alice",
 		Aliases:     []string{"ally"},
 	}
 
-	mockStore.On("GetPerson", int64(123), int64(42)).Return(&existingPerson, nil)
+	mockStore.On("GetPerson", storage.ScopeID("123"), int64(42)).Return(&existingPerson, nil)
 	mockStore.On("UpdatePerson", mock.AnythingOfType("storage.Person")).Return(nil)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 	exec.SetPeopleRepository(mockStore)
 
 	ctx := context.Background()
-	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+	result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
 		"query": `{"operation":"update","person_id":"Person:42","updates":{"aliases_add":["alice2","ally2"]}}`,
 	})
 
@@ -289,13 +289,13 @@ func TestPerformManagePeople_UpdateMissingUpdates(t *testing.T) {
 
 	existingPerson := storage.Person{ID: 42, DisplayName: "Alice"}
 
-	mockStore.On("GetPerson", int64(123), int64(42)).Return(&existingPerson, nil)
+	mockStore.On("GetPerson", storage.ScopeID("123"), int64(42)).Return(&existingPerson, nil)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 	exec.SetPeopleRepository(mockStore)
 
 	ctx := context.Background()
-	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+	result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
 		"query": `{"operation":"update","person_id":"Person:42"}`,
 	})
 
@@ -313,14 +313,14 @@ func TestPerformManagePeople_DeleteByID(t *testing.T) {
 
 	existingPerson := storage.Person{ID: 42, DisplayName: "Alice"}
 
-	mockStore.On("GetPerson", int64(123), int64(42)).Return(&existingPerson, nil)
-	mockStore.On("DeletePerson", int64(123), int64(42)).Return(nil)
+	mockStore.On("GetPerson", storage.ScopeID("123"), int64(42)).Return(&existingPerson, nil)
+	mockStore.On("DeletePerson", storage.ScopeID("123"), int64(42)).Return(nil)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 	exec.SetPeopleRepository(mockStore)
 
 	ctx := context.Background()
-	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+	result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
 		"query": `{"operation":"delete","person_id":"Person:42"}`,
 	})
 
@@ -339,14 +339,14 @@ func TestPerformManagePeople_DeleteByName(t *testing.T) {
 	existingPerson := storage.Person{ID: 42, DisplayName: "Alice"}
 
 	// No person_id provided, so GetPerson is not called
-	mockStore.On("FindPersonByName", int64(123), "Alice").Return(&existingPerson, nil)
-	mockStore.On("DeletePerson", int64(123), int64(42)).Return(nil)
+	mockStore.On("FindPersonByName", storage.ScopeID("123"), "Alice").Return(&existingPerson, nil)
+	mockStore.On("DeletePerson", storage.ScopeID("123"), int64(42)).Return(nil)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 	exec.SetPeopleRepository(mockStore)
 
 	ctx := context.Background()
-	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+	result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
 		"query": `{"operation":"delete","name":"Alice"}`,
 	})
 
@@ -364,9 +364,9 @@ func TestPerformManagePeople_MergeSuccess(t *testing.T) {
 	targetPerson := storage.Person{ID: 1, DisplayName: "Alice", Bio: "Original bio"}
 	sourcePerson := storage.Person{ID: 2, DisplayName: "Alice Smith", Bio: "Additional info"}
 
-	mockStore.On("GetPerson", int64(123), int64(1)).Return(&targetPerson, nil)
-	mockStore.On("GetPerson", int64(123), int64(2)).Return(&sourcePerson, nil)
-	mockStore.On("MergePeople", int64(123), int64(1), int64(2),
+	mockStore.On("GetPerson", storage.ScopeID("123"), int64(1)).Return(&targetPerson, nil)
+	mockStore.On("GetPerson", storage.ScopeID("123"), int64(2)).Return(&sourcePerson, nil)
+	mockStore.On("MergePeople", storage.ScopeID("123"), int64(1), int64(2),
 		mock.AnythingOfType("string"),   // newBio
 		mock.AnythingOfType("[]string"), // newAliases
 		mock.AnythingOfType("*string"),  // newUsername
@@ -379,7 +379,7 @@ func TestPerformManagePeople_MergeSuccess(t *testing.T) {
 	ctx := context.Background()
 	// When only IDs are provided, targetName and sourceName are empty
 	// The code uses names from params (which are empty when only IDs given)
-	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+	result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
 		"query": `{"operation":"merge","target_id":"Person:1","source_id":"Person:2"}`,
 	})
 
@@ -397,13 +397,13 @@ func TestPerformManagePeople_MergeSelfMerge(t *testing.T) {
 
 	person := storage.Person{ID: 1, DisplayName: "Alice"}
 
-	mockStore.On("GetPerson", int64(123), int64(1)).Return(&person, nil).Twice()
+	mockStore.On("GetPerson", storage.ScopeID("123"), int64(1)).Return(&person, nil).Twice()
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 	exec.SetPeopleRepository(mockStore)
 
 	ctx := context.Background()
-	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+	result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
 		"query": `{"operation":"merge","target_id":"Person:1","source_id":"Person:1"}`,
 	})
 
@@ -423,7 +423,7 @@ func TestPerformManagePeople_UpdateRequiresPersonIDOrName(t *testing.T) {
 	exec.SetPeopleRepository(mockStore)
 
 	ctx := context.Background()
-	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+	result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
 		"query": `{"operation":"update"}`,
 	})
 
@@ -441,7 +441,7 @@ func TestPerformManagePeople_DeleteRequiresPersonIDOrName(t *testing.T) {
 	exec.SetPeopleRepository(mockStore)
 
 	ctx := context.Background()
-	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+	result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
 		"query": `{"operation":"delete"}`,
 	})
 
@@ -460,7 +460,7 @@ func TestPerformManagePeople_MergeRequiresTargetAndSource(t *testing.T) {
 
 	t.Run("missing target", func(t *testing.T) {
 		ctx := context.Background()
-		result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+		result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
 			"query": `{"operation":"merge","source_id":"Person:1"}`,
 		})
 
@@ -471,7 +471,7 @@ func TestPerformManagePeople_MergeRequiresTargetAndSource(t *testing.T) {
 
 	t.Run("missing source", func(t *testing.T) {
 		ctx := context.Background()
-		result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+		result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
 			"query": `{"operation":"merge","target_id":"Person:1"}`,
 		})
 
@@ -486,8 +486,8 @@ func TestPerformCreatePerson_WithEmbeddingFailure(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
 
-	mockStore.On("FindPersonByName", int64(123), "Alice").Return(nil, nil)
-	mockStore.On("FindPersonByAlias", int64(123), "Alice").Return([]storage.Person{}, nil)
+	mockStore.On("FindPersonByName", storage.ScopeID("123"), "Alice").Return(nil, nil)
+	mockStore.On("FindPersonByAlias", storage.ScopeID("123"), "Alice").Return([]storage.Person{}, nil)
 	mockStore.On("AddPerson", mock.MatchedBy(func(p storage.Person) bool {
 		return p.DisplayName == "Alice"
 	})).Return(int64(42), nil)
@@ -499,7 +499,7 @@ func TestPerformCreatePerson_WithEmbeddingFailure(t *testing.T) {
 	exec.SetPeopleRepository(mockStore)
 
 	ctx := context.Background()
-	result, err := exec.performCreatePerson(ctx, 123, "Alice", map[string]interface{}{
+	result, err := exec.performCreatePerson(ctx, "123", "Alice", map[string]interface{}{
 		"operation": "create",
 		"name":      "Alice",
 	})
@@ -520,19 +520,19 @@ func TestPerformManagePeople_UpdateByCompositeName(t *testing.T) {
 
 	existingPerson := storage.Person{
 		ID:          22,
-		UserID:      123,
+		UserID:      "123",
 		DisplayName: "John Doe",
 		Circle:      "Work_Inner",
 	}
 
 	// First FindPersonByName gets the raw composite and returns nil (no match).
-	mockStore.On("FindPersonByName", int64(123), "John Doe (@johndoe)").
+	mockStore.On("FindPersonByName", storage.ScopeID("123"), "John Doe (@johndoe)").
 		Return((*storage.Person)(nil), nil)
 	// Alias search also misses — no alias contains the whole composite.
-	mockStore.On("FindPersonByAlias", int64(123), "John Doe (@johndoe)").
+	mockStore.On("FindPersonByAlias", storage.ScopeID("123"), "John Doe (@johndoe)").
 		Return([]storage.Person{}, nil)
 	// Retry with handle suffix stripped succeeds.
-	mockStore.On("FindPersonByName", int64(123), "John Doe").
+	mockStore.On("FindPersonByName", storage.ScopeID("123"), "John Doe").
 		Return(&existingPerson, nil)
 	mockStore.On("UpdatePerson", mock.MatchedBy(func(p storage.Person) bool {
 		return p.ID == 22 && p.Circle == "Friends"
@@ -542,7 +542,7 @@ func TestPerformManagePeople_UpdateByCompositeName(t *testing.T) {
 	exec.SetPeopleRepository(mockStore)
 
 	ctx := context.Background()
-	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+	result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
 		"query": `{"operation":"update","name":"John Doe (@johndoe)","updates":{"circle":"Friends"}}`,
 	})
 
@@ -559,23 +559,23 @@ func TestPerformManagePeople_DeleteByCompositeName(t *testing.T) {
 
 	existingPerson := storage.Person{
 		ID:          22,
-		UserID:      123,
+		UserID:      "123",
 		DisplayName: "Alice Smith",
 	}
 
-	mockStore.On("FindPersonByName", int64(123), "Alice Smith (@alice)").
+	mockStore.On("FindPersonByName", storage.ScopeID("123"), "Alice Smith (@alice)").
 		Return((*storage.Person)(nil), nil)
-	mockStore.On("FindPersonByAlias", int64(123), "Alice Smith (@alice)").
+	mockStore.On("FindPersonByAlias", storage.ScopeID("123"), "Alice Smith (@alice)").
 		Return([]storage.Person{}, nil)
-	mockStore.On("FindPersonByName", int64(123), "Alice Smith").
+	mockStore.On("FindPersonByName", storage.ScopeID("123"), "Alice Smith").
 		Return(&existingPerson, nil)
-	mockStore.On("DeletePerson", int64(123), int64(22)).Return(nil)
+	mockStore.On("DeletePerson", storage.ScopeID("123"), int64(22)).Return(nil)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 	exec.SetPeopleRepository(mockStore)
 
 	ctx := context.Background()
-	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+	result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
 		"query": `{"operation":"delete","name":"Alice Smith (@alice)","reason":"no longer relevant"}`,
 	})
 
@@ -592,18 +592,18 @@ func TestPerformManagePeople_UpdateCompositeNotFound(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
 
-	mockStore.On("FindPersonByName", int64(123), "Ghost Person (@ghost)").
+	mockStore.On("FindPersonByName", storage.ScopeID("123"), "Ghost Person (@ghost)").
 		Return((*storage.Person)(nil), nil)
-	mockStore.On("FindPersonByAlias", int64(123), "Ghost Person (@ghost)").
+	mockStore.On("FindPersonByAlias", storage.ScopeID("123"), "Ghost Person (@ghost)").
 		Return([]storage.Person{}, nil)
-	mockStore.On("FindPersonByName", int64(123), "Ghost Person").
+	mockStore.On("FindPersonByName", storage.ScopeID("123"), "Ghost Person").
 		Return((*storage.Person)(nil), nil)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 	exec.SetPeopleRepository(mockStore)
 
 	ctx := context.Background()
-	result, err := exec.performManagePeople(ctx, 123, map[string]interface{}{
+	result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
 		"query": `{"operation":"update","name":"Ghost Person (@ghost)","updates":{"circle":"Friends"}}`,
 	})
 

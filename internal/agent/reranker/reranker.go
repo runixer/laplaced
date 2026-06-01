@@ -119,7 +119,7 @@ func (r *Reranker) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 // Uses agentic loop with tool calls to select relevant topics, people, and artifacts.
 func (r *Reranker) rerank(
 	ctx context.Context,
-	userID int64,
+	userID storage.ScopeID,
 	candidates []Candidate,
 	personCandidates []PersonCandidate,
 	artifactCandidates []ArtifactCandidate,
@@ -141,7 +141,7 @@ func (r *Reranker) rerank(
 	)
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/reranker").Start(
 		ctx, "reranker.Execute",
-		oteltrace.WithAttributes(attribute.Int64("user.id", userID)),
+		oteltrace.WithAttributes(attribute.String("user.id", string(userID))),
 	)
 	// Bind reranker's own trace/span ids onto the local logger so every
 	// downstream slog line in this method correlates to *this* span (not
@@ -418,7 +418,7 @@ func (r *Reranker) rerank(
 			// Reasoning works correctly without plugins.
 			ResponseFormat: responseFormat,
 			Reasoning:      reasoning,
-			UserID:         userID,
+			UserID:         string(userID),
 		})
 		turnCancel()
 

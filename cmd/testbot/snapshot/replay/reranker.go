@@ -11,18 +11,18 @@ import (
 	"github.com/runixer/laplaced/internal/storage"
 )
 
-// RerankerStore is the slice of storage.SQLiteStore the reconstructor needs.
+// RerankerStore is the slice of storage.Store the reconstructor needs.
 // Defined as an interface so tests can stub the lookups without spinning up
 // a real DB.
 type RerankerStore interface {
-	GetTopicsByIDs(userID int64, ids []int64) ([]storage.Topic, error)
-	GetPeopleByIDs(userID int64, ids []int64) ([]storage.Person, error)
-	GetArtifactsByIDs(userID int64, artifactIDs []int64) ([]storage.Artifact, error)
+	GetTopicsByIDs(userID storage.ScopeID, ids []int64) ([]storage.Topic, error)
+	GetPeopleByIDs(userID storage.ScopeID, ids []int64) ([]storage.Person, error)
+	GetArtifactsByIDs(userID storage.ScopeID, artifactIDs []int64) ([]storage.Artifact, error)
 }
 
 // SharedContextLoader produces a SharedContext for the replay user. In the
 // Cobra command we pass services.ContextService.Load; tests can stub.
-type SharedContextLoader func(ctx context.Context, userID int64) *agent.SharedContext
+type SharedContextLoader func(ctx context.Context, userID storage.ScopeID) *agent.SharedContext
 
 // NewRerankerBuilder constructs a BuildRequestFunc that turns a captured
 // reranker.Execute span into an agent.Request.
@@ -52,7 +52,7 @@ func BuildRerankerRequest(
 	store RerankerStore,
 	loadShared SharedContextLoader,
 ) (BuildResult, error) {
-	if span.UserID == 0 {
+	if span.UserID == "" {
 		return BuildResult{}, fmt.Errorf("trace has no user.id attribute")
 	}
 
@@ -224,7 +224,7 @@ func rerankerInput(
 // loadTopics looks up the captured topic IDs in the snapshot DB and returns
 // fully-formed reranker.Candidate values along with the IDs that weren't
 // found (chunking-split, deleted, etc).
-func loadTopics(store RerankerStore, userID int64, lines []snapshot.CandidateLine) ([]reranker.Candidate, []int64, error) {
+func loadTopics(store RerankerStore, userID storage.ScopeID, lines []snapshot.CandidateLine) ([]reranker.Candidate, []int64, error) {
 	if len(lines) == 0 {
 		return nil, nil, nil
 	}
@@ -263,7 +263,7 @@ func loadTopics(store RerankerStore, userID int64, lines []snapshot.CandidateLin
 	return out, missing, nil
 }
 
-func loadPeople(store RerankerStore, userID int64, lines []snapshot.PersonCandidateLine) ([]reranker.PersonCandidate, []int64, error) {
+func loadPeople(store RerankerStore, userID storage.ScopeID, lines []snapshot.PersonCandidateLine) ([]reranker.PersonCandidate, []int64, error) {
 	if len(lines) == 0 {
 		return nil, nil, nil
 	}
@@ -298,7 +298,7 @@ func loadPeople(store RerankerStore, userID int64, lines []snapshot.PersonCandid
 	return out, missing, nil
 }
 
-func loadArtifacts(store RerankerStore, userID int64, lines []snapshot.ArtifactCandidateLine) ([]reranker.ArtifactCandidate, []int64, error) {
+func loadArtifacts(store RerankerStore, userID storage.ScopeID, lines []snapshot.ArtifactCandidateLine) ([]reranker.ArtifactCandidate, []int64, error) {
 	if len(lines) == 0 {
 		return nil, nil, nil
 	}

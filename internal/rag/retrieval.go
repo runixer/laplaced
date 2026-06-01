@@ -48,7 +48,7 @@ type RetrievalOptions struct {
 	MediaParts     []interface{} // Multimodal content (images, audio) for enricher and reranker
 }
 
-func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts *RetrievalOptions) (*RetrievalResult, *RetrievalDebugInfo, error) {
+func (s *Service) Retrieve(ctx context.Context, userID storage.ScopeID, query string, opts *RetrievalOptions) (*RetrievalResult, *RetrievalDebugInfo, error) {
 	startTime := time.Now()
 	debugInfo := &RetrievalDebugInfo{
 		OriginalQuery: query,
@@ -69,7 +69,7 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/rag").Start(
 		ctx, "rag.Retrieve",
 		trace.WithAttributes(
-			attribute.Int64("user.id", userID),
+			attribute.String("user.id", string(userID)),
 			attribute.String("rag.source", opts.Source),
 		),
 	)
@@ -212,7 +212,7 @@ func (s *Service) Retrieve(ctx context.Context, userID int64, query string, opts
 }
 
 // enrichQueryIfEnabled enriches the query if enrichment is not skipped.
-func (s *Service) enrichQueryIfEnabled(ctx context.Context, userID int64, query string, opts *RetrievalOptions, debugInfo *RetrievalDebugInfo) string {
+func (s *Service) enrichQueryIfEnabled(ctx context.Context, userID storage.ScopeID, query string, opts *RetrievalOptions, debugInfo *RetrievalDebugInfo) string {
 	if opts.SkipEnrichment {
 		debugInfo.EnrichedQuery = query
 		return query
@@ -235,7 +235,7 @@ func (s *Service) enrichQueryIfEnabled(ctx context.Context, userID int64, query 
 }
 
 // createEmbedding creates an embedding for the given query.
-func (s *Service) createEmbedding(ctx context.Context, userID int64, query string) ([]float32, error) {
+func (s *Service) createEmbedding(ctx context.Context, userID storage.ScopeID, query string) ([]float32, error) {
 	embeddingStart := time.Now()
 	resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
 		Model:      s.cfg.Embedding.Model,
@@ -255,7 +255,7 @@ func (s *Service) createEmbedding(ctx context.Context, userID int64, query strin
 	return resp.Data[0].Embedding, nil
 }
 
-func (s *Service) RetrieveFacts(ctx context.Context, userID int64, query string) ([]storage.Fact, error) {
+func (s *Service) RetrieveFacts(ctx context.Context, userID storage.ScopeID, query string) ([]storage.Fact, error) {
 	if !s.cfg.RAG.Enabled {
 		return nil, nil
 	}
@@ -305,7 +305,7 @@ func (s *Service) RetrieveFacts(ctx context.Context, userID int64, query string)
 	return s.factRepo.GetFactsByIDs(userID, ids)
 }
 
-func (s *Service) FindSimilarFacts(ctx context.Context, userID int64, embedding []float32, threshold float32) ([]storage.Fact, error) {
+func (s *Service) FindSimilarFacts(ctx context.Context, userID storage.ScopeID, embedding []float32, threshold float32) ([]storage.Fact, error) {
 	s.mu.RLock()
 	userVectors := s.factVectors[userID]
 	items := make([]embeddingItem, len(userVectors))
@@ -359,7 +359,7 @@ type RetrievalResult struct {
 
 // SearchPeople searches for people by vector similarity (v0.5.1).
 // excludeCircles filters out people from specified circles (e.g., "Work_Inner", "Family").
-func (s *Service) SearchPeople(ctx context.Context, userID int64, embedding []float32, threshold float32, maxResults int, excludeCircles []string) ([]PersonSearchResult, error) {
+func (s *Service) SearchPeople(ctx context.Context, userID storage.ScopeID, embedding []float32, threshold float32, maxResults int, excludeCircles []string) ([]PersonSearchResult, error) {
 	if s.peopleRepo == nil {
 		return nil, nil
 	}
@@ -447,7 +447,7 @@ func (s *Service) SearchPeople(ctx context.Context, userID int64, embedding []fl
 // Returns top N artifacts.
 func (s *Service) SearchArtifactsBySummary(
 	ctx context.Context,
-	userID int64,
+	userID storage.ScopeID,
 	embedding []float32,
 	threshold float32,
 ) ([]ArtifactResult, error) {

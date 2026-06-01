@@ -9,7 +9,11 @@
 // its own reconstructor without touching the runner.
 package replay
 
-import "time"
+import (
+	"time"
+
+	"github.com/runixer/laplaced/internal/storage"
+)
 
 // AgentOutput is the comparable slice of an agent invocation: which entities
 // the agent picked, with what reasons, and at what cost. Both Original (from
@@ -47,7 +51,7 @@ type SkippedLookup struct {
 // `<snapshot>/replay/<variant>/<trace_id>.json`.
 type ReplayResult struct {
 	TraceID string          `json:"trace_id"`
-	UserID  int64           `json:"user_id"`
+	UserID  storage.ScopeID `json:"user_id"`
 	Agent   string          `json:"agent"`   // "reranker", "enricher", ...
 	Variant string          `json:"variant"` // "baseline", "no_match_patch", ...
 	RanAt   time.Time       `json:"ran_at"`

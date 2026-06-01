@@ -99,7 +99,7 @@ func scanArtifactRow(s scannable) (*Artifact, error) {
 // AddArtifact saves a new artifact to the database.
 // Returns the ID of the inserted artifact.
 // If an artifact with the same content_hash exists for the user, returns existing artifact ID.
-func (s *SQLiteStore) AddArtifact(artifact Artifact) (int64, error) {
+func (s *Store) AddArtifact(artifact Artifact) (int64, error) {
 	// Check for duplicate by hash
 	existing, err := s.GetByHash(artifact.UserID, artifact.ContentHash)
 	if err == nil && existing != nil {
@@ -124,7 +124,7 @@ func (s *SQLiteStore) AddArtifact(artifact Artifact) (int64, error) {
 		userContextIface = *artifact.UserContext
 	}
 
-	result, err := s.db.Exec(query,
+	id, err := s.insertReturningID(query, "id",
 		artifact.UserID,
 		artifact.MessageID,
 		artifact.FileType,
@@ -140,11 +140,6 @@ func (s *SQLiteStore) AddArtifact(artifact Artifact) (int64, error) {
 		return 0, fmt.Errorf("failed to insert artifact: %w", err)
 	}
 
-	id, err := result.LastInsertId()
-	if err != nil {
-		return 0, fmt.Errorf("failed to get artifact ID: %w", err)
-	}
-
 	s.logger.Info("artifact created",
 		"id", id,
 		"user_id", artifact.UserID,
@@ -157,7 +152,7 @@ func (s *SQLiteStore) AddArtifact(artifact Artifact) (int64, error) {
 }
 
 // GetArtifact retrieves an artifact by ID and user ID.
-func (s *SQLiteStore) GetArtifact(userID, artifactID int64) (*Artifact, error) {
+func (s *Store) GetArtifact(userID ScopeID, artifactID int64) (*Artifact, error) {
 	query := `
 		SELECT id, user_id, message_id, file_type, file_path, file_size,
 			mime_type, original_name, content_hash, state, error_message,
@@ -169,7 +164,7 @@ func (s *SQLiteStore) GetArtifact(userID, artifactID int64) (*Artifact, error) {
 		WHERE user_id = ? AND id = ?
 	`
 
-	row := s.db.QueryRow(query, userID, artifactID)
+	row := s.queryRow(query, userID, artifactID)
 	artifact, err := scanArtifactRow(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -183,7 +178,7 @@ func (s *SQLiteStore) GetArtifact(userID, artifactID int64) (*Artifact, error) {
 
 // GetByHash retrieves an artifact by content hash and user ID.
 // Used for deduplication checks.
-func (s *SQLiteStore) GetByHash(userID int64, contentHash string) (*Artifact, error) {
+func (s *Store) GetByHash(userID ScopeID, contentHash string) (*Artifact, error) {
 	query := `
 		SELECT id, user_id, message_id, file_type, file_path, file_size,
 			mime_type, original_name, content_hash, state, error_message,
@@ -195,7 +190,7 @@ func (s *SQLiteStore) GetByHash(userID int64, contentHash string) (*Artifact, er
 		WHERE user_id = ? AND content_hash = ?
 	`
 
-	row := s.db.QueryRow(query, userID, contentHash)
+	row := s.queryRow(query, userID, contentHash)
 	artifact, err := scanArtifactRow(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -212,8 +207,8 @@ func (s *SQLiteStore) GetByHash(userID int64, contentHash string) (*Artifact, er
 // - state='pending' (new artifacts)
 // - state='failed' with retry_count < maxRetries and sufficient backoff elapsed (v0.6.0 - CRIT-3)
 // Backoff schedule: 1 min (retry 0), 5 min (retry 1), 30 min (retry 2+)
-func (s *SQLiteStore) GetPendingArtifacts(userID int64, maxRetries int) ([]Artifact, error) {
-	query := `
+func (s *Store) GetPendingArtifacts(userID ScopeID, maxRetries int) ([]Artifact, error) {
+	query := fmt.Sprintf(`
 		SELECT id, user_id, message_id, file_type, file_path, file_size,
 			mime_type, original_name, content_hash, state, error_message,
 			retry_count, last_failed_at,
@@ -229,16 +224,16 @@ func (s *SQLiteStore) GetPendingArtifacts(userID int64, maxRetries int) ([]Artif
 				AND retry_count < ?
 				AND (
 					last_failed_at IS NULL
-					OR (retry_count = 0 AND last_failed_at < datetime('now', '-1 minute'))
-					OR (retry_count = 1 AND last_failed_at < datetime('now', '-5 minutes'))
-					OR (retry_count >= 2 AND last_failed_at < datetime('now', '-30 minutes'))
+					OR (retry_count = 0 AND last_failed_at < %s)
+					OR (retry_count = 1 AND last_failed_at < %s)
+					OR (retry_count >= 2 AND last_failed_at < %s)
 				)
 			)
 		  )
 		ORDER BY created_at ASC
-	`
+	`, s.dialect.MinutesAgoExpr(1), s.dialect.MinutesAgoExpr(5), s.dialect.MinutesAgoExpr(30))
 
-	rows, err := s.db.Query(query, userID, maxRetries)
+	rows, err := s.query(query, userID, maxRetries)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pending artifacts: %w", err)
 	}
@@ -261,7 +256,7 @@ func (s *SQLiteStore) GetPendingArtifacts(userID int64, maxRetries int) ([]Artif
 }
 
 // UpdateArtifact updates an artifact's metadata.
-func (s *SQLiteStore) UpdateArtifact(artifact Artifact) error {
+func (s *Store) UpdateArtifact(artifact Artifact) error {
 	query := `
 		UPDATE artifacts
 		SET state = ?,
@@ -316,7 +311,7 @@ func (s *SQLiteStore) UpdateArtifact(artifact Artifact) error {
 		}
 	}
 
-	result, err := s.db.Exec(query,
+	result, err := s.exec(query,
 		artifact.State,
 		errorMessageIface,
 		artifact.RetryCount,
@@ -340,7 +335,7 @@ func (s *SQLiteStore) UpdateArtifact(artifact Artifact) error {
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("artifact not found (user_id=%d, id=%d)", artifact.UserID, artifact.ID)
+		return fmt.Errorf("artifact not found (user_id=%s, id=%d)", artifact.UserID, artifact.ID)
 	}
 
 	return nil
@@ -350,15 +345,15 @@ func (s *SQLiteStore) UpdateArtifact(artifact Artifact) error {
 // Called on startup to recover from crashes or interruptions.
 // Only recovers artifacts that have been in 'processing' state for longer than threshold
 // to avoid re-processing actively processing artifacts.
-func (s *SQLiteStore) RecoverArtifactStates(threshold time.Duration) error {
-	query := `
+func (s *Store) RecoverArtifactStates(threshold time.Duration) error {
+	query := fmt.Sprintf(`
 		UPDATE artifacts
 		SET state = 'pending', error_message = NULL
 		WHERE state = 'processing'
-		  AND created_at < datetime('now', '-' || ? || ' seconds')
-	`
+		  AND %s
+	`, s.dialect.SecondsAgoExpr("created_at"))
 
-	result, err := s.db.Exec(query, int64(threshold.Seconds()))
+	result, err := s.exec(query, int64(threshold.Seconds()))
 	if err != nil {
 		return fmt.Errorf("failed to recover artifact states: %w", err)
 	}
@@ -375,7 +370,7 @@ func (s *SQLiteStore) RecoverArtifactStates(threshold time.Duration) error {
 }
 
 // GetArtifactsByIDs retrieves artifacts by their IDs (batch load).
-func (s *SQLiteStore) GetArtifactsByIDs(userID int64, artifactIDs []int64) ([]Artifact, error) {
+func (s *Store) GetArtifactsByIDs(userID ScopeID, artifactIDs []int64) ([]Artifact, error) {
 	if len(artifactIDs) == 0 {
 		return nil, nil
 	}
@@ -396,7 +391,7 @@ func (s *SQLiteStore) GetArtifactsByIDs(userID int64, artifactIDs []int64) ([]Ar
 		return nil, err
 	}
 
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get artifacts by IDs: %w", err)
 	}
@@ -416,9 +411,9 @@ func (s *SQLiteStore) GetArtifactsByIDs(userID int64, artifactIDs []int64) ([]Ar
 
 // GetArtifacts retrieves artifacts for a user with optional filters and pagination.
 // UserID is REQUIRED for data isolation.
-func (s *SQLiteStore) GetArtifacts(filter ArtifactFilter, limit, offset int) ([]Artifact, int64, error) {
+func (s *Store) GetArtifacts(filter ArtifactFilter, limit, offset int) ([]Artifact, int64, error) {
 	// Enforce user data isolation - UserID is required
-	if filter.UserID == 0 {
+	if filter.UserID == "" {
 		return nil, 0, fmt.Errorf("UserID required for GetArtifacts")
 	}
 
@@ -441,7 +436,7 @@ func (s *SQLiteStore) GetArtifacts(filter ArtifactFilter, limit, offset int) ([]
 	// Count query first
 	countQuery := `SELECT COUNT(*) FROM artifacts WHERE ` + whereClause
 	var total int64
-	err := s.db.QueryRow(countQuery, countArgs...).Scan(&total)
+	err := s.queryRow(countQuery, countArgs...).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to count artifacts: %w", err)
 	}
@@ -459,7 +454,7 @@ func (s *SQLiteStore) GetArtifacts(filter ArtifactFilter, limit, offset int) ([]
 		ORDER BY created_at DESC LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)
 
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.query(query, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get artifacts: %w", err)
 	}
@@ -484,7 +479,7 @@ func (s *SQLiteStore) GetArtifacts(filter ArtifactFilter, limit, offset int) ([]
 // IncrementContextLoadCount increments the load counter for artifacts
 // and updates last_loaded_at timestamp. Called asynchronously after
 // artifacts are successfully loaded into LLM context (v0.6.0).
-func (s *SQLiteStore) IncrementContextLoadCount(userID int64, artifactIDs []int64) error {
+func (s *Store) IncrementContextLoadCount(userID ScopeID, artifactIDs []int64) error {
 	if len(artifactIDs) == 0 {
 		return nil
 	}
@@ -494,13 +489,13 @@ func (s *SQLiteStore) IncrementContextLoadCount(userID int64, artifactIDs []int6
 		SET context_load_count = context_load_count + 1,
 		    last_loaded_at = ?
 		WHERE user_id = ? AND id IN (?)`,
-		time.Now().UTC().Format("2006-01-02 15:04:05.999"), userID, artifactIDs,
+		s.dialect.BindTime(time.Now()), userID, artifactIDs,
 	)
 	if err != nil {
 		return err
 	}
 
-	result, err := s.db.Exec(query, args...)
+	result, err := s.exec(query, args...)
 	if err != nil {
 		return fmt.Errorf("failed to increment context load count: %w", err)
 	}
@@ -528,15 +523,15 @@ func (s *SQLiteStore) IncrementContextLoadCount(userID int64, artifactIDs []int6
 // Double user_id filter (a.user_id AND h.user_id) is intentional defense-in-depth per the
 // project's user-isolation invariants — session-aware queries with JOIN must enforce isolation
 // on every joined table.
-func (s *SQLiteStore) GetSessionArtifacts(ctx context.Context, userID int64, limit int, maxAge time.Duration) ([]Artifact, error) {
-	if userID == 0 {
+func (s *Store) GetSessionArtifacts(ctx context.Context, userID ScopeID, limit int, maxAge time.Duration) ([]Artifact, error) {
+	if userID == "" {
 		return nil, fmt.Errorf("UserID required for GetSessionArtifacts")
 	}
 	if limit <= 0 {
 		return nil, nil
 	}
 
-	cutoff := time.Now().Add(-maxAge).UTC().Format("2006-01-02 15:04:05.999")
+	cutoff := s.dialect.BindTime(time.Now().Add(-maxAge))
 
 	query := `
 		SELECT a.id, a.user_id, a.message_id, a.file_type, a.file_path, a.file_size,
@@ -557,7 +552,7 @@ func (s *SQLiteStore) GetSessionArtifacts(ctx context.Context, userID int64, lim
 		LIMIT ?
 	`
 
-	rows, err := s.db.QueryContext(ctx, query, userID, userID, cutoff, limit)
+	rows, err := s.queryContext(ctx, query, userID, userID, cutoff, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session artifacts: %w", err)
 	}
@@ -582,17 +577,17 @@ func (s *SQLiteStore) GetSessionArtifacts(ctx context.Context, userID int64, lim
 // UpdateMessageID links an artifact to a history message.
 // Called after message is saved to history (message_id is not known during file processing).
 // Requires userID for proper data isolation (CRIT-2 security fix).
-func (s *SQLiteStore) UpdateMessageID(userID, artifactID, messageID int64) error {
+func (s *Store) UpdateMessageID(userID ScopeID, artifactID, messageID int64) error {
 	query := `UPDATE artifacts SET message_id = ? WHERE user_id = ? AND id = ?`
 
-	result, err := s.db.Exec(query, messageID, userID, artifactID)
+	result, err := s.exec(query, messageID, userID, artifactID)
 	if err != nil {
 		return fmt.Errorf("failed to update artifact message_id: %w", err)
 	}
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("artifact not found (user_id=%d, id=%d)", userID, artifactID)
+		return fmt.Errorf("artifact not found (user_id=%s, id=%d)", userID, artifactID)
 	}
 
 	s.logger.Debug("linked artifact to message",

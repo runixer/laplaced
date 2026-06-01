@@ -158,13 +158,13 @@ func SetupCommonRAGMocks(store *testutil.MockStorage) {
 }
 
 // SetupMergeCandidatesMock sets up mock expectations for merge candidate operations.
-func SetupMergeCandidatesMock(store *testutil.MockStorage, userID int64, candidates []storage.MergeCandidate) {
+func SetupMergeCandidatesMock(store *testutil.MockStorage, userID storage.ScopeID, candidates []storage.MergeCandidate) {
 	store.On("GetMergeCandidates", userID, mock.Anything).Return(candidates, nil).Maybe()
 	store.On("SetTopicConsolidationChecked", userID, mock.Anything, true).Return(nil).Maybe()
 }
 
 // SetupTopicsPendingFactsMock sets up mock expectations for fact extraction operations.
-func SetupTopicsPendingFactsMock(store *testutil.MockStorage, userID int64, topics []storage.Topic, msgs []storage.Message) {
+func SetupTopicsPendingFactsMock(store *testutil.MockStorage, userID storage.ScopeID, topics []storage.Topic, msgs []storage.Message) {
 	store.On("GetTopicsPendingFacts", userID).Return(topics, nil).Maybe()
 	for _, topic := range topics {
 		store.On("GetMessagesByTopicID", mock.Anything, topic.ID).Return(msgs, nil).Maybe()
@@ -173,7 +173,7 @@ func SetupTopicsPendingFactsMock(store *testutil.MockStorage, userID int64, topi
 }
 
 // MockCandidate creates a test merge candidate with two topics for testing.
-func MockCandidate(id1, id2, userID int64, similarity float32) storage.MergeCandidate {
+func MockCandidate(id1, id2 int64, userID storage.ScopeID, similarity float32) storage.MergeCandidate {
 	return storage.MergeCandidate{
 		Topic1: storage.Topic{ID: id1, UserID: userID, Embedding: []float32{1.0, 0.0, 0.0}},
 		Topic2: storage.Topic{ID: id2, UserID: userID, Embedding: []float32{similarity, 1.0 - similarity, 0.0}},
@@ -181,7 +181,7 @@ func MockCandidate(id1, id2, userID int64, similarity float32) storage.MergeCand
 }
 
 // MockTopic creates a test topic with minimal required fields.
-func MockTopic(id, userID int64, embedding []float32) storage.Topic {
+func MockTopic(id int64, userID storage.ScopeID, embedding []float32) storage.Topic {
 	return storage.Topic{
 		ID:         id,
 		UserID:     userID,
@@ -193,7 +193,7 @@ func MockTopic(id, userID int64, embedding []float32) storage.Topic {
 }
 
 // MockFact creates a test fact with minimal required fields.
-func MockFact(id, userID int64, embedding []float32) storage.Fact {
+func MockFact(id int64, userID storage.ScopeID, embedding []float32) storage.Fact {
 	return storage.Fact{
 		ID:          id,
 		UserID:      userID,
@@ -210,7 +210,7 @@ func MockFact(id, userID int64, embedding []float32) storage.Fact {
 }
 
 // MockPerson creates a test person with minimal required fields.
-func MockPerson(id, userID int64, displayName string, embedding []float32) storage.Person {
+func MockPerson(id int64, userID storage.ScopeID, displayName string, embedding []float32) storage.Person {
 	username := fmt.Sprintf("@user%d", id)
 	return storage.Person{
 		ID:           id,

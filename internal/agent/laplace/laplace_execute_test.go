@@ -247,7 +247,7 @@ func TestExecuteToolCalls_ParallelImageGen(t *testing.T) {
 func TestExecute_HappyPath(t *testing.T) {
 	cfg, translator, agent, mockStore, mockORClient, handler := setupExecuteTest(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	req := &Request{
 		UserID:              userID,
 		RawQuery:            "Hello",
@@ -287,7 +287,7 @@ func TestExecute_HappyPath(t *testing.T) {
 func TestExecute_WithToolCall(t *testing.T) {
 	cfg, translator, agent, mockStore, mockORClient, handler := setupExecuteTest(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	req := &Request{
 		UserID:              userID,
 		RawQuery:            "Search for golang",
@@ -339,7 +339,7 @@ func TestExecute_WithToolCall(t *testing.T) {
 func TestExecute_EmptyResponseWithRetry(t *testing.T) {
 	cfg, translator, agent, mockStore, mockORClient, handler := setupExecuteTest(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	req := &Request{
 		UserID:              userID,
 		RawQuery:            "test",
@@ -375,7 +375,7 @@ func TestExecute_EmptyResponseWithRetry(t *testing.T) {
 func TestExecute_MaxEmptyRetries(t *testing.T) {
 	cfg, translator, agent, mockStore, mockORClient, handler := setupExecuteTest(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	req := &Request{
 		UserID:              userID,
 		RawQuery:            "test",
@@ -409,7 +409,7 @@ func TestExecute_MaxEmptyRetries(t *testing.T) {
 func TestExecute_LLMError(t *testing.T) {
 	cfg, translator, agent, mockStore, mockORClient, handler := setupExecuteTest(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	req := &Request{
 		UserID:              userID,
 		RawQuery:            "test",
@@ -439,7 +439,7 @@ func TestExecute_LLMError(t *testing.T) {
 func TestExecute_ResponseSanitization(t *testing.T) {
 	cfg, translator, agent, mockStore, mockORClient, handler := setupExecuteTest(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	req := &Request{
 		UserID:              userID,
 		RawQuery:            "test",
@@ -484,7 +484,7 @@ func TestExecute_WithPDFParserPlugin(t *testing.T) {
 	// Pass nil for ragService and artifactRepo
 	agent := New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, testutil.TestLogger())
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	req := &Request{
 		UserID:              userID,
 		RawQuery:            "test",
@@ -517,7 +517,7 @@ func TestExecute_WithPDFParserPlugin(t *testing.T) {
 func TestExecute_IntermediateMessageWithToolCall(t *testing.T) {
 	cfg, translator, agent, mockStore, mockORClient, handler := setupExecuteTest(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	var intermediateMessages []string
 	req := &Request{
@@ -564,7 +564,7 @@ func TestExecute_IntermediateMessageWithToolCall(t *testing.T) {
 func TestExecute_MaxIterations(t *testing.T) {
 	cfg, translator, agent, mockStore, mockORClient, handler := setupExecuteTest(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	req := &Request{
 		UserID:              userID,
 		RawQuery:            "loop",
@@ -613,7 +613,7 @@ func TestLogExecution(t *testing.T) {
 	agentLogger := agentlog.NewLogger(nil, testutil.TestLogger(), true)
 	agent.agentLogger = agentLogger
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	cost := 0.001
 
 	resp := &Response{
@@ -644,7 +644,7 @@ func TestLogExecution(t *testing.T) {
 func TestExecute_WithToolStart(t *testing.T) {
 	cfg, translator, agent, mockStore, mockORClient, handler := setupExecuteTest(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	typingCallCount := 0
 	var seenToolNames []string
 	req := &Request{

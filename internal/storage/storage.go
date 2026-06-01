@@ -1,21 +1,24 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
+	_ "embed"
 	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/jackc/pgx/v5/stdlib" // postgres driver ("pgx")
+	_ "modernc.org/sqlite"             // sqlite driver ("sqlite")
 
 	"github.com/runixer/laplaced/internal/storage/migrations"
 )
 
 type Message struct {
 	ID        int64
-	UserID    int64
+	UserID    ScopeID
 	Role      string
 	Content   string
 	TopicID   *int64 // Nullable
@@ -37,7 +40,7 @@ type Message struct {
 }
 
 type User struct {
-	ID        int64
+	ID        ScopeID
 	Username  string
 	FirstName string
 	LastName  string
@@ -46,7 +49,7 @@ type User struct {
 
 type Topic struct {
 	ID                   int64
-	UserID               int64
+	UserID               ScopeID
 	Summary              string
 	StartMsgID           int64
 	EndMsgID             int64
@@ -70,7 +73,7 @@ type MergeCandidate struct {
 }
 
 type TopicFilter struct {
-	UserID         int64
+	UserID         ScopeID
 	Search         string
 	HasFacts       *bool // nil = all, true = yes, false = no
 	IsConsolidated *bool // nil = all
@@ -84,7 +87,7 @@ type TopicResult struct {
 
 type Fact struct {
 	ID          int64
-	UserID      int64
+	UserID      ScopeID
 	Relation    string
 	Content     string
 	Category    string
@@ -99,7 +102,7 @@ type Fact struct {
 type FactHistory struct {
 	ID           int64
 	FactID       int64
-	UserID       int64
+	UserID       ScopeID
 	Action       string // add, update, delete
 	OldContent   string
 	NewContent   string
@@ -113,7 +116,7 @@ type FactHistory struct {
 }
 
 type FactHistoryFilter struct {
-	UserID   int64
+	UserID   ScopeID
 	Action   string
 	Category string
 	Search   string
@@ -130,7 +133,7 @@ type FactStats struct {
 }
 
 type Stat struct {
-	UserID     int64
+	UserID     ScopeID
 	TokensUsed int
 	CostUSD    float64
 }
@@ -177,7 +180,7 @@ type RerankerToolCallTopic struct {
 // AgentLog stores debug traces from LLM agent calls (unified logging for all agents)
 type AgentLog struct {
 	ID                int64
-	UserID            int64
+	UserID            ScopeID
 	AgentType         string // laplace, reranker, splitter, merger, enricher, archivist, scout
 	InputPrompt       string
 	InputContext      string // JSON - full OpenRouter API request
@@ -198,7 +201,7 @@ type AgentLog struct {
 
 // AgentLogFilter for filtering agent logs
 type AgentLogFilter struct {
-	UserID    int64
+	UserID    ScopeID
 	AgentType string
 	Success   *bool
 	Search    string
@@ -213,7 +216,7 @@ type AgentLogResult struct {
 // Person represents a person from the user's social graph.
 type Person struct {
 	ID           int64     `json:"id"`
-	UserID       int64     `json:"user_id"`
+	UserID       ScopeID   `json:"user_id"`
 	DisplayName  string    `json:"display_name"`
 	Aliases      []string  `json:"aliases"`     // JSON array: ["Гелёй", "@akaGelo"]
 	TelegramID   *int64    `json:"telegram_id"` // For direct @mention match
@@ -234,7 +237,7 @@ type Person struct {
 
 // PersonFilter for filtering people queries.
 type PersonFilter struct {
-	UserID int64
+	UserID ScopeID
 	Circle string
 	Search string
 }
@@ -248,9 +251,9 @@ type PersonResult struct {
 // Artifact represents a file stored in the artifacts system.
 // v0.6.0: Simplified with summary-based search (no chunks, no full_text).
 type Artifact struct {
-	ID        int64 `json:"id"`
-	UserID    int64 `json:"user_id"`
-	MessageID int64 `json:"message_id"`
+	ID        int64   `json:"id"`
+	UserID    ScopeID `json:"user_id"`
+	MessageID int64   `json:"message_id"`
 
 	// File metadata
 	FileType     string `json:"file_type"` // 'image', 'voice', 'pdf', 'video_note', 'document'
@@ -303,10 +306,15 @@ type Storage interface {
 	ArtifactRepository
 }
 
-type SQLiteStore struct {
-	db     *sql.DB
-	logger *slog.Logger
-	dbPath string // Original path without query params, for file size check
+// Store is the dialect-aware storage backend. A single codebase serves both
+// SQLite and PostgreSQL; the active dialect is selected at
+// construction and the SQLite dialect is a behavioral no-op so the existing
+// SQLite deployment is unaffected.
+type Store struct {
+	db      *sql.DB
+	dialect Dialect
+	logger  *slog.Logger
+	dbPath  string // SQLite file path (size/checkpoint); empty on postgres
 
 	// scopeTypeCache memoizes IsChannelScope lookups. A scope's type is fixed at
 	// mint time and never changes, so entries are valid for the process lifetime.
@@ -314,7 +322,44 @@ type SQLiteStore struct {
 	scopeTypeCache sync.Map
 }
 
-func NewSQLiteStore(logger *slog.Logger, path string) (*SQLiteStore, error) {
+// PostgresConfig holds connection parameters for the postgres backend.
+type PostgresConfig struct {
+	Host     string
+	Port     int
+	Database string
+	User     string
+	Password string
+	SSLMode  string
+}
+
+// Config selects and parameterizes the storage backend.
+type Config struct {
+	Driver   string // "sqlite" (default) | "postgres"
+	Path     string // SQLite file path
+	Postgres PostgresConfig
+}
+
+// NewStore constructs the storage backend selected by cfg.Driver. An empty
+// driver defaults to SQLite.
+func NewStore(cfg Config, logger *slog.Logger) (*Store, error) {
+	switch cfg.Driver {
+	case "", "sqlite":
+		return newSQLiteStore(logger, cfg.Path)
+	case "postgres":
+		return newPostgresStore(logger, cfg.Postgres)
+	default:
+		return nil, fmt.Errorf("unsupported database driver %q", cfg.Driver)
+	}
+}
+
+// NewSQLiteStore is a convenience constructor for the SQLite backend from a file
+// path (used by the testbot and tests). Equivalent to
+// NewStore(Config{Driver: "sqlite", Path: path}, logger).
+func NewSQLiteStore(logger *slog.Logger, path string) (*Store, error) {
+	return newSQLiteStore(logger, path)
+}
+
+func newSQLiteStore(logger *slog.Logger, path string) (*Store, error) {
 	// Save original path for file operations (before adding query params)
 	originalPath := path
 	if idx := strings.Index(path, "?"); idx != -1 {
@@ -350,10 +395,92 @@ func NewSQLiteStore(logger *slog.Logger, path string) (*SQLiteStore, error) {
 		logger.Warn("failed to set busy timeout", "error", err)
 	}
 
-	return &SQLiteStore{db: db, logger: logger, dbPath: originalPath}, nil
+	return &Store{db: db, dialect: sqliteDialect{}, logger: logger, dbPath: originalPath}, nil
 }
 
-func (s *SQLiteStore) Init() error {
+func newPostgresStore(logger *slog.Logger, pc PostgresConfig) (*Store, error) {
+	sslMode := pc.SSLMode
+	if sslMode == "" {
+		sslMode = "require"
+	}
+	port := pc.Port
+	if port == 0 {
+		port = 5432
+	}
+	// libpq keyword/value DSN: every value is single-quoted and escaped so a
+	// password (or any field) containing a space or quote can't break parsing.
+	dsn := fmt.Sprintf(
+		"host=%s port=%d dbname=%s user=%s password=%s sslmode=%s connect_timeout=10",
+		quoteDSNValue(pc.Host), port, quoteDSNValue(pc.Database),
+		quoteDSNValue(pc.User), quoteDSNValue(pc.Password), quoteDSNValue(sslMode),
+	)
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open postgres: %w", err)
+	}
+	// Connection pool tuning (SQLite caps itself at 1; Postgres wants a real pool,
+	// bounded so we don't exhaust server slots behind PgBouncer).
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(30 * time.Minute)
+	db.SetConnMaxIdleTime(5 * time.Minute)
+	if err := db.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to ping postgres %s:%d/%s: %w", pc.Host, port, pc.Database, err)
+	}
+	logger.Info("connected to postgres", "host", pc.Host, "database", pc.Database)
+	return &Store{db: db, dialect: postgresDialect{}, logger: logger}, nil
+}
+
+// quoteDSNValue wraps a libpq keyword/value DSN value in single quotes, escaping
+// backslashes and single quotes, so spaces and special characters are safe.
+func quoteDSNValue(v string) string {
+	v = strings.ReplaceAll(v, `\`, `\\`)
+	v = strings.ReplaceAll(v, `'`, `\'`)
+	return "'" + v + "'"
+}
+
+// rebind applies the active dialect's placeholder syntax. Use for tx.Exec and
+// any path that does not go through the exec/query shims.
+func (s *Store) rebind(query string) string { return s.dialect.Rebind(query) }
+
+// exec/query/queryRow are the central shims: they Rebind once (after any
+// ExpandIn) before delegating to database/sql. Repo methods call these instead
+// of s.db.* so PostgreSQL placeholder numbering is applied transparently.
+func (s *Store) exec(query string, args ...any) (sql.Result, error) {
+	return s.db.Exec(s.dialect.Rebind(query), args...)
+}
+
+func (s *Store) query(query string, args ...any) (*sql.Rows, error) {
+	return s.db.Query(s.dialect.Rebind(query), args...)
+}
+
+func (s *Store) queryRow(query string, args ...any) *sql.Row {
+	return s.db.QueryRow(s.dialect.Rebind(query), args...)
+}
+
+func (s *Store) execContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return s.db.ExecContext(ctx, s.dialect.Rebind(query), args...)
+}
+
+func (s *Store) queryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return s.db.QueryContext(ctx, s.dialect.Rebind(query), args...)
+}
+
+func (s *Store) queryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return s.db.QueryRowContext(ctx, s.dialect.Rebind(query), args...)
+}
+
+// Init creates/upgrades the schema for the active backend. SQLite runs the
+// legacy bootstrap DDL plus the incremental migration runner; Postgres applies
+// a single consolidated end-state schema (greenfield, no incremental replay).
+func (s *Store) Init() error {
+	if s.dialect.Name() == "postgres" {
+		return s.initPostgres()
+	}
+	return s.initSQLite()
+}
+
+func (s *Store) initSQLite() error {
 	query := `
 	CREATE TABLE IF NOT EXISTS history (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -472,7 +599,10 @@ type CheckpointResult struct {
 // Checkpoint forces a WAL checkpoint to flush all pending writes to the main database file.
 // This is useful before shutdown or after critical writes to ensure data persistence.
 // Returns CheckpointResult with details about what was checkpointed.
-func (s *SQLiteStore) Checkpoint() error {
+func (s *Store) Checkpoint() error {
+	if s.dialect.Name() == "postgres" {
+		return nil // No WAL checkpoint concept exposed; Postgres manages its own WAL.
+	}
 	var busy, log, checkpointed int
 	err := s.db.QueryRow("PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &log, &checkpointed)
 	if err != nil {
@@ -494,10 +624,39 @@ func (s *SQLiteStore) Checkpoint() error {
 	return nil
 }
 
-func (s *SQLiteStore) Close() error {
+func (s *Store) Close() error {
 	// Checkpoint WAL to ensure all writes are flushed to main database
 	if err := s.Checkpoint(); err != nil {
 		s.logger.Warn("failed to checkpoint WAL before close", "error", err)
 	}
 	return s.db.Close()
+}
+
+//go:embed schema/postgres.sql
+var postgresSchema string
+
+// initPostgres applies the consolidated end-state schema. The DDL is idempotent
+// (CREATE TABLE IF NOT EXISTS / CREATE INDEX IF NOT EXISTS), so re-running is
+// safe. Postgres allows multiple statements in a single Exec.
+func (s *Store) initPostgres() error {
+	if _, err := s.db.Exec(postgresSchema); err != nil {
+		return fmt.Errorf("postgres schema init failed: %w", err)
+	}
+	return nil
+}
+
+// insertReturningID runs an INSERT and returns the generated primary key,
+// bridging the LastInsertId (SQLite) vs RETURNING (Postgres) gap. The query must
+// NOT already contain a RETURNING clause; idCol names the autoincrement column.
+func (s *Store) insertReturningID(query, idCol string, args ...any) (int64, error) {
+	if s.dialect.Name() == "postgres" {
+		var id int64
+		err := s.queryRow(query+" RETURNING "+idCol, args...).Scan(&id)
+		return id, err
+	}
+	res, err := s.exec(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
 }

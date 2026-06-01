@@ -11,7 +11,7 @@ import (
 )
 
 // performHistorySearch searches the user's conversation history.
-func (e *ToolExecutor) performHistorySearch(ctx context.Context, userID int64, args map[string]interface{}) (string, error) {
+func (e *ToolExecutor) performHistorySearch(ctx context.Context, userID storage.ScopeID, args map[string]interface{}) (string, error) {
 	query, ok := args["query"].(string)
 	if !ok {
 		return "", fmt.Errorf("query argument missing or not a string")
@@ -44,7 +44,7 @@ func (e *ToolExecutor) performHistorySearch(ctx context.Context, userID int64, a
 }
 
 // performSearchPeople searches the user's people database.
-func (e *ToolExecutor) performSearchPeople(ctx context.Context, userID int64, args map[string]interface{}) (string, error) {
+func (e *ToolExecutor) performSearchPeople(ctx context.Context, userID storage.ScopeID, args map[string]interface{}) (string, error) {
 	query, ok := args["query"].(string)
 	if !ok {
 		return "", fmt.Errorf("query argument missing or not a string")

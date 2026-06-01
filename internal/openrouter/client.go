@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -486,7 +485,7 @@ type VideoURLPart struct {
 // Image input formats — how a media file is encoded as an LLM content part.
 const (
 	// ImageInputFormatFile is OpenRouter's universal `file` part (works for
-	// Gemini; the home default). Kept for backward compatibility.
+	// Gemini; the default). Kept for backward compatibility.
 	ImageInputFormatFile = "file"
 	// ImageInputFormatOpenAI is the OpenAI-standard image_url/video_url parts,
 	// required by OpenAI-compatible backends (litellm/vLLM) which reject `file`.
@@ -626,7 +625,7 @@ type ChatCompletionRequest struct {
 	Stream bool `json:"stream,omitempty"`
 
 	// UserID is used for metrics tracking only, not sent to API
-	UserID int64 `json:"-"`
+	UserID string `json:"-"`
 }
 
 type JSONSchema struct {
@@ -840,7 +839,7 @@ func NewClientWithBaseURL(logger *slog.Logger, apiKey, proxyURL, baseURL string,
 // Safe to call when Broadcast is disabled on the OR side — OR ignores
 // unknown fields. Returning the values (instead of mutating pointers)
 // keeps the call-site one-liner at request assembly time.
-func withBroadcastFields(ctx context.Context, trc map[string]any, user string, userID int64) (map[string]any, string) {
+func withBroadcastFields(ctx context.Context, trc map[string]any, user string, userID string) (map[string]any, string) {
 	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
 		if trc == nil {
 			trc = map[string]any{}
@@ -852,8 +851,8 @@ func withBroadcastFields(ctx context.Context, trc map[string]any, user string, u
 			trc["parent_span_id"] = sc.SpanID().String()
 		}
 	}
-	if user == "" && userID != 0 {
-		user = strconv.FormatInt(userID, 10)
+	if user == "" && userID != "" {
+		user = userID
 	}
 	return trc, user
 }
@@ -871,7 +870,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		trace.WithAttributes(
 			attribute.String("gen_ai.system", "openrouter"),
 			attribute.String("gen_ai.request.model", req.Model),
-			attribute.Int64("user.id", req.UserID),
+			attribute.String("user.id", req.UserID),
 			attribute.String("job.type", jt),
 		),
 	)
@@ -1181,7 +1180,7 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 	// ChatCompletionRequest.UserID), so user is left empty unless the
 	// caller sets it explicitly — but trace_id/parent_span_id still link
 	// the OR-side span to our tracing.
-	req.Trace, req.User = withBroadcastFields(ctx, req.Trace, req.User, 0)
+	req.Trace, req.User = withBroadcastFields(ctx, req.Trace, req.User, "")
 
 	c.logger.Debug("Sending embedding request to OpenRouter",
 		"model", req.Model,

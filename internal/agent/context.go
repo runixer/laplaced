@@ -16,7 +16,7 @@ type contextKey struct{}
 // SharedContext holds user data shared across all agents.
 // Loaded once per request to ensure all agents see the same data.
 type SharedContext struct {
-	UserID int64
+	UserID storage.ScopeID
 
 	// Profile (always loaded)
 	Profile      string         // Formatted <user_profile> for prompts
@@ -50,7 +50,7 @@ type ContextService struct {
 	factRepo   storage.FactRepository
 	topicRepo  storage.TopicRepository
 	peopleRepo storage.PeopleRepository
-	scopeRepo  storage.ScopeRepository // channel-scope detection (Phase 6); nil on home
+	scopeRepo  storage.ScopeRepository // channel-scope detection (Phase 6); nil without a resolver (Telegram-only path)
 	cfg        *config.Config
 	logger     *slog.Logger
 }
@@ -83,7 +83,7 @@ func (c *ContextService) SetScopeRepository(repo storage.ScopeRepository) {
 
 // isChannelScope reports whether userID is a channel scope, defaulting to false
 // (DM) when the repo is absent or the lookup fails.
-func (c *ContextService) isChannelScope(userID int64) bool {
+func (c *ContextService) isChannelScope(userID storage.ScopeID) bool {
 	if c.scopeRepo == nil {
 		return false
 	}
@@ -97,7 +97,7 @@ func (c *ContextService) isChannelScope(userID int64) bool {
 
 // Load creates SharedContext for a user.
 // Call once per request at the beginning of processing.
-func (c *ContextService) Load(ctx context.Context, userID int64) *SharedContext {
+func (c *ContextService) Load(ctx context.Context, userID storage.ScopeID) *SharedContext {
 	shared := &SharedContext{
 		UserID:   userID,
 		Language: c.cfg.Bot.Language,
@@ -105,7 +105,7 @@ func (c *ContextService) Load(ctx context.Context, userID int64) *SharedContext 
 	}
 
 	// A channel scope frames its profile/participants around the channel rather
-	// than a single person (Phase 6). DMs (and the Telegram home path) keep the
+	// than a single person (Phase 6). DMs (and the Telegram path) keep the
 	// user-centric framing unchanged.
 	isChannel := c.isChannelScope(userID)
 	shared.IsChannel = isChannel
@@ -177,7 +177,7 @@ func (c *ContextService) Load(ctx context.Context, userID int64) *SharedContext 
 
 // getChannelParticipants returns the channel's most recently active members
 // (People in the scope), newest first, capped at maxChannelParticipantsInContext.
-func (c *ContextService) getChannelParticipants(userID int64) ([]storage.Person, error) {
+func (c *ContextService) getChannelParticipants(userID storage.ScopeID) ([]storage.Person, error) {
 	people, err := c.peopleRepo.GetPeople(userID)
 	if err != nil {
 		return nil, err
@@ -192,7 +192,7 @@ func (c *ContextService) getChannelParticipants(userID int64) ([]storage.Person,
 }
 
 // getInnerCirclePeople returns people from Work_Inner and Family circles.
-func (c *ContextService) getInnerCirclePeople(userID int64) ([]storage.Person, error) {
+func (c *ContextService) getInnerCirclePeople(userID storage.ScopeID) ([]storage.Person, error) {
 	people, err := c.peopleRepo.GetPeople(userID)
 	if err != nil {
 		return nil, err
@@ -210,7 +210,7 @@ func (c *ContextService) getInnerCirclePeople(userID int64) ([]storage.Person, e
 }
 
 // getRecentTopics returns the N most recent topics for a user with message counts.
-func (c *ContextService) getRecentTopics(userID int64, limit int) ([]storage.TopicExtended, error) {
+func (c *ContextService) getRecentTopics(userID storage.ScopeID, limit int) ([]storage.TopicExtended, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
@@ -268,16 +268,16 @@ func GetSharedContext(ctx context.Context, req *Request) (profile, recentTopics,
 		"<inner_circle>\n</inner_circle>"
 }
 
-// GetUserID extracts user ID from request SharedContext or params.
-// Returns 0 if not found.
-func GetUserID(req *Request) int64 {
+// GetUserID extracts the scope id from request SharedContext or params.
+// Returns "" if not found.
+func GetUserID(req *Request) storage.ScopeID {
 	if req != nil && req.Shared != nil {
 		return req.Shared.UserID
 	}
 	if req != nil && req.Params != nil {
-		if userID, ok := req.Params["user_id"].(int64); ok {
+		if userID, ok := req.Params["user_id"].(storage.ScopeID); ok {
 			return userID
 		}
 	}
-	return 0
+	return ""
 }

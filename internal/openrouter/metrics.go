@@ -1,8 +1,6 @@
 package openrouter
 
 import (
-	"strconv"
-
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -105,13 +103,13 @@ const (
 )
 
 // formatUserID converts user ID to string for metric labels.
-func formatUserID(userID int64) string {
-	return strconv.FormatInt(userID, 10)
+func formatUserID(userID string) string {
+	return userID
 }
 
 // RecordLLMRequest записывает метрики LLM запроса.
 // jobType should be "interactive" or "background" (use jobtype.JobType constants).
-func RecordLLMRequest(userID int64, model string, durationSeconds float64, success bool, promptTokens, completionTokens int, cost *float64, jobType string) {
+func RecordLLMRequest(userID string, model string, durationSeconds float64, success bool, promptTokens, completionTokens int, cost *float64, jobType string) {
 	status := statusSuccess
 	if !success {
 		status = statusError

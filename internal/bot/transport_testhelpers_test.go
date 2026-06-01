@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/runixer/laplaced/internal/storage"
+
 	"github.com/runixer/laplaced/internal/telegram"
 )
 
@@ -26,8 +28,8 @@ func (s *stubTransport) IsAllowed(id string) bool                               
 // grpIncoming maps a Telegram message to (scopeID, IncomingMessage) for the
 // bot-free message-grouper tests, carrying only the fields the grouper keys on.
 // Designed for grouper.AddMessage(grpIncoming(msg)) via multi-return spread.
-func grpIncoming(msg *telegram.Message) (int64, IncomingMessage) {
-	return msg.From.ID, IncomingMessage{
+func grpIncoming(msg *telegram.Message) (storage.ScopeID, IncomingMessage) {
+	return storage.ScopeID(strconv.FormatInt(msg.From.ID, 10)), IncomingMessage{
 		SenderID:       strconv.FormatInt(msg.From.ID, 10),
 		ConversationID: strconv.FormatInt(msg.From.ID, 10),
 		MessageID:      strconv.Itoa(msg.MessageID),
@@ -39,7 +41,7 @@ func grpIncoming(msg *telegram.Message) (int64, IncomingMessage) {
 // tgGroup builds a MessageGroup from Telegram messages via the neutral envelope.
 // Used by tests that exercise processMessageGroup directly (post transport-seam,
 // the group holds IncomingMessage, not *telegram.Message).
-func tgGroup(b *Bot, userID int64, msgs ...*telegram.Message) *MessageGroup {
+func tgGroup(b *Bot, userID storage.ScopeID, msgs ...*telegram.Message) *MessageGroup {
 	return &MessageGroup{
 		Messages:  tgIncomings(b, msgs...),
 		UserID:    userID,

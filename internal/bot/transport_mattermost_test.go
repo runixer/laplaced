@@ -88,8 +88,8 @@ func TestMMTransport_IsAllowed(t *testing.T) {
 
 func TestMMTransport_Kind(t *testing.T) {
 	tr := &MMTransport{}
-	if tr.Kind() != transportTime {
-		t.Errorf("Kind() = %q, want %q", tr.Kind(), transportTime)
+	if tr.Kind() != transportMattermost {
+		t.Errorf("Kind() = %q, want %q", tr.Kind(), transportMattermost)
 	}
 }
 

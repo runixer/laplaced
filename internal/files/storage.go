@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/runixer/laplaced/internal/storage"
 )
 
 // FileStorage handles saving files to disk with SHA256 calculation.
@@ -39,14 +40,14 @@ func NewFileStorage(basePath string, logger *slog.Logger) *FileStorage {
 // Returns relative path, hash, and size.
 func (fs *FileStorage) SaveFile(
 	ctx context.Context,
-	userID int64,
+	userID storage.ScopeID,
 	reader io.Reader,
 	filename string,
 ) (*SavedFile, error) {
 	// Create user directory: data/artifacts/user_123/YYYY-MM/
 	now := time.Now()
 	yearMonth := now.Format("2006-01")
-	userDir := filepath.Join(fs.basePath, fmt.Sprintf("user_%d", userID), yearMonth)
+	userDir := filepath.Join(fs.basePath, fmt.Sprintf("user_%s", userID), yearMonth)
 
 	if err := os.MkdirAll(userDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create directory: %w", err)

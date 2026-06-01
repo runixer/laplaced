@@ -76,7 +76,7 @@ func TestGenerate_SendsModalitiesAndImageConfig(t *testing.T) {
 
 	agent := New(mockOR, testCfg(), testutil.TestLogger())
 	resp, err := agent.Generate(context.Background(), Request{
-		UserID:      123,
+		UserID:      "123",
 		Prompt:      "a cat",
 		AspectRatio: "16:9",
 		ImageSize:   "2K",

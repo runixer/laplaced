@@ -1,8 +1,12 @@
-// Package storage provides SQLite repository interfaces and implementations.
+// Package storage provides dialect-aware repository interfaces and a single
+// implementation (Store) that serves both the SQLite and PostgreSQL
+// backends. The active dialect is chosen at construction; the repository
+// code below is backend-agnostic (it goes through the central exec shim and the
+// Dialect interface — see storage.go and dialect.go).
 //
 // Repository Pattern:
 //   - All repositories are interfaces for testability
-//   - SQLiteStore implements all 12+ interfaces
+//   - Store implements all 12+ interfaces
 //   - Methods return wrapped errors with context
 //
 // Critical Invariants (MUST READ):
@@ -10,10 +14,10 @@
 //   - ANY query using ID ranges MUST include user_id filter
 //   - Example: WHERE id >= ? AND id <= ? AND user_id = ?
 //
-// Thread Safety:
-//   - SQLiteStore uses a single connection with WAL mode
-//   - Concurrent reads are safe
-//   - Writes are serialized by SQLite
+// Thread Safety (SQLite backend):
+//   - The SQLite store uses a single connection with WAL mode
+//   - Concurrent reads are safe; writes are serialized by SQLite
+//   - PostgreSQL uses a normal connection pool
 //
 // Usage Example:
 //
@@ -34,38 +38,63 @@ import (
 //
 // Critical: Any range query MUST include user_id filter to prevent data leakage.
 type MessageRepository interface {
-	AddMessageToHistory(userID int64, message Message) error
-	ImportMessage(userID int64, message Message) error
-	GetRecentHistory(userID int64, limit int) ([]Message, error)
-	GetMessagesByIDs(userID int64, ids []int64) ([]Message, error)
-	ClearHistory(userID int64) error
-	GetMessagesInRange(ctx context.Context, userID int64, startID, endID int64) ([]Message, error)
+	AddMessageToHistory(userID ScopeID, message Message) error
+	ImportMessage(userID ScopeID, message Message) error
+	GetRecentHistory(userID ScopeID, limit int) ([]Message, error)
+	GetMessagesByIDs(userID ScopeID, ids []int64) ([]Message, error)
+	ClearHistory(userID ScopeID) error
+	GetMessagesInRange(ctx context.Context, userID ScopeID, startID, endID int64) ([]Message, error)
 	GetMessagesByTopicID(ctx context.Context, topicID int64) ([]Message, error)
-	UpdateMessageTopic(userID int64, messageID, topicID int64) error
-	UpdateMessagesTopicInRange(ctx context.Context, userID, startMsgID, endMsgID, topicID int64) error
-	GetUnprocessedMessages(userID int64) ([]Message, error)
-	GetRecentSessionMessages(ctx context.Context, userID int64, limit int, excludeIDs []int64) ([]Message, error)
+	UpdateMessageTopic(userID ScopeID, messageID, topicID int64) error
+	UpdateMessagesTopicInRange(ctx context.Context, userID ScopeID, startMsgID, endMsgID, topicID int64) error
+	GetUnprocessedMessages(userID ScopeID) ([]Message, error)
+	GetRecentSessionMessages(ctx context.Context, userID ScopeID, limit int, excludeIDs []int64) ([]Message, error)
 }
 
 // UserRepository handles user data operations.
 type UserRepository interface {
 	UpsertUser(user User) error
 	GetAllUsers() ([]User, error)
-	ResetUserData(userID int64) error
+	ResetUserData(userID ScopeID) error
 }
 
-// ScopeRepository maps transport-native identities to internal int64 scope ids
-// (the storage partition key). Telegram resolution is identity passthrough and
-// never touches this repository; non-int64 transports (Mattermost/Time) mint a
-// surrogate via ResolveScope. See migration 010 and internal/bot/identity.go.
+// ScopeRepository exposes scope-type detection over the memory partition key.
+// Scope creation and lookup are owned by the Identity/Principal/Channel
+// repositories and PassthroughScopeID; this is the read side used by background
+// loops. See internal/bot/identity.go.
 type ScopeRepository interface {
-	GetScope(transport, nativeID string) (*Scope, error)
-	ResolveScope(transport, scopeType, nativeID string) (int64, error)
-	// IsChannelScope reports whether the internal scope id is a multi-participant
-	// channel (scope_type='channel'). Background memory loops have only the int64
-	// user_id and use this to gate channel-aware behaviour. Absence of a row means
-	// a DM (Telegram passthrough / Mattermost DM), so it returns false.
-	IsChannelScope(internalID int64) (bool, error)
+	// IsChannelScope reports whether the scope id is a multi-participant channel
+	// (scope_type='channel'). Background memory loops have only the scope id and use
+	// this to gate channel-aware behaviour. Absence of a row means a DM/person scope
+	// (Telegram passthrough / Mattermost DM / principal), so it returns false.
+	IsChannelScope(id ScopeID) (bool, error)
+}
+
+// IdentityRepository maps a transport-native handle to its scope id. The
+// resolver-driven DM flow looks up an identity to reuse an existing scope, then
+// writes one after resolving a principal. Telegram passthrough writes no identity
+// row (its id is a deterministic uuidv5).
+type IdentityRepository interface {
+	GetIdentity(transport, nativeID string) (*Identity, error)
+	PutIdentity(transport, nativeID string, scopeID ScopeID) error
+}
+
+// PrincipalRepository manages AD-backed person scopes. A principal
+// is one human; many transport identities may map to a single principal scope for
+// unified cross-transport memory. Dedup prefers object_guid (the stable AD anchor,
+// nullable until a later lookup) and falls back to ad_login (lowercase preferred_username),
+// so a later object_guid backfill is additive and never re-partitions memory.
+type PrincipalRepository interface {
+	GetOrCreatePrincipal(in PrincipalInput) (ScopeID, bool, error)
+	GetPrincipal(scopeID ScopeID) (*Principal, error)
+}
+
+// ChannelRepository manages channel scopes. A channel scope is
+// keyed deterministically by (transport, native_id); participants are tracked as
+// people within the scope.
+type ChannelRepository interface {
+	GetOrCreateChannel(transport, nativeID, displayName string) (ScopeID, error)
+	GetChannel(scopeID ScopeID) (*Channel, error)
 }
 
 // TopicRepository handles topic operations.
@@ -84,18 +113,18 @@ type TopicRepository interface {
 	AddTopic(topic Topic) (int64, error)
 	AddTopicWithoutMessageUpdate(topic Topic) (int64, error)
 	CreateTopic(topic Topic) (int64, error)
-	DeleteTopic(userID int64, id int64) error
-	DeleteTopicCascade(userID int64, id int64) error
-	GetLastTopicEndMessageID(userID int64) (int64, error)
+	DeleteTopic(userID ScopeID, id int64) error
+	DeleteTopicCascade(userID ScopeID, id int64) error
+	GetLastTopicEndMessageID(userID ScopeID) (int64, error)
 	GetAllTopics() ([]Topic, error)
 	GetTopicsAfterID(minID int64) ([]Topic, error)
-	GetTopicsByIDs(userID int64, ids []int64) ([]Topic, error)
-	GetTopics(userID int64) ([]Topic, error)
-	SetTopicFactsExtracted(userID int64, topicID int64, extracted bool) error
-	SetTopicConsolidationChecked(userID int64, topicID int64, checked bool) error
-	GetTopicsPendingFacts(userID int64) ([]Topic, error)
+	GetTopicsByIDs(userID ScopeID, ids []int64) ([]Topic, error)
+	GetTopics(userID ScopeID) ([]Topic, error)
+	SetTopicFactsExtracted(userID ScopeID, topicID int64, extracted bool) error
+	SetTopicConsolidationChecked(userID ScopeID, topicID int64, checked bool) error
+	GetTopicsPendingFacts(userID ScopeID) ([]Topic, error)
 	GetTopicsExtended(filter TopicFilter, limit, offset int, sortBy, sortDir string) (TopicResult, error)
-	GetMergeCandidates(userID int64) ([]MergeCandidate, error)
+	GetMergeCandidates(userID ScopeID) ([]MergeCandidate, error)
 
 	// v0.7.0: embedding migration
 	GetTopicsNeedingReembed(expectedVersion string, limit int) ([]ReembedCandidate, error)
@@ -115,16 +144,16 @@ type TopicRepository interface {
 // Each fact has an embedding vector for semantic search and deduplication.
 type FactRepository interface {
 	AddFact(fact Fact) (int64, error)
-	GetFacts(userID int64) ([]Fact, error)
-	GetFactsByIDs(userID int64, ids []int64) ([]Fact, error)
-	GetFactsByTopicID(userID int64, topicID int64) ([]Fact, error)
+	GetFacts(userID ScopeID) ([]Fact, error)
+	GetFactsByIDs(userID ScopeID, ids []int64) ([]Fact, error)
+	GetFactsByTopicID(userID ScopeID, topicID int64) ([]Fact, error)
 	GetAllFacts() ([]Fact, error)
 	GetFactsAfterID(minID int64) ([]Fact, error)
 	GetFactStats() (FactStats, error)
-	GetFactStatsByUser(userID int64) (FactStats, error)
+	GetFactStatsByUser(userID ScopeID) (FactStats, error)
 	UpdateFact(fact Fact) error
-	UpdateFactsTopic(userID int64, oldTopicID, newTopicID int64) error
-	DeleteFact(userID, id int64) error
+	UpdateFactsTopic(userID ScopeID, oldTopicID, newTopicID int64) error
+	DeleteFact(userID ScopeID, id int64) error
 
 	// v0.7.0: embedding migration
 	GetFactsNeedingReembed(expectedVersion string, limit int) ([]ReembedCandidate, error)
@@ -135,21 +164,21 @@ type FactRepository interface {
 type FactHistoryRepository interface {
 	AddFactHistory(history FactHistory) error
 	UpdateFactHistoryTopic(oldTopicID, newTopicID int64) error
-	GetFactHistory(userID int64, limit int) ([]FactHistory, error)
+	GetFactHistory(userID ScopeID, limit int) ([]FactHistory, error)
 	GetFactHistoryExtended(filter FactHistoryFilter, limit, offset int, sortBy, sortDir string) (FactHistoryResult, error)
 }
 
 // StatsRepository handles usage statistics.
 type StatsRepository interface {
 	AddStat(stat Stat) error
-	GetStats() (map[int64]Stat, error)
-	GetDashboardStats(userID int64) (*DashboardStats, error)
+	GetStats() (map[ScopeID]Stat, error)
+	GetDashboardStats(userID ScopeID) (*DashboardStats, error)
 }
 
 // MemoryBankRepository handles the legacy memory bank.
 type MemoryBankRepository interface {
-	GetMemoryBank(userID int64) (string, error)
-	UpdateMemoryBank(userID int64, content string) error
+	GetMemoryBank(userID ScopeID) (string, error)
+	UpdateMemoryBank(userID ScopeID, content string) error
 }
 
 // MaintenanceRepository handles database maintenance operations.
@@ -162,18 +191,18 @@ type MaintenanceRepository interface {
 	CountFactHistory() (int64, error)
 
 	// Database health diagnostics
-	CountOrphanedTopics(userID int64) (int, error)
-	GetOrphanedTopicIDs(userID int64) ([]int64, error)
-	CountOverlappingTopics(userID int64) (int, error)
-	GetOverlappingTopics(userID int64) ([]OverlappingPair, error)
-	CountFactsOnOrphanedTopics(userID int64) (int, error)
-	RecalculateTopicRanges(userID int64) (int, error)
-	RecalculateTopicSizes(userID int64) (int, error)
+	CountOrphanedTopics(userID ScopeID) (int, error)
+	GetOrphanedTopicIDs(userID ScopeID) ([]int64, error)
+	CountOverlappingTopics(userID ScopeID) (int, error)
+	GetOverlappingTopics(userID ScopeID) ([]OverlappingPair, error)
+	CountFactsOnOrphanedTopics(userID ScopeID) (int, error)
+	RecalculateTopicRanges(userID ScopeID) (int, error)
+	RecalculateTopicSizes(userID ScopeID) (int, error)
 
 	// Cross-user contamination detection and repair
-	GetContaminatedTopics(userID int64) ([]ContaminatedTopic, error)
-	CountContaminatedTopics(userID int64) (int, error)
-	FixContaminatedTopics(userID int64) (int64, error)
+	GetContaminatedTopics(userID ScopeID) ([]ContaminatedTopic, error)
+	CountContaminatedTopics(userID ScopeID) (int, error)
+	FixContaminatedTopics(userID ScopeID) (int64, error)
 
 	// WAL checkpoint for ensuring data persistence
 	Checkpoint() error
@@ -182,9 +211,9 @@ type MaintenanceRepository interface {
 // AgentLogRepository handles unified agent debug log operations.
 type AgentLogRepository interface {
 	AddAgentLog(log AgentLog) error
-	GetAgentLogs(agentType string, userID int64, limit int) ([]AgentLog, error)
+	GetAgentLogs(agentType string, userID ScopeID, limit int) ([]AgentLog, error)
 	GetAgentLogsExtended(filter AgentLogFilter, limit, offset int) (AgentLogResult, error)
-	GetAgentLogFull(ctx context.Context, id int64, userID int64) (*AgentLog, error)
+	GetAgentLogFull(ctx context.Context, id int64, userID ScopeID) (*AgentLog, error)
 }
 
 // PeopleRepository handles people from the user's social graph.
@@ -192,34 +221,34 @@ type PeopleRepository interface {
 	// CRUD operations
 	AddPerson(person Person) (int64, error)
 	UpdatePerson(person Person) error
-	DeletePerson(userID, personID int64) error
+	DeletePerson(userID ScopeID, personID int64) error
 
 	// Retrieval
-	GetPerson(userID, personID int64) (*Person, error)
-	GetPeople(userID int64) ([]Person, error)
-	GetPeopleByIDs(userID int64, ids []int64) ([]Person, error)
+	GetPerson(userID ScopeID, personID int64) (*Person, error)
+	GetPeople(userID ScopeID) ([]Person, error)
+	GetPeopleByIDs(userID ScopeID, ids []int64) ([]Person, error)
 	GetAllPeople() ([]Person, error)
 	GetPeopleAfterID(minID int64) ([]Person, error)
 
 	// Direct matching (fast path for @username and name lookup)
-	FindPersonByTelegramID(userID, telegramID int64) (*Person, error)
+	FindPersonByTelegramID(userID ScopeID, telegramID int64) (*Person, error)
 	// FindPersonByExternalID matches on the transport-neutral external id
 	// (transport, native_id) introduced in v0.10. For Telegram this is
 	// equivalent to FindPersonByTelegramID via the backfilled ('telegram', id).
-	FindPersonByExternalID(userID int64, transport, nativeID string) (*Person, error)
-	FindPersonByUsername(userID int64, username string) (*Person, error)
-	FindPersonByAlias(userID int64, alias string) ([]Person, error)
-	FindPersonByName(userID int64, name string) (*Person, error)
+	FindPersonByExternalID(userID ScopeID, transport, nativeID string) (*Person, error)
+	FindPersonByUsername(userID ScopeID, username string) (*Person, error)
+	FindPersonByAlias(userID ScopeID, alias string) ([]Person, error)
+	FindPersonByName(userID ScopeID, name string) (*Person, error)
 
 	// Merge operations
-	MergePeople(userID, targetID, sourceID int64, newBio string, newAliases []string, newUsername *string, newTelegramID *int64) error
+	MergePeople(userID ScopeID, targetID, sourceID int64, newBio string, newAliases []string, newUsername *string, newTelegramID *int64) error
 
 	// Extended queries with filtering and pagination
 	GetPeopleExtended(filter PersonFilter, limit, offset int, sortBy, sortDir string) (PersonResult, error)
 
 	// Maintenance
-	CountPeopleWithoutEmbedding(userID int64) (int, error)
-	GetPeopleWithoutEmbedding(userID int64) ([]Person, error)
+	CountPeopleWithoutEmbedding(userID ScopeID) (int, error)
+	GetPeopleWithoutEmbedding(userID ScopeID) ([]Person, error)
 
 	// v0.7.0: embedding migration
 	GetPeopleNeedingReembed(expectedVersion string, limit int) ([]ReembedCandidate, error)
@@ -228,7 +257,7 @@ type PeopleRepository interface {
 
 // ArtifactFilter defines filtering options for artifact queries.
 type ArtifactFilter struct {
-	UserID   int64
+	UserID   ScopeID
 	State    string // "pending", "processing", "ready", "failed", or "" for all
 	FileType string // "image", "voice", "pdf", "video_note", "document", or "" for all
 }
@@ -236,24 +265,24 @@ type ArtifactFilter struct {
 // ArtifactRepository handles artifact file metadata operations.
 type ArtifactRepository interface {
 	AddArtifact(artifact Artifact) (int64, error)
-	GetArtifact(userID, artifactID int64) (*Artifact, error)
-	GetByHash(userID int64, contentHash string) (*Artifact, error)
+	GetArtifact(userID ScopeID, artifactID int64) (*Artifact, error)
+	GetByHash(userID ScopeID, contentHash string) (*Artifact, error)
 	// GetPendingArtifacts returns artifacts ready for processing:
 	// - state='pending' (new artifacts)
 	// - state='failed' with retry_count < maxRetries and sufficient backoff elapsed (v0.6.0)
-	GetPendingArtifacts(userID int64, maxRetries int) ([]Artifact, error)
+	GetPendingArtifacts(userID ScopeID, maxRetries int) ([]Artifact, error)
 	GetArtifacts(filter ArtifactFilter, limit, offset int) ([]Artifact, int64, error)
 	UpdateArtifact(artifact Artifact) error
 	RecoverArtifactStates(threshold time.Duration) error
-	GetArtifactsByIDs(userID int64, artifactIDs []int64) ([]Artifact, error)
+	GetArtifactsByIDs(userID ScopeID, artifactIDs []int64) ([]Artifact, error)
 	// GetSessionArtifacts returns artifacts on messages still in active session (topic_id IS NULL).
 	// Used to inject freshly-created artifacts as priority candidates for the reranker.
-	GetSessionArtifacts(ctx context.Context, userID int64, limit int, maxAge time.Duration) ([]Artifact, error)
+	GetSessionArtifacts(ctx context.Context, userID ScopeID, limit int, maxAge time.Duration) ([]Artifact, error)
 	// IncrementContextLoadCount tracks usage when artifacts are loaded into LLM context (v0.6.0)
-	IncrementContextLoadCount(userID int64, artifactIDs []int64) error
+	IncrementContextLoadCount(userID ScopeID, artifactIDs []int64) error
 	// UpdateMessageID links artifact to history message (called after message is saved)
 	// Requires userID for proper data isolation.
-	UpdateMessageID(userID, artifactID, messageID int64) error
+	UpdateMessageID(userID ScopeID, artifactID, messageID int64) error
 
 	// v0.7.0: embedding migration
 	GetArtifactsNeedingReembed(expectedVersion string, limit int) ([]ReembedCandidate, error)

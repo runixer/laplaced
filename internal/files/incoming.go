@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/storage"
 )
 
 // IncomingFile is a transport-neutral description of a single attachment plus a
@@ -37,7 +38,7 @@ type IncomingFile struct {
 // (unsupported format, too large) are returned to the caller; download failures
 // are logged and the file is skipped (not fatal). A Telegram message carries at
 // most one file, so for that path the slice has 0 or 1 element.
-func (p *Processor) ProcessFiles(ctx context.Context, incoming []IncomingFile, userID int64, groupText string) ([]*ProcessedFile, error) {
+func (p *Processor) ProcessFiles(ctx context.Context, incoming []IncomingFile, userID storage.ScopeID, groupText string) ([]*ProcessedFile, error) {
 	var out []*ProcessedFile
 	for i := range incoming {
 		f := incoming[i]
@@ -58,7 +59,7 @@ func (p *Processor) ProcessFiles(ctx context.Context, incoming []IncomingFile, u
 // processOne validates, fetches, optionally archives, and assembles a single
 // file. Returns (nil, nil) when a download fails after retries (logged, skipped)
 // and (nil, err) for validation failures.
-func (p *Processor) processOne(ctx context.Context, f IncomingFile, userID int64, groupText string) (*ProcessedFile, error) {
+func (p *Processor) processOne(ctx context.Context, f IncomingFile, userID storage.ScopeID, groupText string) (*ProcessedFile, error) {
 	// Pre-fetch validation, matching the legacy per-type methods.
 	switch f.Kind {
 	case FileTypeImage, FileTypePDF, FileTypeVideo, FileTypeDocument:
@@ -192,7 +193,7 @@ func (p *Processor) mediaPart(fileName, mimeType, base64Data string) interface{}
 
 // saveArtifact persists a file as an artifact when a file handler is configured.
 // Returns the artifact id (nil on disabled handler or save failure — non-fatal).
-func (p *Processor) saveArtifact(ctx context.Context, userID int64, artifactType, fileName, mimeType string, data []byte, groupText, sourceID string) *int64 {
+func (p *Processor) saveArtifact(ctx context.Context, userID storage.ScopeID, artifactType, fileName, mimeType string, data []byte, groupText, sourceID string) *int64 {
 	if p.fileHandler == nil {
 		return nil
 	}
@@ -206,7 +207,7 @@ func (p *Processor) saveArtifact(ctx context.Context, userID int64, artifactType
 
 // saveVoiceArtifact applies the voice-duration gating before saving:
 // -1 disables voice artifacts, 0 saves all, N saves voices >= N seconds.
-func (p *Processor) saveVoiceArtifact(ctx context.Context, userID int64, mimeType string, data []byte, groupText, sourceID string, durationSec int) *int64 {
+func (p *Processor) saveVoiceArtifact(ctx context.Context, userID storage.ScopeID, mimeType string, data []byte, groupText, sourceID string, durationSec int) *int64 {
 	if p.fileHandler == nil {
 		return nil
 	}

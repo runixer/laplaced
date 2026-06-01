@@ -195,7 +195,7 @@ func (s *Service) processSingleArtifact(ctx context.Context, artifact storage.Ar
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/rag").Start(
 		ctx, "rag.processArtifactExtraction",
 		trace.WithAttributes(
-			attribute.Int64("user.id", userID),
+			attribute.String("user.id", string(userID)),
 			attribute.Int64("artifact.id", artifactID),
 			attribute.String("artifact.file_type", artifact.FileType),
 			attribute.Int64("artifact.file_size_bytes", artifact.FileSize),

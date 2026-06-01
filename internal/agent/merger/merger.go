@@ -89,7 +89,7 @@ func (m *Merger) Execute(ctx context.Context, req *agent.Request) (response *age
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/merger").Start(
 		ctx, "merger.Execute",
 		trace.WithAttributes(
-			attribute.Int64("user.id", userID),
+			attribute.String("user.id", string(userID)),
 			attribute.Int("merger.topic1_size_chars", len(topic1Summary)),
 			attribute.Int("merger.topic2_size_chars", len(topic2Summary)),
 		),
@@ -136,7 +136,7 @@ func (m *Merger) Execute(ctx context.Context, req *agent.Request) (response *age
 			{Role: "user", Content: userPrompt},
 		},
 		ResponseFormat: map[string]interface{}{"type": "json_object"},
-		UserID:         userID,
+		UserID:         string(userID),
 	})
 	duration := time.Since(start)
 
@@ -198,12 +198,12 @@ func (m *Merger) getTopicSummaries(req *agent.Request) (string, string) {
 }
 
 // getUserID extracts user ID from request.
-func (m *Merger) getUserID(req *agent.Request) int64 {
+func (m *Merger) getUserID(req *agent.Request) storage.ScopeID {
 	return agent.GetUserID(req)
 }
 
 // getContext returns profile and recent topics.
-func (m *Merger) getContext(ctx context.Context, req *agent.Request, userID int64) (profile, recentTopics string) {
+func (m *Merger) getContext(ctx context.Context, req *agent.Request, userID storage.ScopeID) (profile, recentTopics string) {
 	// Try SharedContext first
 	profile, recentTopics, _ = agent.GetSharedContext(ctx, req)
 
@@ -213,14 +213,14 @@ func (m *Merger) getContext(ctx context.Context, req *agent.Request, userID int6
 	}
 
 	// Fallback: load directly for background jobs
-	if m.factRepo != nil && userID > 0 {
+	if m.factRepo != nil && userID != "" {
 		facts, err := m.factRepo.GetFacts(userID)
 		if err == nil {
 			profile = storage.FormatUserProfile(storage.FilterProfileFacts(facts))
 		}
 	}
 
-	if m.topicRepo != nil && userID > 0 {
+	if m.topicRepo != nil && userID != "" {
 		recentTopicsCount := m.cfg.RAG.GetRecentTopicsInContext()
 		if recentTopicsCount > 0 {
 			filter := storage.TopicFilter{UserID: userID}

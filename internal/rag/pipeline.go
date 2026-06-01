@@ -64,7 +64,7 @@ type rerankerOutput struct {
 
 // searchTopicCandidates performs vector search for topics.
 // Returns scored candidates and vectors scanned count.
-func (s *Service) searchTopicCandidates(userID int64, embedding []float32, limit int) ([]topicCandidate, int) {
+func (s *Service) searchTopicCandidates(userID storage.ScopeID, embedding []float32, limit int) ([]topicCandidate, int) {
 	s.mu.RLock()
 	userVectors := s.topicVectors[userID]
 	vectorsScanned := len(userVectors)
@@ -90,7 +90,7 @@ func (s *Service) searchTopicCandidates(userID int64, embedding []float32, limit
 
 // prepareRerankerContext loads user profile, recent topics, formats session messages.
 // Returns formatted strings for reranker prompt.
-func (s *Service) prepareRerankerContext(ctx context.Context, userID int64, history []storage.Message) (userProfile, recentTopics, currentMessages string, err error) {
+func (s *Service) prepareRerankerContext(ctx context.Context, userID storage.ScopeID, history []storage.Message) (userProfile, recentTopics, currentMessages string, err error) {
 	// Try to use SharedContext if available (loaded once in processMessageGroup)
 	if shared := agent.FromContext(ctx); shared != nil {
 		// Use pre-loaded data from SharedContext
@@ -129,7 +129,7 @@ func (s *Service) prepareRerankerContext(ctx context.Context, userID int64, hist
 
 // executeReranker runs the reranker agent with fallback.
 // Returns selected topic IDs, people IDs, artifact IDs, and reasons.
-func (s *Service) executeReranker(ctx context.Context, userID int64, input rerankerInput) (*rerankerOutput, error) {
+func (s *Service) executeReranker(ctx context.Context, userID storage.ScopeID, input rerankerInput) (*rerankerOutput, error) {
 	RecordRerankerCandidatesInput(userID, len(input.topicCandidates))
 
 	// Build reranker candidates with topic metadata
@@ -200,7 +200,7 @@ func (s *Service) executeReranker(ctx context.Context, userID int64, input reran
 
 // buildRetrievalResult assembles final RetrievalResult from selected candidates.
 // Loads topic messages, builds artifact results.
-func (s *Service) buildRetrievalResult(ctx context.Context, userID int64, topicMatches []topicCandidate, topicMap map[int64]storage.Topic, rerankerOutput *rerankerOutput, artifactCandidates []reranker.ArtifactCandidate, useReranker bool) (*RetrievalResult, error) {
+func (s *Service) buildRetrievalResult(ctx context.Context, userID storage.ScopeID, topicMatches []topicCandidate, topicMap map[int64]storage.Topic, rerankerOutput *rerankerOutput, artifactCandidates []reranker.ArtifactCandidate, useReranker bool) (*RetrievalResult, error) {
 	var results []TopicSearchResult
 	seenMsgIDs := make(map[int64]bool)
 
@@ -322,7 +322,7 @@ func filterMatchesByReranker(matches []topicCandidate, selectedIDs []int64, reas
 
 // searchPeopleAndArtifacts searches for people and artifact candidates.
 // Returns person candidates and artifact candidates.
-func (s *Service) searchPeopleAndArtifacts(ctx context.Context, userID int64, embedding []float32, threshold float32) ([]reranker.PersonCandidate, []reranker.ArtifactCandidate) {
+func (s *Service) searchPeopleAndArtifacts(ctx context.Context, userID storage.ScopeID, embedding []float32, threshold float32) ([]reranker.PersonCandidate, []reranker.ArtifactCandidate) {
 	var personCandidates []reranker.PersonCandidate
 	innerCircles := []string{"Work_Inner", "Family"}
 	if s.peopleRepo != nil && s.cfg.Agents.Reranker.Enabled {
@@ -384,7 +384,7 @@ func (s *Service) searchPeopleAndArtifacts(ctx context.Context, userID int64, em
 // The returned slice is truncated to the configured candidates_limit.
 func (s *Service) mergeSessionArtifactCandidates(
 	ctx context.Context,
-	userID int64,
+	userID storage.ScopeID,
 	vectorCandidates []reranker.ArtifactCandidate,
 ) []reranker.ArtifactCandidate {
 	if s.artifactRepo == nil {
@@ -463,7 +463,7 @@ func limitMatches(matches []topicCandidate, maxCandidates int) []topicCandidate 
 }
 
 // loadTopicMap fetches topics by IDs and returns a map.
-func (s *Service) loadTopicMap(ctx context.Context, userID int64, matches []topicCandidate) (map[int64]storage.Topic, error) {
+func (s *Service) loadTopicMap(ctx context.Context, userID storage.ScopeID, matches []topicCandidate) (map[int64]storage.Topic, error) {
 	topicIDs := make([]int64, len(matches))
 	for i, m := range matches {
 		topicIDs[i] = m.topicID
@@ -502,7 +502,7 @@ func (s *Service) getMaxCandidates(useReranker bool) int {
 // Extracted from retrieval.go for pipeline module.
 func (s *Service) rerankViaAgent(
 	ctx context.Context,
-	userID int64,
+	userID storage.ScopeID,
 	candidates []reranker.Candidate,
 	personCandidates []reranker.PersonCandidate,
 	artifactCandidates []reranker.ArtifactCandidate,

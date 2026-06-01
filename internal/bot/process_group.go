@@ -173,7 +173,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/bot").Start(
 		ctx, "bot.processMessageGroup",
 		trace.WithAttributes(
-			attribute.Int64("user.id", userID),
+			attribute.String("user.id", string(userID)),
 			attribute.Int("message.count", len(group.Messages)),
 			attribute.Int("message.total_chars", totalChars),
 		),
@@ -633,7 +633,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 // streaming sink. The sink doesn't know about chatID/threadID/userID/logger,
 // so we close over them here. Returned function is the second arg to
 // streamSink.Finalize.
-func (b *Bot) streamFinalizeCallback(chatID int64, threadID int, userID int64, logger *slog.Logger) func(string) ([]telegram.SendMessageRequest, error) {
+func (b *Bot) streamFinalizeCallback(chatID int64, threadID int, userID storage.ScopeID, logger *slog.Logger) func(string) ([]telegram.SendMessageRequest, error) {
 	return func(text string) ([]telegram.SendMessageRequest, error) {
 		// replyToMsgID=0: only the placeholder (which we edit) had the reply
 		// link; overflow chunks are plain follow-up sends.
@@ -945,7 +945,7 @@ func (b *Bot) sendGenericError(ctx context.Context, convID, threadRoot string, l
 	}
 }
 
-func (b *Bot) finalizeResponse(chatID int64, messageThreadID int, userID int64, replyToMsgID int, responseText string, logger *slog.Logger) ([]telegram.SendMessageRequest, error) {
+func (b *Bot) finalizeResponse(chatID int64, messageThreadID int, userID storage.ScopeID, replyToMsgID int, responseText string, logger *slog.Logger) ([]telegram.SendMessageRequest, error) {
 	// Split by explicit ###SPLIT### delimiter first (respects code blocks)
 	delimiterParts := splitByDelimiter(responseText)
 
@@ -1006,7 +1006,7 @@ func (b *Bot) finalizeResponse(chatID int64, messageThreadID int, userID int64, 
 //
 // When a message is forwarded from a user, we can capture their telegram_id and username
 // for the People graph (v0.5.1).
-func (b *Bot) extractForwardedPeople(ctx context.Context, userID int64, messages []IncomingMessage, logger *slog.Logger) {
+func (b *Bot) extractForwardedPeople(ctx context.Context, userID storage.ScopeID, messages []IncomingMessage, logger *slog.Logger) {
 	if b.peopleRepo == nil {
 		return
 	}
@@ -1028,7 +1028,7 @@ func (b *Bot) extractForwardedPeople(ctx context.Context, userID int64, messages
 		if err != nil {
 			continue
 		}
-		if senderID == userID {
+		if storage.PassthroughScopeID(transportTelegram, fwd.SenderID) == userID {
 			continue // Skip self (user forwarding their own messages)
 		}
 

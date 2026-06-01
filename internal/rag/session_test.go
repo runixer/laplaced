@@ -33,14 +33,14 @@ func TestGetActiveSessions(t *testing.T) {
 
 		// User 123 has unprocessed messages
 		user123Messages := []storage.Message{
-			{ID: 1, UserID: 123, Role: "user", Content: "Hello", CreatedAt: parseTime("2026-01-02T10:00:00Z")},
-			{ID: 2, UserID: 123, Role: "assistant", Content: "Hi", CreatedAt: parseTime("2026-01-02T10:01:00Z")},
-			{ID: 3, UserID: 123, Role: "user", Content: "How are you?", CreatedAt: parseTime("2026-01-02T10:02:00Z")},
+			{ID: 1, UserID: storage.PassthroughScopeID("telegram", "123"), Role: "user", Content: "Hello", CreatedAt: parseTime("2026-01-02T10:00:00Z")},
+			{ID: 2, UserID: storage.PassthroughScopeID("telegram", "123"), Role: "assistant", Content: "Hi", CreatedAt: parseTime("2026-01-02T10:01:00Z")},
+			{ID: 3, UserID: storage.PassthroughScopeID("telegram", "123"), Role: "user", Content: "How are you?", CreatedAt: parseTime("2026-01-02T10:02:00Z")},
 		}
-		mockStore.On("GetUnprocessedMessages", int64(123)).Return(user123Messages, nil)
+		mockStore.On("GetUnprocessedMessages", storage.PassthroughScopeID("telegram", "123")).Return(user123Messages, nil)
 
 		// User 456 has no unprocessed messages
-		mockStore.On("GetUnprocessedMessages", int64(456)).Return([]storage.Message{}, nil)
+		mockStore.On("GetUnprocessedMessages", storage.PassthroughScopeID("telegram", "456")).Return([]storage.Message{}, nil)
 
 		translator := testutil.TestTranslator(t)
 
@@ -65,7 +65,7 @@ func TestGetActiveSessions(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.Len(t, sessions, 1)
-		assert.Equal(t, int64(123), sessions[0].UserID)
+		assert.Equal(t, storage.PassthroughScopeID("telegram", "123"), sessions[0].UserID)
 		assert.Equal(t, 3, sessions[0].MessageCount)
 		assert.Equal(t, parseTime("2026-01-02T10:00:00Z"), sessions[0].FirstMessageTime)
 		assert.Equal(t, parseTime("2026-01-02T10:02:00Z"), sessions[0].LastMessageTime)
@@ -83,7 +83,7 @@ func TestGetActiveSessions(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
-		mockStore.On("GetUnprocessedMessages", int64(123)).Return([]storage.Message{}, nil)
+		mockStore.On("GetUnprocessedMessages", storage.PassthroughScopeID("telegram", "123")).Return([]storage.Message{}, nil)
 
 		translator := testutil.TestTranslator(t)
 
@@ -121,7 +121,7 @@ func TestForceProcessUserWithProgress(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
-		mockStore.On("GetUnprocessedMessages", int64(123)).Return([]storage.Message{}, nil)
+		mockStore.On("GetUnprocessedMessages", storage.ScopeID("123")).Return([]storage.Message{}, nil)
 
 		translator := testutil.TestTranslator(t)
 
@@ -147,7 +147,7 @@ func TestForceProcessUserWithProgress(t *testing.T) {
 			events = append(events, e)
 		}
 
-		stats, err := svc.ForceProcessUserWithProgress(context.Background(), 123, callback)
+		stats, err := svc.ForceProcessUserWithProgress(context.Background(), "123", callback)
 
 		assert.NoError(t, err)
 		assert.NotNil(t, stats)
@@ -166,7 +166,7 @@ func TestForceProcessUserWithProgress(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
-		mockStore.On("GetUnprocessedMessages", int64(123)).Return([]storage.Message{}, assert.AnError)
+		mockStore.On("GetUnprocessedMessages", storage.ScopeID("123")).Return([]storage.Message{}, assert.AnError)
 
 		translator := testutil.TestTranslator(t)
 
@@ -189,7 +189,7 @@ func TestForceProcessUserWithProgress(t *testing.T) {
 
 		callback := func(e ProgressEvent) {}
 
-		_, err = svc.ForceProcessUserWithProgress(context.Background(), 123, callback)
+		_, err = svc.ForceProcessUserWithProgress(context.Background(), "123", callback)
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to fetch unprocessed messages")
@@ -206,7 +206,7 @@ func TestForceProcessUser(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
-		mockStore.On("GetUnprocessedMessages", int64(123)).Return([]storage.Message{}, nil)
+		mockStore.On("GetUnprocessedMessages", storage.ScopeID("123")).Return([]storage.Message{}, nil)
 
 		translator := testutil.TestTranslator(t)
 
@@ -227,7 +227,7 @@ func TestForceProcessUser(t *testing.T) {
 			t.Fatalf("failed to build RAG service: %v", err)
 		}
 
-		count, err := svc.ForceProcessUser(context.Background(), 123)
+		count, err := svc.ForceProcessUser(context.Background(), "123")
 
 		assert.NoError(t, err)
 		assert.Equal(t, 0, count)
@@ -242,7 +242,7 @@ func TestForceProcessUser(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
-		mockStore.On("GetUnprocessedMessages", int64(123)).Return([]storage.Message{}, assert.AnError)
+		mockStore.On("GetUnprocessedMessages", storage.ScopeID("123")).Return([]storage.Message{}, assert.AnError)
 
 		translator := testutil.TestTranslator(t)
 
@@ -263,7 +263,7 @@ func TestForceProcessUser(t *testing.T) {
 			t.Fatalf("failed to build RAG service: %v", err)
 		}
 
-		_, err = svc.ForceProcessUser(context.Background(), 123)
+		_, err = svc.ForceProcessUser(context.Background(), "123")
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to fetch unprocessed messages")

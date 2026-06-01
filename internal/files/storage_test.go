@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/runixer/laplaced/internal/storage"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,7 +37,7 @@ func TestFileStorage_SaveFile_Success(t *testing.T) {
 
 		// Test data
 		ctx := context.Background()
-		userID := int64(123)
+		userID := storage.ScopeID("123")
 		content := []byte("test file content for hash calculation")
 		filename := "test.txt"
 
@@ -78,7 +80,7 @@ func TestFileStorage_SaveFile_Success(t *testing.T) {
 		extensions := []string{".jpg", ".png", ".pdf", ".txt", ".ogg", ".mp4", ".doc"}
 		for _, ext := range extensions {
 			t.Run(ext, func(t *testing.T) {
-				saved, err := fs.SaveFile(ctx, 123, bytes.NewReader(content), "file"+ext)
+				saved, err := fs.SaveFile(ctx, "123", bytes.NewReader(content), "file"+ext)
 				require.NoError(t, err)
 				assert.True(t, strings.HasSuffix(saved.Path, ext))
 			})
@@ -96,7 +98,7 @@ func TestFileStorage_SaveFile_Success(t *testing.T) {
 		now := time.Now()
 		yearMonth := now.Format("2006-01")
 
-		saved, err := fs.SaveFile(ctx, 456, bytes.NewReader([]byte("test")), "test.txt")
+		saved, err := fs.SaveFile(ctx, "456", bytes.NewReader([]byte("test")), "test.txt")
 		require.NoError(t, err)
 
 		// Check directory exists
@@ -125,7 +127,7 @@ func TestFileStorage_SaveFile_ContextCancellation(t *testing.T) {
 
 		// Reader that will trigger cancellation check
 		content := make([]byte, 1000)
-		_, err := fs.SaveFile(ctx, 123, bytes.NewReader(content), "test.txt")
+		_, err := fs.SaveFile(ctx, "123", bytes.NewReader(content), "test.txt")
 
 		assert.Error(t, err)
 		// The error is either context.Canceled or write error due to cancellation
@@ -147,7 +149,7 @@ func TestFileStorage_SaveFile_MkdirFailure(t *testing.T) {
 		fs := NewFileStorage(tempDir, logger)
 
 		ctx := context.Background()
-		_, err = fs.SaveFile(ctx, 123, bytes.NewReader([]byte("test")), "test.txt")
+		_, err = fs.SaveFile(ctx, "123", bytes.NewReader([]byte("test")), "test.txt")
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to create directory")
@@ -167,7 +169,7 @@ func TestFileStorage_SaveFile_CreateFailure(t *testing.T) {
 		// Reader that returns error on read
 		errorReader := &errorReadCloser{err: io.ErrUnexpectedEOF}
 
-		_, err := fs.SaveFile(ctx, 123, errorReader, "test.txt")
+		_, err := fs.SaveFile(ctx, "123", errorReader, "test.txt")
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to write file")
@@ -222,7 +224,7 @@ func TestFileStorage_DeleteFile_Success(t *testing.T) {
 		ctx := context.Background()
 
 		// Create a file first
-		saved, err := fs.SaveFile(ctx, 123, bytes.NewReader([]byte("to be deleted")), "delete_me.txt")
+		saved, err := fs.SaveFile(ctx, "123", bytes.NewReader([]byte("to be deleted")), "delete_me.txt")
 		require.NoError(t, err)
 
 		// Verify it exists
@@ -269,7 +271,7 @@ func TestFileStorage_SaveFile_Sha256Hash(t *testing.T) {
 		content := []byte("Hello, World!")
 		// SHA256 of "Hello, World!" is: dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f
 
-		saved, err := fs.SaveFile(ctx, 123, bytes.NewReader(content), "test.txt")
+		saved, err := fs.SaveFile(ctx, "123", bytes.NewReader(content), "test.txt")
 		require.NoError(t, err)
 
 		expectedHash := "dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f"
@@ -288,7 +290,7 @@ func TestFileStorage_SaveFile_EmptyContent(t *testing.T) {
 		ctx := context.Background()
 		// SHA256 of empty string is: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 
-		saved, err := fs.SaveFile(ctx, 123, bytes.NewReader([]byte("")), "empty.txt")
+		saved, err := fs.SaveFile(ctx, "123", bytes.NewReader([]byte("")), "empty.txt")
 		require.NoError(t, err)
 
 		assert.Equal(t, int64(0), saved.Size)
@@ -317,7 +319,7 @@ func TestFileStorage_SaveFile_LargeContent(t *testing.T) {
 			content[i] = byte(i % 256)
 		}
 
-		saved, err := fs.SaveFile(ctx, 123, bytes.NewReader(content), "large.bin")
+		saved, err := fs.SaveFile(ctx, "123", bytes.NewReader(content), "large.bin")
 		require.NoError(t, err)
 
 		assert.Equal(t, int64(1024*1024), saved.Size)

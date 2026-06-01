@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/runixer/laplaced/internal/storage"
+
 	"github.com/runixer/laplaced/cmd/testbot/snapshot/replay"
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/spf13/cobra"
@@ -68,7 +70,7 @@ func runReplayRerank(cmd *cobra.Command, _ []string) error {
 		Logger:      tb.logger,
 	}
 
-	build := replay.NewRerankerBuilder(tb.store, func(ctx context.Context, userID int64) *agent.SharedContext {
+	build := replay.NewRerankerBuilder(tb.store, func(ctx context.Context, userID storage.ScopeID) *agent.SharedContext {
 		return tb.services.ContextService.Load(ctx, userID)
 	})
 

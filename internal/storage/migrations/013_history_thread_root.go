@@ -17,7 +17,7 @@ func init() {
 // it on its own replies so a later reply into the same thread can be recognised
 // as addressed-to-the-bot without an explicit @mention (channel thread-reply
 // gating). NULL for existing rows and for DM/Telegram paths — purely additive,
-// no home-path behavior change.
+// no Telegram-path behavior change.
 func migrateHistoryThreadRoot(tx *sql.Tx) error {
 	if !tableExists(tx, "history") {
 		return nil

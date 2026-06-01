@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/runixer/laplaced/internal/storage"
 
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
@@ -43,6 +46,7 @@ Examples:
 
 		opts := getOptions(cmd)
 		userID := opts.userID
+		scope := getUserID(cmd)
 
 		// Create context with signal handling for graceful shutdown
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -60,7 +64,7 @@ Examples:
 				return fmt.Errorf("message text required when --voice not provided")
 			}
 			message := strings.Join(args, " ")
-			result, err := tb.bot.SendTestMessage(ctx, userID, message, true)
+			result, err := tb.bot.SendTestMessage(ctx, scope, message, true)
 			if err != nil {
 				return fmt.Errorf("failed to send message: %w", err)
 			}
@@ -81,7 +85,7 @@ Examples:
 
 		// Check topics
 		if checkTopics >= 0 {
-			topics, err := tb.store.GetTopics(userID)
+			topics, err := tb.store.GetTopics(scope)
 			if err != nil {
 				return fmt.Errorf("failed to get topics: %w", err)
 			}
@@ -92,7 +96,7 @@ Examples:
 
 		// Process session if requested
 		if processSession {
-			count, err := tb.bot.ForceCloseSession(ctx, userID)
+			count, err := tb.bot.ForceCloseSession(ctx, scope)
 			if err != nil {
 				return fmt.Errorf("failed to process session: %w", err)
 			}
@@ -130,7 +134,7 @@ Examples:
 }
 
 // sendVoiceMessage sends a voice message through the bot pipeline.
-func sendVoiceMessage(ctx context.Context, tb *testBot, userID int64, voicePath string, textArgs []string) (string, error) {
+func sendVoiceMessage(ctx context.Context, tb *testBot, tgID int64, voicePath string, textArgs []string) (string, error) {
 	// Read voice file to get size
 	fileInfo, err := os.Stat(voicePath)
 	if err != nil {
@@ -161,13 +165,13 @@ func sendVoiceMessage(ctx context.Context, tb *testBot, userID int64, voicePath 
 	voiceMsg := &telegram.Message{
 		MessageID: 1,
 		From: &telegram.User{
-			ID:        userID,
+			ID:        tgID,
 			IsBot:     false,
 			FirstName: "Test",
 			Username:  "testuser",
 		},
 		Chat: &telegram.Chat{
-			ID:   userID,
+			ID:   tgID,
 			Type: "private",
 		},
 		Date: int(time.Now().Unix()),
@@ -195,7 +199,7 @@ func sendVoiceMessage(ctx context.Context, tb *testBot, userID int64, voicePath 
 	time.Sleep(15 * time.Second) // Give time for processing
 
 	// Get last response from history
-	messages, err := tb.store.GetRecentHistory(userID, 10)
+	messages, err := tb.store.GetRecentHistory(storage.PassthroughScopeID("telegram", strconv.FormatInt(tgID, 10)), 10)
 	if err != nil {
 		return "", fmt.Errorf("failed to get history: %w", err)
 	}

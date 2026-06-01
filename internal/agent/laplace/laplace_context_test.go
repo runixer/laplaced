@@ -27,7 +27,7 @@ type mockRetriever struct {
 	mock.Mock
 }
 
-func (m *mockRetriever) GetRecentTopics(userID int64, limit int) ([]storage.TopicExtended, error) {
+func (m *mockRetriever) GetRecentTopics(userID storage.ScopeID, limit int) ([]storage.TopicExtended, error) {
 	args := m.Called(userID, limit)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -35,7 +35,7 @@ func (m *mockRetriever) GetRecentTopics(userID int64, limit int) ([]storage.Topi
 	return args.Get(0).([]storage.TopicExtended), args.Error(1)
 }
 
-func (m *mockRetriever) Retrieve(ctx context.Context, userID int64, query string, opts *rag.RetrievalOptions) (*rag.RetrievalResult, *rag.RetrievalDebugInfo, error) {
+func (m *mockRetriever) Retrieve(ctx context.Context, userID storage.ScopeID, query string, opts *rag.RetrievalOptions) (*rag.RetrievalResult, *rag.RetrievalDebugInfo, error) {
 	args := m.Called(ctx, userID, query, opts)
 	if args.Get(0) == nil {
 		return nil, nil, args.Error(2)
@@ -71,7 +71,7 @@ func setupContextTest(t *testing.T) (*config.Config, *i18n.Translator, *Laplace,
 func TestLoadContextData_WithSharedContext(t *testing.T) {
 	_, translator, lap, mockStore, _, _ := setupContextTest(t)
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	rawQuery := "test query"
 
 	// Create SharedContext
@@ -117,7 +117,7 @@ func TestLoadContextData_WithoutSharedContext(t *testing.T) {
 	cfg, translator, lap, mockStore, _, _ := setupContextTest(t)
 	cfg.RAG.Enabled = false // Disable RAG to avoid ragService calls
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	rawQuery := "test query"
 
 	// No SharedContext in context
@@ -154,7 +154,7 @@ func TestLoadContextData_RAGDisabled(t *testing.T) {
 	cfg, translator, lap, mockStore, _, _ := setupContextTest(t)
 	cfg.RAG.Enabled = false
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	rawQuery := "test query"
 
 	ctx := context.Background()
@@ -180,7 +180,7 @@ func TestLoadContextData_MessageLimiting(t *testing.T) {
 	cfg.RAG.Enabled = false
 	cfg.RAG.MaxContextMessages = 3
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	ctx := context.Background()
 
@@ -213,7 +213,7 @@ func TestLoadContextData_GetFactsError(t *testing.T) {
 	cfg, translator, lap, mockStore, _, _ := setupContextTest(t)
 	cfg.RAG.Enabled = false
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	ctx := context.Background()
 
@@ -237,7 +237,7 @@ func TestLoadContextData_GetUnprocessedMessagesError(t *testing.T) {
 	cfg, translator, lap, mockStore, _, _ := setupContextTest(t)
 	cfg.RAG.Enabled = false
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	ctx := context.Background()
 
@@ -261,7 +261,7 @@ func TestLoadContextData_RAGRetrievalSuccessful(t *testing.T) {
 	cfg, translator, lap, mockStore, _, mockRAG := setupContextTest(t)
 	cfg.RAG.Enabled = true
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	rawQuery := "test query"
 
 	ctx := context.Background()
@@ -337,7 +337,7 @@ func TestLoadContextData_RAGRetrievalError(t *testing.T) {
 	cfg, translator, lap, mockStore, _, mockRAG := setupContextTest(t)
 	cfg.RAG.Enabled = true
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	rawQuery := "test query"
 
 	ctx := context.Background()
@@ -374,7 +374,7 @@ func TestBuildMessages_Minimal(t *testing.T) {
 	_, _, lap, _, _, _ := setupContextTest(t)
 
 	contextData := &ContextData{
-		UserID:           123,
+		UserID:           "123",
 		BaseSystemPrompt: "You are a helpful assistant.",
 		RecentHistory:    []storage.Message{},
 	}
@@ -395,7 +395,7 @@ func TestBuildMessages_FullContext(t *testing.T) {
 	_, _, lap, _, _, _ := setupContextTest(t)
 
 	contextData := &ContextData{
-		UserID:           123,
+		UserID:           "123",
 		BaseSystemPrompt: "You are a helpful assistant.",
 		ProfileFacts:     "<user_profile>\nName: Test User\n</user_profile>",
 		RecentTopics:     "<recent_topics>\n<topic>Previous chat</topic>\n</recent_topics>",
@@ -428,7 +428,7 @@ func TestBuildMessages_WithRAGResults(t *testing.T) {
 	_, _, lap, _, _, _ := setupContextTest(t)
 
 	contextData := &ContextData{
-		UserID:           123,
+		UserID:           "123",
 		BaseSystemPrompt: "You are helpful.",
 		RAGResults: []rag.TopicSearchResult{
 			{
@@ -473,7 +473,7 @@ func TestBuildMessages_WithRelevantPeople(t *testing.T) {
 
 	// Test with empty relevant people - should not add extra user message
 	contextData := &ContextData{
-		UserID:           123,
+		UserID:           "123",
 		BaseSystemPrompt: "You are helpful.",
 		// Empty RelevantPeople - no user message should be added
 		RelevantPeople: []storage.Person{},
@@ -492,7 +492,7 @@ func TestBuildMessages_WithArtifacts(t *testing.T) {
 	_, _, lap, _, _, _ := setupContextTest(t)
 
 	contextData := &ContextData{
-		UserID:           123,
+		UserID:           "123",
 		BaseSystemPrompt: "You are helpful.",
 		ArtifactResults: []rag.ArtifactResult{
 			{
@@ -533,7 +533,7 @@ func TestBuildMessages_WithRecentHistory(t *testing.T) {
 	_, _, lap, _, _, _ := setupContextTest(t)
 
 	contextData := &ContextData{
-		UserID:           123,
+		UserID:           "123",
 		BaseSystemPrompt: "You are helpful.",
 		RecentHistory: []storage.Message{
 			{ID: 1, Role: "user", Content: "First message"},
@@ -591,7 +591,7 @@ func TestBuildMessages_HistoryUsesMultimodalContentForLastMessage(t *testing.T) 
 
 	// Last message in history is a user message, and we have multimodal content
 	contextData := &ContextData{
-		UserID:           123,
+		UserID:           "123",
 		BaseSystemPrompt: "You are helpful.",
 		RecentHistory: []storage.Message{
 			{ID: 1, Role: "user", Content: "Simple text"},
@@ -631,7 +631,7 @@ func TestBuildMessages_FallbackCurrentMessage(t *testing.T) {
 
 	// Empty history - current message should be added separately
 	contextData := &ContextData{
-		UserID:           123,
+		UserID:           "123",
 		BaseSystemPrompt: "You are helpful.",
 		RecentHistory:    []storage.Message{},
 	}
@@ -670,7 +670,7 @@ func TestBuildMessages_WithNonEmptyRelevantPeople(t *testing.T) {
 	alice := "Alice"
 	username := "alice123"
 	contextData := &ContextData{
-		UserID:           123,
+		UserID:           "123",
 		BaseSystemPrompt: "You are helpful.",
 		RelevantPeople: []storage.Person{
 			{ID: 1, DisplayName: "Alice", Circle: "colleague", Username: &alice},

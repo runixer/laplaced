@@ -183,6 +183,9 @@ func TestMigration009_EmbeddingVersion(t *testing.T) {
 	}
 }
 
+// TestMigration010_Scopes verifies the transitional scopes table in isolation.
+// Migration 014 supersedes it (drops + normalizes), so we exercise migrateScopes
+// directly rather than via the full chain.
 func TestMigration010_Scopes(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -190,9 +193,15 @@ func TestMigration010_Scopes(t *testing.T) {
 	}
 	defer db.Close()
 
-	runner := NewRunner(db, testLogger())
-	if err := runner.Run(); err != nil {
-		t.Fatalf("Run() failed: %v", err)
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateScopes(tx); err != nil {
+		t.Fatalf("migrateScopes: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
 	}
 
 	for _, col := range []string{"transport", "scope_type", "native_id", "internal_id"} {
@@ -213,6 +222,76 @@ func TestMigration010_Scopes(t *testing.T) {
 	}
 	if _, err := db.Exec("INSERT INTO scopes (transport, scope_type, native_id, internal_id) VALUES ('time','user','abc',2)"); err == nil {
 		t.Error("expected UNIQUE(transport, native_id) violation, got nil")
+	}
+}
+
+// TestMigration014_PrincipalModel verifies that the full chain ends with the
+// normalized principal identity schema: a thin scopes registry plus identities,
+// principals, and channels tables.
+func TestMigration014_PrincipalModel(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	runner := NewRunner(db, testLogger())
+	if err := runner.Run(); err != nil {
+		t.Fatalf("Run() failed: %v", err)
+	}
+
+	// All four tables exist.
+	for _, table := range []string{"scopes", "identities", "principals", "channels"} {
+		var count int
+		if err := db.QueryRow(
+			"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", table,
+		).Scan(&count); err != nil {
+			t.Fatalf("sqlite_master(%s): %v", table, err)
+		}
+		if count != 1 {
+			t.Errorf("expected table %s to exist", table)
+		}
+	}
+
+	// scopes is the normalized registry: id + scope_type, not the transitional
+	// transport/native_id/internal_id shape.
+	for _, col := range []string{"id", "scope_type", "display_name"} {
+		var count int
+		if err := db.QueryRow(
+			"SELECT COUNT(*) FROM pragma_table_info('scopes') WHERE name=?", col,
+		).Scan(&count); err != nil {
+			t.Fatalf("pragma_table_info(scopes): %v", err)
+		}
+		if count != 1 {
+			t.Errorf("scopes: expected normalized column %s, got %d", col, count)
+		}
+	}
+	var legacy int
+	if err := db.QueryRow(
+		"SELECT COUNT(*) FROM pragma_table_info('scopes') WHERE name='internal_id'",
+	).Scan(&legacy); err != nil {
+		t.Fatalf("pragma_table_info(scopes): %v", err)
+	}
+	if legacy != 0 {
+		t.Error("scopes still has transitional internal_id column after migration 014")
+	}
+
+	// Partial unique index on principals.ad_login rejects duplicate non-null logins.
+	if _, err := db.Exec("INSERT INTO scopes (id, scope_type) VALUES ('s1','principal'),('s2','principal')"); err != nil {
+		t.Fatalf("seed scopes: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO principals (scope_id, ad_login) VALUES ('s1','k.gruzdev')"); err != nil {
+		t.Fatalf("first principal: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO principals (scope_id, ad_login) VALUES ('s2','k.gruzdev')"); err == nil {
+		t.Error("expected UNIQUE ad_login violation, got nil")
+	}
+	// But two NULL ad_logins must coexist (partial index ignores NULLs).
+	if _, err := db.Exec("INSERT INTO scopes (id, scope_type) VALUES ('s3','principal'),('s4','principal')"); err != nil {
+		t.Fatalf("seed scopes 2: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO principals (scope_id) VALUES ('s3'),('s4')"); err != nil {
+		t.Errorf("two NULL ad_logins should coexist: %v", err)
 	}
 }
 

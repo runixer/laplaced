@@ -4,12 +4,14 @@ package reranker
 
 import (
 	"log/slog"
+
+	"github.com/runixer/laplaced/internal/storage"
 )
 
 // filterValidTopics removes hallucinated topic IDs from the result.
 // Logs warnings for any IDs that don't exist in the candidate map.
 func filterValidTopics(
-	userID int64,
+	userID storage.ScopeID,
 	result *Result,
 	candidateMap map[int64]Candidate,
 	logger *slog.Logger,
@@ -52,7 +54,7 @@ func filterValidTopics(
 // filterValidPeople removes hallucinated person IDs from the result (v0.5.1).
 // Logs warnings for any IDs that don't exist in the candidate map.
 func filterValidPeople(
-	userID int64,
+	userID storage.ScopeID,
 	result *Result,
 	peopleMap map[int64]PersonCandidate,
 	logger *slog.Logger,
@@ -99,7 +101,7 @@ func filterValidPeople(
 // filterValidArtifacts removes hallucinated artifact IDs from the result (v0.6.0).
 // Logs warnings for any IDs that don't exist in the candidate map.
 func filterValidArtifacts(
-	userID int64,
+	userID storage.ScopeID,
 	result *Result,
 	artifactsMap map[int64]ArtifactCandidate,
 	logger *slog.Logger,

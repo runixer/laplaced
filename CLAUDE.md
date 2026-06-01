@@ -161,6 +161,37 @@ When you add a config field that changes the **shape** of data the system produc
 
 **Incident that motivated this (v0.7.0 → v0.7.1):** the embedding-dim migration correctly re-embedded 6500 vectors at the new 1536 dim; 14 unrelated embedding call sites (retrieval, new topics, new facts, search tools, extractor) kept the old literal without `Dimensions`; OpenRouter defaulted those to 3072; on-disk vectors (1536) and query vectors (3072) lived in different spaces; cosine returned 0 for every pair; RAG returned no candidates for anyone; reranker was silently never invoked (gated on `candidates > 0`). No errors, no warnings, green CI. Diagnosed through Prometheus showing zero candidates in prod.
 
+### Wide type migrations: compiler blind spots & test hygiene (MUST READ!)
+
+When changing a widely-used type — e.g. the partition key flip `user_id int64` →
+`storage.ScopeID` (a UUID string) — most of the cost and nearly all the pain is in
+**tests**, not production. Production is compiler-guided and goes fast; tests are where
+you lose days. Three rakes, learned the expensive way:
+
+1. **Implement `sql.Scanner` / `driver.Valuer` on the new type FIRST** if it lands in a
+   DB column. SQLite has dynamic/affinity typing: a numeric-looking string (`"123"`) is
+   coerced to INTEGER on write and scans back as `int64` — a plain string-kind destination
+   then panics (`unsupported Scan`). This is **runtime-only**, invisible at build. Scanner
+   (accept `int64`/`string`/`[]byte`) + Valuer (bind as string) makes round-trips lossless
+   on both SQLite and Postgres. Add it before the flip, not after the first panic.
+
+2. **The compiler covers typed positions; `interface{}` sinks do NOT.** `testify` matchers
+   (`mock.On("M", x, ...)`) and `assert.Equal(t, want, got)` take `any`, so a wrong literal
+   there compiles clean and fails only at runtime — one panic at a time, each masking the
+   next. **Do not bulk-`sed` literals in those positions.** Fix each by reading the matched
+   method signature: which arg is the partition key (flips) vs an entity id / count (stays).
+
+3. **Tests must derive derived values the same way prod does — never hardcode the literal.**
+   The scope id is computed (`ScopeID = uuidv5(transport, nativeID)`; the home Telegram id
+   `123` → a UUID). Fixtures that hardcode `"123"` silently diverge from what the code
+   computes via `backgroundUserIDs` / `resolveScopeID`. Go through the same helper
+   (`testutil.TestUserID` / `storage.PassthroughScopeID`) everywhere so plain-call and
+   loop-driven paths agree *by construction*. This single habit removes most of the churn.
+
+Process: run `golangci-lint` (in `~/go/bin`, used by the git hook) and `go test -race` early
+and often during a big flip — not just `go build` — so staticcheck/gosec/unused and data
+races surface before the final commit, not at the hook gate.
+
 ### Personal Data in Code (IMPORTANT!)
 
 **NEVER put real personal data in tracked files.**

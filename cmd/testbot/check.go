@@ -64,7 +64,7 @@ by the archivist agent and used for profile information.`,
 		}
 
 		userID := getUserID(cmd)
-		fmt.Printf("Facts for user %d: %d\n", userID, len(facts))
+		fmt.Printf("Facts for user %s: %d\n", userID, len(facts))
 		for i, fact := range facts {
 			fmt.Printf("%2d. [Fact:%d] [%s/%s] (Updated: %s) %s\n",
 				i+1, fact.ID, fact.Category, fact.Type,
@@ -102,7 +102,7 @@ created from sessions and used for RAG retrieval.`,
 		}
 
 		userID := getUserID(cmd)
-		fmt.Printf("Topics for user %d: %d\n", userID, len(topics))
+		fmt.Printf("Topics for user %s: %d\n", userID, len(topics))
 		for i, topic := range topics {
 			fmt.Printf("%2d. [Topic:%d] %s (msg %d-%d, %d chars)\n",
 				i+1, topic.ID, topic.Summary, topic.StartMsgID, topic.EndMsgID, topic.SizeChars)
@@ -139,7 +139,7 @@ and include contacts, family, friends, etc.`,
 		}
 
 		userID := getUserID(cmd)
-		fmt.Printf("People for user %d: %d\n", userID, len(people))
+		fmt.Printf("People for user %s: %d\n", userID, len(people))
 		for i, person := range people {
 			username := "none"
 			if person.Username != nil {
@@ -182,7 +182,7 @@ var checkMessagesCmd = &cobra.Command{
 		}
 
 		userID := getUserID(cmd)
-		fmt.Printf("Messages for user %d: %d (showing last %d)\n", userID, len(messages), defaultMessageLimit)
+		fmt.Printf("Messages for user %s: %d (showing last %d)\n", userID, len(messages), defaultMessageLimit)
 		for i, msg := range messages {
 			topicInfo := ""
 			if msg.TopicID != nil {

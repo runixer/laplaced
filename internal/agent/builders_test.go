@@ -11,11 +11,11 @@ import (
 // TestRequestBuilder tests the RequestBuilder fluent API.
 func TestRequestBuilder(t *testing.T) {
 	t.Run("WithShared", func(t *testing.T) {
-		shared := &SharedContext{UserID: 123}
+		shared := &SharedContext{UserID: "123"}
 		req := NewRequestBuilder().WithShared(shared).Build()
 
 		assert.Same(t, shared, req.Shared)
-		assert.Equal(t, int64(123), req.Shared.UserID)
+		assert.Equal(t, storage.ScopeID("123"), req.Shared.UserID)
 	})
 
 	t.Run("WithQuery", func(t *testing.T) {
@@ -63,7 +63,7 @@ func TestRequestBuilder(t *testing.T) {
 	})
 
 	t.Run("Chained", func(t *testing.T) {
-		shared := &SharedContext{UserID: 456}
+		shared := &SharedContext{UserID: "456"}
 		messages := []Message{{Role: "user", Content: "test"}}
 		media := []MediaPart{{Type: "audio"}}
 
@@ -182,9 +182,9 @@ func TestResponseBuilder(t *testing.T) {
 // TestSharedContextBuilder tests the SharedContextBuilder fluent API.
 func TestSharedContextBuilder(t *testing.T) {
 	t.Run("WithUserID", func(t *testing.T) {
-		shared := NewSharedContextBuilder().WithUserID(789).Build()
+		shared := NewSharedContextBuilder().WithUserID("789").Build()
 
-		assert.Equal(t, int64(789), shared.UserID)
+		assert.Equal(t, storage.ScopeID("789"), shared.UserID)
 	})
 
 	t.Run("WithProfile", func(t *testing.T) {
@@ -228,7 +228,7 @@ func TestSharedContextBuilder(t *testing.T) {
 		beforeBuild := time.Now()
 
 		shared := NewSharedContextBuilder().
-			WithUserID(999).
+			WithUserID("999").
 			WithProfile("profile").
 			WithProfileFacts(facts).
 			WithRecentTopics("topics").
@@ -236,7 +236,7 @@ func TestSharedContextBuilder(t *testing.T) {
 			WithLanguage("en").
 			Build()
 
-		assert.Equal(t, int64(999), shared.UserID)
+		assert.Equal(t, storage.ScopeID("999"), shared.UserID)
 		assert.Equal(t, "profile", shared.Profile)
 		assert.Equal(t, facts, shared.ProfileFacts)
 		assert.Equal(t, "topics", shared.RecentTopics)
@@ -249,7 +249,7 @@ func TestSharedContextBuilder(t *testing.T) {
 	t.Run("DefaultValues", func(t *testing.T) {
 		shared := NewSharedContextBuilder().Build()
 
-		assert.Equal(t, int64(0), shared.UserID)
+		assert.Equal(t, storage.ScopeID(""), shared.UserID)
 		assert.Contains(t, shared.Profile, "<user_profile>")
 		assert.Contains(t, shared.RecentTopics, "<recent_topics>")
 		assert.Contains(t, shared.InnerCircle, "<inner_circle>")

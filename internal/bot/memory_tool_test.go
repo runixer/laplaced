@@ -83,7 +83,7 @@ func TestPerformManageMemory_Add(t *testing.T) {
 
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, testutil.TestLogger())
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	queryJSON := `{"action": "add", "content": "Likes pizza", "category": "food", "type": "preference", "importance": 80}`
 
 	// Mocks
@@ -117,7 +117,7 @@ func TestPerformManageMemory_InvalidJSON(t *testing.T) {
 	cfg := testutil.TestConfig()
 	toolExecutor := tools.NewToolExecutor(nil, nil, nil, cfg, testutil.TestLogger())
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "manage_memory", `{"query":"{invalid json"}`)
 
@@ -130,7 +130,7 @@ func TestPerformManageMemory_MissingQuery(t *testing.T) {
 	cfg := testutil.TestConfig()
 	toolExecutor := tools.NewToolExecutor(nil, nil, nil, cfg, testutil.TestLogger())
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	result, err := toolExecutor.ExecuteToolCall(context.Background(), tools.CallContext{UserID: userID}, "manage_memory", `{}`)
 

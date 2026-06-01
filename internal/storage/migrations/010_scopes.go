@@ -17,7 +17,7 @@ func init() {
 // rewrite.
 //
 // Telegram resolution is identity passthrough (internalID == telegramID) and
-// writes NO row here — the home instance never gets scopes rows. Mattermost/
+// writes NO row here — the Telegram passthrough never gets scopes rows. Mattermost/
 // Time users have 26-char string ids, so the scopes table mints a surrogate
 // int64 internal_id per (transport, native_id).
 func migrateScopes(tx *sql.Tx) error {

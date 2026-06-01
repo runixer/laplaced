@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/runixer/laplaced/internal/storage"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,7 +21,7 @@ const sampleTrace = `{
               "startTimeUnixNano": "1000000000",
               "endTimeUnixNano": "1500000000",
               "attributes": [
-                {"key": "user.id", "value": {"intValue": "12345"}},
+                {"key": "user.id", "value": {"stringValue": "12345"}},
                 {"key": "reranker.candidates_in.topics", "value": {"intValue": "50"}},
                 {"key": "reranker.candidates_in.people", "value": {"intValue": "10"}},
                 {"key": "reranker.candidates_in.artifacts", "value": {"intValue": "20"}},
@@ -70,7 +72,7 @@ func TestExtractRerankerSpan_HappyPath(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "trace-abc", sp.TraceID)
-	assert.Equal(t, int64(12345), sp.UserID)
+	assert.Equal(t, storage.ScopeID("12345"), sp.UserID)
 	assert.Equal(t, int64(500), sp.DurationMs, "endTimeNano-startTimeNano = 500_000_000ns = 500ms")
 
 	assert.Equal(t, 50, sp.CandidatesIn.Topics)

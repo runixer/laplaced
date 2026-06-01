@@ -3,6 +3,8 @@ package rag
 import (
 	"sort"
 	"time"
+
+	"github.com/runixer/laplaced/internal/storage"
 )
 
 // VectorSearchResult holds ID and similarity score from vector search.
@@ -50,7 +52,7 @@ func (a ArtifactVectorItem) GetEmbedding() []float32 { return a.Embedding }
 //
 // Returns results sorted by score (descending).
 func (s *Service) vectorSearch(
-	userID int64,
+	userID storage.ScopeID,
 	queryEmbedding []float32,
 	vectors []embeddingItem,
 	cfg VectorSearchConfig,

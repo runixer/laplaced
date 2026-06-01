@@ -67,7 +67,7 @@ func TestCosineSimilarity(t *testing.T) {
 }
 
 func TestFindSimilarFacts(t *testing.T) {
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 
 	t.Run("no similar facts", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
@@ -116,11 +116,11 @@ func TestLoadNewVectors(t *testing.T) {
 
 		embedding := []float32{0.1, 0.2, 0.3}
 		mockStore.On("GetTopicsAfterID", int64(0)).Return([]storage.Topic{
-			{ID: 1, UserID: 123, Summary: "Topic 1", Embedding: embedding},
-			{ID: 2, UserID: 123, Summary: "Topic 2", Embedding: embedding},
+			{ID: 1, UserID: "123", Summary: "Topic 1", Embedding: embedding},
+			{ID: 2, UserID: "123", Summary: "Topic 2", Embedding: embedding},
 		}, nil)
 		mockStore.On("GetFactsAfterID", int64(0)).Return([]storage.Fact{
-			{ID: 1, UserID: 123, Content: "Fact 1", Embedding: embedding},
+			{ID: 1, UserID: "123", Content: "Fact 1", Embedding: embedding},
 		}, nil)
 
 		svc := newTestRAGServiceNoStart(t, mockStore, mockClient)
@@ -181,8 +181,8 @@ func TestLoadNewVectors(t *testing.T) {
 
 		embedding := []float32{0.1, 0.2, 0.3}
 		mockStore.On("GetTopicsAfterID", int64(0)).Return([]storage.Topic{
-			{ID: 1, UserID: 123, Summary: "Topic with embedding", Embedding: embedding},
-			{ID: 2, UserID: 123, Summary: "Topic without embedding", Embedding: nil},
+			{ID: 1, UserID: "123", Summary: "Topic with embedding", Embedding: embedding},
+			{ID: 2, UserID: "123", Summary: "Topic without embedding", Embedding: nil},
 		}, nil)
 		mockStore.On("GetFactsAfterID", int64(0)).Return([]storage.Fact{}, nil)
 

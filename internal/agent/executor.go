@@ -9,6 +9,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/storage"
 )
 
 // Executor provides common execution logic for agents.
@@ -34,7 +35,7 @@ func NewExecutor(
 // SingleShotRequest for simple one-turn agents.
 type SingleShotRequest struct {
 	AgentType    AgentType
-	UserID       int64
+	UserID       storage.ScopeID
 	Model        string
 	SystemPrompt string
 	UserPrompt   string
@@ -59,7 +60,7 @@ func (e *Executor) ExecuteSingleShot(ctx context.Context, req SingleShotRequest)
 	orReq := openrouter.ChatCompletionRequest{
 		Model:    req.Model,
 		Messages: messages,
-		UserID:   req.UserID,
+		UserID:   string(req.UserID),
 	}
 
 	if req.JSONMode {
@@ -144,7 +145,7 @@ func (e *Executor) ExecuteAgentic(ctx context.Context, req SingleShotRequest, op
 			Model:     req.Model,
 			Messages:  messages,
 			Tools:     opts.Tools,
-			UserID:    req.UserID,
+			UserID:    string(req.UserID),
 			Reasoning: opts.Reasoning,
 			Plugins:   opts.Plugins,
 		}

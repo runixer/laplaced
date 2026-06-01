@@ -153,7 +153,7 @@ func TestProcessChunk(t *testing.T) {
 			t.Fatalf("failed to build RAG service: %v", err)
 		}
 
-		err = svc.processChunk(context.Background(), 123, []storage.Message{})
+		err = svc.processChunk(context.Background(), "123", []storage.Message{})
 
 		assert.NoError(t, err)
 	})
@@ -188,7 +188,7 @@ func TestProcessChunkWithStats(t *testing.T) {
 		}
 
 		stats := &ProcessingStats{}
-		topicIDs, err := svc.processChunkWithStats(context.Background(), 123, []storage.Message{}, stats)
+		topicIDs, err := svc.processChunkWithStats(context.Background(), "123", []storage.Message{}, stats)
 
 		assert.NoError(t, err)
 		assert.Nil(t, topicIDs)
@@ -232,7 +232,7 @@ func TestProcessChunkWithStats(t *testing.T) {
 			{ID: 1, Role: "user", Content: "Hello", CreatedAt: time.Now()},
 		}
 		stats := &ProcessingStats{}
-		_, err = svc.processChunkWithStats(context.Background(), 123, chunk, stats)
+		_, err = svc.processChunkWithStats(context.Background(), "123", chunk, stats)
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "extract topics")
@@ -305,7 +305,7 @@ func TestProcessChunkWithStats(t *testing.T) {
 		svc.SetSplitterAgent(mockSplitter)
 
 		stats := &ProcessingStats{}
-		topicIDs, err := svc.processChunkWithStats(context.Background(), 123, chunk, stats)
+		topicIDs, err := svc.processChunkWithStats(context.Background(), "123", chunk, stats)
 
 		assert.NoError(t, err)
 		assert.Len(t, topicIDs, 1)
@@ -368,7 +368,7 @@ func TestProcessChunkWithStats(t *testing.T) {
 		svc.SetSplitterAgent(mockSplitter)
 
 		stats := &ProcessingStats{}
-		_, err = svc.processChunkWithStats(context.Background(), 123, chunk, stats)
+		_, err = svc.processChunkWithStats(context.Background(), "123", chunk, stats)
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "create embeddings")
@@ -385,7 +385,7 @@ func TestProcessTopicChunking(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
-		mockStore.On("GetUnprocessedMessages", int64(123)).Return([]storage.Message{}, assert.AnError)
+		mockStore.On("GetUnprocessedMessages", storage.ScopeID("123")).Return([]storage.Message{}, assert.AnError)
 
 		translator := testutil.TestTranslator(t)
 
@@ -406,7 +406,7 @@ func TestProcessTopicChunking(t *testing.T) {
 			t.Fatalf("failed to build RAG service: %v", err)
 		}
 
-		svc.processTopicChunking(context.Background(), 123)
+		svc.processTopicChunking(context.Background(), "123")
 
 		mockStore.AssertExpectations(t)
 	})
@@ -420,7 +420,7 @@ func TestProcessTopicChunking(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
-		mockStore.On("GetUnprocessedMessages", int64(123)).Return([]storage.Message{}, nil)
+		mockStore.On("GetUnprocessedMessages", storage.ScopeID("123")).Return([]storage.Message{}, nil)
 
 		translator := testutil.TestTranslator(t)
 
@@ -441,7 +441,7 @@ func TestProcessTopicChunking(t *testing.T) {
 			t.Fatalf("failed to build RAG service: %v", err)
 		}
 
-		svc.processTopicChunking(context.Background(), 123)
+		svc.processTopicChunking(context.Background(), "123")
 
 		mockStore.AssertExpectations(t)
 	})
@@ -458,7 +458,7 @@ func TestProcessTopicChunking(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
-		mockStore.On("GetUnprocessedMessages", int64(123)).Return([]storage.Message{}, nil)
+		mockStore.On("GetUnprocessedMessages", storage.ScopeID("123")).Return([]storage.Message{}, nil)
 
 		translator := testutil.TestTranslator(t)
 
@@ -480,7 +480,7 @@ func TestProcessTopicChunking(t *testing.T) {
 		}
 
 		// Should not panic with invalid duration
-		svc.processTopicChunking(context.Background(), 123)
+		svc.processTopicChunking(context.Background(), "123")
 
 		mockStore.AssertExpectations(t)
 	})
@@ -501,12 +501,12 @@ func TestProcessTopicChunking(t *testing.T) {
 		// Messages with time gap > 1h
 		baseTime := time.Now().Add(-2 * time.Hour)
 		messages := []storage.Message{
-			{ID: 1, UserID: 123, CreatedAt: baseTime},
-			{ID: 2, UserID: 123, CreatedAt: baseTime.Add(30 * time.Minute)},
-			{ID: 3, UserID: 123, CreatedAt: time.Now().Add(-30 * time.Minute)}, // Gap > 1h
+			{ID: 1, UserID: "123", CreatedAt: baseTime},
+			{ID: 2, UserID: "123", CreatedAt: baseTime.Add(30 * time.Minute)},
+			{ID: 3, UserID: "123", CreatedAt: time.Now().Add(-30 * time.Minute)}, // Gap > 1h
 		}
 
-		mockStore.On("GetUnprocessedMessages", int64(123)).Return(messages, nil)
+		mockStore.On("GetUnprocessedMessages", storage.ScopeID("123")).Return(messages, nil)
 
 		translator := testutil.TestTranslator(t)
 
@@ -528,7 +528,7 @@ func TestProcessTopicChunking(t *testing.T) {
 		}
 
 		// Process should handle error gracefully and return early
-		svc.processTopicChunking(context.Background(), 123)
+		svc.processTopicChunking(context.Background(), "123")
 
 		mockStore.AssertExpectations(t)
 	})
@@ -549,12 +549,12 @@ func TestProcessTopicChunking(t *testing.T) {
 		// Messages close in time but exceeding max chunk size
 		baseTime := time.Now().Add(-1 * time.Hour)
 		messages := []storage.Message{
-			{ID: 1, UserID: 123, CreatedAt: baseTime},
-			{ID: 2, UserID: 123, CreatedAt: baseTime.Add(1 * time.Minute)},
-			{ID: 3, UserID: 123, CreatedAt: baseTime.Add(2 * time.Minute)}, // Should trigger chunk at size 2
+			{ID: 1, UserID: "123", CreatedAt: baseTime},
+			{ID: 2, UserID: "123", CreatedAt: baseTime.Add(1 * time.Minute)},
+			{ID: 3, UserID: "123", CreatedAt: baseTime.Add(2 * time.Minute)}, // Should trigger chunk at size 2
 		}
 
-		mockStore.On("GetUnprocessedMessages", int64(123)).Return(messages, nil)
+		mockStore.On("GetUnprocessedMessages", storage.ScopeID("123")).Return(messages, nil)
 
 		translator := testutil.TestTranslator(t)
 
@@ -576,7 +576,7 @@ func TestProcessTopicChunking(t *testing.T) {
 		}
 
 		// Should process chunk when size limit reached
-		svc.processTopicChunking(context.Background(), 123)
+		svc.processTopicChunking(context.Background(), "123")
 
 		mockStore.AssertExpectations(t)
 	})
@@ -597,11 +597,11 @@ func TestProcessTopicChunking(t *testing.T) {
 		// Old messages (more than 1 minute ago)
 		oldTime := time.Now().Add(-2 * time.Minute)
 		messages := []storage.Message{
-			{ID: 1, UserID: 123, CreatedAt: oldTime},
-			{ID: 2, UserID: 123, CreatedAt: oldTime.Add(10 * time.Second)},
+			{ID: 1, UserID: "123", CreatedAt: oldTime},
+			{ID: 2, UserID: "123", CreatedAt: oldTime.Add(10 * time.Second)},
 		}
 
-		mockStore.On("GetUnprocessedMessages", int64(123)).Return(messages, nil)
+		mockStore.On("GetUnprocessedMessages", storage.ScopeID("123")).Return(messages, nil)
 
 		translator := testutil.TestTranslator(t)
 
@@ -623,7 +623,7 @@ func TestProcessTopicChunking(t *testing.T) {
 		}
 
 		// Should process final chunk when enough time passed
-		svc.processTopicChunking(context.Background(), 123)
+		svc.processTopicChunking(context.Background(), "123")
 
 		mockStore.AssertExpectations(t)
 	})
@@ -679,7 +679,7 @@ func TestProcessFactExtraction(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
-		mockStore.On("GetTopicsPendingFacts", int64(123)).Return([]storage.Topic{}, assert.AnError)
+		mockStore.On("GetTopicsPendingFacts", storage.PassthroughScopeID("telegram", "123")).Return([]storage.Topic{}, assert.AnError)
 
 		translator := testutil.TestTranslator(t)
 
@@ -716,8 +716,8 @@ func TestProcessFactExtraction(t *testing.T) {
 		mockClient := new(testutil.MockOpenRouterClient)
 
 		// Return topic that hasn't been checked for consolidation
-		mockStore.On("GetTopicsPendingFacts", int64(123)).Return([]storage.Topic{
-			{ID: 1, UserID: 123, ConsolidationChecked: false},
+		mockStore.On("GetTopicsPendingFacts", storage.PassthroughScopeID("telegram", "123")).Return([]storage.Topic{
+			{ID: 1, UserID: storage.PassthroughScopeID("telegram", "123"), ConsolidationChecked: false},
 		}, nil)
 
 		translator := testutil.TestTranslator(t)
@@ -755,11 +755,11 @@ func TestProcessFactExtraction(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
-		mockStore.On("GetTopicsPendingFacts", int64(123)).Return([]storage.Topic{
-			{ID: 1, UserID: 123, ConsolidationChecked: true, StartMsgID: 1, EndMsgID: 10},
+		mockStore.On("GetTopicsPendingFacts", storage.PassthroughScopeID("telegram", "123")).Return([]storage.Topic{
+			{ID: 1, UserID: storage.PassthroughScopeID("telegram", "123"), ConsolidationChecked: true, StartMsgID: 1, EndMsgID: 10},
 		}, nil)
 		mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return([]storage.Message{}, nil)
-		mockStore.On("SetTopicFactsExtracted", int64(123), int64(1), true).Return(nil)
+		mockStore.On("SetTopicFactsExtracted", storage.PassthroughScopeID("telegram", "123"), int64(1), true).Return(nil)
 
 		translator := testutil.TestTranslator(t)
 
@@ -795,8 +795,8 @@ func TestProcessFactExtraction(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
 		mockClient := new(testutil.MockOpenRouterClient)
 
-		mockStore.On("GetTopicsPendingFacts", int64(123)).Return([]storage.Topic{
-			{ID: 1, UserID: 123, ConsolidationChecked: true, StartMsgID: 1, EndMsgID: 10},
+		mockStore.On("GetTopicsPendingFacts", storage.PassthroughScopeID("telegram", "123")).Return([]storage.Topic{
+			{ID: 1, UserID: storage.PassthroughScopeID("telegram", "123"), ConsolidationChecked: true, StartMsgID: 1, EndMsgID: 10},
 		}, nil)
 		mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return([]storage.Message{}, assert.AnError)
 
@@ -877,7 +877,7 @@ func TestProcessConsolidation(t *testing.T) {
 		mockClient := new(testutil.MockOpenRouterClient)
 
 		// Return error for GetMergeCandidates
-		mockStore.On("GetMergeCandidates", int64(123)).Return([]storage.MergeCandidate{}, assert.AnError)
+		mockStore.On("GetMergeCandidates", storage.PassthroughScopeID("telegram", "123")).Return([]storage.MergeCandidate{}, assert.AnError)
 
 		translator := testutil.TestTranslator(t)
 
@@ -914,9 +914,9 @@ func TestProcessConsolidation(t *testing.T) {
 		mockClient := new(testutil.MockOpenRouterClient)
 
 		// Return empty merge candidates
-		mockStore.On("GetMergeCandidates", int64(123)).Return([]storage.MergeCandidate{}, nil)
+		mockStore.On("GetMergeCandidates", storage.PassthroughScopeID("telegram", "123")).Return([]storage.MergeCandidate{}, nil)
 		// Return empty pending topics (for orphan check)
-		mockStore.On("GetTopicsPendingFacts", int64(123)).Return([]storage.Topic{}, nil)
+		mockStore.On("GetTopicsPendingFacts", storage.PassthroughScopeID("telegram", "123")).Return([]storage.Topic{}, nil)
 
 		translator := testutil.TestTranslator(t)
 
@@ -991,7 +991,7 @@ func TestProcessAllUsers(t *testing.T) {
 		mockClient := new(testutil.MockOpenRouterClient)
 
 		// Mock GetUnprocessedMessages returning empty (no work to do)
-		mockStore.On("GetUnprocessedMessages", int64(123)).Return([]storage.Message{}, nil)
+		mockStore.On("GetUnprocessedMessages", storage.PassthroughScopeID("telegram", "123")).Return([]storage.Message{}, nil)
 
 		translator := testutil.TestTranslator(t)
 

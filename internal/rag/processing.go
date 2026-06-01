@@ -120,7 +120,7 @@ func findStragglers(chunk []storage.Message, topics []ExtractedTopic) []int64 {
 	return stragglers
 }
 
-func (s *Service) processChunk(ctx context.Context, userID int64, chunk []storage.Message) error {
+func (s *Service) processChunk(ctx context.Context, userID storage.ScopeID, chunk []storage.Message) error {
 	if len(chunk) == 0 {
 		return nil
 	}
@@ -279,7 +279,7 @@ func (s *Service) processChunk(ctx context.Context, userID int64, chunk []storag
 }
 
 // processChunkWithStats processes a chunk and returns the created topic IDs.
-func (s *Service) processChunkWithStats(ctx context.Context, userID int64, chunk []storage.Message, stats *ProcessingStats) ([]int64, error) {
+func (s *Service) processChunkWithStats(ctx context.Context, userID storage.ScopeID, chunk []storage.Message, stats *ProcessingStats) ([]int64, error) {
 	if len(chunk) == 0 {
 		return nil, nil
 	}
@@ -405,7 +405,7 @@ func (s *Service) processChunkWithStats(ctx context.Context, userID int64, chunk
 }
 
 // runConsolidationSync runs consolidation for specific topics and returns merged topic IDs.
-func (s *Service) runConsolidationSync(ctx context.Context, userID int64, topicIDs []int64, stats *ProcessingStats) []int64 {
+func (s *Service) runConsolidationSync(ctx context.Context, userID storage.ScopeID, topicIDs []int64, stats *ProcessingStats) []int64 {
 	mergedTopicIDs := []int64{}
 
 	for {

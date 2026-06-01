@@ -29,7 +29,7 @@ func TestMerger_Execute_ShouldMerge(t *testing.T) {
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID:       123,
+			UserID:       "123",
 			Profile:      "<user_profile>\n</user_profile>",
 			RecentTopics: "<recent_topics>\n</recent_topics>",
 		},
@@ -67,7 +67,7 @@ func TestMerger_Execute_ShouldNotMerge(t *testing.T) {
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID:       123,
+			UserID:       "123",
 			Profile:      "<user_profile>\n</user_profile>",
 			RecentTopics: "<recent_topics>\n</recent_topics>",
 		},
@@ -193,24 +193,24 @@ func TestMerger_getUserID(t *testing.T) {
 	tests := []struct {
 		name     string
 		req      *agent.Request
-		expected int64
+		expected storage.ScopeID
 	}{
 		{
 			name:     "nil request",
 			req:      nil,
-			expected: 0,
+			expected: "",
 		},
 		{
 			name:     "no shared context",
 			req:      &agent.Request{},
-			expected: 0,
+			expected: "",
 		},
 		{
 			name: "with shared context",
 			req: &agent.Request{
-				Shared: &agent.SharedContext{UserID: 456},
+				Shared: &agent.SharedContext{UserID: "456"},
 			},
-			expected: 456,
+			expected: "456",
 		},
 	}
 
@@ -240,7 +240,7 @@ func TestMerger_SameTopics(t *testing.T) {
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID:       123,
+			UserID:       "123",
 			Profile:      "<user_profile>\n</user_profile>",
 			RecentTopics: "<recent_topics>\n</recent_topics>",
 		},
@@ -277,7 +277,7 @@ func TestMerger_DifferentTopics(t *testing.T) {
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID:       123,
+			UserID:       "123",
 			Profile:      "<user_profile>\n</user_profile>",
 			RecentTopics: "<recent_topics>\n</recent_topics>",
 		},
@@ -312,7 +312,7 @@ func TestMerger_ParseError(t *testing.T) {
 
 	req := &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID:       123,
+			UserID:       "123",
 			Profile:      "<user_profile>\n</user_profile>",
 			RecentTopics: "<recent_topics>\n</recent_topics>",
 		},
@@ -360,7 +360,7 @@ func TestMerger_getContext_WithFallback(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 
 	// Setup mock fact repo to return facts
-	mockStore.On("GetFacts", int64(123)).Return([]storage.Fact{
+	mockStore.On("GetFacts", storage.ScopeID("123")).Return([]storage.Fact{
 		{ID: 1, Relation: "test_relation", Content: "Test fact", Category: "test", Type: "identity", Importance: 80},
 	}, nil)
 
@@ -381,11 +381,11 @@ func TestMerger_getContext_WithFallback(t *testing.T) {
 	// Call with empty SharedContext (should trigger fallback)
 	profile, recentTopics := merger.getContext(context.Background(), &agent.Request{
 		Shared: &agent.SharedContext{
-			UserID:       123,
+			UserID:       "123",
 			Profile:      "", // Empty - triggers fallback
 			RecentTopics: "", // Empty - triggers fallback
 		},
-	}, 123)
+	}, "123")
 
 	// Should have loaded from storage due to fallback
 	// FormatUserProfile formats facts differently, just check it's not empty and contains fact content

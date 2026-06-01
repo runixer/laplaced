@@ -68,7 +68,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 	}
 	bot.messageGrouper = NewMessageGrouper(bot, logger, 0, bot.processMessageGroup)
 
-	userID := int64(123)
+	userID := storage.PassthroughScopeID("telegram", "123")
 	chatID := int64(456)
 
 	// Test Data
@@ -76,7 +76,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 		{
 			MessageID: 1,
 			Text:      "Test message",
-			From:      &telegram.User{ID: userID, FirstName: "User", Username: "testuser"},
+			From:      &telegram.User{ID: 123, FirstName: "User", Username: "testuser"},
 			Chat:      &telegram.Chat{ID: chatID},
 			Date:      1234567890,
 		},

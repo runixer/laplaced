@@ -118,17 +118,17 @@ type MockStorage struct {
 
 // MessageRepository methods
 
-func (m *MockStorage) AddMessageToHistory(userID int64, message storage.Message) error {
+func (m *MockStorage) AddMessageToHistory(userID storage.ScopeID, message storage.Message) error {
 	args := m.Called(userID, message)
 	return args.Error(0)
 }
 
-func (m *MockStorage) ImportMessage(userID int64, message storage.Message) error {
+func (m *MockStorage) ImportMessage(userID storage.ScopeID, message storage.Message) error {
 	args := m.Called(userID, message)
 	return args.Error(0)
 }
 
-func (m *MockStorage) GetRecentHistory(userID int64, limit int) ([]storage.Message, error) {
+func (m *MockStorage) GetRecentHistory(userID storage.ScopeID, limit int) ([]storage.Message, error) {
 	args := m.Called(userID, limit)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -136,7 +136,7 @@ func (m *MockStorage) GetRecentHistory(userID int64, limit int) ([]storage.Messa
 	return args.Get(0).([]storage.Message), args.Error(1)
 }
 
-func (m *MockStorage) GetMessagesByIDs(userID int64, ids []int64) ([]storage.Message, error) {
+func (m *MockStorage) GetMessagesByIDs(userID storage.ScopeID, ids []int64) ([]storage.Message, error) {
 	args := m.Called(userID, ids)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -144,12 +144,12 @@ func (m *MockStorage) GetMessagesByIDs(userID int64, ids []int64) ([]storage.Mes
 	return args.Get(0).([]storage.Message), args.Error(1)
 }
 
-func (m *MockStorage) ClearHistory(userID int64) error {
+func (m *MockStorage) ClearHistory(userID storage.ScopeID) error {
 	args := m.Called(userID)
 	return args.Error(0)
 }
 
-func (m *MockStorage) GetMessagesInRange(ctx context.Context, userID int64, startID, endID int64) ([]storage.Message, error) {
+func (m *MockStorage) GetMessagesInRange(ctx context.Context, userID storage.ScopeID, startID, endID int64) ([]storage.Message, error) {
 	args := m.Called(ctx, userID, startID, endID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -165,17 +165,17 @@ func (m *MockStorage) GetMessagesByTopicID(ctx context.Context, topicID int64) (
 	return args.Get(0).([]storage.Message), args.Error(1)
 }
 
-func (m *MockStorage) UpdateMessageTopic(userID int64, messageID, topicID int64) error {
+func (m *MockStorage) UpdateMessageTopic(userID storage.ScopeID, messageID, topicID int64) error {
 	args := m.Called(userID, messageID, topicID)
 	return args.Error(0)
 }
 
-func (m *MockStorage) UpdateMessagesTopicInRange(ctx context.Context, userID, startMsgID, endMsgID, topicID int64) error {
+func (m *MockStorage) UpdateMessagesTopicInRange(ctx context.Context, userID storage.ScopeID, startMsgID, endMsgID, topicID int64) error {
 	args := m.Called(ctx, userID, startMsgID, endMsgID, topicID)
 	return args.Error(0)
 }
 
-func (m *MockStorage) GetUnprocessedMessages(userID int64) ([]storage.Message, error) {
+func (m *MockStorage) GetUnprocessedMessages(userID storage.ScopeID) ([]storage.Message, error) {
 	args := m.Called(userID)
 	if args.Get(0) == nil {
 		return []storage.Message{}, args.Error(1)
@@ -183,7 +183,7 @@ func (m *MockStorage) GetUnprocessedMessages(userID int64) ([]storage.Message, e
 	return args.Get(0).([]storage.Message), args.Error(1)
 }
 
-func (m *MockStorage) GetRecentSessionMessages(ctx context.Context, userID int64, limit int, excludeIDs []int64) ([]storage.Message, error) {
+func (m *MockStorage) GetRecentSessionMessages(ctx context.Context, userID storage.ScopeID, limit int, excludeIDs []int64) ([]storage.Message, error) {
 	args := m.Called(ctx, userID, limit, excludeIDs)
 	if args.Get(0) == nil {
 		return []storage.Message{}, args.Error(1)
@@ -206,7 +206,7 @@ func (m *MockStorage) GetAllUsers() ([]storage.User, error) {
 	return args.Get(0).([]storage.User), args.Error(1)
 }
 
-func (m *MockStorage) ResetUserData(userID int64) error {
+func (m *MockStorage) ResetUserData(userID storage.ScopeID) error {
 	args := m.Called(userID)
 	return args.Error(0)
 }
@@ -228,17 +228,17 @@ func (m *MockStorage) CreateTopic(topic storage.Topic) (int64, error) {
 	return args.Get(0).(int64), args.Error(1)
 }
 
-func (m *MockStorage) DeleteTopic(userID int64, id int64) error {
+func (m *MockStorage) DeleteTopic(userID storage.ScopeID, id int64) error {
 	args := m.Called(userID, id)
 	return args.Error(0)
 }
 
-func (m *MockStorage) DeleteTopicCascade(userID int64, id int64) error {
+func (m *MockStorage) DeleteTopicCascade(userID storage.ScopeID, id int64) error {
 	args := m.Called(userID, id)
 	return args.Error(0)
 }
 
-func (m *MockStorage) GetLastTopicEndMessageID(userID int64) (int64, error) {
+func (m *MockStorage) GetLastTopicEndMessageID(userID storage.ScopeID) (int64, error) {
 	args := m.Called(userID)
 	return args.Get(0).(int64), args.Error(1)
 }
@@ -259,7 +259,7 @@ func (m *MockStorage) GetTopicsAfterID(minID int64) ([]storage.Topic, error) {
 	return args.Get(0).([]storage.Topic), args.Error(1)
 }
 
-func (m *MockStorage) GetTopicsByIDs(userID int64, ids []int64) ([]storage.Topic, error) {
+func (m *MockStorage) GetTopicsByIDs(userID storage.ScopeID, ids []int64) ([]storage.Topic, error) {
 	args := m.Called(userID, ids)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -267,7 +267,7 @@ func (m *MockStorage) GetTopicsByIDs(userID int64, ids []int64) ([]storage.Topic
 	return args.Get(0).([]storage.Topic), args.Error(1)
 }
 
-func (m *MockStorage) GetTopics(userID int64) ([]storage.Topic, error) {
+func (m *MockStorage) GetTopics(userID storage.ScopeID) ([]storage.Topic, error) {
 	args := m.Called(userID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -275,17 +275,17 @@ func (m *MockStorage) GetTopics(userID int64) ([]storage.Topic, error) {
 	return args.Get(0).([]storage.Topic), args.Error(1)
 }
 
-func (m *MockStorage) SetTopicFactsExtracted(userID int64, topicID int64, extracted bool) error {
+func (m *MockStorage) SetTopicFactsExtracted(userID storage.ScopeID, topicID int64, extracted bool) error {
 	args := m.Called(userID, topicID, extracted)
 	return args.Error(0)
 }
 
-func (m *MockStorage) SetTopicConsolidationChecked(userID int64, topicID int64, checked bool) error {
+func (m *MockStorage) SetTopicConsolidationChecked(userID storage.ScopeID, topicID int64, checked bool) error {
 	args := m.Called(userID, topicID, checked)
 	return args.Error(0)
 }
 
-func (m *MockStorage) GetTopicsPendingFacts(userID int64) ([]storage.Topic, error) {
+func (m *MockStorage) GetTopicsPendingFacts(userID storage.ScopeID) ([]storage.Topic, error) {
 	args := m.Called(userID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -298,7 +298,7 @@ func (m *MockStorage) GetTopicsExtended(filter storage.TopicFilter, limit, offse
 	return args.Get(0).(storage.TopicResult), args.Error(1)
 }
 
-func (m *MockStorage) GetMergeCandidates(userID int64) ([]storage.MergeCandidate, error) {
+func (m *MockStorage) GetMergeCandidates(userID storage.ScopeID) ([]storage.MergeCandidate, error) {
 	args := m.Called(userID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -316,7 +316,7 @@ func (m *MockStorage) AddFact(fact storage.Fact) (int64, error) {
 	return args.Get(0).(int64), args.Error(1)
 }
 
-func (m *MockStorage) GetFacts(userID int64) ([]storage.Fact, error) {
+func (m *MockStorage) GetFacts(userID storage.ScopeID) ([]storage.Fact, error) {
 	args := m.Called(userID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -324,7 +324,7 @@ func (m *MockStorage) GetFacts(userID int64) ([]storage.Fact, error) {
 	return args.Get(0).([]storage.Fact), args.Error(1)
 }
 
-func (m *MockStorage) GetFactsByIDs(userID int64, ids []int64) ([]storage.Fact, error) {
+func (m *MockStorage) GetFactsByIDs(userID storage.ScopeID, ids []int64) ([]storage.Fact, error) {
 	args := m.Called(userID, ids)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -332,7 +332,7 @@ func (m *MockStorage) GetFactsByIDs(userID int64, ids []int64) ([]storage.Fact, 
 	return args.Get(0).([]storage.Fact), args.Error(1)
 }
 
-func (m *MockStorage) GetFactsByTopicID(userID int64, topicID int64) ([]storage.Fact, error) {
+func (m *MockStorage) GetFactsByTopicID(userID storage.ScopeID, topicID int64) ([]storage.Fact, error) {
 	args := m.Called(userID, topicID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -361,7 +361,7 @@ func (m *MockStorage) GetFactStats() (storage.FactStats, error) {
 	return args.Get(0).(storage.FactStats), args.Error(1)
 }
 
-func (m *MockStorage) GetFactStatsByUser(userID int64) (storage.FactStats, error) {
+func (m *MockStorage) GetFactStatsByUser(userID storage.ScopeID) (storage.FactStats, error) {
 	args := m.Called(userID)
 	return args.Get(0).(storage.FactStats), args.Error(1)
 }
@@ -371,12 +371,12 @@ func (m *MockStorage) UpdateFact(fact storage.Fact) error {
 	return args.Error(0)
 }
 
-func (m *MockStorage) UpdateFactsTopic(userID int64, oldTopicID, newTopicID int64) error {
+func (m *MockStorage) UpdateFactsTopic(userID storage.ScopeID, oldTopicID, newTopicID int64) error {
 	args := m.Called(userID, oldTopicID, newTopicID)
 	return args.Error(0)
 }
 
-func (m *MockStorage) DeleteFact(userID, id int64) error {
+func (m *MockStorage) DeleteFact(userID storage.ScopeID, id int64) error {
 	args := m.Called(userID, id)
 	return args.Error(0)
 }
@@ -393,7 +393,7 @@ func (m *MockStorage) UpdateFactHistoryTopic(oldTopicID, newTopicID int64) error
 	return args.Error(0)
 }
 
-func (m *MockStorage) GetFactHistory(userID int64, limit int) ([]storage.FactHistory, error) {
+func (m *MockStorage) GetFactHistory(userID storage.ScopeID, limit int) ([]storage.FactHistory, error) {
 	args := m.Called(userID, limit)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -413,15 +413,15 @@ func (m *MockStorage) AddStat(stat storage.Stat) error {
 	return args.Error(0)
 }
 
-func (m *MockStorage) GetStats() (map[int64]storage.Stat, error) {
+func (m *MockStorage) GetStats() (map[storage.ScopeID]storage.Stat, error) {
 	args := m.Called()
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(map[int64]storage.Stat), args.Error(1)
+	return args.Get(0).(map[storage.ScopeID]storage.Stat), args.Error(1)
 }
 
-func (m *MockStorage) GetDashboardStats(userID int64) (*storage.DashboardStats, error) {
+func (m *MockStorage) GetDashboardStats(userID storage.ScopeID) (*storage.DashboardStats, error) {
 	args := m.Called(userID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -431,12 +431,12 @@ func (m *MockStorage) GetDashboardStats(userID int64) (*storage.DashboardStats, 
 
 // MemoryBankRepository methods
 
-func (m *MockStorage) GetMemoryBank(userID int64) (string, error) {
+func (m *MockStorage) GetMemoryBank(userID storage.ScopeID) (string, error) {
 	args := m.Called(userID)
 	return args.String(0), args.Error(1)
 }
 
-func (m *MockStorage) UpdateMemoryBank(userID int64, content string) error {
+func (m *MockStorage) UpdateMemoryBank(userID storage.ScopeID, content string) error {
 	args := m.Called(userID, content)
 	return args.Error(0)
 }
@@ -476,12 +476,12 @@ func (m *MockStorage) CountFactHistory() (int64, error) {
 	return args.Get(0).(int64), args.Error(1)
 }
 
-func (m *MockStorage) CountOrphanedTopics(userID int64) (int, error) {
+func (m *MockStorage) CountOrphanedTopics(userID storage.ScopeID) (int, error) {
 	args := m.Called(userID)
 	return args.Get(0).(int), args.Error(1)
 }
 
-func (m *MockStorage) GetOrphanedTopicIDs(userID int64) ([]int64, error) {
+func (m *MockStorage) GetOrphanedTopicIDs(userID storage.ScopeID) ([]int64, error) {
 	args := m.Called(userID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -489,12 +489,12 @@ func (m *MockStorage) GetOrphanedTopicIDs(userID int64) ([]int64, error) {
 	return args.Get(0).([]int64), args.Error(1)
 }
 
-func (m *MockStorage) CountOverlappingTopics(userID int64) (int, error) {
+func (m *MockStorage) CountOverlappingTopics(userID storage.ScopeID) (int, error) {
 	args := m.Called(userID)
 	return args.Get(0).(int), args.Error(1)
 }
 
-func (m *MockStorage) GetOverlappingTopics(userID int64) ([]storage.OverlappingPair, error) {
+func (m *MockStorage) GetOverlappingTopics(userID storage.ScopeID) ([]storage.OverlappingPair, error) {
 	args := m.Called(userID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -502,22 +502,22 @@ func (m *MockStorage) GetOverlappingTopics(userID int64) ([]storage.OverlappingP
 	return args.Get(0).([]storage.OverlappingPair), args.Error(1)
 }
 
-func (m *MockStorage) CountFactsOnOrphanedTopics(userID int64) (int, error) {
+func (m *MockStorage) CountFactsOnOrphanedTopics(userID storage.ScopeID) (int, error) {
 	args := m.Called(userID)
 	return args.Get(0).(int), args.Error(1)
 }
 
-func (m *MockStorage) RecalculateTopicRanges(userID int64) (int, error) {
+func (m *MockStorage) RecalculateTopicRanges(userID storage.ScopeID) (int, error) {
 	args := m.Called(userID)
 	return args.Get(0).(int), args.Error(1)
 }
 
-func (m *MockStorage) RecalculateTopicSizes(userID int64) (int, error) {
+func (m *MockStorage) RecalculateTopicSizes(userID storage.ScopeID) (int, error) {
 	args := m.Called(userID)
 	return args.Get(0).(int), args.Error(1)
 }
 
-func (m *MockStorage) GetContaminatedTopics(userID int64) ([]storage.ContaminatedTopic, error) {
+func (m *MockStorage) GetContaminatedTopics(userID storage.ScopeID) ([]storage.ContaminatedTopic, error) {
 	args := m.Called(userID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -525,12 +525,12 @@ func (m *MockStorage) GetContaminatedTopics(userID int64) ([]storage.Contaminate
 	return args.Get(0).([]storage.ContaminatedTopic), args.Error(1)
 }
 
-func (m *MockStorage) CountContaminatedTopics(userID int64) (int, error) {
+func (m *MockStorage) CountContaminatedTopics(userID storage.ScopeID) (int, error) {
 	args := m.Called(userID)
 	return args.Get(0).(int), args.Error(1)
 }
 
-func (m *MockStorage) FixContaminatedTopics(userID int64) (int64, error) {
+func (m *MockStorage) FixContaminatedTopics(userID storage.ScopeID) (int64, error) {
 	args := m.Called(userID)
 	return args.Get(0).(int64), args.Error(1)
 }
@@ -547,7 +547,7 @@ func (m *MockStorage) AddAgentLog(log storage.AgentLog) error {
 	return args.Error(0)
 }
 
-func (m *MockStorage) GetAgentLogs(agentType string, userID int64, limit int) ([]storage.AgentLog, error) {
+func (m *MockStorage) GetAgentLogs(agentType string, userID storage.ScopeID, limit int) ([]storage.AgentLog, error) {
 	args := m.Called(agentType, userID, limit)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -560,7 +560,7 @@ func (m *MockStorage) GetAgentLogsExtended(filter storage.AgentLogFilter, limit,
 	return args.Get(0).(storage.AgentLogResult), args.Error(1)
 }
 
-func (m *MockStorage) GetAgentLogFull(ctx context.Context, id int64, userID int64) (*storage.AgentLog, error) {
+func (m *MockStorage) GetAgentLogFull(ctx context.Context, id int64, userID storage.ScopeID) (*storage.AgentLog, error) {
 	args := m.Called(ctx, id, userID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -580,12 +580,12 @@ func (m *MockStorage) UpdatePerson(person storage.Person) error {
 	return args.Error(0)
 }
 
-func (m *MockStorage) DeletePerson(userID, personID int64) error {
+func (m *MockStorage) DeletePerson(userID storage.ScopeID, personID int64) error {
 	args := m.Called(userID, personID)
 	return args.Error(0)
 }
 
-func (m *MockStorage) GetPerson(userID, personID int64) (*storage.Person, error) {
+func (m *MockStorage) GetPerson(userID storage.ScopeID, personID int64) (*storage.Person, error) {
 	args := m.Called(userID, personID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -593,7 +593,7 @@ func (m *MockStorage) GetPerson(userID, personID int64) (*storage.Person, error)
 	return args.Get(0).(*storage.Person), args.Error(1)
 }
 
-func (m *MockStorage) GetPeople(userID int64) ([]storage.Person, error) {
+func (m *MockStorage) GetPeople(userID storage.ScopeID) ([]storage.Person, error) {
 	args := m.Called(userID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -601,7 +601,7 @@ func (m *MockStorage) GetPeople(userID int64) ([]storage.Person, error) {
 	return args.Get(0).([]storage.Person), args.Error(1)
 }
 
-func (m *MockStorage) GetPeopleByIDs(userID int64, ids []int64) ([]storage.Person, error) {
+func (m *MockStorage) GetPeopleByIDs(userID storage.ScopeID, ids []int64) ([]storage.Person, error) {
 	args := m.Called(userID, ids)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -625,7 +625,7 @@ func (m *MockStorage) GetPeopleAfterID(minID int64) ([]storage.Person, error) {
 	return args.Get(0).([]storage.Person), args.Error(1)
 }
 
-func (m *MockStorage) FindPersonByTelegramID(userID, telegramID int64) (*storage.Person, error) {
+func (m *MockStorage) FindPersonByTelegramID(userID storage.ScopeID, telegramID int64) (*storage.Person, error) {
 	args := m.Called(userID, telegramID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -633,7 +633,7 @@ func (m *MockStorage) FindPersonByTelegramID(userID, telegramID int64) (*storage
 	return args.Get(0).(*storage.Person), args.Error(1)
 }
 
-func (m *MockStorage) FindPersonByExternalID(userID int64, transport, nativeID string) (*storage.Person, error) {
+func (m *MockStorage) FindPersonByExternalID(userID storage.ScopeID, transport, nativeID string) (*storage.Person, error) {
 	args := m.Called(userID, transport, nativeID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -641,25 +641,57 @@ func (m *MockStorage) FindPersonByExternalID(userID int64, transport, nativeID s
 	return args.Get(0).(*storage.Person), args.Error(1)
 }
 
-func (m *MockStorage) GetScope(transport, nativeID string) (*storage.Scope, error) {
+func (m *MockStorage) IsChannelScope(id storage.ScopeID) (bool, error) {
+	args := m.Called(id)
+	return args.Bool(0), args.Error(1)
+}
+
+// IdentityRepository.
+
+func (m *MockStorage) GetIdentity(transport, nativeID string) (*storage.Identity, error) {
 	args := m.Called(transport, nativeID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*storage.Scope), args.Error(1)
+	return args.Get(0).(*storage.Identity), args.Error(1)
 }
 
-func (m *MockStorage) ResolveScope(transport, scopeType, nativeID string) (int64, error) {
-	args := m.Called(transport, scopeType, nativeID)
-	return args.Get(0).(int64), args.Error(1)
+func (m *MockStorage) PutIdentity(transport, nativeID string, scopeID storage.ScopeID) error {
+	args := m.Called(transport, nativeID, scopeID)
+	return args.Error(0)
 }
 
-func (m *MockStorage) IsChannelScope(internalID int64) (bool, error) {
-	args := m.Called(internalID)
-	return args.Bool(0), args.Error(1)
+// PrincipalRepository.
+
+func (m *MockStorage) GetOrCreatePrincipal(in storage.PrincipalInput) (storage.ScopeID, bool, error) {
+	args := m.Called(in)
+	return args.Get(0).(storage.ScopeID), args.Bool(1), args.Error(2)
 }
 
-func (m *MockStorage) FindPersonByUsername(userID int64, username string) (*storage.Person, error) {
+func (m *MockStorage) GetPrincipal(scopeID storage.ScopeID) (*storage.Principal, error) {
+	args := m.Called(scopeID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*storage.Principal), args.Error(1)
+}
+
+// ChannelRepository.
+
+func (m *MockStorage) GetOrCreateChannel(transport, nativeID, displayName string) (storage.ScopeID, error) {
+	args := m.Called(transport, nativeID, displayName)
+	return args.Get(0).(storage.ScopeID), args.Error(1)
+}
+
+func (m *MockStorage) GetChannel(scopeID storage.ScopeID) (*storage.Channel, error) {
+	args := m.Called(scopeID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*storage.Channel), args.Error(1)
+}
+
+func (m *MockStorage) FindPersonByUsername(userID storage.ScopeID, username string) (*storage.Person, error) {
 	args := m.Called(userID, username)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -667,7 +699,7 @@ func (m *MockStorage) FindPersonByUsername(userID int64, username string) (*stor
 	return args.Get(0).(*storage.Person), args.Error(1)
 }
 
-func (m *MockStorage) FindPersonByAlias(userID int64, alias string) ([]storage.Person, error) {
+func (m *MockStorage) FindPersonByAlias(userID storage.ScopeID, alias string) ([]storage.Person, error) {
 	args := m.Called(userID, alias)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -675,7 +707,7 @@ func (m *MockStorage) FindPersonByAlias(userID int64, alias string) ([]storage.P
 	return args.Get(0).([]storage.Person), args.Error(1)
 }
 
-func (m *MockStorage) FindPersonByName(userID int64, name string) (*storage.Person, error) {
+func (m *MockStorage) FindPersonByName(userID storage.ScopeID, name string) (*storage.Person, error) {
 	args := m.Called(userID, name)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -683,7 +715,7 @@ func (m *MockStorage) FindPersonByName(userID int64, name string) (*storage.Pers
 	return args.Get(0).(*storage.Person), args.Error(1)
 }
 
-func (m *MockStorage) MergePeople(userID, targetID, sourceID int64, newBio string, newAliases []string, newUsername *string, newTelegramID *int64) error {
+func (m *MockStorage) MergePeople(userID storage.ScopeID, targetID, sourceID int64, newBio string, newAliases []string, newUsername *string, newTelegramID *int64) error {
 	args := m.Called(userID, targetID, sourceID, newBio, newAliases, newUsername, newTelegramID)
 	return args.Error(0)
 }
@@ -693,12 +725,12 @@ func (m *MockStorage) GetPeopleExtended(filter storage.PersonFilter, limit, offs
 	return args.Get(0).(storage.PersonResult), args.Error(1)
 }
 
-func (m *MockStorage) CountPeopleWithoutEmbedding(userID int64) (int, error) {
+func (m *MockStorage) CountPeopleWithoutEmbedding(userID storage.ScopeID) (int, error) {
 	args := m.Called(userID)
 	return args.Get(0).(int), args.Error(1)
 }
 
-func (m *MockStorage) GetPeopleWithoutEmbedding(userID int64) ([]storage.Person, error) {
+func (m *MockStorage) GetPeopleWithoutEmbedding(userID storage.ScopeID) ([]storage.Person, error) {
 	args := m.Called(userID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -793,7 +825,7 @@ type MockFileSaver struct {
 	mock.Mock
 }
 
-func (m *MockFileSaver) SaveFile(ctx context.Context, userID int64, messageID int64, fileType string, originalName string, mimeType string, reader io.Reader, messageText string) (*int64, error) {
+func (m *MockFileSaver) SaveFile(ctx context.Context, userID storage.ScopeID, messageID int64, fileType string, originalName string, mimeType string, reader io.Reader, messageText string) (*int64, error) {
 	args := m.Called(ctx, userID, messageID, fileType, originalName, mimeType, mock.Anything, messageText)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -806,7 +838,7 @@ type MockVectorSearcher struct {
 	mock.Mock
 }
 
-func (m *MockVectorSearcher) FindSimilarFacts(ctx context.Context, userID int64, embedding []float32, threshold float32) ([]storage.Fact, error) {
+func (m *MockVectorSearcher) FindSimilarFacts(ctx context.Context, userID storage.ScopeID, embedding []float32, threshold float32) ([]storage.Fact, error) {
 	args := m.Called(ctx, userID, embedding, threshold)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -856,7 +888,7 @@ func (m *MockStorage) AddArtifact(artifact storage.Artifact) (int64, error) {
 	return args.Get(0).(int64), args.Error(1)
 }
 
-func (m *MockStorage) GetArtifact(userID, artifactID int64) (*storage.Artifact, error) {
+func (m *MockStorage) GetArtifact(userID storage.ScopeID, artifactID int64) (*storage.Artifact, error) {
 	args := m.Called(userID, artifactID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -864,7 +896,7 @@ func (m *MockStorage) GetArtifact(userID, artifactID int64) (*storage.Artifact, 
 	return args.Get(0).(*storage.Artifact), args.Error(1)
 }
 
-func (m *MockStorage) GetByHash(userID int64, contentHash string) (*storage.Artifact, error) {
+func (m *MockStorage) GetByHash(userID storage.ScopeID, contentHash string) (*storage.Artifact, error) {
 	args := m.Called(userID, contentHash)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -872,7 +904,7 @@ func (m *MockStorage) GetByHash(userID int64, contentHash string) (*storage.Arti
 	return args.Get(0).(*storage.Artifact), args.Error(1)
 }
 
-func (m *MockStorage) GetPendingArtifacts(userID int64, maxRetries int) ([]storage.Artifact, error) {
+func (m *MockStorage) GetPendingArtifacts(userID storage.ScopeID, maxRetries int) ([]storage.Artifact, error) {
 	args := m.Called(userID, maxRetries)
 	if args.Get(0) == nil {
 		return []storage.Artifact{}, args.Error(1)
@@ -898,7 +930,7 @@ func (m *MockStorage) RecoverArtifactStates(threshold time.Duration) error {
 	return args.Error(0)
 }
 
-func (m *MockStorage) GetArtifactsByIDs(userID int64, artifactIDs []int64) ([]storage.Artifact, error) {
+func (m *MockStorage) GetArtifactsByIDs(userID storage.ScopeID, artifactIDs []int64) ([]storage.Artifact, error) {
 	args := m.Called(userID, artifactIDs)
 	if args.Get(0) == nil {
 		return []storage.Artifact{}, args.Error(1)
@@ -906,7 +938,7 @@ func (m *MockStorage) GetArtifactsByIDs(userID int64, artifactIDs []int64) ([]st
 	return args.Get(0).([]storage.Artifact), args.Error(1)
 }
 
-func (m *MockStorage) GetSessionArtifacts(ctx context.Context, userID int64, limit int, maxAge time.Duration) ([]storage.Artifact, error) {
+func (m *MockStorage) GetSessionArtifacts(ctx context.Context, userID storage.ScopeID, limit int, maxAge time.Duration) ([]storage.Artifact, error) {
 	args := m.Called(ctx, userID, limit, maxAge)
 	if args.Get(0) == nil {
 		return []storage.Artifact{}, args.Error(1)
@@ -914,12 +946,12 @@ func (m *MockStorage) GetSessionArtifacts(ctx context.Context, userID int64, lim
 	return args.Get(0).([]storage.Artifact), args.Error(1)
 }
 
-func (m *MockStorage) IncrementContextLoadCount(userID int64, artifactIDs []int64) error {
+func (m *MockStorage) IncrementContextLoadCount(userID storage.ScopeID, artifactIDs []int64) error {
 	args := m.Called(userID, artifactIDs)
 	return args.Error(0)
 }
 
-func (m *MockStorage) UpdateMessageID(userID, artifactID, messageID int64) error {
+func (m *MockStorage) UpdateMessageID(userID storage.ScopeID, artifactID, messageID int64) error {
 	args := m.Called(userID, artifactID, messageID)
 	return args.Error(0)
 }
@@ -941,7 +973,7 @@ func (m *MockStorage) UpdateMessageID(userID, artifactID, messageID int64) error
 //		*testutil.MockRetriever
 //	}
 //
-//	func (a *ragRetrieverAdapter) Retrieve(ctx context.Context, userID int64, query string, opts *rag.RetrievalOptions) (*rag.RetrievalResult, *rag.RetrievalDebugInfo, error) {
+//	func (a *ragRetrieverAdapter) Retrieve(ctx context.Context, userID storage.ScopeID, query string, opts *rag.RetrievalOptions) (*rag.RetrievalResult, *rag.RetrievalDebugInfo, error) {
 //		result, debugInfo, err := a.MockRetriever.Retrieve(ctx, userID, query, opts)
 //		return result.(*rag.RetrievalResult), debugInfo.(*rag.RetrievalDebugInfo), err
 //	}
@@ -953,7 +985,7 @@ type MockRetriever struct {
 }
 
 // GetRecentTopics returns the N most recent topics for a user with message counts.
-func (m *MockRetriever) GetRecentTopics(userID int64, limit int) ([]storage.TopicExtended, error) {
+func (m *MockRetriever) GetRecentTopics(userID storage.ScopeID, limit int) ([]storage.TopicExtended, error) {
 	args := m.Called(userID, limit)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -964,7 +996,7 @@ func (m *MockRetriever) GetRecentTopics(userID int64, limit int) ([]storage.Topi
 // Retrieve performs RAG retrieval for a query.
 // Returns (result interface{}, debugInfo interface{}, error).
 // Caller is responsible for type assertions to *rag.RetrievalResult and *rag.RetrievalDebugInfo.
-func (m *MockRetriever) Retrieve(ctx context.Context, userID int64, query string, opts interface{}) (interface{}, interface{}, error) {
+func (m *MockRetriever) Retrieve(ctx context.Context, userID storage.ScopeID, query string, opts interface{}) (interface{}, interface{}, error) {
 	args := m.Called(ctx, userID, query, opts)
 	return args.Get(0), args.Get(1), args.Error(2)
 }

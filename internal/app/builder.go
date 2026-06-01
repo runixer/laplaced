@@ -58,7 +58,7 @@ func SetupServices(
 	ctx context.Context,
 	logger *slog.Logger,
 	cfg *config.Config,
-	store *storage.SQLiteStore,
+	store *storage.Store,
 	client openrouter.Client,
 	translator *i18n.Translator,
 ) (*Services, error) {

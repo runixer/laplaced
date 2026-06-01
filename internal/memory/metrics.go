@@ -1,10 +1,9 @@
 package memory
 
 import (
-	"strconv"
-
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/runixer/laplaced/internal/storage"
 )
 
 // Prometheus метрики для Memory System
@@ -78,12 +77,12 @@ const (
 )
 
 // formatUserID converts user ID to string for metric labels.
-func formatUserID(userID int64) string {
-	return strconv.FormatInt(userID, 10)
+func formatUserID(userID storage.ScopeID) string {
+	return string(userID)
 }
 
 // RecordFactOperation записывает операцию с фактом.
-func RecordFactOperation(userID int64, operation string) {
+func RecordFactOperation(userID storage.ScopeID, operation string) {
 	factOperationsTotal.WithLabelValues(formatUserID(userID), operation).Inc()
 }
 
@@ -98,6 +97,6 @@ func RecordTopicProcessing(durationSeconds float64) {
 }
 
 // SetTopicsTotal устанавливает количество топиков для пользователя.
-func SetTopicsTotal(userID int64, count int) {
+func SetTopicsTotal(userID storage.ScopeID, count int) {
 	topicsTotal.WithLabelValues(formatUserID(userID)).Set(float64(count))
 }

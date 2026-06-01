@@ -19,7 +19,7 @@ type TestBot struct {
 	logger     *slog.Logger
 	logCapture *LogCapture
 	cfg        *testConfig
-	store      *storage.SQLiteStore
+	store      *storage.Store
 	tempDir    string
 	dbPath     string
 }
@@ -81,7 +81,7 @@ func NewTestBot(t *testing.T, opts *TestBotOptions) *TestBot {
 }
 
 // Store returns the storage store.
-func (tb *TestBot) Store() *storage.SQLiteStore {
+func (tb *TestBot) Store() *storage.Store {
 	return tb.store
 }
 

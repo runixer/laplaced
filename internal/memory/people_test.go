@@ -67,7 +67,7 @@ func TestApplyPeopleUpdates_SkipDuplicatePerson(t *testing.T) {
 	mockStore := ts.Store
 	mockOR := ts.ORClient
 
-	userID := int64(123)
+	userID := storage.ScopeID("123")
 	referenceDate := time.Now()
 
 	existingPeople := []storage.Person{

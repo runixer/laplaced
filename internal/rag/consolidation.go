@@ -60,11 +60,11 @@ func (s *Service) processConsolidation(ctx context.Context) {
 // processConsolidationForUser handles consolidation for one user under a single
 // rag.processConsolidation span. Extracted so the span deferred-closure pattern
 // fits cleanly without affecting the outer loop's user iteration.
-func (s *Service) processConsolidationForUser(ctx context.Context, userID int64) {
+func (s *Service) processConsolidationForUser(ctx context.Context, userID storage.ScopeID) {
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/rag").Start(
 		ctx, "rag.processConsolidation",
 		trace.WithAttributes(
-			attribute.Int64("user.id", userID),
+			attribute.String("user.id", string(userID)),
 			attribute.String("job.type", jobtype.Background.String()),
 		),
 	)
@@ -136,7 +136,7 @@ func (s *Service) processConsolidationForUser(ctx context.Context, userID int64)
 
 // markOrphanTopicsChecked marks topics that have no potential merge partner as consolidation-checked.
 // A topic is an "orphan" if there's no unchecked topic within DefaultMergeGapThreshold message IDs after it.
-func (s *Service) markOrphanTopicsChecked(userID int64) {
+func (s *Service) markOrphanTopicsChecked(userID storage.ScopeID) {
 	pendingTopics, err := s.topicRepo.GetTopicsPendingFacts(userID)
 	if err != nil {
 		s.logger.Error("failed to get pending topics for orphan check", "error", err)
@@ -173,7 +173,7 @@ func (s *Service) markOrphanTopicsChecked(userID int64) {
 	}
 }
 
-func (s *Service) findMergeCandidates(userID int64) ([]storage.MergeCandidate, error) {
+func (s *Service) findMergeCandidates(userID storage.ScopeID) ([]storage.MergeCandidate, error) {
 	candidates, err := s.topicRepo.GetMergeCandidates(userID)
 	if err != nil {
 		return nil, err
