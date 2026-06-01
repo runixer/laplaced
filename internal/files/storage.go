@@ -169,9 +169,13 @@ func (fs *FileStorage) GetFullPath(relativePath string) string {
 	return filepath.Join(fs.basePath, relativePath)
 }
 
-// DeleteFile deletes a file from disk.
+// DeleteFile deletes a file from disk. Routed through the same containment
+// guard as ReadFile so a malformed/traversing key can never escape the base.
 func (fs *FileStorage) DeleteFile(_ context.Context, relativePath string) error {
-	fullPath := fs.GetFullPath(relativePath)
+	fullPath, err := fs.resolveWithinBase(relativePath)
+	if err != nil {
+		return err
+	}
 	if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete file: %w", err)
 	}

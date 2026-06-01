@@ -160,6 +160,29 @@ func (b *Bot) SetImageGenerator(gen tools.ImageGenerator) {
 	}
 }
 
+// IsAllowedScope reports whether a scope id (the partition key used in the web
+// UI and storage) belongs to an allowlisted user on ANY transport. The download
+// handler uses it to authorize artifact access transport-agnostically: scope ids
+// are derived as PassthroughScopeID(transport, nativeID), so we re-derive the
+// allowed set from each transport's own allowlist rather than assuming Telegram.
+//
+// NOTE: valid while scopes are pure passthrough(transport, native). Once a
+// principal resolver remaps scopes (Variant C), this must consult the scope/
+// principal store instead of the config-derived set.
+func (b *Bot) IsAllowedScope(scopeID storage.ScopeID) bool {
+	for _, id := range b.cfg.Bot.AllowedUserIDs {
+		if storage.PassthroughScopeID(transportTelegram, strconv.FormatInt(id, 10)) == scopeID {
+			return true
+		}
+	}
+	for _, id := range b.cfg.Mattermost.AllowedUserIDs {
+		if storage.PassthroughScopeID(transportMattermost, id) == scopeID {
+			return true
+		}
+	}
+	return false
+}
+
 // SetFileStorage wires the artifact blob store used by the generate_image
 // tool to persist output PNGs and by the media-reply path to read them.
 func (b *Bot) SetFileStorage(fs files.Storage) {

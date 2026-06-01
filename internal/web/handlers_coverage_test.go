@@ -35,6 +35,7 @@ func setupTestServer(t *testing.T) (*Server, *testutil.MockStorage, *MockBotInte
 	cfg.Bot.AllowedUserIDs = []int64{123, 456}
 
 	mockBot.On("API").Return(mockAPI)
+	mockBot.cfg = cfg // download-auth tests mutate cfg.Bot.AllowedUserIDs; mirror it
 	mockAPI.On("GetToken").Return("test-token")
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))

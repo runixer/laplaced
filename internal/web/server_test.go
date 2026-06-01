@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -26,6 +27,27 @@ import (
 // This mock is kept in web package to avoid import cycles (rag <-> testutil).
 type MockBotInterface struct {
 	mock.Mock
+	// cfg, when set, makes IsAllowedScope mirror the real transport-agnostic
+	// derivation against this config's allowlists. Left nil, IsAllowedScope
+	// allows everything (most handler tests don't exercise download auth).
+	cfg *config.Config
+}
+
+func (m *MockBotInterface) IsAllowedScope(scopeID storage.ScopeID) bool {
+	if m.cfg == nil {
+		return true
+	}
+	for _, id := range m.cfg.Bot.AllowedUserIDs {
+		if storage.PassthroughScopeID("telegram", strconv.FormatInt(id, 10)) == scopeID {
+			return true
+		}
+	}
+	for _, id := range m.cfg.Mattermost.AllowedUserIDs {
+		if storage.PassthroughScopeID("mattermost", id) == scopeID {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *MockBotInterface) API() telegram.BotAPI {

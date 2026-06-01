@@ -99,6 +99,9 @@ type BotInterface interface {
 	ForceCloseSession(ctx context.Context, userID storage.ScopeID) (int, error)
 	ForceCloseSessionWithProgress(ctx context.Context, userID storage.ScopeID, onProgress rag.ProgressCallback) (*rag.ProcessingStats, error)
 	SendTestMessage(ctx context.Context, userID storage.ScopeID, text string, saveToHistory bool) (*rag.TestMessageResult, error)
+	// IsAllowedScope authorizes a scope id against the allowlists of all
+	// transports (Telegram + Mattermost), not just Telegram.
+	IsAllowedScope(scopeID storage.ScopeID) bool
 }
 
 // dashboardStatsCache holds cached dashboard stats with TTL
@@ -1711,15 +1714,10 @@ func (s *Server) artifactDownloadHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Validate user_id is in allowed list (CRIT-5 security fix)
-	userAllowed := false
-	for _, allowedID := range s.cfg.Bot.AllowedUserIDs {
-		if storage.PassthroughScopeID("telegram", strconv.FormatInt(allowedID, 10)) == userID {
-			userAllowed = true
-			break
-		}
-	}
-	if !userAllowed {
+	// Validate user_id is in allowed list (CRIT-5 security fix). Authorize
+	// transport-agnostically via the bot: on non-Telegram contours the scope id
+	// is derived from that transport's allowlist, not cfg.Bot.AllowedUserIDs.
+	if s.bot == nil || !s.bot.IsAllowedScope(userID) {
 		s.logger.Warn("artifact download denied: user_id not in allowed list",
 			"user_id", userID,
 			"artifact_id", artifactID,

@@ -360,6 +360,11 @@ func (s *S3Config) validate() []error {
 	if s.Bucket == "" {
 		errs = append(errs, errors.New("artifacts.s3.bucket is required"))
 	}
+	// SigV4 needs a region to sign requests; Yandex tolerates an empty one with a
+	// custom endpoint, but stricter S3 backends reject the signature. Require it.
+	if s.Region == "" {
+		errs = append(errs, errors.New("artifacts.s3.region is required"))
+	}
 	return errs
 }
 

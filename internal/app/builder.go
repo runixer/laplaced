@@ -52,7 +52,11 @@ type Services struct {
 // StoragePath. Capability-driven, so the home deployment (no s3 block) is
 // byte-identical to before.
 func NewArtifactStorage(ctx context.Context, cfg *config.Config, logger *slog.Logger) (files.Storage, error) {
-	if s3 := cfg.Artifacts.S3; s3 != nil {
+	// Only stand up the S3 client when artifacts are actually on. A disabled
+	// system with a (possibly incomplete) s3 block — which Validate skips, since
+	// it gates on Enabled — must not build or fail on an unused backend; fall
+	// back to the cheap, never-erroring local store.
+	if s3 := cfg.Artifacts.S3; cfg.Artifacts.Enabled && s3 != nil {
 		store, err := files.NewS3Storage(ctx, files.S3Options{
 			Endpoint:  s3.Endpoint,
 			Region:    s3.Region,

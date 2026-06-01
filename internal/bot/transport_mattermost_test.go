@@ -10,6 +10,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/mattermost"
+	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 )
 
@@ -83,6 +84,32 @@ func TestMMTransport_IsAllowed(t *testing.T) {
 	// Empty allowlist fails closed.
 	if (&MMTransport{cfg: &config.Config{}}).IsAllowed("anyone") {
 		t.Error("empty allowlist should reject everyone")
+	}
+}
+
+// TestBot_IsAllowedScope covers the transport-agnostic download authorization:
+// a scope id must match an allowlisted user on EITHER transport, derived via the
+// same PassthroughScopeID the ingestion path uses.
+func TestBot_IsAllowedScope(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Bot.AllowedUserIDs = []int64{123}
+	cfg.Mattermost.AllowedUserIDs = []string{"bk7w9enuabyp9gmr6fw8t91exy"}
+	b := &Bot{cfg: cfg}
+
+	tgScope := storage.PassthroughScopeID(transportTelegram, "123")
+	mmScope := storage.PassthroughScopeID(transportMattermost, "bk7w9enuabyp9gmr6fw8t91exy")
+
+	if !b.IsAllowedScope(tgScope) {
+		t.Error("telegram-allowlisted scope should be allowed")
+	}
+	if !b.IsAllowedScope(mmScope) {
+		t.Error("mattermost-allowlisted scope should be allowed")
+	}
+	if b.IsAllowedScope(storage.PassthroughScopeID(transportMattermost, "evexxxxxxxxxxxxxxxxxxxxxxxx")) {
+		t.Error("non-allowlisted scope should be rejected")
+	}
+	if b.IsAllowedScope("not-a-real-scope") {
+		t.Error("arbitrary scope should be rejected")
 	}
 }
 

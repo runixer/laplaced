@@ -268,6 +268,16 @@ func TestFileStorage_ReadFile_PathTraversalRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "escapes storage directory")
 }
 
+func TestFileStorage_DeleteFile_PathTraversalRejected(t *testing.T) {
+	tempDir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	fs := NewFileStorage(tempDir, logger)
+
+	err := fs.DeleteFile(context.Background(), "../../etc/passwd")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "escapes storage directory")
+}
+
 func TestFileStorage_DeleteFile_NonExistent(t *testing.T) {
 	t.Run("returns no error for non-existent file", func(t *testing.T) {
 		t.Helper()
