@@ -192,33 +192,31 @@ Process: run `golangci-lint` (in `~/go/bin`, used by the git hook) and `go test 
 and often during a big flip — not just `go build` — so staticcheck/gosec/unused and data
 races surface before the final commit, not at the hook gate.
 
-### Personal Data in Code (IMPORTANT!)
+### Public Repository Hygiene (MUST READ!)
 
-**NEVER put real personal data in tracked files.**
+**This repo is PUBLIC** (mirrored to GitHub; the image is published to a public registry). Anything in a *tracked* file — code, comments, identifiers, commit messages, tracked docs — is world-readable and permanent in git history. Keep internal-only material out of tracked files; it belongs in the gitignored locations below. Squashing a feature branch before pushing does not undo leaks already committed — get it right per-commit.
 
-This bot processes real conversations. When analyzing logs, debugging, writing examples, or documenting bugs — always depersonalize before putting into tracked files.
+**1. English only in tracked artifacts.** Code comments, identifiers, and commit messages on tracked files MUST be English. (The global instruction to write Russian commits does NOT apply here — this public project overrides it. Chat with the user and gitignored notes may be any language.)
 
-**Gitignored directories (real data OK here):**
-- `logs/` — runtime logs with real conversations
-- `data/` — SQLite databases with user data
-- `docs/plans/` — internal planning documents (draft roadmaps, issues)
-- `docs/bugs/` — bug analysis notes ( drafts)
-- `docs/external/` — external research and references
+**2. No internal roadmap jargon.** No project-internal labels in code/comments/commit messages: stage names ("Стадия N"), design-option codes ("variant-C"), commit-spine labels ("C1".."C6"), phase numbers. They mean nothing to an outside reader and leak internal planning. Describe the mechanism instead ("principal resolution", "the int64→UUID migration"). Roadmaps live in gitignored `docs/plans/`.
+
+**3. No internal infrastructure.** No internal hostnames/FQDNs/URLs (corporate domains, dev DB hosts, litellm/Keycloak/Jira endpoints), no secret-store paths (`psecret …`, vault paths), no internal IPs. In runbook comments use placeholders (`host=<host>`, `password=<password>`). Real values live in gitignored overlays (`configs/dev-*.yaml`) and env vars only.
+
+**4. No real accounts or personal data.** No real logins/usernames, emails (corporate domains), Telegram/Mattermost ids, or conversation excerpts. This bot processes real conversations — depersonalize before anything lands in a tracked file.
+
+**Gitignored locations (internal material OK here — never committed):**
+- `logs/`, `data/` — runtime logs / SQLite DBs with real conversations
+- `docs/plans/`, `docs/bugs/`, `docs/external/` — internal planning, bug notes, research
+- `configs/dev-*.yaml`, `.env` — overlays with real endpoints (secrets via env)
 - `.claude/` — Claude Code working files
 
-**Note:** Files in these directories are NOT tracked by git. Do NOT commit them.
+**Before committing a tracked file, scan the diff for:** non-English text · stage/variant/`Cn` roadmap labels · internal hostnames / corporate domains · `psecret`/vault paths · real logins/emails/ids · conversation excerpts.
 
-**Tracked files (depersonalize!):**
-- `*_test.go` — use `@testuser`, `John Doe`, generic topics
-- `*.yaml` prompts — use `Mary`, `Alice`, `@johndoe` in examples
-- `*.md` documentation — describe bugs abstractly, no real excerpts
-- Any file that goes to GitHub
+**Depersonalization quick map:** real name → `John`/`Mary`/`Alice`/`Bob` · handle → `@testuser`/`@johndoe` · email → `someone@example.com` · excerpt → abstract ("user asked about X") · generic detail → "hobby discussion", "family topic".
 
-**Depersonalization checklist:**
-1. Replace real names → `John`, `Mary`, `Alice`, `Bob`
-2. Replace real handles → `@testuser`, `@johndoe`, `@news_channel`
-3. Replace conversation excerpts → describe abstractly ("user asked about X")
-4. Replace personal details → generic equivalents ("hobby discussion", "family topic")
+### Naming reflects reality — rename on refactor (IMPORTANT!)
+
+A file/type/identifier name is a claim about what the code *is*. When a refactor changes that, rename to match — don't let a name outlive the assumption it encoded. Canonical example: the `sqlite_*.go` repositories became backend-agnostic once the `Dialect` layer landed, so the `sqlite_` prefix lied; they were renamed (prefix dropped) and the misleading `SQLiteStore` type alias retired. Reserve backend/transport-specific names for code that genuinely is specific (`NewSQLiteStore` really does open SQLite). Use `git mv` so history follows, and prefer a separate "renames only" commit so the diff stays reviewable.
 
 ### Terminology (IMPORTANT!)
 
@@ -490,6 +488,7 @@ After completing a task (feature, refactoring, bug fix), **always offer to commi
 
 ### Commit Style
 
+- **Language**: English (public repo — see [Public Repository Hygiene](#public-repository-hygiene-must-read)). No internal roadmap labels (stage names, `variant-C`, `Cn`).
 - **Format**: Short imperative subject, optional body with details
 - **Subject**: Start with verb (Add, Fix, Refactor, Update, Remove)
 - **Length**: Subject ≤50 chars, body lines ≤72 chars
