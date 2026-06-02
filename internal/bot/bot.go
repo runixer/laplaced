@@ -54,14 +54,18 @@ type Bot struct {
 	renderer          Renderer          // wire-format renderer for the active transport
 	scopeRepo         identityStore     // identity resolution for non-Telegram transports
 	principalResolver PrincipalResolver // nil = passthrough (Telegram and resolver-less transports)
-	transportOnce     sync.Once         // guards lazy Telegram default for struct-literal test bots
-	messageGrouper    *MessageGrouper
-	toolExecutor      *tools.ToolExecutor // v0.6.1: Tool execution
-	fileStorage       files.Storage       // v0.8.0: For media-reply path
-	logger            *slog.Logger
-	translator        *i18n.Translator
-	agentLogger       *agentlog.Logger
-	wg                sync.WaitGroup
+	// accessDeniedNotified deduplicates the SSO access-denied notice so a denied
+	// sender is told once per process, not on every message. Keyed by native
+	// sender id; values are unused (presence = already notified).
+	accessDeniedNotified sync.Map
+	transportOnce        sync.Once // guards lazy Telegram default for struct-literal test bots
+	messageGrouper       *MessageGrouper
+	toolExecutor         *tools.ToolExecutor // v0.6.1: Tool execution
+	fileStorage          files.Storage       // v0.8.0: For media-reply path
+	logger               *slog.Logger
+	translator           *i18n.Translator
+	agentLogger          *agentlog.Logger
+	wg                   sync.WaitGroup
 }
 
 func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRepo storage.UserRepository, msgRepo storage.MessageRepository, statsRepo storage.StatsRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, peopleRepo storage.PeopleRepository, orClient openrouter.Client, ragService *rag.Service, contextService *agent.ContextService, translator *i18n.Translator) (*Bot, error) {
@@ -340,7 +344,35 @@ func (b *Bot) ensureTransport() {
 // converge here.
 func (b *Bot) HandleIncoming(im IncomingMessage) {
 	b.ensureTransport()
-	scopeID, err := resolveScopeID(context.Background(), b.scopeRepo, b.principalResolver, b.transport.Kind(), im)
+	ctx := context.Background()
+
+	// Authorization is needed only when a reply is even possible: every DM, and
+	// channel posts that address the bot (mention / reply-to-bot). Pure passive
+	// channel chatter is stored as context without an auth check — we don't
+	// resolve every participant.
+	replyPossible := im.IsDirect || im.Mention || im.ReplyToBot
+	authorized := false
+	if replyPossible {
+		ok, err := b.authorizeSender(ctx, im)
+		if err != nil {
+			// Fail closed, but stay silent on a transient lookup error — the sender
+			// may well be allowed, and a wrong denial notice is worse than a retry.
+			b.logger.Warn("sender authorization failed",
+				"transport", b.transport.Kind(), "sender_id", im.SenderID, "error", err)
+			return
+		}
+		authorized = ok
+		if !authorized {
+			b.notifyAccessDenied(ctx, im)
+			if im.IsDirect {
+				return // DM from a denied sender: nothing is stored or resolved
+			}
+			// Channel mention from a denied sender: no reply, but fall through so
+			// the post is still stored as channel context below.
+		}
+	}
+
+	scopeID, err := resolveScopeID(ctx, b.scopeRepo, b.principalResolver, b.transport.Kind(), im)
 	if err != nil {
 		b.logger.Error("failed to resolve scope", "error", err, "transport", b.transport.Kind())
 		return
@@ -357,29 +389,82 @@ func (b *Bot) HandleIncoming(im IncomingMessage) {
 
 	// Channel scopes (Time O/P/G) listen passively: every participant's post is
 	// stored so the conversation is available as context, but the bot only
-	// generates a reply when addressed. DMs — and Telegram, which is always
-	// IsDirect — always reply, so the DM path is unchanged (it never
-	// passive-stores).
-	if shouldReply(im, b.transport.IsAllowed(im.SenderID)) {
+	// generates a reply when addressed by an authorized sender. DMs — and
+	// Telegram, which is always IsDirect — always reply (never passive-store).
+	if shouldReply(im, authorized) {
 		b.messageGrouper.AddMessage(scopeID, im)
 		return
 	}
 	b.storePassiveChannelMessage(scopeID, im)
 }
 
-// shouldReply decides whether an incoming message warrants a generated reply.
-// DMs always do (the per-transport allowlist is enforced before ingestion
-// reaches here). In a channel the bot replies only when addressed by an
-// allowlisted sender: an @mention, or a reply that quotes one of the bot's own
-// messages. A plain post in a thread the bot merely spoke in does NOT qualify —
-// Mattermost threads are flat, so "reply to the bot" is detected via the post's
-// quote (ReplyToBot), not by thread membership. Other channel posts are stored
-// passively for context.
-func shouldReply(im IncomingMessage, senderAllowed bool) bool {
+// authorizeSender decides whether the bot may act on a sender's message. In
+// simple mode (no principal resolver, e.g. home Telegram) it is the static
+// per-transport allowlist, unchanged — an empty allowlist denies everyone
+// (fail-closed). In SSO mode (a resolver is wired) access is granted to the
+// externally-authenticated senders the resolver trusts; a configured allowlist
+// then acts as an optional subset filter (empty = all trusted senders). The
+// SSO trust check (IsTrusted) is deliberately looser than principal linkage, so
+// a trusted sender with an unlinkable auth_data still gets access (on an
+// isolated scope).
+func (b *Bot) authorizeSender(ctx context.Context, im IncomingMessage) (bool, error) {
+	if b.principalResolver == nil {
+		return b.transport.IsAllowed(im.SenderID), nil
+	}
+	trusted, err := b.principalResolver.IsTrusted(ctx, im.SenderID)
+	if err != nil {
+		return false, err
+	}
+	if !trusted {
+		return false, nil
+	}
+	if b.transport.AllowlistConfigured() {
+		return b.transport.IsAllowed(im.SenderID), nil
+	}
+	return true, nil
+}
+
+// notifyAccessDenied tells a denied sender, once per process, that they have no
+// access — using the deployment's configured message or a neutral localized
+// default. It is a no-op in simple mode (no resolver): home Telegram and
+// allowlist-only transports stay silent, as before.
+func (b *Bot) notifyAccessDenied(ctx context.Context, im IncomingMessage) {
+	if b.principalResolver == nil {
+		return
+	}
+	if _, seen := b.accessDeniedNotified.LoadOrStore(im.SenderID, true); seen {
+		return
+	}
+	msg := ""
+	if pr := b.cfg.Mattermost.PrincipalResolver; pr != nil {
+		msg = pr.AccessDeniedMessage
+	}
+	if msg == "" {
+		msg = b.translator.Get(b.cfg.Bot.Language, "bot.access_denied")
+	}
+	if _, err := b.transport.SendText(ctx, OutgoingResponse{
+		ConversationID: im.ConversationID,
+		Text:           msg,
+		ThreadRoot:     im.ThreadRoot,
+	}); err != nil {
+		b.logger.Warn("failed to send access-denied notice", "sender_id", im.SenderID, "error", err)
+	}
+}
+
+// shouldReply decides whether an incoming message warrants a generated reply,
+// given the caller's authorization verdict for the sender (authorizeSender). A
+// DM from an authorized sender always replies — HandleIncoming only reaches here
+// for a DM after authorization passed. In a channel the bot replies only when
+// addressed by an authorized sender: an @mention, or a reply that quotes one of
+// the bot's own messages. A plain post in a thread the bot merely spoke in does
+// NOT qualify — Mattermost threads are flat, so "reply to the bot" is detected
+// via the post's quote (ReplyToBot), not by thread membership. Other channel
+// posts are stored passively for context.
+func shouldReply(im IncomingMessage, senderAuthorized bool) bool {
 	if im.IsDirect {
 		return true
 	}
-	return senderAllowed && (im.Mention || im.ReplyToBot)
+	return senderAuthorized && (im.Mention || im.ReplyToBot)
 }
 
 // storePassiveChannelMessage records a channel post the bot is not replying to,

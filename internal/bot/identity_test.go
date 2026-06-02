@@ -30,15 +30,22 @@ func TestScopeLabel(t *testing.T) {
 }
 
 // fakeResolver is a test PrincipalResolver: returns a fixed result, or an error.
+// trusted backs IsTrusted (defaults false); resolveScopeID never calls IsTrusted,
+// so these tests leave it at its default.
 type fakeResolver struct {
-	out    *storage.PrincipalInput
-	err    error
-	called int
+	out     *storage.PrincipalInput
+	err     error
+	trusted bool
+	called  int
 }
 
 func (f *fakeResolver) Resolve(_ context.Context, _ string) (*storage.PrincipalInput, error) {
 	f.called++
 	return f.out, f.err
+}
+
+func (f *fakeResolver) IsTrusted(_ context.Context, _ string) (bool, error) {
+	return f.trusted, f.err
 }
 
 func TestResolveScopeID_TelegramPassthrough(t *testing.T) {

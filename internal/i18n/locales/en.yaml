@@ -12,6 +12,7 @@ bot:
   api_error: "Sorry, I can't answer right now. Please try asking something else a bit later."
   empty_response: "Seems I got lost in thought and couldn't come up with anything. Ask about something else?"
   generic_error: "Oops, something went wrong. I couldn't send the answer. Please try repeating your request a bit later."
+  access_denied: "Sorry, you don't have access to this bot."
   file_unsupported_format: "Sorry, I can't process .{ext} files. Supported formats: images (PNG, JPEG, WEBP, HEIC, HEIF), PDF, video, audio, and text files."
   file_too_large: "Sorry, the file is too large ({size} MB). Maximum size is 20 MB."
   file_read_error: "Sorry, I couldn't read the file properly. The AI might not understand its contents. Please try again or convert it to a supported format."

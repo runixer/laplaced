@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Secrets can now be pulled from HashiCorp Vault — add a `vault:` block (token, Kubernetes, or AppRole auth, with a configurable auth mount path) and reference secrets inline like `openrouter.api_key: "vault:secret/laplaced/dev#api_key"`; without the block, behaviour is unchanged.
 - Artifact files can now be stored in an S3-compatible bucket (e.g. Yandex Object Storage) — add an `artifacts.s3` block (endpoint, region, bucket, credentials); without it, files stay on local disk as before.
 
+### Changed
+- Mattermost/Time access can be gated by corporate SSO instead of a fixed id list: with a `mattermost.principal_resolver` block, any SSO-authenticated user is allowed and others get a sign-in notice (customizable via `mattermost.principal_resolver.access_denied_message`); `mattermost.allowed_user_ids` then acts as an optional subset filter.
+
 ### Fixed
 - Web search (`internet_search`) no longer fails when the backend reports `usage.cost` as an object instead of a number — affected Perplexity via litellm.
 - The bot now reliably re-views an image you ask about later in a conversation, instead of claiming it "can't see past images" — recalled images are placed alongside your question.

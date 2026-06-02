@@ -22,6 +22,13 @@ import (
 // (Mattermost auth_service, later Talk/MAX equivalents).
 type PrincipalResolver interface {
 	Resolve(ctx context.Context, nativeID string) (*storage.PrincipalInput, error)
+	// IsTrusted reports whether the sender is an externally-authenticated (SSO)
+	// account this resolver trusts — the access gate. It is intentionally looser
+	// than Resolve: it does NOT require a linkable ad_login, so an SSO user with
+	// an email-shaped or empty auth_data is granted access but still resolves to
+	// an isolated scope (Resolve returns nil). Access and linkability are
+	// distinct concerns.
+	IsTrusted(ctx context.Context, nativeID string) (bool, error)
 }
 
 // mmUserLookup is the slice of the Mattermost client the resolver needs (just
@@ -74,12 +81,9 @@ func (r *MattermostPrincipalResolver) Resolve(ctx context.Context, nativeID stri
 	}
 
 	// Trust gate: only externally-authenticated accounts may be linked.
-	if u.AuthService == "" {
-		r.logger.Debug("local account, not linking to principal", "user_id", nativeID)
-		return nil, nil
-	}
-	if len(r.trustedServices) > 0 && !slices.Contains(r.trustedServices, strings.ToLower(u.AuthService)) {
-		r.logger.Debug("untrusted auth_service, not linking", "user_id", nativeID, "auth_service", u.AuthService)
+	if !r.authServiceTrusted(u) {
+		r.logger.Debug("local or untrusted auth_service, not linking to principal",
+			"user_id", nativeID, "auth_service", u.AuthService)
 		return nil, nil
 	}
 
@@ -106,6 +110,35 @@ func (r *MattermostPrincipalResolver) Resolve(ctx context.Context, nativeID stri
 		DisplayName: mmPrincipalDisplayName(u),
 		// ObjectGUID intentionally empty for now (backfilled later).
 	}, nil
+}
+
+// IsTrusted reports whether the sender is an externally-authenticated account
+// this resolver trusts (the access gate). It checks only auth_service — a
+// non-empty value that, when a trustedServices allowlist is configured, is a
+// member of it. It deliberately skips the ad_login/email checks Resolve applies:
+// access is broader than linkability (an SSO user with an unusable auth_data
+// still gets in, just on an isolated scope).
+func (r *MattermostPrincipalResolver) IsTrusted(ctx context.Context, nativeID string) (bool, error) {
+	u, err := r.client.GetUser(ctx, nativeID)
+	if err != nil {
+		return false, fmt.Errorf("failed to fetch mm user %s for access check: %w", nativeID, err)
+	}
+	return r.authServiceTrusted(u), nil
+}
+
+// authServiceTrusted is the shared auth_service trust predicate behind both
+// Resolve (gate 1) and IsTrusted: the account is externally authenticated
+// (auth_service != "") and, when a trustedServices allowlist is set, its
+// auth_service is in it (case-insensitive). Centralized so the access gate and
+// the linkage gate can never drift apart.
+func (r *MattermostPrincipalResolver) authServiceTrusted(u *mattermost.User) bool {
+	if u.AuthService == "" {
+		return false
+	}
+	if len(r.trustedServices) > 0 && !slices.Contains(r.trustedServices, strings.ToLower(u.AuthService)) {
+		return false
+	}
+	return true
 }
 
 // mmPrincipalDisplayName renders a human label from the MM user, preferring the

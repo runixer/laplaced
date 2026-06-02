@@ -416,6 +416,12 @@ type PrincipalResolverConfig struct {
 	// trusted for principal linkage. Empty = trust any non-empty auth_service
 	// (the default gate). Local accounts (auth_service == "") are never linked.
 	TrustedAuthServices []string `yaml:"trusted_auth_services" env:"LAPLACED_MATTERMOST_TRUSTED_AUTH_SERVICES" env-separator:","`
+	// AccessDeniedMessage is the verbatim text sent to a sender denied access
+	// because they are not an SSO-authenticated user. Empty falls back to the
+	// neutral localized default (i18n bot.access_denied). Deployment-specific
+	// wording (e.g. "sign in via your corporate SSO first") belongs here, in a
+	// gitignored overlay — never in tracked locale files.
+	AccessDeniedMessage string `yaml:"access_denied_message" env:"LAPLACED_MATTERMOST_ACCESS_DENIED_MESSAGE"`
 }
 
 type OpenRouterConfig struct {

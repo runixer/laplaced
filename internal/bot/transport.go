@@ -103,8 +103,13 @@ type Transport interface {
 	SetReaction(ctx context.Context, conversationID, messageID string) error
 	Kind() string
 	Capabilities() Capabilities
-	// IsAllowed reports whether the native sender id is permitted to use the bot.
+	// IsAllowed reports whether the native sender id is in the static allowlist.
 	IsAllowed(nativeSenderID string) bool
+	// AllowlistConfigured reports whether a static allowlist is configured at all.
+	// It distinguishes "empty allowlist" (IsAllowed always false, fail-closed in
+	// simple mode) from "allowlist used as an optional subset filter" in SSO mode,
+	// where an empty list means "all trusted senders" rather than "no one".
+	AllowlistConfigured() bool
 }
 
 // Renderer converts a canonical-markdown response into one or more wire-format

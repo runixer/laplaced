@@ -65,6 +65,10 @@ func (t *TelegramTransport) IsAllowed(nativeSenderID string) bool {
 	return false
 }
 
+func (t *TelegramTransport) AllowlistConfigured() bool {
+	return len(t.cfg.Bot.AllowedUserIDs) > 0
+}
+
 // SendText sends one rendered HTML chunk. It preserves the legacy
 // "can't parse entities" recovery: on a parse error it retries once as plain
 // text (ParseMode cleared) using a fresh, non-cancellable context.

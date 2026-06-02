@@ -64,7 +64,9 @@ func (t *MMTransport) Capabilities() Capabilities {
 }
 
 // IsAllowed checks the native Mattermost sender id (26-char string) against the
-// configured allowlist. Empty allowlist rejects everyone (fail closed).
+// configured allowlist. Empty allowlist rejects everyone (fail closed) — in SSO
+// mode the caller treats an unconfigured allowlist as "all trusted senders"
+// instead, see Bot.authorizeSender.
 func (t *MMTransport) IsAllowed(nativeSenderID string) bool {
 	for _, allowed := range t.cfg.Mattermost.AllowedUserIDs {
 		if allowed == nativeSenderID {
@@ -72,6 +74,10 @@ func (t *MMTransport) IsAllowed(nativeSenderID string) bool {
 		}
 	}
 	return false
+}
+
+func (t *MMTransport) AllowlistConfigured() bool {
+	return len(t.cfg.Mattermost.AllowedUserIDs) > 0
 }
 
 // SendText posts one rendered markdown chunk. It threads under ThreadRoot (or
@@ -298,16 +304,16 @@ func mmFormatTime(createAtMillis int64) string {
 // them into the neutral pipeline. It returns when the client closes its events
 // channel (on ctx cancellation), making shutdown deterministic.
 //
-// mmShouldProcess drops the bot's own/system posts and (for DMs) enforces the
-// allowlist. Channel posts always pass through: HandleIncoming stores them
-// passively and only the reply is gated (mention + allowlist).
+// mmShouldProcess drops the bot's own/system posts. Authorization (the SSO/
+// allowlist access gate) and channel reply-gating are owned by HandleIncoming,
+// so both DMs and channel posts pass through here.
 func (b *Bot) StartMattermostIngestion(client *mattermost.Client) {
 	botID := client.BotID()
 	for ev := range client.Events() {
 		b.logger.Debug("mm ingestion event",
 			"post_id", ev.Post.ID, "user_id", ev.Post.UserID, "type", ev.Post.Type,
 			"channel_type", ev.ChannelType, "channel_id", ev.Post.ChannelID)
-		if !mmShouldProcess(ev.Post, botID, ev.ChannelType, b.transport.IsAllowed) {
+		if !mmShouldProcess(ev.Post, botID) {
 			b.logger.Debug("mm ingestion: post filtered out", "post_id", ev.Post.ID, "sender_id", ev.Post.UserID)
 			continue
 		}
@@ -369,22 +375,14 @@ func mmFileKind(mime string) (files.FileType, bool) {
 }
 
 // mmShouldProcess decides whether an incoming post should enter the pipeline:
-// always skip the bot's own posts and system posts (non-empty type).
-//
-//   - DM (channel_type "D"): enforce the sender allowlist here, as before — the
-//     bot does not passively store DMs from non-allowlisted users.
-//   - Channel (O/P/G): admit every post. Channels listen passively (every
-//     participant's message is stored for context); whether the bot *replies* is
-//     gated later in HandleIncoming by mention + allowlist.
-func mmShouldProcess(post mattermost.Post, botID, channelType string, isAllowed func(string) bool) bool {
+// skip only the bot's own posts and system posts (non-empty type). Everything
+// else — DMs and channel posts alike — passes through to HandleIncoming, which
+// owns the access gate (SSO trust / allowlist via authorizeSender) and channel
+// reply-gating. Deferring the DM gate there lets a denied sender be told why,
+// instead of being silently dropped at ingestion.
+func mmShouldProcess(post mattermost.Post, botID string) bool {
 	if post.UserID == botID {
 		return false
 	}
-	if post.Type != "" {
-		return false
-	}
-	if channelType == "D" {
-		return isAllowed(post.UserID)
-	}
-	return true
+	return post.Type == ""
 }
