@@ -211,8 +211,12 @@ func (l *Laplace) LoadContextData(
 		return nil, fmt.Errorf("failed to build system prompt: %w", err)
 	}
 	data.BaseSystemPrompt = basePrompt
-	if l.cfg.Bot.SystemPromptExtra != "" {
-		data.BaseSystemPrompt += " " + l.cfg.Bot.SystemPromptExtra
+	// Instance-specific rules (deployment identity, support contact, house style)
+	// live in config so the public default prompt stays generic. Wrap them in a
+	// delimited section and separate with a blank line so they read as an
+	// authoritative block rather than text glued onto the end of the prompt.
+	if extra := strings.TrimSpace(l.cfg.Bot.SystemPromptExtra); extra != "" {
+		data.BaseSystemPrompt += "\n\n<instance_context>\n" + extra + "\n</instance_context>"
 	}
 
 	// RAG Retrieval
