@@ -16,7 +16,7 @@ on:
 permissions: {}
 
 env:
-  GO_VERSION: '1.25'
+  GO_VERSION: '1.25.11'
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
