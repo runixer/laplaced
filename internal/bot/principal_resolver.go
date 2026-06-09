@@ -31,10 +31,19 @@ type PrincipalResolver interface {
 	IsTrusted(ctx context.Context, nativeID string) (bool, error)
 }
 
-// mmUserLookup is the slice of the Mattermost client the resolver needs (just
-// GetUser); narrowed for testability.
+// principalCacheInvalidator is an optional upgrade of PrincipalResolver,
+// implemented by resolvers whose trust decision is backed by a cache that can go
+// stale across an auth_service migration. The bot type-asserts for it and drops a
+// denied sender so the next message re-reads a fresh profile.
+type principalCacheInvalidator interface {
+	Invalidate(nativeID string)
+}
+
+// mmUserLookup is the slice of the Mattermost client the resolver needs (the
+// cached profile read plus its invalidation); narrowed for testability.
 type mmUserLookup interface {
 	GetUser(ctx context.Context, userID string) (*mattermost.User, error)
+	InvalidateUser(userID string)
 }
 
 // MattermostPrincipalResolver implements federated-passive resolution for the
@@ -124,6 +133,14 @@ func (r *MattermostPrincipalResolver) IsTrusted(ctx context.Context, nativeID st
 		return false, fmt.Errorf("failed to fetch mm user %s for access check: %w", nativeID, err)
 	}
 	return r.authServiceTrusted(u), nil
+}
+
+// Invalidate drops the resolver's cached view of nativeID so the next trust
+// check re-reads the profile from the server. The bot calls this on a denial:
+// the denied account may have just migrated to SSO, and re-reading on its next
+// message gives instant recovery instead of waiting out the profile-cache TTL.
+func (r *MattermostPrincipalResolver) Invalidate(nativeID string) {
+	r.client.InvalidateUser(nativeID)
 }
 
 // authServiceTrusted is the shared auth_service trust predicate behind both

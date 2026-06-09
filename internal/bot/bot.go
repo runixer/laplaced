@@ -369,6 +369,10 @@ func (b *Bot) HandleIncoming(im IncomingMessage) {
 			}
 			// Channel mention from a denied sender: no reply, but fall through so
 			// the post is still stored as channel context below.
+		} else if b.principalResolver != nil {
+			// Authorized now: clear any prior denial dedup so a later denial (e.g.
+			// the account gets disabled) notifies again instead of staying silent.
+			b.accessDeniedNotified.Delete(im.SenderID)
 		}
 	}
 
@@ -416,6 +420,12 @@ func (b *Bot) authorizeSender(ctx context.Context, im IncomingMessage) (bool, er
 		return false, err
 	}
 	if !trusted {
+		// The denial may be off a pre-migration profile (auth_service still ""):
+		// drop the cached view so the sender's next message re-reads a fresh
+		// profile rather than being denied off a stale cache until the TTL lapses.
+		if inv, ok := b.principalResolver.(principalCacheInvalidator); ok {
+			inv.Invalidate(im.SenderID)
+		}
 		return false, nil
 	}
 	if b.transport.AllowlistConfigured() {

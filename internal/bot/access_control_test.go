@@ -86,6 +86,29 @@ func TestAuthorizeSender(t *testing.T) {
 	}
 }
 
+// A denial drops the sender's cached profile (via the invalidator upgrade) so a
+// just-migrated SSO account recovers on its next message instead of being denied
+// off a stale cache. A trusted sender is never invalidated. Regression guard for
+// the stale-GetUser-cache bug.
+func TestAuthorizeSender_InvalidatesCacheOnDenialOnly(t *testing.T) {
+	t.Run("denied sender is invalidated", func(t *testing.T) {
+		r := &fakeResolver{trusted: false}
+		b := &Bot{transport: &stubTransport{kind: transportMattermost}, principalResolver: r}
+		got, err := b.authorizeSender(context.Background(), IncomingMessage{SenderID: "u1"})
+		require.NoError(t, err)
+		assert.False(t, got)
+		assert.Equal(t, 1, r.invalidated, "denied sender's stale profile must be dropped")
+	})
+
+	t.Run("trusted sender is not invalidated", func(t *testing.T) {
+		r := &fakeResolver{trusted: true}
+		b := &Bot{transport: &stubTransport{kind: transportMattermost}, principalResolver: r}
+		_, err := b.authorizeSender(context.Background(), IncomingMessage{SenderID: "u1"})
+		require.NoError(t, err)
+		assert.Equal(t, 0, r.invalidated)
+	})
+}
+
 func TestNotifyAccessDenied(t *testing.T) {
 	newBot := func(transport *stubTransport, pr *config.PrincipalResolverConfig, resolver PrincipalResolver) *Bot {
 		cfg := &config.Config{}
@@ -220,5 +243,22 @@ func TestHandleIncoming_ChannelMentionGate(t *testing.T) {
 
 		assert.Empty(t, tr.sent, "authorized mention gets no denial")
 		mockStore.AssertNotCalled(t, "AddMessageToHistory", mock.Anything, mock.Anything)
+	})
+
+	t.Run("authorized sender clears a prior denial dedup", func(t *testing.T) {
+		tr := &stubTransport{kind: transportMattermost}
+		b, mockStore := handleIncomingTestBot(t, &fakeResolver{trusted: true}, tr)
+		// As if the sender was denied before migrating: the dedup flag is set.
+		b.accessDeniedNotified.Store("saml1", true)
+		mockStore.On("GetOrCreateChannel", transportMattermost, "chan1", mock.Anything).Return(storage.ScopeID("chan-scope"), nil)
+		mockStore.On("UpsertUser", mock.Anything).Return(nil)
+
+		b.HandleIncoming(IncomingMessage{
+			IsDirect: false, Mention: true, ConversationID: "chan1",
+			SenderID: "saml1", SenderDisplay: "@saml1", Text: "@bot hi",
+		})
+
+		_, stillFlagged := b.accessDeniedNotified.Load("saml1")
+		assert.False(t, stillFlagged, "authorized sender's denial dedup is cleared so a later denial re-notifies")
 	})
 }

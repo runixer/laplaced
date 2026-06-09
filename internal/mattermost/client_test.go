@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testLogger() *slog.Logger {
@@ -149,6 +150,61 @@ func TestGetChannel_FetchesAndCaches(t *testing.T) {
 	}
 	if hits != 1 {
 		t.Errorf("server hits = %d, want 1 (second call should be cached)", hits)
+	}
+}
+
+// GetUser must expire its cache: a profile read before an SSO migration
+// (auth_service "") must not be served forever. Past the TTL — or after an
+// explicit InvalidateUser — the re-read picks up auth_service "saml". Regression
+// guard for the stale-cache bug that left migrated users silently denied.
+func TestGetUser_RefetchesAfterTTLAndOnInvalidate(t *testing.T) {
+	var hits int
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v4/users/me", "/api/v4/config/client":
+			bootstrapHandler("16383")(w, r)
+		case "/api/v4/users/u1":
+			hits++
+			authService := "" // first read: still a local (pre-migration) account
+			if hits > 1 {
+				authService = "saml" // re-reads see the migrated account
+			}
+			_ = json.NewEncoder(w).Encode(User{ID: "u1", AuthService: authService})
+		default:
+			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+		}
+	})
+
+	// Deterministic clock so the TTL is exercised without sleeping.
+	base := time.Unix(1_700_000_000, 0)
+	nowVal := base
+	c.now = func() time.Time { return nowVal }
+	c.cacheTTL = 10 * time.Minute
+
+	u, err := c.GetUser(context.Background(), "u1")
+	if err != nil {
+		t.Fatalf("GetUser: %v", err)
+	}
+	if u.AuthService != "" {
+		t.Fatalf("first read auth_service = %q, want empty", u.AuthService)
+	}
+
+	// Within the TTL: served from cache (no new hit), still the stale value.
+	nowVal = base.Add(5 * time.Minute)
+	if u, _ = c.GetUser(context.Background(), "u1"); hits != 1 || u.AuthService != "" {
+		t.Fatalf("within TTL: hits=%d auth_service=%q, want hits=1 and empty (cached)", hits, u.AuthService)
+	}
+
+	// Past the TTL: the re-read picks up the migration.
+	nowVal = base.Add(11 * time.Minute)
+	if u, _ = c.GetUser(context.Background(), "u1"); hits != 2 || u.AuthService != "saml" {
+		t.Fatalf("past TTL: hits=%d auth_service=%q, want hits=2 and saml", hits, u.AuthService)
+	}
+
+	// InvalidateUser forces an immediate re-read even within the TTL.
+	c.InvalidateUser("u1")
+	if _, _ = c.GetUser(context.Background(), "u1"); hits != 3 {
+		t.Fatalf("after InvalidateUser: hits=%d, want 3 (forced re-read)", hits)
 	}
 }
 

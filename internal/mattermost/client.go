@@ -29,6 +29,26 @@ type Config struct {
 	ServerURL string // e.g. https://time.example.com
 	BotToken  string // bot account token; sent as "Authorization: Bearer <token>"
 	ProxyURL  string // explicit per-client proxy (HTTP proxy); "" = direct
+	// ProfileCacheTTL bounds how long a cached user/channel profile is trusted
+	// before it is re-read from the server. It MUST be finite: auth_service (the
+	// SSO access anchor) flips at migration time, and an unbounded cache would
+	// keep serving the pre-migration value for the life of the process. 0 selects
+	// defaultProfileCacheTTL.
+	ProfileCacheTTL time.Duration
+}
+
+// defaultProfileCacheTTL bounds the lifetime of a cached user/channel profile.
+// Short enough that an SSO migration (auth_service "" -> "saml") is picked up
+// within minutes even without an explicit invalidation, long enough that the
+// per-post profile lookups stay overwhelmingly cache hits.
+const defaultProfileCacheTTL = 10 * time.Minute
+
+// cacheEntry wraps a cached value with the time it was fetched, so reads can
+// expire it against the client's clock (TTL). *T keeps the nil-vs-present
+// distinction the lookups already rely on.
+type cacheEntry[T any] struct {
+	val       *T
+	fetchedAt time.Time
 }
 
 // Client talks to the Mattermost v4 REST API over a dedicated, proxy-aware
@@ -44,10 +64,15 @@ type Client struct {
 	botID       string
 	maxPostSize int
 
-	userCache   map[string]*User // id -> profile; populated lazily by GetUser
+	// cacheTTL bounds the lifetime of every cached profile; now is the injectable
+	// clock used to expire entries (real time in production, a fake in tests).
+	cacheTTL time.Duration
+	now      func() time.Time
+
+	userCache   map[string]cacheEntry[User] // id -> profile; populated lazily by GetUser
 	userCacheMu sync.RWMutex
 
-	channelCache   map[string]*Channel // id -> channel; populated lazily by GetChannel
+	channelCache   map[string]cacheEntry[Channel] // id -> channel; populated lazily by GetChannel
 	channelCacheMu sync.RWMutex
 
 	events chan PostedEvent
@@ -202,6 +227,11 @@ func NewClient(ctx context.Context, cfg Config, logger *slog.Logger) (*Client, e
 		transport.Proxy = http.ProxyURL(proxyURL)
 	}
 
+	ttl := cfg.ProfileCacheTTL
+	if ttl <= 0 {
+		ttl = defaultProfileCacheTTL
+	}
+
 	c := &Client{
 		cfg:          cfg,
 		httpClient:   &http.Client{Timeout: 30 * time.Second, Transport: transport},
@@ -209,8 +239,10 @@ func NewClient(ctx context.Context, cfg Config, logger *slog.Logger) (*Client, e
 		baseURL:      server + "/api/v4",
 		wsURL:        wsURLFromServer(server),
 		logger:       logger.With("component", "mattermost"),
-		userCache:    make(map[string]*User),
-		channelCache: make(map[string]*Channel),
+		cacheTTL:     ttl,
+		now:          time.Now,
+		userCache:    make(map[string]cacheEntry[User]),
+		channelCache: make(map[string]cacheEntry[Channel]),
 		events:       make(chan PostedEvent),
 	}
 
@@ -284,15 +316,17 @@ func (c *Client) SendTyping(ctx context.Context, channelID string) error {
 	return c.do(ctx, http.MethodPost, "/users/"+c.botID+"/typing", body, nil)
 }
 
-// GetUser fetches a user's profile by id, caching the result — profiles change
-// rarely and the WS ingestion looks them up once per inbound post. Concurrency-
-// safe (the parallel tool path never calls this, but the cache is guarded anyway).
+// GetUser fetches a user's profile by id, caching the result with a TTL — the WS
+// ingestion looks profiles up once per inbound post, but auth_service (the SSO
+// access anchor) flips at migration time, so the cache MUST expire. On a stale or
+// missing entry the profile is re-read. Concurrency-safe (the parallel tool path
+// never calls this, but the cache is guarded anyway).
 func (c *Client) GetUser(ctx context.Context, userID string) (*User, error) {
 	c.userCacheMu.RLock()
 	cached, ok := c.userCache[userID]
 	c.userCacheMu.RUnlock()
-	if ok {
-		return cached, nil
+	if ok && c.now().Sub(cached.fetchedAt) < c.cacheTTL {
+		return cached.val, nil
 	}
 
 	var u User
@@ -300,20 +334,31 @@ func (c *Client) GetUser(ctx context.Context, userID string) (*User, error) {
 		return nil, err
 	}
 	c.userCacheMu.Lock()
-	c.userCache[userID] = &u
+	c.userCache[userID] = cacheEntry[User]{val: &u, fetchedAt: c.now()}
 	c.userCacheMu.Unlock()
 	return &u, nil
 }
 
-// GetChannel fetches a channel by id, caching the result — channel names change
-// rarely and ingestion looks them up once per inbound channel post. Mirrors
-// GetUser; used to label a channel scope by its display name.
+// InvalidateUser drops the cached profile for userID so the next GetUser re-reads
+// it from the server. The bot calls this when it denies a sender: an account that
+// has just migrated to SSO then recovers on its very next message instead of
+// waiting out the cache TTL.
+func (c *Client) InvalidateUser(userID string) {
+	c.userCacheMu.Lock()
+	delete(c.userCache, userID)
+	c.userCacheMu.Unlock()
+}
+
+// GetChannel fetches a channel by id, caching the result with a TTL — channel
+// names change rarely, but the entry still expires so a rename is eventually
+// reflected (and the cache cannot grow stale forever). Mirrors GetUser; used to
+// label a channel scope by its display name.
 func (c *Client) GetChannel(ctx context.Context, channelID string) (*Channel, error) {
 	c.channelCacheMu.RLock()
 	cached, ok := c.channelCache[channelID]
 	c.channelCacheMu.RUnlock()
-	if ok {
-		return cached, nil
+	if ok && c.now().Sub(cached.fetchedAt) < c.cacheTTL {
+		return cached.val, nil
 	}
 
 	var ch Channel
@@ -321,7 +366,7 @@ func (c *Client) GetChannel(ctx context.Context, channelID string) (*Channel, er
 		return nil, err
 	}
 	c.channelCacheMu.Lock()
-	c.channelCache[channelID] = &ch
+	c.channelCache[channelID] = cacheEntry[Channel]{val: &ch, fetchedAt: c.now()}
 	c.channelCacheMu.Unlock()
 	return &ch, nil
 }

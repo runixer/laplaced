@@ -12,15 +12,19 @@ import (
 	"github.com/runixer/laplaced/internal/testutil"
 )
 
-// fakeMMUser is a stub mmUserLookup returning a fixed user (or error).
+// fakeMMUser is a stub mmUserLookup returning a fixed user (or error). It counts
+// InvalidateUser calls so wiring can be asserted.
 type fakeMMUser struct {
-	user *mattermost.User
-	err  error
+	user        *mattermost.User
+	err         error
+	invalidated int
 }
 
 func (f *fakeMMUser) GetUser(_ context.Context, _ string) (*mattermost.User, error) {
 	return f.user, f.err
 }
+
+func (f *fakeMMUser) InvalidateUser(_ string) { f.invalidated++ }
 
 func TestMattermostPrincipalResolver_TrustGate(t *testing.T) {
 	tests := []struct {
@@ -137,4 +141,14 @@ func TestMattermostPrincipalResolver_IsTrusted_GetUserErrorPropagates(t *testing
 	r := NewMattermostPrincipalResolver(&fakeMMUser{err: errors.New("503")}, nil, testutil.TestLogger())
 	_, err := r.IsTrusted(context.Background(), "uid")
 	require.Error(t, err)
+}
+
+// Invalidate must forward to the client so a denied (pre-migration) profile can
+// be dropped — the wiring that lets an SSO-migrated account recover without a
+// process restart. Regression guard for the stale-GetUser-cache bug.
+func TestMattermostPrincipalResolver_InvalidateForwardsToClient(t *testing.T) {
+	f := &fakeMMUser{user: &mattermost.User{AuthService: ""}}
+	r := NewMattermostPrincipalResolver(f, nil, testutil.TestLogger())
+	r.Invalidate("uid")
+	assert.Equal(t, 1, f.invalidated, "Invalidate must drop the client's cached profile")
 }

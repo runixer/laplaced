@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Mattermost/Time access can be gated by corporate SSO instead of a fixed id list: with a `mattermost.principal_resolver` block, any SSO-authenticated user is allowed and others get a sign-in notice (customizable via `mattermost.principal_resolver.access_denied_message`); `mattermost.allowed_user_ids` then acts as an optional subset filter.
 
 ### Fixed
+- A user who gains access after migrating to corporate SSO is now served within minutes (or immediately on their next message), instead of being silently ignored until the bot restarts.
 - Web search (`internet_search`) no longer fails when the backend reports `usage.cost` as an object instead of a number — affected Perplexity via litellm.
 - The bot now reliably re-views an image you ask about later in a conversation, instead of claiming it "can't see past images" — recalled images are placed alongside your question.
 - Background memory (topic creation, fact extraction, file indexing) now runs on non-Telegram transports; previously it only processed users from the Telegram allowlist.

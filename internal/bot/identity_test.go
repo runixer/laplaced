@@ -33,10 +33,11 @@ func TestScopeLabel(t *testing.T) {
 // trusted backs IsTrusted (defaults false); resolveScopeID never calls IsTrusted,
 // so these tests leave it at its default.
 type fakeResolver struct {
-	out     *storage.PrincipalInput
-	err     error
-	trusted bool
-	called  int
+	out         *storage.PrincipalInput
+	err         error
+	trusted     bool
+	called      int
+	invalidated int
 }
 
 func (f *fakeResolver) Resolve(_ context.Context, _ string) (*storage.PrincipalInput, error) {
@@ -47,6 +48,10 @@ func (f *fakeResolver) Resolve(_ context.Context, _ string) (*storage.PrincipalI
 func (f *fakeResolver) IsTrusted(_ context.Context, _ string) (bool, error) {
 	return f.trusted, f.err
 }
+
+// Invalidate makes fakeResolver satisfy principalCacheInvalidator so the bot's
+// denial path (which type-asserts for it) is exercised.
+func (f *fakeResolver) Invalidate(_ string) { f.invalidated++ }
 
 func TestResolveScopeID_TelegramPassthrough(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
