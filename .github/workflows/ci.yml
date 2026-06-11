@@ -60,7 +60,7 @@ jobs:
       - name: Test
         run: go test -race -shuffle=on -coverprofile=coverage.out ./...
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         if: github.event_name != 'pull_request'
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
