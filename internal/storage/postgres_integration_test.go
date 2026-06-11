@@ -373,3 +373,55 @@ func TestPostgresEmbeddingShape(t *testing.T) {
 	}
 	assertEmb("GetTopics", topics[0].Embedding)
 }
+
+// TestPostgresMaintenanceCleanup covers the retention queries, which use a
+// derived table that Postgres requires to be aliased (SQLite does not, so the
+// unit tests cannot catch a missing alias).
+func TestPostgresMaintenanceCleanup(t *testing.T) {
+	store := openTestPG(t)
+
+	alice := PassthroughScopeID("mattermost", "alice@corp")
+	bob := PassthroughScopeID("mattermost", "bob@corp")
+
+	for i := 0; i < 5; i++ {
+		if err := store.AddFactHistory(FactHistory{FactID: int64(i + 1), UserID: alice, Action: "add", NewContent: "fact"}); err != nil {
+			t.Fatalf("AddFactHistory(alice): %v", err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		if err := store.AddFactHistory(FactHistory{FactID: int64(i + 10), UserID: bob, Action: "add", NewContent: "fact"}); err != nil {
+			t.Fatalf("AddFactHistory(bob): %v", err)
+		}
+	}
+	deleted, err := store.CleanupFactHistory(2)
+	if err != nil {
+		t.Fatalf("CleanupFactHistory: %v", err)
+	}
+	if deleted != 4 {
+		t.Fatalf("CleanupFactHistory deleted = %d, want 4", deleted)
+	}
+	if n, err := store.CountFactHistory(); err != nil || n != 4 {
+		t.Fatalf("CountFactHistory = %d, err=%v, want 4", n, err)
+	}
+
+	for i := 0; i < 5; i++ {
+		if err := store.AddAgentLog(AgentLog{UserID: alice, AgentType: "chat", Success: true}); err != nil {
+			t.Fatalf("AddAgentLog(alice/chat): %v", err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		if err := store.AddAgentLog(AgentLog{UserID: alice, AgentType: "reranker", Success: true}); err != nil {
+			t.Fatalf("AddAgentLog(alice/reranker): %v", err)
+		}
+	}
+	deleted, err = store.CleanupAgentLogs(2)
+	if err != nil {
+		t.Fatalf("CleanupAgentLogs: %v", err)
+	}
+	if deleted != 4 {
+		t.Fatalf("CleanupAgentLogs deleted = %d, want 4 (3 chat + 1 reranker)", deleted)
+	}
+	if n, err := store.CountAgentLogs(); err != nil || n != 4 {
+		t.Fatalf("CountAgentLogs = %d, err=%v, want 4", n, err)
+	}
+}

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `fact_history`/`agent_logs` retention cleanup failed on PostgreSQL 15 and older ("subquery in FROM must have an alias"), so those tables grew unbounded.
+
 ## [0.10.0] - 2026-06-11
 
 ### Added

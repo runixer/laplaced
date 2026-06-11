@@ -78,14 +78,16 @@ func (s *Store) CountFactHistory() (int64, error) {
 // CleanupFactHistory removes old fact_history records, keeping only the N most recent per user.
 // Returns the number of deleted rows.
 func (s *Store) CleanupFactHistory(keepPerUser int) (int64, error) {
-	// Delete records that are not in the top N per user (by id DESC)
+	// Delete records that are not in the top N per user (by id DESC).
+	// The derived table must be aliased: Postgres 15 and older reject an
+	// unaliased subquery in FROM (SQLite and Postgres 16+ tolerate it).
 	query := `
 		DELETE FROM fact_history
 		WHERE id NOT IN (
 			SELECT id FROM (
 				SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY id DESC) as rn
 				FROM fact_history
-			) WHERE rn <= ?
+			) ranked WHERE rn <= ?
 		)
 	`
 	result, err := s.exec(query, keepPerUser)
@@ -98,14 +100,16 @@ func (s *Store) CleanupFactHistory(keepPerUser int) (int64, error) {
 // CleanupAgentLogs removes old agent_logs records, keeping only the N most recent per user per agent type.
 // Returns the number of deleted rows.
 func (s *Store) CleanupAgentLogs(keepPerUserPerAgent int) (int64, error) {
-	// Delete records that are not in the top N per (user_id, agent_type) group (by id DESC)
+	// Delete records that are not in the top N per (user_id, agent_type) group
+	// (by id DESC). See CleanupFactHistory: the derived table alias is required
+	// on Postgres 15 and older.
 	query := `
 		DELETE FROM agent_logs
 		WHERE id NOT IN (
 			SELECT id FROM (
 				SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id, agent_type ORDER BY id DESC) as rn
 				FROM agent_logs
-			) WHERE rn <= ?
+			) ranked WHERE rn <= ?
 		)
 	`
 	result, err := s.exec(query, keepPerUserPerAgent)
