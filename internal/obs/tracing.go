@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
@@ -143,6 +144,15 @@ func InitTracing(ctx context.Context, cfg TracingConfig, serviceVersion string) 
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
 	)
 	otel.SetTracerProvider(tp)
+
+	// W3C trace context + baggage so outbound HTTP clients can inject
+	// traceparent and downstream services (the LLM gateway) join our traces.
+	// Set only when tracing is enabled: with the noop provider the span
+	// context is invalid and Inject writes nothing anyway.
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
 
 	return tp.Shutdown, nil
 }

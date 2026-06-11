@@ -2,7 +2,6 @@ package openrouter
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -224,14 +223,11 @@ func (c *clientImpl) openStream(
 			}
 		}
 
-		httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(body))
+		httpReq, err := c.newAPIRequest(ctx, endpoint, body)
 		if err != nil {
 			return nil, attempts, retryDelays, err
 		}
-		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Accept", "text/event-stream")
-		httpReq.Header.Set("User-Agent", "laplaced/1.0")
 
 		attemptStart := time.Now()
 		resp, err := c.httpClient.Do(httpReq)

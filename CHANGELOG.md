@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Image input is now backend-aware (`openrouter.image_input_format`): `openai` sends OpenAI-standard `image_url`/`video_url` parts for litellm/vLLM, `file` (default) keeps the OpenRouter/Gemini shape.
 - Secrets can now be pulled from HashiCorp Vault — add a `vault:` block (token, Kubernetes, or AppRole auth, with a configurable auth mount path) and reference secrets inline like `openrouter.api_key: "vault:secret/laplaced/dev#api_key"`; without the block, behaviour is unchanged.
 - Artifact files can now be stored in an S3-compatible bucket (e.g. Yandex Object Storage) — add an `artifacts.s3` block (endpoint, region, bucket, credentials); without it, files stay on local disk as before.
+- LLM requests now carry W3C trace context (`traceparent`), so an OTel-instrumented gateway (litellm, vLLM) joins its spans to the bot's traces.
 
 ### Changed
 - Mattermost/Time access can be gated by corporate SSO instead of a fixed id list: with a `mattermost.principal_resolver` block, any SSO-authenticated user is allowed and others get a sign-in notice (customizable via `mattermost.principal_resolver.access_denied_message`); `mattermost.allowed_user_ids` then acts as an optional subset filter.

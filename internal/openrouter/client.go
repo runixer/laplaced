@@ -18,6 +18,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/runixer/laplaced/internal/jobtype"
@@ -832,6 +833,23 @@ func NewClientWithBaseURL(logger *slog.Logger, apiKey, proxyURL, baseURL string,
 	}, nil
 }
 
+// newAPIRequest builds a POST request with the standard API headers and
+// injects W3C trace context (traceparent/tracestate) so an OpenAI-compatible
+// gateway with OTel instrumentation can parent its spans to ours. With
+// tracing disabled the global propagator is the noop default and Inject
+// writes nothing.
+func (c *clientImpl) newAPIRequest(ctx context.Context, endpoint string, body []byte) (*http.Request, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("User-Agent", "laplaced/1.0")
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(httpReq.Header))
+	return httpReq, nil
+}
+
 // withBroadcastFields returns trc and user enriched with OpenRouter
 // Broadcast linking metadata. When ctx carries a valid span context,
 // trace_id and parent_span_id are filled (callers' values win). When user
@@ -1013,14 +1031,10 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 			}
 		}
 
-		httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(body))
+		httpReq, err := c.newAPIRequest(ctx, endpoint, body)
 		if err != nil {
 			return ChatCompletionResponse{}, err
 		}
-
-		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("User-Agent", "laplaced/1.0")
 
 		attemptStart := time.Now()
 		resp, err := c.httpClient.Do(httpReq)
@@ -1213,14 +1227,10 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 			}
 		}
 
-		httpReq, err := http.NewRequestWithContext(ctx, "POST", embeddingsURL, bytes.NewBuffer(body))
+		httpReq, err := c.newAPIRequest(ctx, embeddingsURL, body)
 		if err != nil {
 			return EmbeddingResponse{}, err
 		}
-
-		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("User-Agent", "laplaced/1.0")
 
 		attemptStart := time.Now()
 		resp, err := c.httpClient.Do(httpReq)
