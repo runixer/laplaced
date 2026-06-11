@@ -5,39 +5,39 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
-// Prometheus метрики для Telegram HTTP-клиента
+// Prometheus metrics for the Telegram HTTP client
 //
-// Метрики позволяют отслеживать:
-// - Время выполнения запросов к Telegram API (гистограмма)
-// - Количество ошибок по типам (счётчик)
-// - Количество retry-попыток (счётчик)
-// - Текущее состояние long polling (gauge)
+// These metrics track:
+// - Telegram API request duration (histogram)
+// - Number of errors by type (counter)
+// - Number of retry attempts (counter)
+// - Current long polling state (gauge)
 
 const metricsNamespace = "laplaced"
 
 var (
-	// telegramRequestDuration измеряет время выполнения запросов к Telegram API.
+	// telegramRequestDuration measures Telegram API request duration.
 	// Labels:
-	//   - method: название API-метода (sendMessage, sendChatAction, getUpdates и т.д.)
-	//   - status: результат запроса (success, error, timeout, retry)
+	//   - method: API method name (sendMessage, sendChatAction, getUpdates, etc.)
+	//   - status: request outcome (success, error, timeout, retry)
 	telegramRequestDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: metricsNamespace,
 			Subsystem: "telegram",
 			Name:      "request_duration_seconds",
 			Help:      "Duration of Telegram API requests in seconds",
-			// Buckets оптимизированы для типичных времён ответа Telegram API:
-			// - Короткие запросы (sendMessage): 0.1-1s
+			// Buckets are optimized for typical Telegram API response times:
+			// - Short requests (sendMessage): 0.1-1s
 			// - Long polling (getUpdates): 25-35s
 			Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 25, 30, 35},
 		},
 		[]string{"method", "status"},
 	)
 
-	// telegramRequestsTotal считает общее количество запросов к Telegram API.
+	// telegramRequestsTotal counts the total number of Telegram API requests.
 	// Labels:
-	//   - method: название API-метода
-	//   - status: результат (success, error, timeout)
+	//   - method: API method name
+	//   - status: outcome (success, error, timeout)
 	telegramRequestsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metricsNamespace,
@@ -48,9 +48,9 @@ var (
 		[]string{"method", "status"},
 	)
 
-	// telegramRetriesTotal считает количество retry-попыток.
+	// telegramRetriesTotal counts retry attempts.
 	// Labels:
-	//   - method: название API-метода
+	//   - method: API method name
 	telegramRetriesTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metricsNamespace,
@@ -61,10 +61,10 @@ var (
 		[]string{"method"},
 	)
 
-	// telegramErrorsTotal считает ошибки по типам.
+	// telegramErrorsTotal counts errors by type.
 	// Labels:
-	//   - method: название API-метода
-	//   - error_type: тип ошибки (network, timeout, api_error, decode_error)
+	//   - method: API method name
+	//   - error_type: error type (network, timeout, api_error, decode_error)
 	telegramErrorsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metricsNamespace,
@@ -75,8 +75,8 @@ var (
 		[]string{"method", "error_type"},
 	)
 
-	// telegramLongPollingActive показывает, активен ли long polling.
-	// Значение 1 = активен, 0 = неактивен
+	// telegramLongPollingActive shows whether long polling is active.
+	// Value 1 = active, 0 = inactive
 	telegramLongPollingActive = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: metricsNamespace,
@@ -86,7 +86,7 @@ var (
 		},
 	)
 
-	// telegramLongPollingUpdates считает количество полученных updates.
+	// telegramLongPollingUpdates counts the number of updates received.
 	telegramLongPollingUpdates = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: metricsNamespace,
@@ -97,7 +97,7 @@ var (
 	)
 )
 
-// Константы для статусов метрик
+// Metric status constants
 const (
 	statusSuccess = "success"
 	statusError   = "error"
@@ -105,7 +105,7 @@ const (
 	statusRetry   = "retry"
 )
 
-// Константы для типов ошибок
+// Error type constants
 const (
 	errorTypeNetwork = "network"
 	errorTypeTimeout = "timeout"
@@ -113,23 +113,23 @@ const (
 	errorTypeDecode  = "decode_error"
 )
 
-// recordRequestDuration записывает время выполнения запроса
+// recordRequestDuration records request duration
 func recordRequestDuration(method, status string, durationSeconds float64) {
 	telegramRequestDuration.WithLabelValues(method, status).Observe(durationSeconds)
 	telegramRequestsTotal.WithLabelValues(method, status).Inc()
 }
 
-// recordRetry записывает retry-попытку
+// recordRetry records a retry attempt
 func recordRetry(method string) {
 	telegramRetriesTotal.WithLabelValues(method).Inc()
 }
 
-// recordError записывает ошибку определённого типа
+// recordError records an error of the given type
 func recordError(method, errorType string) {
 	telegramErrorsTotal.WithLabelValues(method, errorType).Inc()
 }
 
-// setLongPollingActive устанавливает статус long polling
+// setLongPollingActive sets the long polling status
 func setLongPollingActive(active bool) {
 	if active {
 		telegramLongPollingActive.Set(1)
@@ -138,7 +138,7 @@ func setLongPollingActive(active bool) {
 	}
 }
 
-// recordLongPollingUpdates записывает количество полученных updates
+// recordLongPollingUpdates records the number of updates received
 func recordLongPollingUpdates(count int) {
 	telegramLongPollingUpdates.Add(float64(count))
 }

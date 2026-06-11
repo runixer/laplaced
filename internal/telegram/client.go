@@ -38,73 +38,73 @@ var ErrMessageNotModified = errors.New("telegram: message is not modified")
 
 // Client is a client for the Telegram Bot API.
 //
-// АРХИТЕКТУРНОЕ РЕШЕНИЕ: Два отдельных HTTP-клиента
+// ARCHITECTURAL DECISION: Two separate HTTP clients
 //
-// Проблема: При использовании одного HTTP-клиента для всех запросов возникали
-// спорадические ошибки "context deadline exceeded (Client.Timeout exceeded while
-// awaiting headers)" для sendMessage, sendChatAction и getUpdates.
+// Problem: Using a single HTTP client for all requests caused sporadic
+// "context deadline exceeded (Client.Timeout exceeded while awaiting headers)"
+// errors for sendMessage, sendChatAction, and getUpdates.
 //
-// Причина: Long polling (getUpdates с Timeout=25s) "занимал" соединения из общего
-// пула на длительное время. При высокой нагрузке или сетевых задержках другие
-// запросы не могли получить свободное соединение и таймаутились.
+// Cause: Long polling (getUpdates with Timeout=25s) held connections from the
+// shared pool for long periods. Under high load or network delays, other
+// requests could not get a free connection and timed out.
 //
-// Решение:
-//  1. httpClient - для коротких API-вызовов (sendMessage, sendChatAction и т.д.)
-//     с таймаутом 15 секунд и retry-логикой
-//  2. longPollingClient - для getUpdates с бесконечным таймаутом (контролируется
-//     через context), изолированный пул соединений
+// Solution:
+//  1. httpClient - for short API calls (sendMessage, sendChatAction, etc.)
+//     with a 15-second timeout and retry logic
+//  2. longPollingClient - for getUpdates with no timeout (controlled via
+//     context), isolated connection pool
 //
-// Дополнительно отключён HTTP/2 (ForceAttemptHTTP2=false), так как мультиплексирование
-// запросов через одно соединение усугубляло проблему с конкуренцией за ресурсы.
+// Additionally, HTTP/2 is disabled (ForceAttemptHTTP2=false), since multiplexing
+// requests over a single connection aggravated the resource contention problem.
 type Client struct {
 	token             string
-	httpClient        *http.Client // Для коротких API-вызовов с retry
-	longPollingClient *http.Client // Для getUpdates с длительным ожиданием
+	httpClient        *http.Client // For short API calls with retry
+	longPollingClient *http.Client // For getUpdates with long waits
 	apiURL            string
 }
 
 // NewClient creates a new Telegram API client.
 //
-// Создаёт два изолированных HTTP-клиента с разными настройками:
-// - httpClient: таймаут 30s, retry-логика, для sendMessage/sendChatAction
-// - longPollingClient: без таймаута (контроль через context), для getUpdates
+// Creates two isolated HTTP clients with different settings:
+// - httpClient: 30s timeout, retry logic, for sendMessage/sendChatAction
+// - longPollingClient: no timeout (controlled via context), for getUpdates
 func NewClient(token, proxyURL string) (*Client, error) {
-	// Transport для обычных API-вызовов (sendMessage, sendChatAction и т.д.)
-	// DisableKeepAlives=true - каждый запрос создаёт новое соединение,
-	// что исключает проблемы с "зависшими" keep-alive соединениями
+	// Transport for regular API calls (sendMessage, sendChatAction, etc.)
+	// DisableKeepAlives=true - each request creates a new connection,
+	// which eliminates problems with "stuck" keep-alive connections
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second, // Увеличен для нестабильных сетей
-			KeepAlive: 0,                // Отключаем keep-alive на уровне TCP
+			Timeout:   30 * time.Second, // Increased for unstable networks
+			KeepAlive: 0,                // Disable keep-alive at the TCP level
 		}).DialContext,
-		// HTTP/2 отключён: мультиплексирование через одно соединение создавало
-		// конкуренцию между короткими и длинными запросами
+		// HTTP/2 disabled: multiplexing over a single connection created
+		// contention between short and long requests
 		ForceAttemptHTTP2:     false,
-		MaxIdleConns:          0, // Не храним idle соединения
-		IdleConnTimeout:       0, // Не используется при DisableKeepAlives=true
+		MaxIdleConns:          0, // Don't keep idle connections
+		IdleConnTimeout:       0, // Not used with DisableKeepAlives=true
 		TLSHandshakeTimeout:   15 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second, // Таймаут на получение заголовков ответа
+		ResponseHeaderTimeout: 30 * time.Second, // Timeout for receiving response headers
 		MaxIdleConnsPerHost:   0,
-		DisableKeepAlives:     true, // Каждый запрос - новое соединение
+		DisableKeepAlives:     true, // Each request gets a new connection
 	}
 
-	// Отдельный transport для long polling - изолированный пул соединений
-	// с увеличенными таймаутами для длительного ожидания updates
-	// Здесь keep-alive нужен, чтобы не переустанавливать соединение каждые 25 секунд
+	// Separate transport for long polling - isolated connection pool
+	// with increased timeouts for long waits on updates.
+	// Keep-alive is needed here to avoid re-establishing the connection every 25 seconds
 	longPollingTransport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
 			Timeout:   30 * time.Second,
-			KeepAlive: 60 * time.Second, // Дольше держим соединение живым
+			KeepAlive: 60 * time.Second, // Keep the connection alive longer
 		}).DialContext,
-		ForceAttemptHTTP2:     false, // Консистентность с основным transport
-		MaxIdleConns:          2,     // Минимальный пул, нужно только одно соединение
+		ForceAttemptHTTP2:     false, // Consistency with the main transport
+		MaxIdleConns:          2,     // Minimal pool, only one connection needed
 		IdleConnTimeout:       120 * time.Second,
 		TLSHandshakeTimeout:   15 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
-		ResponseHeaderTimeout: 0, // Без ограничения - контролируется через context
+		ResponseHeaderTimeout: 0, // No limit - controlled via context
 		MaxIdleConnsPerHost:   1,
 		DisableKeepAlives:     false,
 	}
@@ -120,14 +120,14 @@ func NewClient(token, proxyURL string) (*Client, error) {
 
 	return &Client{
 		token: token,
-		// Таймаут 30s + retry-логика в makeRequest()
-		// DisableKeepAlives гарантирует свежее соединение для каждого запроса
+		// 30s timeout + retry logic in makeRequest()
+		// DisableKeepAlives guarantees a fresh connection for each request
 		httpClient: &http.Client{
 			Timeout:   30 * time.Second,
 			Transport: transport,
 		},
-		// Таймаут=0 означает "без ограничения" - контролируется через context
-		// в методе GetUpdates() (Timeout + 10 секунд на сетевые задержки)
+		// Timeout=0 means "no limit" - controlled via context
+		// in the GetUpdates() method (Timeout + 10 seconds for network delays)
 		longPollingClient: &http.Client{
 			Timeout:   0,
 			Transport: longPollingTransport,
@@ -138,16 +138,16 @@ func NewClient(token, proxyURL string) (*Client, error) {
 
 // makeRequest performs a request to the Telegram API with retry logic.
 //
-// Retry-стратегия: до 2 попыток с задержкой 2 секунды.
-// Retry выполняется только для сетевых ошибок, НЕ для API-ошибок Telegram
-// (например, "Bad Request" не будет повторяться).
+// Retry strategy: up to 2 attempts with a 2-second delay.
+// Retries happen only for network errors, NOT for Telegram API errors
+// (e.g., "Bad Request" will not be retried).
 //
-// С таймаутом httpClient 30s и DisableKeepAlives=true:
-// - Каждый запрос создаёт новое TCP-соединение (исключает проблемы с "зависшими" соединениями)
-// - Общее время ожидания до ~62 секунд в худшем случае (30+2+30)
-// - Retry помогает при временных DNS/сетевых проблемах
+// With the 30s httpClient timeout and DisableKeepAlives=true:
+// - Each request creates a new TCP connection (eliminates problems with "stuck" connections)
+// - Total wait time up to ~62 seconds in the worst case (30+2+30)
+// - Retry helps with transient DNS/network problems
 //
-// Метрики: записывает время выполнения, количество retry и ошибки в Prometheus.
+// Metrics: records request duration, retry count, and errors in Prometheus.
 func (c *Client) makeRequest(ctx context.Context, method string, params interface{}) (*APIResponse, error) {
 	startTime := time.Now()
 
@@ -164,10 +164,10 @@ func (c *Client) makeRequest(ctx context.Context, method string, params interfac
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
-			// Записываем retry в метрики
+			// Record the retry in metrics
 			recordRetry(method)
 
-			// Фиксированная задержка перед retry
+			// Fixed delay before retry
 			select {
 			case <-ctx.Done():
 				duration := time.Since(startTime).Seconds()
@@ -195,7 +195,7 @@ func (c *Client) makeRequest(ctx context.Context, method string, params interfac
 				recordError(method, errorTypeTimeout)
 				return nil, lastErr
 			}
-			// Определяем тип ошибки для метрик
+			// Determine the error type for metrics
 			if isTimeoutError(err) {
 				recordError(method, errorTypeTimeout)
 			} else {
@@ -221,19 +221,19 @@ func (c *Client) makeRequest(ctx context.Context, method string, params interfac
 			return nil, fmt.Errorf("telegram api error: %s", apiResp.Description)
 		}
 
-		// Успешный запрос
+		// Successful request
 		duration := time.Since(startTime).Seconds()
 		recordRequestDuration(method, statusSuccess, duration)
 		return &apiResp, nil
 	}
 
-	// Все retry исчерпаны
+	// All retries exhausted
 	duration := time.Since(startTime).Seconds()
 	recordRequestDuration(method, statusError, duration)
 	return nil, lastErr
 }
 
-// isTimeoutError проверяет, является ли ошибка таймаутом
+// isTimeoutError reports whether the error is a timeout
 func isTimeoutError(err error) bool {
 	if err == nil {
 		return false
@@ -337,25 +337,25 @@ func (c *Client) SetMessageReaction(ctx context.Context, req SetMessageReactionR
 
 // GetUpdates receives incoming updates using long polling.
 //
-// ВАЖНО: Использует отдельный longPollingClient с Timeout=0.
+// IMPORTANT: Uses the dedicated longPollingClient with Timeout=0.
 //
-// Long polling работает так: Telegram держит соединение открытым до req.Timeout
-// секунд, ожидая новые сообщения. Если сообщения приходят раньше - возвращает
-// их сразу. Если нет - возвращает пустой массив по истечении таймаута.
+// Long polling works like this: Telegram keeps the connection open for up to
+// req.Timeout seconds, waiting for new messages. If messages arrive earlier,
+// it returns them immediately. If not, it returns an empty array on timeout.
 //
-// Почему отдельный клиент:
-// - httpClient имеет таймаут 15s, что меньше типичного req.Timeout (25s)
-// - Использование общего пула соединений создавало конкуренцию с короткими запросами
-// - Изолированный transport гарантирует, что long polling не влияет на sendMessage
+// Why a separate client:
+// - httpClient has a 15s timeout, which is less than the typical req.Timeout (25s)
+// - Using a shared connection pool created contention with short requests
+// - An isolated transport guarantees long polling does not affect sendMessage
 //
-// Таймаут контролируется через context: req.Timeout + 10 секунд на сетевые задержки.
+// Timeout is controlled via context: req.Timeout + 10 seconds for network delays.
 //
-// Метрики: записывает время выполнения, статус long polling и количество updates.
+// Metrics: records request duration, long polling status, and number of updates.
 func (c *Client) GetUpdates(ctx context.Context, req GetUpdatesRequest) ([]Update, error) {
 	const method = "getUpdates"
 	startTime := time.Now()
 
-	// Отмечаем начало long polling
+	// Mark the start of long polling
 	setLongPollingActive(true)
 	defer setLongPollingActive(false)
 
@@ -366,8 +366,8 @@ func (c *Client) GetUpdates(ctx context.Context, req GetUpdatesRequest) ([]Updat
 
 	apiURL := fmt.Sprintf("%s/%s", c.apiURL, method)
 
-	// Context с таймаутом = Telegram timeout + запас на сетевые задержки
-	// Например: req.Timeout=25 → context timeout=35 секунд
+	// Context timeout = Telegram timeout + margin for network delays
+	// For example: req.Timeout=25 → context timeout=35 seconds
 	timeout := time.Duration(req.Timeout+10) * time.Second
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -378,7 +378,7 @@ func (c *Client) GetUpdates(ctx context.Context, req GetUpdatesRequest) ([]Updat
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	// longPollingClient имеет Timeout=0, реальный таймаут контролируется через reqCtx
+	// longPollingClient has Timeout=0, the actual timeout is controlled via reqCtx
 	resp, err := c.longPollingClient.Do(httpReq)
 	if err != nil {
 		duration := time.Since(startTime).Seconds()
@@ -417,11 +417,11 @@ func (c *Client) GetUpdates(ctx context.Context, req GetUpdatesRequest) ([]Updat
 		return nil, fmt.Errorf("failed to unmarshal updates: %w", err)
 	}
 
-	// Успешный запрос
+	// Successful request
 	duration := time.Since(startTime).Seconds()
 	recordRequestDuration(method, statusSuccess, duration)
 
-	// Записываем количество полученных updates
+	// Record the number of updates received
 	if len(updates) > 0 {
 		recordLongPollingUpdates(len(updates))
 	}

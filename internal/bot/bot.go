@@ -569,10 +569,10 @@ func (b *Bot) isAllowed(userID int64) bool {
 	return false
 }
 
-// intPtrOrNil возвращает указатель на int, если значение != 0, иначе nil.
-// Это нужно для корректной работы omitempty в JSON - Telegram API
-// интерпретирует message_thread_id: 0 как попытку отправить в топик с ID=0,
-// которого не существует, что вызывает ошибку "invalid topic identifier".
+// intPtrOrNil returns a pointer to int if the value != 0, otherwise nil.
+// This is needed for omitempty to work correctly in JSON - the Telegram API
+// interprets message_thread_id: 0 as an attempt to send to a topic with ID=0,
+// which does not exist, causing an "invalid topic identifier" error.
 func intPtrOrNil(v int) *int {
 	if v == 0 {
 		return nil

@@ -7,7 +7,7 @@ import (
 	"unicode"
 )
 
-// ... (все переменные и константы без изменений)
+// ... (all variables and constants unchanged)
 
 var latexSymbols = map[string]string{
 	`\left`: ``, `\right`: ``,

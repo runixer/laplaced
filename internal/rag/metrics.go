@@ -6,13 +6,13 @@ import (
 	"github.com/runixer/laplaced/internal/storage"
 )
 
-// Prometheus метрики для RAG системы
+// Prometheus metrics for the RAG system
 //
-// Все метрики используют namespace "laplaced" для консистентности.
-// Метрики позволяют отслеживать:
-// - Производительность и стоимость embedding API
-// - Latency и эффективность vector search
-// - Размер и память vector index
+// All metrics use the "laplaced" namespace for consistency.
+// These metrics track:
+// - Embedding API performance and cost
+// - Vector search latency and effectiveness
+// - Vector index size and memory
 
 const (
 	namespace = "laplaced"
@@ -21,30 +21,30 @@ const (
 var (
 	// === Embedding API Metrics ===
 
-	// embeddingRequestDuration измеряет время генерации embeddings через OpenRouter API.
+	// embeddingRequestDuration measures embedding generation time via the OpenRouter API.
 	// Labels:
-	//   - user_id: идентификатор пользователя
-	//   - model: название модели (google/gemini-embedding-001)
-	//   - type: тип embedding (topics, facts)
-	//   - status: результат запроса (success, error)
+	//   - user_id: user identifier
+	//   - model: model name (google/gemini-embedding-001)
+	//   - type: embedding type (topics, facts)
+	//   - status: request outcome (success, error)
 	embeddingRequestDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
 			Subsystem: "embedding",
 			Name:      "request_duration_seconds",
 			Help:      "Duration of embedding API requests in seconds",
-			// Buckets для типичных времён embedding API: 100ms - 5s
+			// Buckets for typical embedding API times: 100ms - 5s
 			Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 3, 5},
 		},
 		[]string{"user_id", "model", "type", "status"},
 	)
 
-	// embeddingRequestsTotal считает общее количество embedding запросов.
+	// embeddingRequestsTotal counts the total number of embedding requests.
 	// Labels:
-	//   - user_id: идентификатор пользователя
-	//   - model: название модели
-	//   - type: тип embedding (topics, facts)
-	//   - status: результат (success, error)
+	//   - user_id: user identifier
+	//   - model: model name
+	//   - type: embedding type (topics, facts)
+	//   - status: outcome (success, error)
 	embeddingRequestsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -55,10 +55,10 @@ var (
 		[]string{"user_id", "model", "type", "status"},
 	)
 
-	// embeddingTokensTotal считает использованные токены.
+	// embeddingTokensTotal counts tokens used.
 	// Labels:
-	//   - user_id: идентификатор пользователя
-	//   - model: название модели
+	//   - user_id: user identifier
+	//   - model: model name
 	embeddingTokensTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -69,10 +69,10 @@ var (
 		[]string{"user_id", "model"},
 	)
 
-	// embeddingCostTotal отслеживает кумулятивную стоимость embedding API (USD).
+	// embeddingCostTotal tracks cumulative embedding API cost (USD).
 	// Labels:
-	//   - user_id: идентификатор пользователя
-	//   - model: название модели
+	//   - user_id: user identifier
+	//   - model: model name
 	embeddingCostTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -85,33 +85,33 @@ var (
 
 	// === Vector Search Metrics ===
 
-	// vectorSearchDuration измеряет время vector search (cosine similarity).
+	// vectorSearchDuration measures vector search time (cosine similarity).
 	// Labels:
-	//   - user_id: идентификатор пользователя
-	//   - type: тип поиска (topics, facts)
+	//   - user_id: user identifier
+	//   - type: search type (topics, facts)
 	vectorSearchDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
 			Subsystem: "vector",
 			Name:      "search_duration_seconds",
 			Help:      "Duration of vector search operations in seconds",
-			// Buckets для in-memory cosine: 1ms - 500ms
+			// Buckets for in-memory cosine: 1ms - 500ms
 			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5},
 		},
 		[]string{"user_id", "type"},
 	)
 
-	// vectorSearchVectorsScanned отслеживает количество просканированных векторов.
+	// vectorSearchVectorsScanned tracks the number of vectors scanned.
 	// Labels:
-	//   - user_id: идентификатор пользователя
-	//   - type: тип поиска (topics, facts)
+	//   - user_id: user identifier
+	//   - type: search type (topics, facts)
 	vectorSearchVectorsScanned = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
 			Subsystem: "vector",
 			Name:      "search_vectors_scanned",
 			Help:      "Number of vectors scanned per search operation",
-			// Buckets для количества векторов: 10 - 100K
+			// Buckets for vector counts: 10 - 100K
 			Buckets: []float64{10, 50, 100, 500, 1000, 5000, 10000, 50000, 100000},
 		},
 		[]string{"user_id", "type"},
@@ -119,9 +119,9 @@ var (
 
 	// === Vector Index State Metrics ===
 
-	// vectorIndexSize показывает текущий размер vector index.
+	// vectorIndexSize shows the current vector index size.
 	// Labels:
-	//   - type: тип индекса (topics, facts)
+	//   - type: index type (topics, facts)
 	vectorIndexSize = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
@@ -132,9 +132,9 @@ var (
 		[]string{"type"},
 	)
 
-	// vectorIndexMemoryBytes показывает приблизительный размер индекса в памяти.
+	// vectorIndexMemoryBytes shows the approximate in-memory size of the index.
 	// Labels:
-	//   - type: тип индекса (topics, facts)
+	//   - type: index type (topics, facts)
 	vectorIndexMemoryBytes = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
@@ -145,11 +145,11 @@ var (
 		[]string{"type"},
 	)
 
-	// ragRetrievalTotal считает результаты RAG retrieval.
+	// ragRetrievalTotal counts RAG retrieval results.
 	// Labels:
-	//   - user_id: идентификатор пользователя
-	//   - result: результат (hit, miss)
-	// hit = нашли релевантный контекст, miss = контекст пустой
+	//   - user_id: user identifier
+	//   - result: outcome (hit, miss)
+	// hit = relevant context found, miss = context is empty
 	ragRetrievalTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -160,27 +160,27 @@ var (
 		[]string{"user_id", "result"},
 	)
 
-	// ragCandidatesTotal считает количество кандидатов до фильтрации.
+	// ragCandidatesTotal counts the number of candidates before filtering.
 	// Labels:
-	//   - user_id: идентификатор пользователя
-	//   - type: тип кандидатов (topics, facts)
-	// Используется для сравнения "до/после" reranker
+	//   - user_id: user identifier
+	//   - type: candidate type (topics, facts)
+	// Used for before/after reranker comparison
 	ragCandidatesTotal = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
 			Subsystem: "rag",
 			Name:      "candidates",
 			Help:      "Number of candidates from vector search before filtering",
-			// Buckets: 0 - 100 кандидатов
+			// Buckets: 0 - 100 candidates
 			Buckets: []float64{0, 1, 5, 10, 20, 30, 50, 75, 100},
 		},
 		[]string{"user_id", "type"},
 	)
 
-	// ragLatency измеряет общее время RAG retrieval (enrichment + embedding + vector search).
+	// ragLatency measures total RAG retrieval time (enrichment + embedding + vector search).
 	// Labels:
-	//   - user_id: идентификатор пользователя
-	//   - source: "auto" (buildContext) или "tool" (search_history)
+	//   - user_id: user identifier
+	//   - source: "auto" (buildContext) or "tool" (search_history)
 	ragLatency = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -193,9 +193,9 @@ var (
 		[]string{"user_id", "source"},
 	)
 
-	// ragEnrichmentDuration измеряет время LLM вызова для обогащения запроса.
+	// ragEnrichmentDuration measures the LLM call time for query enrichment.
 	// Labels:
-	//   - user_id: идентификатор пользователя
+	//   - user_id: user identifier
 	ragEnrichmentDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -209,13 +209,13 @@ var (
 	)
 )
 
-// Константы для статусов
+// Status constants
 const (
 	statusSuccess = "success"
 	statusError   = "error"
 )
 
-// Константы для типов поиска
+// Search type constants
 const (
 	searchTypeTopics    = "topics"
 	searchTypeFacts     = "facts"
@@ -223,7 +223,7 @@ const (
 	searchTypeArtifacts = "artifacts" // v0.5.2
 )
 
-// Константы для RAG результатов
+// RAG result constants
 const (
 	resultHit  = "hit"
 	resultMiss = "miss"
@@ -248,8 +248,8 @@ func formatUserID(userID storage.ScopeID) string {
 	return string(userID)
 }
 
-// RecordEmbeddingRequest записывает метрики embedding запроса.
-// embeddingType: searchTypeTopics или searchTypeFacts
+// RecordEmbeddingRequest records embedding request metrics.
+// embeddingType: searchTypeTopics or searchTypeFacts
 func RecordEmbeddingRequest(userID storage.ScopeID, model string, embeddingType string, durationSeconds float64, success bool, tokens int, cost *float64) {
 	status := statusSuccess
 	if !success {
@@ -269,14 +269,14 @@ func RecordEmbeddingRequest(userID storage.ScopeID, model string, embeddingType 
 	}
 }
 
-// RecordVectorSearch записывает метрики vector search.
+// RecordVectorSearch records vector search metrics.
 func RecordVectorSearch(userID storage.ScopeID, searchType string, durationSeconds float64, vectorsScanned int) {
 	uid := formatUserID(userID)
 	vectorSearchDuration.WithLabelValues(uid, searchType).Observe(durationSeconds)
 	vectorSearchVectorsScanned.WithLabelValues(uid, searchType).Observe(float64(vectorsScanned))
 }
 
-// UpdateVectorIndexMetrics обновляет метрики размера индекса.
+// UpdateVectorIndexMetrics updates index size metrics.
 // dim should be the configured embedding dimension; used to derive a
 // ballpark RAM estimate for the vector_index_memory_bytes metric.
 func UpdateVectorIndexMetrics(topicsCount, factsCount, peopleCount, dim int) {
@@ -290,7 +290,7 @@ func UpdateVectorIndexMetrics(topicsCount, factsCount, peopleCount, dim int) {
 	vectorIndexMemoryBytes.WithLabelValues(searchTypePeople).Set(float64(peopleCount * perVec))
 }
 
-// RecordRAGRetrieval записывает результат RAG retrieval.
+// RecordRAGRetrieval records the result of a RAG retrieval.
 func RecordRAGRetrieval(userID storage.ScopeID, hasContext bool) {
 	uid := formatUserID(userID)
 	if hasContext {
@@ -300,14 +300,14 @@ func RecordRAGRetrieval(userID storage.ScopeID, hasContext bool) {
 	}
 }
 
-// RecordRAGCandidates записывает количество кандидатов до фильтрации.
+// RecordRAGCandidates records the number of candidates before filtering.
 func RecordRAGCandidates(userID storage.ScopeID, searchType string, count int) {
 	uid := formatUserID(userID)
 	ragCandidatesTotal.WithLabelValues(uid, searchType).Observe(float64(count))
 }
 
-// RecordRAGLatency записывает общее время RAG retrieval.
-// source: "auto" для buildContext, "tool" для search_history tool.
+// RecordRAGLatency records total RAG retrieval time.
+// source: "auto" for buildContext, "tool" for the search_history tool.
 func RecordRAGLatency(userID storage.ScopeID, source string, durationSeconds float64) {
 	uid := formatUserID(userID)
 	if source == "" {
@@ -316,7 +316,7 @@ func RecordRAGLatency(userID storage.ScopeID, source string, durationSeconds flo
 	ragLatency.WithLabelValues(uid, source).Observe(durationSeconds)
 }
 
-// RecordRAGEnrichment записывает время LLM вызова для обогащения запроса.
+// RecordRAGEnrichment records the LLM call time for query enrichment.
 func RecordRAGEnrichment(userID storage.ScopeID, durationSeconds float64) {
 	uid := formatUserID(userID)
 	ragEnrichmentDuration.WithLabelValues(uid).Observe(durationSeconds)
@@ -325,7 +325,7 @@ func RecordRAGEnrichment(userID storage.ScopeID, durationSeconds float64) {
 // === Reranker Metrics (v0.4) ===
 
 var (
-	// rerankerDuration измеряет общее время reranker (все LLM turns).
+	// rerankerDuration measures total reranker time (all LLM turns).
 	rerankerDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -337,7 +337,7 @@ var (
 		[]string{"user_id"},
 	)
 
-	// rerankerToolCallsTotal считает количество tool calls в reranker.
+	// rerankerToolCallsTotal counts tool calls in the reranker.
 	rerankerToolCallsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -348,7 +348,7 @@ var (
 		[]string{"user_id"},
 	)
 
-	// rerankerCandidatesInput - кандидатов на входе (из vector search).
+	// rerankerCandidatesInput - candidates on input (from vector search).
 	rerankerCandidatesInput = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -360,7 +360,7 @@ var (
 		[]string{"user_id"},
 	)
 
-	// rerankerCandidatesOutput - кандидатов на выходе (финальный выбор).
+	// rerankerCandidatesOutput - candidates on output (final selection).
 	rerankerCandidatesOutput = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -372,7 +372,7 @@ var (
 		[]string{"user_id"},
 	)
 
-	// rerankerCostTotal - стоимость reranker (USD).
+	// rerankerCostTotal - reranker cost (USD).
 	rerankerCostTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -383,7 +383,7 @@ var (
 		[]string{"user_id"},
 	)
 
-	// rerankerFallbackTotal - срабатывания fallback.
+	// rerankerFallbackTotal - fallback activations.
 	rerankerFallbackTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -394,7 +394,7 @@ var (
 		[]string{"user_id", "reason"},
 	)
 
-	// rerankerHallucinationTotal - галлюцинированные topic IDs.
+	// rerankerHallucinationTotal - hallucinated topic IDs.
 	rerankerHallucinationTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -406,44 +406,44 @@ var (
 	)
 )
 
-// RecordRerankerDuration записывает время reranker операции.
+// RecordRerankerDuration records reranker operation duration.
 func RecordRerankerDuration(userID storage.ScopeID, durationSeconds float64) {
 	uid := formatUserID(userID)
 	rerankerDuration.WithLabelValues(uid).Observe(durationSeconds)
 }
 
-// RecordRerankerToolCalls записывает количество tool calls.
+// RecordRerankerToolCalls records the number of tool calls.
 func RecordRerankerToolCalls(userID storage.ScopeID, count int) {
 	uid := formatUserID(userID)
 	rerankerToolCallsTotal.WithLabelValues(uid).Add(float64(count))
 }
 
-// RecordRerankerCandidatesInput записывает кандидатов на входе.
+// RecordRerankerCandidatesInput records the number of input candidates.
 func RecordRerankerCandidatesInput(userID storage.ScopeID, count int) {
 	uid := formatUserID(userID)
 	rerankerCandidatesInput.WithLabelValues(uid).Observe(float64(count))
 }
 
-// RecordRerankerCandidatesOutput записывает кандидатов на выходе.
+// RecordRerankerCandidatesOutput records the number of selected candidates.
 func RecordRerankerCandidatesOutput(userID storage.ScopeID, count int) {
 	uid := formatUserID(userID)
 	rerankerCandidatesOutput.WithLabelValues(uid).Observe(float64(count))
 }
 
-// RecordRerankerCost записывает стоимость reranker.
+// RecordRerankerCost records reranker cost.
 func RecordRerankerCost(userID storage.ScopeID, cost float64) {
 	uid := formatUserID(userID)
 	rerankerCostTotal.WithLabelValues(uid).Add(cost)
 }
 
-// RecordRerankerFallback записывает срабатывание fallback.
+// RecordRerankerFallback records a fallback activation.
 // reason: "timeout", "error", "max_tool_calls", "invalid_json", "requested_ids", "vector_top", "all_hallucinated"
 func RecordRerankerFallback(userID storage.ScopeID, reason string) {
 	uid := formatUserID(userID)
 	rerankerFallbackTotal.WithLabelValues(uid, reason).Inc()
 }
 
-// RecordRerankerHallucination записывает количество галлюцинированных topic IDs.
+// RecordRerankerHallucination records the number of hallucinated topic IDs.
 func RecordRerankerHallucination(userID storage.ScopeID, count int) {
 	uid := formatUserID(userID)
 	rerankerHallucinationTotal.WithLabelValues(uid).Add(float64(count))
@@ -454,8 +454,8 @@ func RecordRerankerHallucination(userID storage.ScopeID, count int) {
 var (
 	// artifactExtractionJobsTotal counts artifact extraction jobs.
 	// Labels:
-	//   - user_id: идентификатор пользователя
-	//   - status: результат (success, error)
+	//   - user_id: user identifier
+	//   - status: outcome (success, error)
 	artifactExtractionJobsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -468,8 +468,8 @@ var (
 
 	// artifactExtractionDuration measures time for artifact extraction.
 	// Labels:
-	//   - user_id: идентификатор пользователя
-	//   - status: результат (success, error)
+	//   - user_id: user identifier
+	//   - status: outcome (success, error)
 	artifactExtractionDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,

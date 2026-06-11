@@ -6,17 +6,17 @@ import (
 	"github.com/runixer/laplaced/internal/storage"
 )
 
-// Prometheus метрики для Bot
+// Prometheus metrics for Bot
 //
-// Метрики позволяют отслеживать:
-// - Количество активных сессий
-// - Время обработки сообщений (end-to-end)
-// - Количество обработанных сообщений
+// These metrics track:
+// - Number of active sessions
+// - Message processing time (end-to-end)
+// - Number of processed messages
 
 const metricsNamespace = "laplaced"
 
 var (
-	// activeSessions показывает текущее количество активных сессий.
+	// activeSessions shows the current number of active sessions.
 	activeSessions = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: metricsNamespace,
@@ -26,27 +26,27 @@ var (
 		},
 	)
 
-	// messageProcessingDuration измеряет end-to-end время обработки сообщения.
-	// От получения сообщения до отправки ответа.
+	// messageProcessingDuration measures end-to-end message processing time.
+	// From receiving the message to sending the response.
 	// Labels:
-	//   - user_id: идентификатор пользователя
+	//   - user_id: user identifier
 	messageProcessingDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: metricsNamespace,
 			Subsystem: "bot",
 			Name:      "message_processing_duration_seconds",
 			Help:      "End-to-end duration of message processing in seconds",
-			// Buckets для типичных времён обработки: 0.5s - 120s
-			// (LLM генерация может занимать до минуты)
+			// Buckets for typical processing times: 0.5s - 120s
+			// (LLM generation can take up to a minute)
 			Buckets: []float64{0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30, 45, 60, 90, 120},
 		},
 		[]string{"user_id"},
 	)
 
-	// messagesProcessedTotal считает количество обработанных сообщений.
+	// messagesProcessedTotal counts the number of processed messages.
 	// Labels:
-	//   - user_id: идентификатор пользователя
-	//   - status: результат (success, error)
+	//   - user_id: user identifier
+	//   - status: outcome (success, error)
 	messagesProcessedTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metricsNamespace,
@@ -57,31 +57,31 @@ var (
 		[]string{"user_id", "status"},
 	)
 
-	// contextTokens отслеживает размер контекста в токенах.
-	// Помогает понять, насколько большие контексты мы отправляем в LLM.
+	// contextTokens tracks context size in tokens.
+	// Helps understand how large the contexts we send to the LLM are.
 	contextTokens = promauto.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: metricsNamespace,
 			Subsystem: "bot",
 			Name:      "context_tokens",
 			Help:      "Approximate number of tokens in context sent to LLM",
-			// Buckets для размеров контекста: 1K - 100K tokens
+			// Buckets for context sizes: 1K - 100K tokens
 			Buckets: []float64{1000, 2000, 5000, 10000, 20000, 30000, 50000, 75000, 100000},
 		},
 	)
 
-	// contextTokensBySource отслеживает токены по источнику контекста.
+	// contextTokensBySource tracks tokens by context source.
 	// Labels:
-	//   - user_id: идентификатор пользователя
+	//   - user_id: user identifier
 	//   - source: profile, topics, session
-	// Помогает понять распределение контекста между источниками.
+	// Helps understand context distribution across sources.
 	contextTokensBySource = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: metricsNamespace,
 			Subsystem: "bot",
 			Name:      "context_tokens_by_source",
 			Help:      "Approximate number of tokens in context by source",
-			// Buckets для каждого источника: 100 - 50K tokens
+			// Buckets for each source: 100 - 50K tokens
 			Buckets: []float64{100, 500, 1000, 2000, 5000, 10000, 20000, 30000, 50000},
 		},
 		[]string{"user_id", "source"},
@@ -241,22 +241,22 @@ func formatUserID(userID storage.ScopeID) string {
 	return string(userID)
 }
 
-// SetActiveSessions устанавливает текущее количество активных сессий.
+// SetActiveSessions sets the current number of active sessions.
 func SetActiveSessions(count int) {
 	activeSessions.Set(float64(count))
 }
 
-// IncActiveSessions увеличивает счётчик активных сессий на 1.
+// IncActiveSessions increments the active sessions counter by 1.
 func IncActiveSessions() {
 	activeSessions.Inc()
 }
 
-// DecActiveSessions уменьшает счётчик активных сессий на 1.
+// DecActiveSessions decrements the active sessions counter by 1.
 func DecActiveSessions() {
 	activeSessions.Dec()
 }
 
-// RecordMessageProcessing записывает метрики обработки сообщения.
+// RecordMessageProcessing records message processing metrics.
 func RecordMessageProcessing(userID storage.ScopeID, durationSeconds float64, success bool) {
 	uid := formatUserID(userID)
 	messageProcessingDuration.WithLabelValues(uid).Observe(durationSeconds)
@@ -268,12 +268,12 @@ func RecordMessageProcessing(userID storage.ScopeID, durationSeconds float64, su
 	messagesProcessedTotal.WithLabelValues(uid, status).Inc()
 }
 
-// RecordContextTokens записывает размер контекста в токенах.
+// RecordContextTokens records context size in tokens.
 func RecordContextTokens(tokens int) {
 	contextTokens.Observe(float64(tokens))
 }
 
-// RecordContextTokensBySource записывает токены по источнику контекста.
+// RecordContextTokensBySource records tokens by context source.
 func RecordContextTokensBySource(userID storage.ScopeID, source string, tokens int) {
 	uid := formatUserID(userID)
 	contextTokensBySource.WithLabelValues(uid, source).Observe(float64(tokens))

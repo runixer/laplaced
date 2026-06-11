@@ -121,11 +121,11 @@ type EditMessageTextRequest struct {
 
 // SendMessageRequest represents the parameters for the sendMessage method.
 //
-// ВАЖНО: MessageThreadID использует *int вместо int, чтобы omitempty корректно
-// работал для нулевого значения. Telegram API интерпретирует message_thread_id: 0
-// как попытку отправить в топик с ID=0, что вызывает ошибку
-// "Bad Request: invalid topic identifier specified" в обычных чатах (не форумах).
-// При использовании указателя nil не сериализуется в JSON вообще.
+// IMPORTANT: MessageThreadID uses *int instead of int so that omitempty works
+// correctly for the zero value. The Telegram API interprets message_thread_id: 0
+// as an attempt to send to a topic with ID=0, which causes a
+// "Bad Request: invalid topic identifier specified" error in regular chats (non-forums).
+// With a pointer, nil is not serialized into JSON at all.
 type SendMessageRequest struct {
 	ChatID           int64  `json:"chat_id"`
 	MessageThreadID  *int   `json:"message_thread_id,omitempty"`
@@ -152,7 +152,7 @@ type SetWebhookRequest struct {
 }
 
 // SendChatActionRequest represents the parameters for the sendChatAction method.
-// См. комментарий к SendMessageRequest о причине использования *int для MessageThreadID.
+// See the SendMessageRequest comment for why MessageThreadID uses *int.
 type SendChatActionRequest struct {
 	ChatID          int64  `json:"chat_id"`
 	MessageThreadID *int   `json:"message_thread_id,omitempty"`

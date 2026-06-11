@@ -5,41 +5,41 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
-// Prometheus метрики для OpenRouter LLM клиента
+// Prometheus metrics for the OpenRouter LLM client
 //
-// Метрики позволяют отслеживать:
-// - Время выполнения LLM запросов
-// - Использование токенов (prompt/completion)
-// - Стоимость LLM запросов
+// These metrics track:
+// - LLM request duration
+// - Token usage (prompt/completion)
+// - LLM request cost
 
 const metricsNamespace = "laplaced"
 
 var (
-	// llmRequestDuration измеряет время выполнения LLM запросов.
+	// llmRequestDuration measures LLM request duration.
 	// Labels:
-	//   - user_id: идентификатор пользователя
-	//   - model: название модели
-	//   - status: результат (success, error)
-	//   - job_type: тип операции (interactive, background)
+	//   - user_id: user identifier
+	//   - model: model name
+	//   - status: outcome (success, error)
+	//   - job_type: operation type (interactive, background)
 	llmRequestDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: metricsNamespace,
 			Subsystem: "llm",
 			Name:      "request_duration_seconds",
 			Help:      "Duration of LLM API requests in seconds",
-			// Buckets для типичных времён LLM: 0.5s - 120s
+			// Buckets for typical LLM times: 0.5s - 120s
 			// Extended to 120s for background jobs (archiver can take 60+ seconds)
 			Buckets: []float64{0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30, 45, 60, 90, 120},
 		},
 		[]string{"user_id", "model", "status", "job_type"},
 	)
 
-	// llmRequestsTotal считает количество LLM запросов.
+	// llmRequestsTotal counts LLM requests.
 	// Labels:
-	//   - user_id: идентификатор пользователя
-	//   - model: название модели
-	//   - status: результат (success, error)
-	//   - job_type: тип операции (interactive, background)
+	//   - user_id: user identifier
+	//   - model: model name
+	//   - status: outcome (success, error)
+	//   - job_type: operation type (interactive, background)
 	llmRequestsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metricsNamespace,
@@ -50,12 +50,12 @@ var (
 		[]string{"user_id", "model", "status", "job_type"},
 	)
 
-	// llmTokensTotal считает использованные токены.
+	// llmTokensTotal counts tokens used.
 	// Labels:
-	//   - user_id: идентификатор пользователя
-	//   - model: название модели
-	//   - type: тип токенов (prompt, completion)
-	//   - job_type: тип операции (interactive, background)
+	//   - user_id: user identifier
+	//   - model: model name
+	//   - type: token type (prompt, completion)
+	//   - job_type: operation type (interactive, background)
 	llmTokensTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metricsNamespace,
@@ -66,11 +66,11 @@ var (
 		[]string{"user_id", "model", "type", "job_type"},
 	)
 
-	// llmCostTotal отслеживает кумулятивную стоимость LLM запросов (USD).
+	// llmCostTotal tracks cumulative LLM request cost (USD).
 	// Labels:
-	//   - user_id: идентификатор пользователя
-	//   - model: название модели
-	//   - job_type: тип операции (interactive, background)
+	//   - user_id: user identifier
+	//   - model: model name
+	//   - job_type: operation type (interactive, background)
 	llmCostTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metricsNamespace,
@@ -81,9 +81,9 @@ var (
 		[]string{"user_id", "model", "job_type"},
 	)
 
-	// llmRetriesTotal считает количество retry-попыток.
+	// llmRetriesTotal counts retry attempts.
 	// Labels:
-	//   - model: название модели
+	//   - model: model name
 	llmRetriesTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metricsNamespace,
@@ -107,7 +107,7 @@ func formatUserID(userID string) string {
 	return userID
 }
 
-// RecordLLMRequest записывает метрики LLM запроса.
+// RecordLLMRequest records LLM request metrics.
 // jobType should be "interactive" or "background" (use jobtype.JobType constants).
 func RecordLLMRequest(userID string, model string, durationSeconds float64, success bool, promptTokens, completionTokens int, cost *float64, jobType string) {
 	status := statusSuccess
@@ -132,7 +132,7 @@ func RecordLLMRequest(userID string, model string, durationSeconds float64, succ
 	}
 }
 
-// RecordLLMRetry записывает retry-попытку.
+// RecordLLMRetry records a retry attempt.
 func RecordLLMRetry(model string) {
 	llmRetriesTotal.WithLabelValues(model).Inc()
 }

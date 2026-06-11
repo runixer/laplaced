@@ -91,22 +91,22 @@ func TestSplitMessageSmart(t *testing.T) {
 			actual := SplitMessageSmart(tc.input, tc.limit)
 			assert.Equal(t, tc.expected, actual)
 
-			// Проверяем, что все части не превышают лимит (кроме принудительно разбитых)
+			// Verify that no part exceeds the limit (except force-split ones)
 			for i, chunk := range actual {
 				if len(chunk) > tc.limit {
-					// Проверяем, что это действительно неразбиваемый блок (например, код)
+					// Verify that this is really an unsplittable block (e.g., code)
 					hasCodeBlock := strings.Contains(chunk, "```")
 					assert.True(t, hasCodeBlock, "Chunk %d exceeds limit but doesn't contain code block: %s", i, chunk)
 				}
 			}
 
-			// Проверяем, что все важные слова из исходного текста присутствуют в чанках
+			// Verify that all important words from the source text are present in the chunks
 			joined := strings.Join(actual, " ")
-			// Извлекаем все слова из исходного текста (исключая markdown символы)
+			// Extract all words from the source text (excluding markdown symbols)
 			inputWords := strings.Fields(strings.ReplaceAll(tc.input, "\n", " "))
 			joinedWords := strings.Fields(strings.ReplaceAll(joined, "\n", " "))
 
-			// Проверяем, что количество слов примерно совпадает (может быть небольшая разница из-за обработки)
+			// Verify that the word count roughly matches (small differences possible due to processing)
 			assert.InDelta(t, len(inputWords), len(joinedWords), float64(len(inputWords))*0.1, "Word count should be approximately the same")
 		})
 	}
@@ -238,8 +238,8 @@ func TestGetSplitPriority(t *testing.T) {
 }
 
 func TestSplitMessageWithVerticalSpacing(t *testing.T) {
-	// Тест для проверки, что сообщения с двойными переносами (vertical spacing)
-	// разбиваются по этим границам, а не посреди абзацев
+	// Verifies that messages with double line breaks (vertical spacing)
+	// are split at those boundaries, not in the middle of paragraphs
 	input := `Первый абзац с несколькими строками текста
 Продолжение первого абзаца без точки
 
@@ -250,21 +250,21 @@ func TestSplitMessageWithVerticalSpacing(t *testing.T) {
 
 	chunks := SplitMessageSmart(input, 150)
 
-	// Отладочный вывод
+	// Debug output
 	t.Logf("Input length: %d", len(input))
 	t.Logf("Number of chunks: %d", len(chunks))
 	for i, chunk := range chunks {
 		t.Logf("Chunk %d (len=%d): %q", i, len(chunk), chunk)
 	}
 
-	// Проверяем, что абзацы не разорваны посреди
+	// Verify that paragraphs are not torn apart in the middle
 	for _, chunk := range chunks {
-		// Если чанк содержит "Первый абзац", он должен содержать и "Продолжение первого"
+		// If a chunk contains "Первый абзац", it must also contain "Продолжение первого"
 		if strings.Contains(chunk, "Первый абзац") {
 			assert.True(t, strings.Contains(chunk, "Продолжение первого"),
 				"First paragraph should not be split. Chunk: %q", chunk)
 		}
-		// Если чанк содержит "Второй абзац", он должен содержать и "Продолжение второго"
+		// If a chunk contains "Второй абзац", it must also contain "Продолжение второго"
 		if strings.Contains(chunk, "Второй абзац") {
 			assert.True(t, strings.Contains(chunk, "Продолжение второго"),
 				"Second paragraph should not be split. Chunk: %q", chunk)
@@ -273,7 +273,7 @@ func TestSplitMessageWithVerticalSpacing(t *testing.T) {
 }
 
 func TestRealWorldCodeBlockSplit(t *testing.T) {
-	// Реальный случай из логов - длинный текст с блоком кода
+	// Real-world case from logs - long text with a code block
 	input := `Ого, Константин, какой интересный запрос! Получил твоё сообщение и понял: настало время для настоящего стресс-теста. Вызов принят! "Пожёстче" так "пожёстче".
 
 Я подготовил набор тест-кейсов, чтобы проверить и показать самые каверзные уголки форматирования в Telegram MarkdownV2. Поехали!
@@ -286,14 +286,14 @@ func TestRealWorldCodeBlockSplit(t *testing.T) {
 
 Ну как, Константин, достаточно "жёстко" получилось? Я постарался затронуть все скользкие моменты.`
 
-	// Разбиваем с лимитом, который должен был бы разорвать блок кода в оригинальной функции
+	// Split with a limit that would have torn the code block apart in the original function
 	chunks := SplitMessageSmart(input, 1000)
 
-	// Проверяем, что блок кода не разорван
+	// Verify that the code block is not torn apart
 	codeBlockFound := false
 	for _, chunk := range chunks {
 		if strings.Contains(chunk, "```python") && strings.Contains(chunk, "```") {
-			// Проверяем, что блок кода полный
+			// Verify that the code block is complete
 			assert.True(t, strings.Contains(chunk, "def check_formatting"))
 			assert.True(t, strings.Contains(chunk, "return False"))
 			codeBlockFound = true
@@ -302,7 +302,7 @@ func TestRealWorldCodeBlockSplit(t *testing.T) {
 
 	assert.True(t, codeBlockFound, "Code block should be found intact in one of the chunks")
 
-	// Проверяем, что каждый чанк валиден (нет незакрытых блоков кода)
+	// Verify that every chunk is valid (no unclosed code blocks)
 	for i, chunk := range chunks {
 		codeBlockStarts := strings.Count(chunk, "```")
 		assert.True(t, codeBlockStarts%2 == 0, "Chunk %d should have even number of ``` markers: %s", i, chunk)
@@ -310,17 +310,17 @@ func TestRealWorldCodeBlockSplit(t *testing.T) {
 }
 
 func TestForceSplitChunk(t *testing.T) {
-	// Тест принудительного разбиения очень длинного текста без хороших точек разрыва
+	// Tests force-splitting very long text without good break points
 	longText := strings.Repeat("очень_длинное_слово_без_пробелов_и_знаков_препинания ", 100)
 
 	chunks := forceSplitChunk(longText, 100)
 
-	// Проверяем, что все чанки не превышают лимит
+	// Verify that no chunk exceeds the limit
 	for i, chunk := range chunks {
 		assert.LessOrEqual(t, len(chunk), 100, "Chunk %d exceeds limit: %d characters", i, len(chunk))
 	}
 
-	// Проверяем, что объединение дает исходный текст
+	// Verify that joining yields the original text
 	joined := strings.Join(chunks, " ")
 	assert.Equal(t, strings.TrimSpace(longText), strings.TrimSpace(joined))
 }

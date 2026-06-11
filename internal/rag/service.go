@@ -564,9 +564,9 @@ func (s *Service) LoadNewVectors() error {
 	return nil
 }
 
-// loadNewArtifactSummariesLocked загружает artifact summaries с захваченным мьютексом.
-// Требует: s.mu.Lock() уже вызван.
-// Инкрементально добавляет новые artifact summaries к уже загруженным (как LoadNewVectors для topics/facts/people).
+// loadNewArtifactSummariesLocked loads artifact summaries with the mutex held.
+// Requires: s.mu.Lock() already acquired.
+// Incrementally adds new artifact summaries to those already loaded (like LoadNewVectors for topics/facts/people).
 func (s *Service) loadNewArtifactSummariesLocked() error {
 	if s.artifactRepo == nil {
 		s.logger.Debug("artifactRepo is nil, skipping artifact loading")

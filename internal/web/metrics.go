@@ -9,17 +9,17 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
-// Prometheus метрики для HTTP сервера
+// Prometheus metrics for the HTTP server
 //
-// Метрики позволяют отслеживать:
-// - Время выполнения HTTP запросов
-// - Количество запросов по endpoint/method/status
+// These metrics track:
+// - HTTP request duration
+// - Number of requests by endpoint/method/status
 
 var (
-	// httpRequestDuration измеряет время выполнения HTTP запросов.
+	// httpRequestDuration measures HTTP request duration.
 	// Labels:
-	//   - handler: название handler'а (stats, topics, facts, etc.)
-	//   - method: HTTP метод (GET, POST)
+	//   - handler: handler name (stats, topics, facts, etc.)
+	//   - method: HTTP method (GET, POST)
 	//   - status: HTTP status code (200, 404, 500)
 	httpRequestDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -27,16 +27,16 @@ var (
 			Subsystem: "http",
 			Name:      "request_duration_seconds",
 			Help:      "Duration of HTTP requests in seconds",
-			// Buckets для типичных времён web UI: 10ms - 10s
+			// Buckets for typical web UI times: 10ms - 10s
 			Buckets: []float64{0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
 		},
 		[]string{"handler", "method", "status"},
 	)
 
-	// httpRequestsTotal считает количество HTTP запросов.
+	// httpRequestsTotal counts HTTP requests.
 	// Labels:
-	//   - handler: название handler'а
-	//   - method: HTTP метод
+	//   - handler: handler name
+	//   - method: HTTP method
 	//   - status: HTTP status code
 	httpRequestsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
@@ -76,8 +76,8 @@ func (rw *responseWriter) Flush() {
 	}
 }
 
-// metricsMiddleware записывает метрики для HTTP запросов.
-// handlerName используется как label для идентификации endpoint'а.
+// metricsMiddleware records metrics for HTTP requests.
+// handlerName is used as a label to identify the endpoint.
 func metricsMiddleware(handlerName string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -93,7 +93,7 @@ func metricsMiddleware(handlerName string, next http.HandlerFunc) http.HandlerFu
 	}
 }
 
-// instrumentHandler оборачивает handler с метриками.
+// instrumentHandler wraps a handler with metrics.
 func instrumentHandler(name string, handler http.HandlerFunc) http.HandlerFunc {
 	return metricsMiddleware(name, handler)
 }
