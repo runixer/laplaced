@@ -51,7 +51,7 @@ func TestPrincipal_GetOrCreate_DedupByADLogin(t *testing.T) {
 	require.NoError(t, store.Init())
 
 	sid1, created, err := store.GetOrCreatePrincipal(PrincipalInput{
-		ADLogin: "k.gruzdev", Email: "k.gruzdev@corp", DisplayName: "K Gruzdev",
+		ADLogin: "j.doe", Email: "j.doe@corp", DisplayName: "John Doe",
 	})
 	require.NoError(t, err)
 	assert.True(t, created, "first call creates the principal")
@@ -59,7 +59,7 @@ func TestPrincipal_GetOrCreate_DedupByADLogin(t *testing.T) {
 
 	// A second handle for the same person (same ad_login) reuses the scope —
 	// this is the unified cross-transport memory invariant.
-	sid2, created, err := store.GetOrCreatePrincipal(PrincipalInput{ADLogin: "k.gruzdev"})
+	sid2, created, err := store.GetOrCreatePrincipal(PrincipalInput{ADLogin: "j.doe"})
 	require.NoError(t, err)
 	assert.False(t, created, "same ad_login must not create a new principal")
 	assert.Equal(t, sid1, sid2)
@@ -76,7 +76,7 @@ func TestPrincipal_GetOrCreate_DedupByObjectGUIDAcrossLoginRename(t *testing.T) 
 	require.NoError(t, store.Init())
 
 	sid1, created, err := store.GetOrCreatePrincipal(PrincipalInput{
-		ObjectGUID: "guid-123", ADLogin: "k.gruzdev",
+		ObjectGUID: "guid-123", ADLogin: "j.doe",
 	})
 	require.NoError(t, err)
 	assert.True(t, created)
@@ -84,7 +84,7 @@ func TestPrincipal_GetOrCreate_DedupByObjectGUIDAcrossLoginRename(t *testing.T) 
 	// Same person, login renamed: object_guid still matches → same scope, and
 	// the new ad_login is backfilled.
 	sid2, created, err := store.GetOrCreatePrincipal(PrincipalInput{
-		ObjectGUID: "guid-123", ADLogin: "k.gruzdev2",
+		ObjectGUID: "guid-123", ADLogin: "j.doe2",
 	})
 	require.NoError(t, err)
 	assert.False(t, created)
@@ -93,7 +93,7 @@ func TestPrincipal_GetOrCreate_DedupByObjectGUIDAcrossLoginRename(t *testing.T) 
 	p, err := store.GetPrincipal(sid1)
 	require.NoError(t, err)
 	require.NotNil(t, p)
-	assert.Equal(t, "k.gruzdev2", p.ADLogin)
+	assert.Equal(t, "j.doe2", p.ADLogin)
 }
 
 func TestPrincipal_GetOrCreate_BackfillObjectGUID(t *testing.T) {

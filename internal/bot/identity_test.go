@@ -113,7 +113,7 @@ func TestResolveScopeID_ChannelGetsChannelScope(t *testing.T) {
 
 func TestResolveScopeID_DMWithResolver_LinksPrincipal(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	pin := storage.PrincipalInput{ADLogin: "k.gruzdev", DisplayName: "K G"}
+	pin := storage.PrincipalInput{ADLogin: "j.doe", DisplayName: "John Doe"}
 	resolver := &fakeResolver{out: &pin}
 
 	// First sight: no identity yet → resolve → get-or-create principal → link.

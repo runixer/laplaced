@@ -280,10 +280,10 @@ func TestMigration014_PrincipalModel(t *testing.T) {
 	if _, err := db.Exec("INSERT INTO scopes (id, scope_type) VALUES ('s1','principal'),('s2','principal')"); err != nil {
 		t.Fatalf("seed scopes: %v", err)
 	}
-	if _, err := db.Exec("INSERT INTO principals (scope_id, ad_login) VALUES ('s1','k.gruzdev')"); err != nil {
+	if _, err := db.Exec("INSERT INTO principals (scope_id, ad_login) VALUES ('s1','j.doe')"); err != nil {
 		t.Fatalf("first principal: %v", err)
 	}
-	if _, err := db.Exec("INSERT INTO principals (scope_id, ad_login) VALUES ('s2','k.gruzdev')"); err == nil {
+	if _, err := db.Exec("INSERT INTO principals (scope_id, ad_login) VALUES ('s2','j.doe')"); err == nil {
 		t.Error("expected UNIQUE ad_login violation, got nil")
 	}
 	// But two NULL ad_logins must coexist (partial index ignores NULLs).

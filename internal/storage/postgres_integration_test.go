@@ -164,7 +164,7 @@ func TestPostgresPrincipalModel(t *testing.T) {
 
 	// Principal dedup by ad_login across two handles (unified memory).
 	sid, created, err := store.GetOrCreatePrincipal(PrincipalInput{
-		ObjectGUID: "pg-guid-1", ADLogin: "k.gruzdev", Email: "k.gruzdev@corp", DisplayName: "K G",
+		ObjectGUID: "pg-guid-1", ADLogin: "j.doe", Email: "j.doe@corp", DisplayName: "John Doe",
 	})
 	if err != nil || !created {
 		t.Fatalf("GetOrCreatePrincipal create: sid=%q created=%v err=%v", sid, created, err)
@@ -174,7 +174,7 @@ func TestPostgresPrincipalModel(t *testing.T) {
 		t.Fatalf("GetOrCreatePrincipal dedup: again=%q created=%v err=%v (want %q)", again, created, err, sid)
 	}
 	p, err := store.GetPrincipal(sid)
-	if err != nil || p == nil || p.ADLogin != "k.gruzdev" {
+	if err != nil || p == nil || p.ADLogin != "j.doe" {
 		t.Fatalf("GetPrincipal: %+v err=%v", p, err)
 	}
 
@@ -278,7 +278,7 @@ func TestPostgresUserIsolation(t *testing.T) {
 func TestPostgresUnifiedMemory(t *testing.T) {
 	store := openTestPG(t)
 
-	scope, created, err := store.GetOrCreatePrincipal(PrincipalInput{ADLogin: "k.gruzdev", DisplayName: "K G"})
+	scope, created, err := store.GetOrCreatePrincipal(PrincipalInput{ADLogin: "j.doe", DisplayName: "John Doe"})
 	if err != nil || !created {
 		t.Fatalf("GetOrCreatePrincipal: scope=%q created=%v err=%v", scope, created, err)
 	}

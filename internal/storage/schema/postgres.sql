@@ -1,4 +1,4 @@
--- Consolidated PostgreSQL schema (variant-C / Стадия 2).
+-- Consolidated PostgreSQL schema.
 --
 -- This is the cumulative end-state of the SQLite bootstrap DDL + migrations
 -- 001–013, translated to PostgreSQL. PostgreSQL is a greenfield backend, so
@@ -225,7 +225,7 @@ CREATE INDEX IF NOT EXISTS idx_artifacts_hash ON artifacts(user_id, content_hash
 CREATE INDEX IF NOT EXISTS idx_artifacts_message_id ON artifacts(user_id, message_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_type ON artifacts(user_id, file_type);
 
--- Variant-C identity model (C3). Four normalized tables:
+-- Principal identity model. Four normalized tables:
 --   scopes      thin registry of memory tenants (id = partition key).
 --   identities  (transport, native_id) -> scope_id map; many handles per principal.
 --   principals  AD-backed person details, dedup'd by object_guid then ad_login.

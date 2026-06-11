@@ -197,7 +197,7 @@ func TestHandleIncoming_DMAccessGate(t *testing.T) {
 
 	t.Run("trusted DM sender is admitted (no denial, no passive store)", func(t *testing.T) {
 		tr := &stubTransport{kind: transportMattermost}
-		resolver := &fakeResolver{trusted: true, out: &storage.PrincipalInput{ADLogin: "k.gruzdev"}}
+		resolver := &fakeResolver{trusted: true, out: &storage.PrincipalInput{ADLogin: "j.doe"}}
 		b, mockStore := handleIncomingTestBot(t, resolver, tr)
 		mockStore.On("GetIdentity", transportMattermost, "saml1").Return((*storage.Identity)(nil), nil)
 		mockStore.On("GetOrCreatePrincipal", mock.Anything).Return(storage.ScopeID("scope-uuid"), true, nil)

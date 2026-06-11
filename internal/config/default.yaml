@@ -21,8 +21,8 @@ telegram:
   proxy_url: ""
 
 # Mattermost/Time Configuration (used when transport: "mattermost")
-# server_url/bot_token/allowed_user_ids come from the work overlay + env.
-# proxy_url is the corp proxy (per-client only — never a global HTTP_PROXY).
+# server_url/bot_token/allowed_user_ids come from an overlay config + env.
+# proxy_url is an optional egress proxy (per-client only — never a global HTTP_PROXY).
 mattermost:
   server_url: ""
   bot_token: ""
@@ -30,7 +30,7 @@ mattermost:
   allowed_user_ids: []
   # principal_resolver (optional): its mere presence turns on principal identity
   # resolution for DMs — many of one person's transport handles share one memory
-  # scope (variant-C). Absent (home/default) = passthrough: every DM sender gets
+  # scope. Absent (default) = passthrough: every DM sender gets
   # its own isolated scope, exactly as before. The trust gate is the account's
   # auth_service (never the self-claimed email); local accounts are never linked.
   # principal_resolver:
@@ -259,13 +259,13 @@ bot:
 
 # Database Configuration
 database:
-  # driver selects the backend: "sqlite" (default, home) or "postgres" (corp).
+  # driver selects the backend: "sqlite" (default) or "postgres".
   driver: "sqlite"
   path: "data/laplaced.db"
   # PostgreSQL backend (driver: postgres). Password MUST come from the env var
   # LAPLACED_DATABASE_PASSWORD, never a committed literal.
   # postgres:
-  #   host: "postgresql-ai-dev.service.corp.alfacapital.ru"
+  #   host: "<postgres-host>"
   #   port: 5432
   #   database: "laplaced"
   #   user: "laplaced"
