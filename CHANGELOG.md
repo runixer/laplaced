@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Links with `&` in the URL and odd code-fence language tags no longer trigger a "can't parse entities" plain-text fallback.
 - Memory extraction no longer discards a valid result when the model returns fact ids as numbers or wraps the JSON in garbage.
 - File metadata extraction recovers from empty model responses with an immediate retry instead of failing the artifact and waiting out the backoff.
+- Provider failures injected mid-generation (truncated responses with an embedded error) are now retried instead of being treated as successful completions.
 
 ## [0.10.0] - 2026-06-11
 
