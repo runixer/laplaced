@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `fact_history`/`agent_logs` retention cleanup failed on PostgreSQL 15 and older ("subquery in FROM must have an alias"), so those tables grew unbounded.
+- Long replies can no longer be lost to Telegram's "message is too long" — chunks are re-split when the rendered HTML exceeds the wire limit.
+- Image captions over Telegram's limit no longer fall back to raw markdown with visible asterisks; overflow is sent as a follow-up message.
+- Tables are no longer cut between rows when a reply is split across messages; oversized tables repeat their header in each part.
+- Cyrillic replies are no longer split twice as eagerly as intended (the splitter measured bytes instead of characters).
+- Links with `&` in the URL and odd code-fence language tags no longer trigger a "can't parse entities" plain-text fallback.
+- Memory extraction no longer discards a valid result when the model returns fact ids as numbers or wraps the JSON in garbage.
+- File metadata extraction recovers from empty model responses with an immediate retry instead of failing the artifact and waiting out the backoff.
 
 ## [0.10.0] - 2026-06-11
 
