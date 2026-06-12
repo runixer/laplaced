@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -114,7 +114,7 @@ type Request struct {
 	// InputImages are reference images for editing/combining. Pass the
 	// user's attached photos or artifacts loaded from storage. May be empty
 	// for pure text-to-image generation.
-	InputImages []openrouter.FilePart
+	InputImages []llm.FilePart
 
 	// AspectRatio is one of the values accepted by the target model, e.g.
 	// "1:1", "16:9", "21:9". Empty means model default (typically 1:1).

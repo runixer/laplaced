@@ -13,8 +13,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/obs"
-	"github.com/runixer/laplaced/internal/openrouter"
 )
 
 // Outcome classifies the terminal state of a Generate call. It lives on
@@ -62,13 +62,13 @@ func outcomeFromKind(k FailureKind) string {
 // Agent wraps an OpenRouter client and emits image-generation requests with
 // modalities=["image","text"] set.
 type Agent struct {
-	client openrouter.Client
+	client llm.Client
 	cfg    *config.ImageGeneratorConfig
 	logger *slog.Logger
 }
 
 // New constructs an image-generation Agent.
-func New(client openrouter.Client, cfg *config.ImageGeneratorConfig, logger *slog.Logger) *Agent {
+func New(client llm.Client, cfg *config.ImageGeneratorConfig, logger *slog.Logger) *Agent {
 	return &Agent{
 		client: client,
 		cfg:    cfg,
@@ -134,11 +134,11 @@ func (a *Agent) Generate(ctx context.Context, req Request) (resp *Response, err 
 	// "image_url" shape — the unified "file" FilePart shape used by text
 	// Gemini models produces "Invalid file type: image/…" 400 errors here.
 	parts := make([]interface{}, 0, 1+len(req.InputImages))
-	parts = append(parts, openrouter.TextPart{Type: "text", Text: req.Prompt})
+	parts = append(parts, llm.TextPart{Type: "text", Text: req.Prompt})
 	for _, img := range req.InputImages {
-		parts = append(parts, openrouter.ImageURLPart{
+		parts = append(parts, llm.ImageURLPart{
 			Type:     "image_url",
-			ImageURL: openrouter.ImageURLValue{URL: img.File.FileData},
+			ImageURL: llm.ImageURLValue{URL: img.File.FileData},
 		})
 	}
 
@@ -154,9 +154,9 @@ func (a *Agent) Generate(ctx context.Context, req Request) (resp *Response, err 
 		imageSize = a.cfg.DefaultImageSize
 	}
 
-	var imgCfg *openrouter.ImageConfig
+	var imgCfg *llm.ImageConfig
 	if aspectRatio != "" || imageSize != "" {
-		imgCfg = &openrouter.ImageConfig{
+		imgCfg = &llm.ImageConfig{
 			AspectRatio: aspectRatio,
 			ImageSize:   imageSize,
 		}
@@ -170,11 +170,11 @@ func (a *Agent) Generate(ctx context.Context, req Request) (resp *Response, err 
 		attribute.String("imagegen.image_size", imageSize),
 	)
 
-	orReq := openrouter.ChatCompletionRequest{
+	orReq := llm.ChatCompletionRequest{
 		Model:       a.cfg.Model,
 		Modalities:  []string{"image", "text"},
 		ImageConfig: imgCfg,
-		Messages: []openrouter.Message{
+		Messages: []llm.Message{
 			{Role: "user", Content: parts},
 		},
 		UserID: string(req.UserID),
@@ -188,7 +188,7 @@ func (a *Agent) Generate(ctx context.Context, req Request) (resp *Response, err 
 		// upstream errors so dashboards can plot "timeout rate per model"
 		// and tell "openai needs >180s" apart from real provider failures.
 		failure := &ImagegenFailure{
-			Kind:  classifyFailure(callErr, openrouter.ResponseMessage{}, ""),
+			Kind:  classifyFailure(callErr, llm.ResponseMessage{}, ""),
 			Cause: callErr,
 		}
 		outcome = outcomeFromKind(failure.Kind)

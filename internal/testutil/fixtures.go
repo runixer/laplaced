@@ -3,7 +3,7 @@ package testutil
 import (
 	"time"
 
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -258,16 +258,16 @@ func TestPeople() []storage.Person {
 
 // MockChatResponse creates a mock ChatCompletionResponse with the given content.
 // Token counts are set to reasonable defaults (150/30/180).
-func MockChatResponse(content string) openrouter.ChatCompletionResponse {
+func MockChatResponse(content string) llm.ChatCompletionResponse {
 	return MockChatResponseWithTokens(content, 150, 30)
 }
 
 // MockChatResponseWithTokens creates a mock ChatCompletionResponse with the given content
 // and token counts. TotalTokens is calculated automatically.
-func MockChatResponseWithTokens(content string, promptTokens, completionTokens int) openrouter.ChatCompletionResponse {
-	var resp openrouter.ChatCompletionResponse
-	resp.Choices = append(resp.Choices, openrouter.ResponseChoice{
-		Message: openrouter.ResponseMessage{
+func MockChatResponseWithTokens(content string, promptTokens, completionTokens int) llm.ChatCompletionResponse {
+	var resp llm.ChatCompletionResponse
+	resp.Choices = append(resp.Choices, llm.ResponseChoice{
+		Message: llm.ResponseMessage{
 			Role:    "assistant",
 			Content: content,
 		},
@@ -280,10 +280,10 @@ func MockChatResponseWithTokens(content string, promptTokens, completionTokens i
 
 // MockChatResponseWithToolCalls creates a mock ChatCompletionResponse with tool calls.
 // Token counts are set to reasonable defaults (150/30/180).
-func MockChatResponseWithToolCalls(content string, toolCalls []openrouter.ToolCall) openrouter.ChatCompletionResponse {
-	var resp openrouter.ChatCompletionResponse
-	resp.Choices = append(resp.Choices, openrouter.ResponseChoice{
-		Message: openrouter.ResponseMessage{
+func MockChatResponseWithToolCalls(content string, toolCalls []llm.ToolCall) llm.ChatCompletionResponse {
+	var resp llm.ChatCompletionResponse
+	resp.Choices = append(resp.Choices, llm.ResponseChoice{
+		Message: llm.ResponseMessage{
 			Role:      "assistant",
 			Content:   content,
 			ToolCalls: toolCalls,
@@ -296,8 +296,8 @@ func MockChatResponseWithToolCalls(content string, toolCalls []openrouter.ToolCa
 }
 
 // MockToolCall creates a mock ToolCall for testing.
-func MockToolCall(id, name, arguments string) openrouter.ToolCall {
-	return openrouter.ToolCall{
+func MockToolCall(id, name, arguments string) llm.ToolCall {
+	return llm.ToolCall{
 		ID:   id,
 		Type: "function",
 		Function: struct {

@@ -7,11 +7,11 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 )
 
 // MediaEntry is the JSON shape of one file in an *.media_parts span event.
-// Replay relies on this exact field layout to reconstruct openrouter.FilePart
+// Replay relies on this exact field layout to reconstruct llm.FilePart
 // from a snapshot DB by content_hash — keep changes coordinated with
 // cmd/testbot/snapshot/extract.go.
 type MediaEntry struct {
@@ -43,7 +43,7 @@ type MediaPartWithSource struct {
 // base64 payload through Tempo.
 //
 // Non-FilePart entries are skipped silently — callers may pass a heterogenous
-// content slice (e.g., openrouter.Message.Content as []interface{} mixing
+// content slice (e.g., llm.Message.Content as []interface{} mixing
 // TextPart and FilePart). Returns "" when nothing recordable is found.
 //
 // Use FormatMediaPartsWithSources when entries have distinct origins.
@@ -60,7 +60,7 @@ func FormatMediaParts(parts []interface{}, source string) string {
 func FormatMediaPartsWithSources(parts []MediaPartWithSource) string {
 	out := make([]MediaEntry, 0, len(parts))
 	for _, p := range parts {
-		fp, ok := p.Part.(openrouter.FilePart)
+		fp, ok := p.Part.(llm.FilePart)
 		if !ok {
 			continue
 		}

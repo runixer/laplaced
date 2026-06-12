@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -70,10 +70,10 @@ func TestPerformManagePeople_CreateSuccess(t *testing.T) {
 	mockORClient := new(testutil.MockOpenRouterClient)
 
 	embedding := testutil.TestEmbedding()
-	mockORClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req openrouter.EmbeddingRequest) bool {
+	mockORClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req llm.EmbeddingRequest) bool {
 		return len(req.Input) > 0
-	})).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{{Embedding: embedding}},
+	})).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{{Embedding: embedding}},
 	}, nil)
 
 	mockStore.On("FindPersonByName", storage.ScopeID("123"), "Alice").Return(nil, nil)
@@ -104,8 +104,8 @@ func TestPerformManagePeople_CreateWithAllFields(t *testing.T) {
 	mockORClient := new(testutil.MockOpenRouterClient)
 
 	embedding := testutil.TestEmbedding()
-	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{{Embedding: embedding}},
+	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{{Embedding: embedding}},
 	}, nil)
 
 	mockStore.On("FindPersonByName", storage.ScopeID("123"), "Bob").Return(nil, nil)
@@ -181,8 +181,8 @@ func TestPerformManagePeople_UpdateByID(t *testing.T) {
 	mockORClient := new(testutil.MockOpenRouterClient)
 
 	embedding := testutil.TestEmbedding()
-	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{{Embedding: embedding}},
+	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{{Embedding: embedding}},
 	}, nil)
 
 	existingPerson := storage.Person{
@@ -253,8 +253,8 @@ func TestPerformManagePeople_UpdateWithAliases(t *testing.T) {
 	mockORClient := new(testutil.MockOpenRouterClient)
 
 	embedding := testutil.TestEmbedding()
-	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{{Embedding: embedding}},
+	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{{Embedding: embedding}},
 	}, nil)
 
 	existingPerson := storage.Person{
@@ -493,7 +493,7 @@ func TestPerformCreatePerson_WithEmbeddingFailure(t *testing.T) {
 	})).Return(int64(42), nil)
 
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).
-		Return(openrouter.EmbeddingResponse{}, errors.New("API error"))
+		Return(llm.EmbeddingResponse{}, errors.New("API error"))
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 	exec.SetPeopleRepository(mockStore)

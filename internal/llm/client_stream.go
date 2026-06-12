@@ -1,4 +1,4 @@
-package openrouter
+package llm
 
 import (
 	"bufio"
@@ -93,7 +93,7 @@ type ChatCompletionStream struct {
 // retried. Once the SSE body starts flowing we never reconnect — partial
 // streams produce an Err event and the consumer decides what to do.
 //
-// Tracing: emits an openrouter.CreateChatCompletionStream span with the same
+// Tracing: emits an llm.CreateChatCompletionStream span with the same
 // gen_ai.* / llm.* attribute surface as CreateChatCompletion. The span's
 // lifetime spans the entire operation — when openStream returns a usable HTTP
 // response, span ownership is handed to pumpStream, which sets the response
@@ -103,8 +103,8 @@ func (c *clientImpl) CreateChatCompletionStream(ctx context.Context, req ChatCom
 	startTime := time.Now()
 	jt := jobtype.FromContext(ctx).String()
 
-	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/openrouter").Start(
-		ctx, "openrouter.CreateChatCompletionStream",
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/llm").Start(
+		ctx, "llm.CreateChatCompletionStream",
 		trace.WithAttributes(
 			attribute.String("gen_ai.system", "openrouter"),
 			attribute.String("gen_ai.request.model", req.Model),

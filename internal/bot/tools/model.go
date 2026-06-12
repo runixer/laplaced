@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/runixer/laplaced/internal/agentlog"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -15,13 +15,13 @@ func (e *ToolExecutor) performModelTool(ctx context.Context, userID storage.Scop
 
 	startTime := time.Now()
 
-	req := openrouter.ChatCompletionRequest{
+	req := llm.ChatCompletionRequest{
 		Model: modelName,
-		Messages: []openrouter.Message{
+		Messages: []llm.Message{
 			{
 				Role: "user",
 				Content: []interface{}{
-					openrouter.TextPart{Type: "text", Text: query},
+					llm.TextPart{Type: "text", Text: query},
 				},
 			},
 		},

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -16,7 +16,7 @@ func (e *ToolExecutor) performAddFact(ctx context.Context, userID storage.ScopeI
 		return "", fmt.Errorf("content is required for adding a fact")
 	}
 
-	resp, err := e.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
+	resp, err := e.orClient.CreateEmbeddings(ctx, llm.EmbeddingRequest{
 		Model:      e.cfg.Embedding.Model,
 		Dimensions: e.cfg.Embedding.Dimensions,
 		Input:      []string{p.Content},
@@ -122,7 +122,7 @@ func (e *ToolExecutor) performUpdateFact(ctx context.Context, userID storage.Sco
 		return "", fmt.Errorf("fact ID is required for update")
 	}
 
-	resp, err := e.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
+	resp, err := e.orClient.CreateEmbeddings(ctx, llm.EmbeddingRequest{
 		Model:      e.cfg.Embedding.Model,
 		Dimensions: e.cfg.Embedding.Dimensions,
 		Input:      []string{p.Content},

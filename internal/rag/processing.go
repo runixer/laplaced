@@ -11,8 +11,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/obs"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -208,7 +208,7 @@ func (s *Service) processChunk(ctx context.Context, userID storage.ScopeID, chun
 
 	if len(embeddingInputs) > 0 {
 		embeddingStart := time.Now()
-		resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
+		resp, err := s.client.CreateEmbeddings(ctx, llm.EmbeddingRequest{
 			Model:      s.cfg.Embedding.Model,
 			Dimensions: s.cfg.Embedding.Dimensions,
 			Input:      embeddingInputs,
@@ -346,7 +346,7 @@ func (s *Service) processChunkWithStats(ctx context.Context, userID storage.Scop
 
 	if len(embeddingInputs) > 0 {
 		embeddingStart := time.Now()
-		resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
+		resp, err := s.client.CreateEmbeddings(ctx, llm.EmbeddingRequest{
 			Model:      s.cfg.Embedding.Model,
 			Dimensions: s.cfg.Embedding.Dimensions,
 			Input:      embeddingInputs,

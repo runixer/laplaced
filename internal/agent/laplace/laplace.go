@@ -20,8 +20,8 @@ import (
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/obs"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -34,7 +34,7 @@ const (
 // Laplace is the main chat agent that handles user conversations.
 type Laplace struct {
 	cfg          *config.Config
-	orClient     openrouter.Client
+	orClient     llm.Client
 	ragService   rag.Retriever
 	msgRepo      storage.MessageRepository
 	factRepo     storage.FactRepository
@@ -45,13 +45,13 @@ type Laplace struct {
 	logger       *slog.Logger
 
 	// Pre-built tools
-	tools []openrouter.Tool
+	tools []llm.Tool
 }
 
 // New creates a new Laplace agent.
 func New(
 	cfg *config.Config,
-	orClient openrouter.Client,
+	orClient llm.Client,
 	ragService rag.Retriever,
 	msgRepo storage.MessageRepository,
 	factRepo storage.FactRepository,
@@ -160,11 +160,11 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 	}
 
 	// Prepare plugins
-	var plugins []openrouter.Plugin
+	var plugins []llm.Plugin
 	if l.cfg.OpenRouter.PDFParserEngine != "" {
-		plugins = append(plugins, openrouter.Plugin{
+		plugins = append(plugins, llm.Plugin{
 			ID: "file-parser",
-			PDF: openrouter.PDFConfig{
+			PDF: llm.PDFConfig{
 				Engine: l.cfg.OpenRouter.PDFParserEngine,
 			},
 		})
@@ -173,10 +173,10 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 	// Build reasoning config once — constant across tool iterations.
 	// Explicit reasoning.effort prevents Gemini 3.1 Pro from leaking internal
 	// chain-of-thought into message.content (see docs/bugs/2026-04-22-laplace-thought-leak/).
-	var reasoning *openrouter.ReasoningConfig
+	var reasoning *llm.ReasoningConfig
 	thinkingLevel := l.cfg.Agents.GetChatThinkingLevel()
 	if thinkingLevel != "" && thinkingLevel != "off" {
-		reasoning = &openrouter.ReasoningConfig{Effort: thinkingLevel}
+		reasoning = &llm.ReasoningConfig{Effort: thinkingLevel}
 	}
 
 	// Tool loop
@@ -199,7 +199,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 		}
 		toolIterationsFinal++
 
-		orReq := openrouter.ChatCompletionRequest{
+		orReq := llm.ChatCompletionRequest{
 			Model:     l.cfg.Agents.GetChatModel(),
 			Messages:  orMessages,
 			Plugins:   plugins,
@@ -252,7 +252,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 				if len(orMessages) > 0 && orMessages[0].Role == "system" {
 					if contentSlice, ok := orMessages[0].Content.([]interface{}); ok {
 						contentSlice = append(contentSlice,
-							openrouter.TextPart{Type: "text", Text: nonce})
+							llm.TextPart{Type: "text", Text: nonce})
 						orMessages[0].Content = contentSlice
 					}
 				}
@@ -306,7 +306,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 			if outcome.content == "" {
 				content = nil
 			}
-			orMessages = append(orMessages, openrouter.Message{
+			orMessages = append(orMessages, llm.Message{
 				Role:             "assistant",
 				Content:          content,
 				ToolCalls:        outcome.toolCalls,
@@ -373,7 +373,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 // fields the tool loop in Execute reads after each iteration.
 type turnOutcome struct {
 	content           string
-	toolCalls         []openrouter.ToolCall
+	toolCalls         []llm.ToolCall
 	reasoningDetails  interface{}
 	finishReason      string
 	model             string
@@ -389,7 +389,7 @@ type turnOutcome struct {
 // streaming OpenRouter API based on req.UseStreaming.
 func (l *Laplace) runChatTurn(
 	ctx context.Context,
-	orReq openrouter.ChatCompletionRequest,
+	orReq llm.ChatCompletionRequest,
 	req *Request,
 	logger *slog.Logger,
 ) (*turnOutcome, error) {
@@ -443,10 +443,10 @@ func (l *Laplace) executeToolCalls(
 	ctx context.Context,
 	handler ToolHandler,
 	tcc ToolCallContext,
-	toolCalls []openrouter.ToolCall,
+	toolCalls []llm.ToolCall,
 	onToolStart func(toolName, arguments string),
 	logger *slog.Logger,
-) ([]openrouter.Message, []int64) {
+) ([]llm.Message, []int64) {
 	n := len(toolCalls)
 	if n == 0 {
 		return nil, nil
@@ -455,16 +455,16 @@ func (l *Laplace) executeToolCalls(
 	// Each tool call's outcome is stored by its declared index so the assembled
 	// result preserves order regardless of execution order.
 	type execResult struct {
-		msg         openrouter.Message
+		msg         llm.Message
 		artifactIDs []int64
 	}
 	results := make([]execResult, n)
 
-	run := func(i int, tc openrouter.ToolCall) {
+	run := func(i int, tc llm.ToolCall) {
 		result, err := handler.ExecuteToolCall(ctx, tcc, tc.Function.Name, tc.Function.Arguments)
 		if err != nil {
 			logger.Error("tool execution failed", "error", err, "tool", tc.Function.Name)
-			results[i] = execResult{msg: openrouter.Message{
+			results[i] = execResult{msg: llm.Message{
 				Role:       "tool",
 				Content:    fmt.Sprintf("Tool execution failed: %v", err),
 				ToolCallID: tc.ID,
@@ -472,7 +472,7 @@ func (l *Laplace) executeToolCalls(
 			return
 		}
 		results[i] = execResult{
-			msg:         openrouter.Message{Role: "tool", Content: result.Content, ToolCallID: tc.ID},
+			msg:         llm.Message{Role: "tool", Content: result.Content, ToolCallID: tc.ID},
 			artifactIDs: result.GeneratedArtifactIDs,
 		}
 	}
@@ -496,7 +496,7 @@ func (l *Laplace) executeToolCalls(
 		if tc.Function.Name == "generate_image" {
 			wg.Add(1)
 			sem <- struct{}{}
-			go func(i int, tc openrouter.ToolCall) {
+			go func(i int, tc llm.ToolCall) {
 				defer wg.Done()
 				defer func() { <-sem }()
 				run(i, tc)
@@ -507,7 +507,7 @@ func (l *Laplace) executeToolCalls(
 	}
 	wg.Wait()
 
-	toolMessages := make([]openrouter.Message, 0, n)
+	toolMessages := make([]llm.Message, 0, n)
 	var artifactIDs []int64
 	for i := range results {
 		toolMessages = append(toolMessages, results[i].msg)
@@ -528,7 +528,7 @@ func (l *Laplace) recordMediaParts(ctx context.Context, req *Request, contextDat
 	span := trace.SpanFromContext(ctx)
 	parts := make([]agent.MediaPartWithSource, 0, len(req.CurrentMessageParts)+len(contextData.SelectedArtifactIDs))
 	for _, p := range req.CurrentMessageParts {
-		if _, ok := p.(openrouter.FilePart); ok {
+		if _, ok := p.(llm.FilePart); ok {
 			parts = append(parts, agent.MediaPartWithSource{Part: p, Source: "current_message"})
 		}
 	}
@@ -552,10 +552,10 @@ func (l *Laplace) recordMediaParts(ctx context.Context, req *Request, contextDat
 // collects FilePart entries whose file_data is an image MIME. These are
 // used by tools that edit/combine attached photos without the LLM having
 // to cite artifact IDs.
-func extractImageFileParts(parts []interface{}) []openrouter.FilePart {
-	var images []openrouter.FilePart
+func extractImageFileParts(parts []interface{}) []llm.FilePart {
+	var images []llm.FilePart
 	for _, p := range parts {
-		fp, ok := p.(openrouter.FilePart)
+		fp, ok := p.(llm.FilePart)
 		if !ok {
 			continue
 		}
@@ -619,7 +619,7 @@ func (l *Laplace) LogExecution(ctx context.Context, userID storage.ScopeID, resp
 }
 
 // formatMessagesForLog formats OpenRouter messages into a human-readable string.
-func formatMessagesForLog(messages []openrouter.Message) string {
+func formatMessagesForLog(messages []llm.Message) string {
 	var sb strings.Builder
 	for i, msg := range messages {
 		if i > 0 {
@@ -633,7 +633,7 @@ func formatMessagesForLog(messages []openrouter.Message) string {
 			sb.WriteString(content)
 		case []interface{}:
 			for _, part := range content {
-				if tp, ok := part.(openrouter.TextPart); ok {
+				if tp, ok := part.(llm.TextPart); ok {
 					sb.WriteString(tp.Text)
 				} else if m, ok := part.(map[string]interface{}); ok {
 					if t, ok := m["type"].(string); ok && t == "text" {

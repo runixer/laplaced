@@ -17,8 +17,8 @@ import (
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/memory"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -44,7 +44,7 @@ type Services struct {
 	AgentExecutor    *agent.Executor
 	Translator       *i18n.Translator
 	FileStorage      files.Storage
-	OpenRouterClient openrouter.Client
+	OpenRouterClient llm.Client
 }
 
 // NewArtifactStorage selects the artifact blob backend from config: an
@@ -86,7 +86,7 @@ func SetupServices(
 	logger *slog.Logger,
 	cfg *config.Config,
 	store *storage.Store,
-	client openrouter.Client,
+	client llm.Client,
 	translator *i18n.Translator,
 ) (*Services, error) {
 	// Validate inputs

@@ -9,7 +9,7 @@ import (
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
@@ -22,13 +22,13 @@ import (
 func TestExecuteToolCalls(t *testing.T) {
 	tests := []struct {
 		name      string
-		toolCalls []openrouter.ToolCall
+		toolCalls []llm.ToolCall
 		mockSetup func(*mockToolHandler)
-		verify    func(*testing.T, []openrouter.Message)
+		verify    func(*testing.T, []llm.Message)
 	}{
 		{
 			name: "single successful tool call",
-			toolCalls: []openrouter.ToolCall{
+			toolCalls: []llm.ToolCall{
 				{
 					ID:   "call_1",
 					Type: "function",
@@ -45,7 +45,7 @@ func TestExecuteToolCalls(t *testing.T) {
 				h.On("ExecuteToolCall", mock.Anything, mock.Anything, "search_web", `{"query": "test"}`).
 					Return(&ToolResult{Content: "Search results: found 5 items"}, nil)
 			},
-			verify: func(t *testing.T, msgs []openrouter.Message) {
+			verify: func(t *testing.T, msgs []llm.Message) {
 				require.Len(t, msgs, 1)
 				assert.Equal(t, "tool", msgs[0].Role)
 				assert.Equal(t, "call_1", msgs[0].ToolCallID)
@@ -54,7 +54,7 @@ func TestExecuteToolCalls(t *testing.T) {
 		},
 		{
 			name: "tool call with error",
-			toolCalls: []openrouter.ToolCall{
+			toolCalls: []llm.ToolCall{
 				{
 					ID:   "call_2",
 					Type: "function",
@@ -71,7 +71,7 @@ func TestExecuteToolCalls(t *testing.T) {
 				h.On("ExecuteToolCall", mock.Anything, mock.Anything, "search_history", mock.Anything).
 					Return(nil, errors.New("database error"))
 			},
-			verify: func(t *testing.T, msgs []openrouter.Message) {
+			verify: func(t *testing.T, msgs []llm.Message) {
 				require.Len(t, msgs, 1)
 				assert.Equal(t, "tool", msgs[0].Role)
 				assert.Contains(t, msgs[0].Content, "Tool execution failed")
@@ -80,7 +80,7 @@ func TestExecuteToolCalls(t *testing.T) {
 		},
 		{
 			name: "multiple tool calls",
-			toolCalls: []openrouter.ToolCall{
+			toolCalls: []llm.ToolCall{
 				{
 					ID:   "call_1",
 					Type: "function",
@@ -110,7 +110,7 @@ func TestExecuteToolCalls(t *testing.T) {
 				h.On("ExecuteToolCall", mock.Anything, mock.Anything, "search_history", `{"query": "memory"}`).
 					Return(&ToolResult{Content: "History results"}, nil)
 			},
-			verify: func(t *testing.T, msgs []openrouter.Message) {
+			verify: func(t *testing.T, msgs []llm.Message) {
 				require.Len(t, msgs, 2)
 				assert.Equal(t, "call_1", msgs[0].ToolCallID)
 				assert.Equal(t, "Golang results", msgs[0].Content)
@@ -120,15 +120,15 @@ func TestExecuteToolCalls(t *testing.T) {
 		},
 		{
 			name:      "empty tool calls list",
-			toolCalls: []openrouter.ToolCall{},
+			toolCalls: []llm.ToolCall{},
 			mockSetup: func(h *mockToolHandler) {},
-			verify: func(t *testing.T, msgs []openrouter.Message) {
+			verify: func(t *testing.T, msgs []llm.Message) {
 				assert.Len(t, msgs, 0)
 			},
 		},
 		{
 			name: "mixed success and failure",
-			toolCalls: []openrouter.ToolCall{
+			toolCalls: []llm.ToolCall{
 				{
 					ID:   "call_1",
 					Type: "function",
@@ -158,7 +158,7 @@ func TestExecuteToolCalls(t *testing.T) {
 				h.On("ExecuteToolCall", mock.Anything, mock.Anything, "search_history", `{"query": "bad"}`).
 					Return(nil, errors.New("failed"))
 			},
-			verify: func(t *testing.T, msgs []openrouter.Message) {
+			verify: func(t *testing.T, msgs []llm.Message) {
 				require.Len(t, msgs, 2)
 				assert.Equal(t, "Success", msgs[0].Content)
 				assert.Contains(t, msgs[1].Content, "Tool execution failed")
@@ -191,8 +191,8 @@ func TestExecuteToolCalls(t *testing.T) {
 }
 
 // imgToolCall builds a generate_image tool call with the given id and prompt args.
-func imgToolCall(id, args string) openrouter.ToolCall {
-	return openrouter.ToolCall{
+func imgToolCall(id, args string) llm.ToolCall {
+	return llm.ToolCall{
 		ID:   id,
 		Type: "function",
 		Function: struct {
@@ -218,7 +218,7 @@ func TestExecuteToolCalls_ParallelImageGen(t *testing.T) {
 		Return(&ToolResult{Content: "img bird", GeneratedArtifactIDs: []int64{33}}, nil)
 
 	agent := &Laplace{logger: testutil.TestLogger()}
-	toolCalls := []openrouter.ToolCall{
+	toolCalls := []llm.ToolCall{
 		imgToolCall("c1", `{"prompt":"cat"}`),
 		imgToolCall("c2", `{"prompt":"dog"}`),
 		imgToolCall("c3", `{"prompt":"bird"}`),
@@ -252,7 +252,7 @@ func TestExecute_HappyPath(t *testing.T) {
 		UserID:              userID,
 		RawQuery:            "Hello",
 		HistoryContent:      "Hello",
-		CurrentMessageParts: []interface{}{openrouter.TextPart{Type: "text", Text: "Hello"}},
+		CurrentMessageParts: []interface{}{llm.TextPart{Type: "text", Text: "Hello"}},
 	}
 
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
@@ -292,7 +292,7 @@ func TestExecute_WithToolCall(t *testing.T) {
 		UserID:              userID,
 		RawQuery:            "Search for golang",
 		HistoryContent:      "Search for golang",
-		CurrentMessageParts: []interface{}{openrouter.TextPart{Type: "text", Text: "Search for golang"}},
+		CurrentMessageParts: []interface{}{llm.TextPart{Type: "text", Text: "Search for golang"}},
 	}
 
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
@@ -344,7 +344,7 @@ func TestExecute_EmptyResponseWithRetry(t *testing.T) {
 		UserID:              userID,
 		RawQuery:            "test",
 		HistoryContent:      "test",
-		CurrentMessageParts: []interface{}{openrouter.TextPart{Type: "text", Text: "test"}},
+		CurrentMessageParts: []interface{}{llm.TextPart{Type: "text", Text: "test"}},
 	}
 
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
@@ -380,7 +380,7 @@ func TestExecute_MaxEmptyRetries(t *testing.T) {
 		UserID:              userID,
 		RawQuery:            "test",
 		HistoryContent:      "test",
-		CurrentMessageParts: []interface{}{openrouter.TextPart{Type: "text", Text: "test"}},
+		CurrentMessageParts: []interface{}{llm.TextPart{Type: "text", Text: "test"}},
 	}
 
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
@@ -414,14 +414,14 @@ func TestExecute_LLMError(t *testing.T) {
 		UserID:              userID,
 		RawQuery:            "test",
 		HistoryContent:      "test",
-		CurrentMessageParts: []interface{}{openrouter.TextPart{Type: "text", Text: "test"}},
+		CurrentMessageParts: []interface{}{llm.TextPart{Type: "text", Text: "test"}},
 	}
 
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
 
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(openrouter.ChatCompletionResponse{}, errors.New("API error"))
+		Return(llm.ChatCompletionResponse{}, errors.New("API error"))
 
 	resp, err := agent.Execute(context.Background(), req, handler)
 	assert.Error(t, err)
@@ -444,7 +444,7 @@ func TestExecute_ResponseSanitization(t *testing.T) {
 		UserID:              userID,
 		RawQuery:            "test",
 		HistoryContent:      "test",
-		CurrentMessageParts: []interface{}{openrouter.TextPart{Type: "text", Text: "test"}},
+		CurrentMessageParts: []interface{}{llm.TextPart{Type: "text", Text: "test"}},
 	}
 
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
@@ -489,14 +489,14 @@ func TestExecute_WithPDFParserPlugin(t *testing.T) {
 		UserID:              userID,
 		RawQuery:            "test",
 		HistoryContent:      "test",
-		CurrentMessageParts: []interface{}{openrouter.TextPart{Type: "text", Text: "test"}},
+		CurrentMessageParts: []interface{}{llm.TextPart{Type: "text", Text: "test"}},
 	}
 
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
 
 	// Verify plugin is in request
-	mockORClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(r openrouter.ChatCompletionRequest) bool {
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(r llm.ChatCompletionRequest) bool {
 		return len(r.Plugins) == 1 && r.Plugins[0].ID == "file-parser" && r.Plugins[0].PDF.Engine == "legacy"
 	})).Return(
 		makeChatResponse("Response", WithTokens(5, 3, 8)), nil,
@@ -524,7 +524,7 @@ func TestExecute_IntermediateMessageWithToolCall(t *testing.T) {
 		UserID:              userID,
 		RawQuery:            "search",
 		HistoryContent:      "search",
-		CurrentMessageParts: []interface{}{openrouter.TextPart{Type: "text", Text: "search"}},
+		CurrentMessageParts: []interface{}{llm.TextPart{Type: "text", Text: "search"}},
 		OnIntermediateMessage: func(text string) {
 			intermediateMessages = append(intermediateMessages, text)
 		},
@@ -569,7 +569,7 @@ func TestExecute_MaxIterations(t *testing.T) {
 		UserID:              userID,
 		RawQuery:            "loop",
 		HistoryContent:      "loop",
-		CurrentMessageParts: []interface{}{openrouter.TextPart{Type: "text", Text: "loop"}},
+		CurrentMessageParts: []interface{}{llm.TextPart{Type: "text", Text: "loop"}},
 	}
 
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
@@ -627,7 +627,7 @@ func TestLogExecution(t *testing.T) {
 			OriginalQuery: "test query",
 			EnrichedQuery: "enriched query",
 		},
-		Messages: []openrouter.Message{
+		Messages: []llm.Message{
 			{Role: "user", Content: "Hello"},
 			{Role: "assistant", Content: "Hi"},
 		},
@@ -651,7 +651,7 @@ func TestExecute_WithToolStart(t *testing.T) {
 		UserID:              userID,
 		RawQuery:            "search",
 		HistoryContent:      "search",
-		CurrentMessageParts: []interface{}{openrouter.TextPart{Type: "text", Text: "search"}},
+		CurrentMessageParts: []interface{}{llm.TextPart{Type: "text", Text: "search"}},
 		OnToolStart: func(toolName, arguments string) {
 			typingCallCount++
 			seenToolNames = append(seenToolNames, toolName)

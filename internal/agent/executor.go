@@ -8,20 +8,20 @@ import (
 	"time"
 
 	"github.com/runixer/laplaced/internal/agentlog"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
 // Executor provides common execution logic for agents.
 type Executor struct {
-	client      openrouter.Client
+	client      llm.Client
 	agentLogger *agentlog.Logger
 	logger      *slog.Logger
 }
 
 // NewExecutor creates a new Executor.
 func NewExecutor(
-	client openrouter.Client,
+	client llm.Client,
 	agentLogger *agentlog.Logger,
 	logger *slog.Logger,
 ) *Executor {
@@ -39,10 +39,10 @@ type SingleShotRequest struct {
 	Model        string
 	SystemPrompt string
 	UserPrompt   string
-	Messages     []openrouter.Message // Alternative to SystemPrompt+UserPrompt
+	Messages     []llm.Message // Alternative to SystemPrompt+UserPrompt
 	Temperature  *float64
 	JSONMode     bool
-	JSONSchema   *openrouter.JSONSchema // Optional: strict JSON schema validation
+	JSONSchema   *llm.JSONSchema // Optional: strict JSON schema validation
 }
 
 // ExecuteSingleShot runs a single LLM call with logging.
@@ -51,13 +51,13 @@ func (e *Executor) ExecuteSingleShot(ctx context.Context, req SingleShotRequest)
 
 	messages := req.Messages
 	if messages == nil {
-		messages = []openrouter.Message{
+		messages = []llm.Message{
 			{Role: "system", Content: req.SystemPrompt},
 			{Role: "user", Content: req.UserPrompt},
 		}
 	}
 
-	orReq := openrouter.ChatCompletionRequest{
+	orReq := llm.ChatCompletionRequest{
 		Model:    req.Model,
 		Messages: messages,
 		UserID:   string(req.UserID),
@@ -65,12 +65,12 @@ func (e *Executor) ExecuteSingleShot(ctx context.Context, req SingleShotRequest)
 
 	if req.JSONMode {
 		if req.JSONSchema != nil {
-			orReq.ResponseFormat = openrouter.ResponseFormatJSONSchema{
+			orReq.ResponseFormat = llm.ResponseFormatJSONSchema{
 				Type:       "json_schema",
 				JSONSchema: *req.JSONSchema,
 			}
 		} else {
-			orReq.ResponseFormat = openrouter.ResponseFormat{Type: "json_object"}
+			orReq.ResponseFormat = llm.ResponseFormat{Type: "json_object"}
 		}
 	}
 
@@ -105,12 +105,12 @@ func (e *Executor) ExecuteSingleShot(ctx context.Context, req SingleShotRequest)
 // AgenticOptions for multi-turn agents.
 type AgenticOptions struct {
 	MaxTurns    int
-	Tools       []openrouter.Tool
-	ToolHandler func(ctx context.Context, calls []openrouter.ToolCall) []openrouter.Message
+	Tools       []llm.Tool
+	ToolHandler func(ctx context.Context, calls []llm.ToolCall) []llm.Message
 	Timeout     time.Duration
 	TurnTimeout time.Duration
-	Reasoning   *openrouter.ReasoningConfig
-	Plugins     []openrouter.Plugin
+	Reasoning   *llm.ReasoningConfig
+	Plugins     []llm.Plugin
 	ToolChoice  any // "auto", "none", "required", or specific tool
 }
 
@@ -120,7 +120,7 @@ func (e *Executor) ExecuteAgentic(ctx context.Context, req SingleShotRequest, op
 
 	messages := req.Messages
 	if messages == nil {
-		messages = []openrouter.Message{
+		messages = []llm.Message{
 			{Role: "system", Content: req.SystemPrompt},
 			{Role: "user", Content: req.UserPrompt},
 		}
@@ -141,7 +141,7 @@ func (e *Executor) ExecuteAgentic(ctx context.Context, req SingleShotRequest, op
 			turnCtx, turnCancel = context.WithTimeout(ctx, opts.TurnTimeout)
 		}
 
-		orReq := openrouter.ChatCompletionRequest{
+		orReq := llm.ChatCompletionRequest{
 			Model:     req.Model,
 			Messages:  messages,
 			Tools:     opts.Tools,
@@ -196,7 +196,7 @@ func (e *Executor) ExecuteAgentic(ctx context.Context, req SingleShotRequest, op
 		}
 
 		// Execute tools
-		messages = append(messages, openrouter.Message{
+		messages = append(messages, llm.Message{
 			Role:      "assistant",
 			Content:   choice.Message.Content,
 			ToolCalls: choice.Message.ToolCalls,
@@ -211,7 +211,7 @@ func (e *Executor) ExecuteAgentic(ctx context.Context, req SingleShotRequest, op
 	return nil, fmt.Errorf("max turns (%d) exceeded", opts.MaxTurns)
 }
 
-func (e *Executor) logSuccess(ctx context.Context, req SingleShotRequest, result *Response, raw *openrouter.ChatCompletionResponse) {
+func (e *Executor) logSuccess(ctx context.Context, req SingleShotRequest, result *Response, raw *llm.ChatCompletionResponse) {
 	if e.agentLogger == nil {
 		return
 	}
@@ -232,7 +232,7 @@ func (e *Executor) logError(ctx context.Context, req SingleShotRequest, err erro
 
 // Client returns the underlying OpenRouter client.
 // Useful for agents that need custom request handling.
-func (e *Executor) Client() openrouter.Client {
+func (e *Executor) Client() llm.Client {
 	return e.client
 }
 

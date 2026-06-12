@@ -25,7 +25,7 @@ const (
 // ProcessedFile represents a processed file ready for LLM consumption.
 type ProcessedFile struct {
 	// LLMParts contains the file data formatted for OpenRouter API
-	// (FilePart, TextPart from openrouter package) (v0.6.0: unified on FilePart)
+	// (FilePart, TextPart from llm package) (v0.6.0: unified on FilePart)
 	LLMParts []interface{}
 
 	// Instruction is the localized LLM instruction for this file type

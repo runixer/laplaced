@@ -1,4 +1,4 @@
-package openrouter
+package llm
 
 import (
 	"encoding/json"

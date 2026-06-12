@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/runixer/laplaced/internal/bot/tools"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 
@@ -47,10 +47,10 @@ func TestPerformManageMemory_BatchOperations(t *testing.T) {
 	}`
 
 	// Mocks for Add
-	mockORClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req openrouter.EmbeddingRequest) bool {
+	mockORClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req llm.EmbeddingRequest) bool {
 		return req.Input[0] == "Likes pizza"
-	})).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{
+	})).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{
 			{Embedding: []float32{0.1, 0.1}},
 		},
 	}, nil)
@@ -62,10 +62,10 @@ func TestPerformManageMemory_BatchOperations(t *testing.T) {
 	mockStore.On("AddFactHistory", mock.Anything).Return(nil)
 
 	// Mocks for Update
-	mockORClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req openrouter.EmbeddingRequest) bool {
+	mockORClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req llm.EmbeddingRequest) bool {
 		return req.Input[0] == "Likes sushi"
-	})).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{
+	})).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{
 			{Embedding: []float32{0.2, 0.2}},
 		},
 	}, nil)
@@ -118,8 +118,8 @@ func TestPerformManageMemory_BatchOperations_PartialFailure(t *testing.T) {
 	}`
 
 	// Mocks for Add (Success)
-	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{{Embedding: []float32{0.1}}},
+	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{{Embedding: []float32{0.1}}},
 	}, nil)
 	mockStore.On("AddFact", mock.Anything).Return(int64(1), nil)
 	mockStore.On("AddFactHistory", mock.Anything).Return(nil)

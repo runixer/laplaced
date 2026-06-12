@@ -3,12 +3,12 @@ package laplace
 import (
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 )
 
 // BuildTools creates OpenRouter tool definitions from config.
-func BuildTools(cfg *config.Config, translator *i18n.Translator) []openrouter.Tool {
-	var tools []openrouter.Tool
+func BuildTools(cfg *config.Config, translator *i18n.Translator) []llm.Tool {
+	var tools []llm.Tool
 	lang := cfg.Bot.Language
 
 	for _, toolCfg := range cfg.Tools {
@@ -41,9 +41,9 @@ func BuildTools(cfg *config.Config, translator *i18n.Translator) []openrouter.To
 			}
 		}
 
-		tool := openrouter.Tool{
+		tool := llm.Tool{
 			Type: "function",
-			Function: openrouter.ToolFunction{
+			Function: llm.ToolFunction{
 				Name:        toolCfg.Name,
 				Description: desc,
 				Parameters:  parameters,

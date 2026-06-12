@@ -18,8 +18,8 @@ import (
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/obs"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -57,7 +57,7 @@ type Extractor struct {
 	cfg          *config.Config
 	logger       *slog.Logger
 	fileStorage  files.Storage
-	llmClient    openrouter.Client
+	llmClient    llm.Client
 	artifactRepo storage.ArtifactRepository
 }
 
@@ -68,7 +68,7 @@ func New(
 	cfg *config.Config,
 	logger *slog.Logger,
 	fileStorage files.Storage,
-	llmClient openrouter.Client,
+	llmClient llm.Client,
 	artifactRepo storage.ArtifactRepository,
 ) *Extractor {
 	return &Extractor{
@@ -287,7 +287,7 @@ func (ex *Extractor) generateSummaryEmbedding(
 ) ([]float32, error) {
 	embeddingModel := ex.cfg.Embedding.Model
 
-	embReq := openrouter.EmbeddingRequest{
+	embReq := llm.EmbeddingRequest{
 		Model:      embeddingModel,
 		Input:      []string{summary},
 		Dimensions: ex.cfg.Embedding.Dimensions,
@@ -316,7 +316,7 @@ func (ex *Extractor) getContext(ctx context.Context, req *agent.Request) (profil
 }
 
 // buildMultimodalMessages constructs multimodal messages with file content for the LLM.
-func (ex *Extractor) buildMultimodalMessages(ctx context.Context, req *agent.Request, artifact *storage.Artifact, fileData []byte) ([]openrouter.Message, error) {
+func (ex *Extractor) buildMultimodalMessages(ctx context.Context, req *agent.Request, artifact *storage.Artifact, fileData []byte) ([]llm.Message, error) {
 	// Get user context for personalized extraction
 	profile, recentTopics, innerCircle := ex.getContext(ctx, req)
 
@@ -366,11 +366,11 @@ func (ex *Extractor) buildMultimodalMessages(ctx context.Context, req *agent.Req
 	var contentParts []interface{}
 
 	// Add file part based on type. Visual media (image/video) is encoded per the
-	// configured backend format via openrouter.MediaPart (image_url/video_url on
+	// configured backend format via llm.MediaPart (image_url/video_url on
 	// OpenAI-compatible backends, else `file`); other types use `file`.
 	format := ex.cfg.OpenRouter.ImageInputFormat
 	mediaPart := func(mimeType, fileName string) interface{} {
-		return openrouter.MediaPart(format, mimeType, fileName, fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data))
+		return llm.MediaPart(format, mimeType, fileName, fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data))
 	}
 	switch artifact.FileType {
 	case "image", "photo":
@@ -413,7 +413,7 @@ func (ex *Extractor) buildMultimodalMessages(ctx context.Context, req *agent.Req
 
 	case "document":
 		// For text documents, include content as text
-		contentParts = append(contentParts, openrouter.TextPart{
+		contentParts = append(contentParts, llm.TextPart{
 			Type: "text",
 			Text: string(fileData),
 		})
@@ -431,13 +431,13 @@ func (ex *Extractor) buildMultimodalMessages(ctx context.Context, req *agent.Req
 	}
 
 	// Add user prompt text
-	contentParts = append(contentParts, openrouter.TextPart{
+	contentParts = append(contentParts, llm.TextPart{
 		Type: "text",
 		Text: userPrompt,
 	})
 
 	// Build messages
-	messages := []openrouter.Message{
+	messages := []llm.Message{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: contentParts},
 	}

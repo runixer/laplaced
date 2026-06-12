@@ -13,7 +13,7 @@ import (
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -135,7 +135,7 @@ type Service struct {
 	artifactRepo         storage.ArtifactRepository
 	userRepo             storage.UserRepository  // background loops enumerate real tenants (transport-agnostic)
 	scopeRepo            storage.ScopeRepository // channel-scope detection (Phase 6); nil without a resolver (Telegram-only path)
-	client               openrouter.Client
+	client               llm.Client
 	memoryService        MemoryService
 	translator           *i18n.Translator
 	agentLogger          *agentlog.Logger

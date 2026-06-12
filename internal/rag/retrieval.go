@@ -12,8 +12,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/obs"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -237,7 +237,7 @@ func (s *Service) enrichQueryIfEnabled(ctx context.Context, userID storage.Scope
 // createEmbedding creates an embedding for the given query.
 func (s *Service) createEmbedding(ctx context.Context, userID storage.ScopeID, query string) ([]float32, error) {
 	embeddingStart := time.Now()
-	resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
+	resp, err := s.client.CreateEmbeddings(ctx, llm.EmbeddingRequest{
 		Model:      s.cfg.Embedding.Model,
 		Dimensions: s.cfg.Embedding.Dimensions,
 		Input:      []string{query},
@@ -262,7 +262,7 @@ func (s *Service) RetrieveFacts(ctx context.Context, userID storage.ScopeID, que
 
 	// Embedding for query
 	embeddingStart := time.Now()
-	resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
+	resp, err := s.client.CreateEmbeddings(ctx, llm.EmbeddingRequest{
 		Model:      s.cfg.Embedding.Model,
 		Dimensions: s.cfg.Embedding.Dimensions,
 		Input:      []string{query},

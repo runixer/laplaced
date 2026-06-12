@@ -8,8 +8,8 @@ import (
 
 	"github.com/runixer/laplaced/internal/agent"
 	agenttesting "github.com/runixer/laplaced/internal/agent/testing"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/memory"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -457,7 +457,7 @@ func TestServiceExtractTopicsForSplit_AgentError(t *testing.T) {
 
 	// Mock OpenRouter client to return error
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(openrouter.ChatCompletionResponse{}, errors.New("LLM error")).Once()
+		Return(llm.ChatCompletionResponse{}, errors.New("LLM error")).Once()
 
 	topics, usage, err := svc.extractTopicsForSplit(context.Background(), userID, messages)
 	assert.Error(t, err)
@@ -629,8 +629,8 @@ func TestServiceSplitTopic_SuccessfulSplit(t *testing.T) {
 
 	// splitTopic calls CreateEmbeddings for the new topics
 	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(
-		openrouter.EmbeddingResponse{
-			Data: []openrouter.EmbeddingObject{
+		llm.EmbeddingResponse{
+			Data: []llm.EmbeddingObject{
 				{Embedding: []float32{0.1, 0.2, 0.3}, Index: 0},
 				{Embedding: []float32{0.4, 0.5, 0.6}, Index: 1},
 			},

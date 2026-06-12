@@ -7,7 +7,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -66,24 +66,24 @@ func TestLaplace_SetAgentLogger(t *testing.T) {
 func TestFormatMessagesForLog(t *testing.T) {
 	tests := []struct {
 		name     string
-		messages []openrouter.Message
+		messages []llm.Message
 		expected string
 	}{
 		{
 			name:     "empty messages",
-			messages: []openrouter.Message{},
+			messages: []llm.Message{},
 			expected: "",
 		},
 		{
 			name: "single text message",
-			messages: []openrouter.Message{
+			messages: []llm.Message{
 				{Role: "user", Content: "Hello world"},
 			},
 			expected: "=== USER ===\nHello world",
 		},
 		{
 			name: "multiple messages",
-			messages: []openrouter.Message{
+			messages: []llm.Message{
 				{Role: "user", Content: "Hello"},
 				{Role: "assistant", Content: "Hi there!"},
 			},
@@ -95,11 +95,11 @@ Hi there!`,
 		},
 		{
 			name: "message with structured content (text parts)",
-			messages: []openrouter.Message{
+			messages: []llm.Message{
 				{
 					Role: "user",
 					Content: []interface{}{
-						openrouter.TextPart{Type: "text", Text: "Structured message"},
+						llm.TextPart{Type: "text", Text: "Structured message"},
 					},
 				},
 			},
@@ -107,7 +107,7 @@ Hi there!`,
 		},
 		{
 			name: "message with map content (legacy format)",
-			messages: []openrouter.Message{
+			messages: []llm.Message{
 				{
 					Role: "user",
 					Content: []interface{}{
@@ -119,11 +119,11 @@ Hi there!`,
 		},
 		{
 			name: "message with image",
-			messages: []openrouter.Message{
+			messages: []llm.Message{
 				{
 					Role: "user",
 					Content: []interface{}{
-						openrouter.TextPart{Type: "text", Text: "Look at this"},
+						llm.TextPart{Type: "text", Text: "Look at this"},
 						map[string]interface{}{"type": "image_url", "url": "http://example.com/img.jpg"},
 					},
 				},
@@ -132,7 +132,7 @@ Hi there!`,
 		},
 		{
 			name: "message with audio",
-			messages: []openrouter.Message{
+			messages: []llm.Message{
 				{
 					Role: "user",
 					Content: []interface{}{
@@ -144,11 +144,11 @@ Hi there!`,
 		},
 		{
 			name: "message with tool call",
-			messages: []openrouter.Message{
+			messages: []llm.Message{
 				{
 					Role:    "assistant",
 					Content: "Let me search",
-					ToolCalls: []openrouter.ToolCall{
+					ToolCalls: []llm.ToolCall{
 						{ID: "call_1", Function: toolFunc("search_web", `{"query": "test"}`)},
 					},
 				},
@@ -161,11 +161,11 @@ Let me search
 		},
 		{
 			name: "message with nil content (tool-only response)",
-			messages: []openrouter.Message{
+			messages: []llm.Message{
 				{
 					Role:    "assistant",
 					Content: nil,
-					ToolCalls: []openrouter.ToolCall{
+					ToolCalls: []llm.ToolCall{
 						{ID: "call_1", Function: toolFunc("test", "")},
 					},
 				},
@@ -178,11 +178,11 @@ Let me search
 		},
 		{
 			name: "multiple tool calls",
-			messages: []openrouter.Message{
+			messages: []llm.Message{
 				{
 					Role:    "assistant",
 					Content: "",
-					ToolCalls: []openrouter.ToolCall{
+					ToolCalls: []llm.ToolCall{
 						{Function: toolFunc("search_web", `{"q":"a"}`)},
 						{Function: toolFunc("search_history", `{"q":"b"}`)},
 					},
@@ -197,10 +197,10 @@ Let me search
 		},
 		{
 			name: "mixed content types",
-			messages: []openrouter.Message{
+			messages: []llm.Message{
 				{Role: "system", Content: "You are a bot"},
 				{Role: "user", Content: []interface{}{
-					openrouter.TextPart{Type: "text", Text: "Text with"},
+					llm.TextPart{Type: "text", Text: "Text with"},
 					map[string]interface{}{"type": "image_url"},
 				}},
 				{Role: "assistant", Content: "Response"},

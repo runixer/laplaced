@@ -8,16 +8,16 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 )
 
 // streamTurnResult is the synthesized output of a single streaming LLM turn.
-// It mimics the relevant subset of openrouter.ChatCompletionResponse so the
+// It mimics the relevant subset of llm.ChatCompletionResponse so the
 // surrounding tool loop in Execute can be agnostic about whether the call was
 // streamed or buffered.
 type streamTurnResult struct {
 	Content          string
-	ToolCalls        []openrouter.ToolCall
+	ToolCalls        []llm.ToolCall
 	ReasoningDetails interface{}
 	FinishReason     string
 	Model            string
@@ -32,7 +32,7 @@ type streamTurnResult struct {
 	FirstContentDelay time.Duration
 
 	// DebugRequestBody is the raw JSON request body sent to OpenRouter.
-	// Captured from openrouter.ChatCompletionStream so the agentlog turn
+	// Captured from llm.ChatCompletionStream so the agentlog turn
 	// tracker mirrors what the buffered path records.
 	DebugRequestBody string
 
@@ -57,7 +57,7 @@ type streamTurnResult struct {
 // required for follow-up tool turns and arrives in fragments.
 func (l *Laplace) runStreamingTurn(
 	ctx context.Context,
-	orReq openrouter.ChatCompletionRequest,
+	orReq llm.ChatCompletionRequest,
 	onContentDelta func(string),
 	logger *slog.Logger,
 ) (*streamTurnResult, error) {
@@ -184,7 +184,7 @@ func (l *Laplace) runStreamingTurn(
 				// A gap in indices is unusual but not fatal; skip silently.
 				continue
 			}
-			tc := openrouter.ToolCall{
+			tc := llm.ToolCall{
 				ID:   acc.ID,
 				Type: acc.Type,
 			}

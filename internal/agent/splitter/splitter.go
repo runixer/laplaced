@@ -16,8 +16,8 @@ import (
 	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/obs"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -88,7 +88,7 @@ func (s *Splitter) Execute(ctx context.Context, req *agent.Request) (response *a
 		return nil, fmt.Errorf("no model configured for splitter")
 	}
 
-	// Span boundary for the splitter call so the child openrouter span attaches
+	// Span boundary for the splitter call so the child llm span attaches
 	// here and coverage diagnostics on rag.processChunk can reference these
 	// inputs. Named returns let the deferred closure route terminal err via
 	// obs.ObserveErr. See plan: ticklish-giggling-hearth.md.
@@ -148,9 +148,9 @@ func (s *Splitter) Execute(ctx context.Context, req *agent.Request) (response *a
 
 	// Make LLM call using executor's client directly (for ResponseFormat support)
 	start := time.Now()
-	resp, err := s.executor.Client().CreateChatCompletion(ctx, openrouter.ChatCompletionRequest{
+	resp, err := s.executor.Client().CreateChatCompletion(ctx, llm.ChatCompletionRequest{
 		Model: model,
-		Messages: []openrouter.Message{
+		Messages: []llm.Message{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userMessage},
 		},

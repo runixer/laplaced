@@ -14,8 +14,8 @@ import (
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/obs"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -28,7 +28,7 @@ type CallContext struct {
 	// CurrentMessageImages is the image FileParts attached to the current
 	// user message. generate_image uses these as default input when the LLM
 	// does not pass explicit artifact IDs.
-	CurrentMessageImages []openrouter.FilePart
+	CurrentMessageImages []llm.FilePart
 	// Iteration is the 1-based laplace tool-loop iteration. Recorded on the
 	// tool_executor span as tool.iteration; zero is acceptable for callers
 	// outside the laplace loop (none today).
@@ -48,7 +48,7 @@ type Result struct {
 // It dispatches tool calls to appropriate handlers and manages
 // access to repositories and services.
 type ToolExecutor struct {
-	orClient        openrouter.Client
+	orClient        llm.Client
 	factRepo        storage.FactRepository
 	factHistoryRepo storage.FactHistoryRepository
 	peopleRepo      storage.PeopleRepository
@@ -78,7 +78,7 @@ type ImageGenerator interface {
 type ImageGenRequest struct {
 	UserID      storage.ScopeID
 	Prompt      string
-	InputImages []openrouter.FilePart
+	InputImages []llm.FilePart
 	AspectRatio string
 	ImageSize   string
 }
@@ -97,7 +97,7 @@ type ImageGenImage struct {
 
 // NewToolExecutor creates a new ToolExecutor with required dependencies.
 func NewToolExecutor(
-	orClient openrouter.Client,
+	orClient llm.Client,
 	factRepo storage.FactRepository,
 	factHistoryRepo storage.FactHistoryRepository,
 	cfg *config.Config,
@@ -151,7 +151,7 @@ func (e *ToolExecutor) SetFileStorage(fs files.Storage) {
 func (e *ToolExecutor) ExecuteToolCall(ctx context.Context, cc CallContext, toolName string, arguments string) (result *Result, err error) {
 	// One span per dispatched call. The tool.name attribute pivots across
 	// all six handlers. When a handler makes its own downstream LLM call
-	// (e.g. performModelTool → openrouter.CreateChatCompletion), the inner
+	// (e.g. performModelTool → llm.CreateChatCompletion), the inner
 	// span naturally nests here via ctx, which is the trace we want.
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/bot/tools").Start(
 		ctx, "tool_executor.ExecuteToolCall",

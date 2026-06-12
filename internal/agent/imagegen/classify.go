@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 )
 
 // classifyFailure determines why an image-generation call did not yield an
@@ -26,7 +26,7 @@ import (
 //
 // Returns KindUnknown only as a defensive default when called with images
 // already present, which the caller should not do.
-func classifyFailure(genErr error, msg openrouter.ResponseMessage, provider string) FailureKind {
+func classifyFailure(genErr error, msg llm.ResponseMessage, provider string) FailureKind {
 	if genErr != nil {
 		if errors.Is(genErr, context.DeadlineExceeded) {
 			return KindTimeout

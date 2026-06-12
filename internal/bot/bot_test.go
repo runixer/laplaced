@@ -14,7 +14,7 @@ import (
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
@@ -119,14 +119,14 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
 	// Mock OpenRouter call
-	var capturedRequest openrouter.ChatCompletionRequest
+	var capturedRequest llm.ChatCompletionRequest
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-		capturedRequest = args.Get(1).(openrouter.ChatCompletionRequest)
-	}).Return(openrouter.ChatCompletionResponse{
-		Choices: []openrouter.ResponseChoice{
-			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
+		capturedRequest = args.Get(1).(llm.ChatCompletionRequest)
+	}).Return(llm.ChatCompletionResponse{
+		Choices: []llm.ResponseChoice{
+			{Message: llm.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
-		Usage: openrouter.Usage{TotalTokens: 10},
+		Usage: llm.Usage{TotalTokens: 10},
 	}, nil)
 
 	// Execute
@@ -152,7 +152,7 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 		// The structure is now flat: a slice of parts, not a slice of slices of parts.
 		// Each part can be a TextPart, FilePart, etc.
 		// In this specific test, we only have text.
-		textPart, ok := part.(openrouter.TextPart)
+		textPart, ok := part.(llm.TextPart)
 		assert.True(t, ok, "Part should be a TextPart")
 		assert.Equal(t, messages[i].BuildContent(translator, "en"), textPart.Text)
 	}
@@ -248,14 +248,14 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
 	// Mock OpenRouter call
-	var capturedRequest openrouter.ChatCompletionRequest
+	var capturedRequest llm.ChatCompletionRequest
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-		capturedRequest = args.Get(1).(openrouter.ChatCompletionRequest)
-	}).Return(openrouter.ChatCompletionResponse{
-		Choices: []openrouter.ResponseChoice{
-			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
+		capturedRequest = args.Get(1).(llm.ChatCompletionRequest)
+	}).Return(llm.ChatCompletionResponse{
+		Choices: []llm.ResponseChoice{
+			{Message: llm.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
-		Usage: openrouter.Usage{TotalTokens: 10},
+		Usage: llm.Usage{TotalTokens: 10},
 	}, nil)
 
 	// Execute
@@ -277,13 +277,13 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 	assert.Len(t, contentParts, 2) // Text part + Image part
 
 	// Check text part
-	textPart, ok := contentParts[0].(openrouter.TextPart)
+	textPart, ok := contentParts[0].(llm.TextPart)
 	assert.True(t, ok)
 	expectedText := messages[0].BuildContent(translator, "en")
 	assert.Equal(t, expectedText, textPart.Text)
 
 	// Check image part (v0.6.0: unified FilePart format)
-	filePart, ok := contentParts[1].(openrouter.FilePart)
+	filePart, ok := contentParts[1].(llm.FilePart)
 	assert.True(t, ok)
 	assert.Equal(t, "file", filePart.Type)
 	assert.Equal(t, "photo.jpg", filePart.File.FileName)
@@ -382,14 +382,14 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
 	// Mock OpenRouter call
-	var capturedRequest openrouter.ChatCompletionRequest
+	var capturedRequest llm.ChatCompletionRequest
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-		capturedRequest = args.Get(1).(openrouter.ChatCompletionRequest)
-	}).Return(openrouter.ChatCompletionResponse{
-		Choices: []openrouter.ResponseChoice{
-			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
+		capturedRequest = args.Get(1).(llm.ChatCompletionRequest)
+	}).Return(llm.ChatCompletionResponse{
+		Choices: []llm.ResponseChoice{
+			{Message: llm.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
-		Usage: openrouter.Usage{TotalTokens: 10},
+		Usage: llm.Usage{TotalTokens: 10},
 	}, nil)
 
 	// Execute
@@ -411,13 +411,13 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 	assert.Len(t, contentParts, 2) // Text part + Image part
 
 	// Check text part
-	textPart, ok := contentParts[0].(openrouter.TextPart)
+	textPart, ok := contentParts[0].(llm.TextPart)
 	assert.True(t, ok)
 	expectedText := messages[0].BuildContent(translator, "en")
 	assert.Equal(t, expectedText, textPart.Text)
 
 	// Check image part (v0.6.0: unified FilePart format)
-	filePart, ok := contentParts[1].(openrouter.FilePart)
+	filePart, ok := contentParts[1].(llm.FilePart)
 	assert.True(t, ok)
 	assert.Equal(t, "file", filePart.Type)
 	assert.Equal(t, "image.png", filePart.File.FileName)
@@ -517,14 +517,14 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
 	// Mock OpenRouter call
-	var capturedRequest openrouter.ChatCompletionRequest
+	var capturedRequest llm.ChatCompletionRequest
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-		capturedRequest = args.Get(1).(openrouter.ChatCompletionRequest)
-	}).Return(openrouter.ChatCompletionResponse{
-		Choices: []openrouter.ResponseChoice{
-			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
+		capturedRequest = args.Get(1).(llm.ChatCompletionRequest)
+	}).Return(llm.ChatCompletionResponse{
+		Choices: []llm.ResponseChoice{
+			{Message: llm.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
-		Usage: openrouter.Usage{TotalTokens: 10},
+		Usage: llm.Usage{TotalTokens: 10},
 	}, nil)
 
 	// Execute
@@ -546,13 +546,13 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 	assert.Len(t, contentParts, 2) // Text part + File part
 
 	// Check text part
-	textPart, ok := contentParts[0].(openrouter.TextPart)
+	textPart, ok := contentParts[0].(llm.TextPart)
 	assert.True(t, ok)
 	expectedText := messages[0].BuildContent(translator, "en")
 	assert.Equal(t, expectedText, textPart.Text)
 
 	// Check file part
-	filePart, ok := contentParts[1].(openrouter.FilePart)
+	filePart, ok := contentParts[1].(llm.FilePart)
 	assert.True(t, ok)
 	assert.Equal(t, "file", filePart.Type)
 	assert.Equal(t, "document.pdf", filePart.File.FileName)
@@ -664,14 +664,14 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
 	// Mock OpenRouter call
-	var capturedRequest openrouter.ChatCompletionRequest
+	var capturedRequest llm.ChatCompletionRequest
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-		capturedRequest = args.Get(1).(openrouter.ChatCompletionRequest)
-	}).Return(openrouter.ChatCompletionResponse{
-		Choices: []openrouter.ResponseChoice{
-			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
+		capturedRequest = args.Get(1).(llm.ChatCompletionRequest)
+	}).Return(llm.ChatCompletionResponse{
+		Choices: []llm.ResponseChoice{
+			{Message: llm.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
-		Usage: openrouter.Usage{TotalTokens: 10},
+		Usage: llm.Usage{TotalTokens: 10},
 	}, nil)
 
 	// Execute
@@ -693,13 +693,13 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 	assert.Len(t, contentParts, 2) // Text part from caption + Text part from document
 
 	// Check caption text part
-	captionPart, ok := contentParts[0].(openrouter.TextPart)
+	captionPart, ok := contentParts[0].(llm.TextPart)
 	assert.True(t, ok)
 	expectedCaptionText := messages[0].BuildContent(translator, "en")
 	assert.Equal(t, expectedCaptionText, captionPart.Text)
 
 	// Check document text part
-	docPart, ok := contentParts[1].(openrouter.TextPart)
+	docPart, ok := contentParts[1].(llm.TextPart)
 	assert.True(t, ok)
 	assert.Equal(t, "text", docPart.Type)
 	assert.Equal(t, expectedFileTextContent, docPart.Text)
@@ -791,14 +791,14 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
-	var capturedRequest openrouter.ChatCompletionRequest
+	var capturedRequest llm.ChatCompletionRequest
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-		capturedRequest = args.Get(1).(openrouter.ChatCompletionRequest)
-	}).Return(openrouter.ChatCompletionResponse{
-		Choices: []openrouter.ResponseChoice{
-			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
+		capturedRequest = args.Get(1).(llm.ChatCompletionRequest)
+	}).Return(llm.ChatCompletionResponse{
+		Choices: []llm.ResponseChoice{
+			{Message: llm.ResponseMessage{Role: "assistant", Content: "Test response"}, FinishReason: "stop"},
 		},
-		Usage: openrouter.Usage{TotalTokens: 10},
+		Usage: llm.Usage{TotalTokens: 10},
 	}, nil)
 
 	// Execute - voice messages now go through processMessageGroup
@@ -819,13 +819,13 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 	assert.Len(t, contentParts, 2) // TextPart (instruction) + FilePart (audio)
 
 	// Verify voice instruction is sent as TextPart
-	textPart, ok := contentParts[0].(openrouter.TextPart)
+	textPart, ok := contentParts[0].(llm.TextPart)
 	assert.True(t, ok, "expected TextPart for voice instruction")
 	assert.Equal(t, "text", textPart.Type)
 	assert.Contains(t, textPart.Text, "voice message")
 
 	// Verify audio is sent as FilePart
-	filePart, ok := contentParts[1].(openrouter.FilePart)
+	filePart, ok := contentParts[1].(llm.FilePart)
 	assert.True(t, ok, "expected FilePart for voice message")
 	assert.Equal(t, "file", filePart.Type)
 	assert.Equal(t, "voice.ogg", filePart.File.FileName)
@@ -1079,14 +1079,14 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
 	// --- Capture the request to OpenRouter ---
-	var capturedRequest openrouter.ChatCompletionRequest
+	var capturedRequest llm.ChatCompletionRequest
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-		capturedRequest = args.Get(1).(openrouter.ChatCompletionRequest)
-	}).Return(openrouter.ChatCompletionResponse{
-		Choices: []openrouter.ResponseChoice{
-			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "You said hello."}, FinishReason: "stop"},
+		capturedRequest = args.Get(1).(llm.ChatCompletionRequest)
+	}).Return(llm.ChatCompletionResponse{
+		Choices: []llm.ResponseChoice{
+			{Message: llm.ResponseMessage{Role: "assistant", Content: "You said hello."}, FinishReason: "stop"},
 		},
-		Usage: openrouter.Usage{TotalTokens: 100},
+		Usage: llm.Usage{TotalTokens: 100},
 	}, nil)
 
 	// --- Execution ---
@@ -1104,7 +1104,7 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 	assert.Len(t, capturedRequest.Messages, len(fullHistory)+1) // +1 for system prompt
 
 	// Check system prompt (includes empty user_profile tag when no facts)
-	systemContent, ok := capturedRequest.Messages[0].Content.([]interface{})[0].(openrouter.TextPart)
+	systemContent, ok := capturedRequest.Messages[0].Content.([]interface{})[0].(llm.TextPart)
 	assert.True(t, ok)
 	assert.Contains(t, systemContent.Text, "System TestBot")
 	assert.Contains(t, systemContent.Text, "<user_profile>")
@@ -1117,12 +1117,12 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 			currentContent, ok := capturedRequest.Messages[i+1].Content.([]interface{})
 			assert.True(t, ok)
 			assert.Len(t, currentContent, 1)
-			textPart, ok := currentContent[0].(openrouter.TextPart)
+			textPart, ok := currentContent[0].(llm.TextPart)
 			assert.True(t, ok)
 			assert.Equal(t, hMsg.Content, textPart.Text)
 		} else {
 			// These are old messages from history
-			historicalContent, ok := capturedRequest.Messages[i+1].Content.([]interface{})[0].(openrouter.TextPart)
+			historicalContent, ok := capturedRequest.Messages[i+1].Content.([]interface{})[0].(llm.TextPart)
 			assert.True(t, ok)
 			assert.Equal(t, hMsg.Content, historicalContent.Text)
 		}
@@ -1346,11 +1346,11 @@ func TestSendTestMessage_Success(t *testing.T) {
 	mockStore.On("AddStat", mock.Anything).Return(nil)
 
 	// Mock LLM call
-	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(openrouter.ChatCompletionResponse{
-		Choices: []openrouter.ResponseChoice{
-			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Hello! How can I help you?"}, FinishReason: "stop"},
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(llm.ChatCompletionResponse{
+		Choices: []llm.ResponseChoice{
+			{Message: llm.ResponseMessage{Role: "assistant", Content: "Hello! How can I help you?"}, FinishReason: "stop"},
 		},
-		Usage: openrouter.Usage{
+		Usage: llm.Usage{
 			PromptTokens:     100,
 			CompletionTokens: 20,
 		},
@@ -1422,11 +1422,11 @@ func TestSendTestMessage_SaveToHistoryFalse(t *testing.T) {
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
 
 	// Mock LLM call
-	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(openrouter.ChatCompletionResponse{
-		Choices: []openrouter.ResponseChoice{
-			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "Response without history"}, FinishReason: "stop"},
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(llm.ChatCompletionResponse{
+		Choices: []llm.ResponseChoice{
+			{Message: llm.ResponseMessage{Role: "assistant", Content: "Response without history"}, FinishReason: "stop"},
 		},
-		Usage: openrouter.Usage{
+		Usage: llm.Usage{
 			PromptTokens:     50,
 			CompletionTokens: 10,
 		},
@@ -1498,7 +1498,7 @@ func TestSendTestMessage_OpenRouterError(t *testing.T) {
 
 	// Mock LLM call to return error
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
-		openrouter.ChatCompletionResponse{},
+		llm.ChatCompletionResponse{},
 		fmt.Errorf("API rate limit exceeded"),
 	)
 
@@ -1541,7 +1541,7 @@ func TestLogExecution_WithError(t *testing.T) {
 		ToolDuration:     5 * time.Second,
 		TotalTurns:       3,
 		RAGInfo:          nil,
-		Messages: []openrouter.Message{
+		Messages: []llm.Message{
 			{Role: "system", Content: "You are a helpful assistant"},
 			{Role: "user", Content: "Hello"},
 		},

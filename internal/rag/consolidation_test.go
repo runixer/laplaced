@@ -8,8 +8,8 @@ import (
 	"github.com/runixer/laplaced/internal/agent/merger"
 	agenttesting "github.com/runixer/laplaced/internal/agent/testing"
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/memory"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 
@@ -187,8 +187,8 @@ func TestMergeTopics(t *testing.T) {
 		}, nil)
 
 		// CreateEmbeddings for new topic
-		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{
-			Data: []openrouter.EmbeddingObject{
+		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
+			Data: []llm.EmbeddingObject{
 				{Embedding: []float32{0.1, 0.2, 0.3}, Index: 0},
 			},
 		}, nil)
@@ -253,7 +253,7 @@ func TestMergeTopics(t *testing.T) {
 		mockStore.On("GetMessagesByTopicID", mock.Anything, int64(2)).Return([]storage.Message{
 			{ID: 11, Role: "user", Content: "World"},
 		}, nil)
-		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{}, assert.AnError)
+		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{}, assert.AnError)
 
 		svc := newTestRAGService(t, mockStore, mockClient)
 
@@ -277,8 +277,8 @@ func TestMergeTopics(t *testing.T) {
 		mockStore.On("GetMessagesByTopicID", mock.Anything, int64(2)).Return([]storage.Message{
 			{ID: 11, Role: "user", Content: "World"},
 		}, nil)
-		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{
-			Data: []openrouter.EmbeddingObject{},
+		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
+			Data: []llm.EmbeddingObject{},
 		}, nil)
 
 		svc := newTestRAGService(t, mockStore, mockClient)
@@ -705,8 +705,8 @@ func TestProcessConsolidation_ShouldMerge_Success(t *testing.T) {
 	mockStore.On("GetMessagesByTopicID", mock.Anything, int64(2)).Return(msgs2, nil).Once()
 
 	// CreateEmbeddings for new merged topic
-	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{
+	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{
 			{Embedding: []float32{0.1, 0.2, 0.3}, Index: 0},
 		},
 	}, nil).Once()

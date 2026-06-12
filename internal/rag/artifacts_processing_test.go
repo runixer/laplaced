@@ -11,8 +11,8 @@ import (
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/extractor"
 	agenttesting "github.com/runixer/laplaced/internal/agent/testing"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/memory"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 	"github.com/stretchr/testify/mock"
@@ -647,7 +647,7 @@ func TestProcessArtifactExtraction_DefaultMaxRetries(t *testing.T) {
 		&storage.Artifact{ID: 1, UserID: userID, FilePath: "/tmp/test.jpg"}, nil).Maybe()
 	mockArtifactRepo.On("GetArtifacts", mock.Anything, mock.Anything, mock.Anything).Return([]storage.Artifact{}, int64(0), nil).Maybe()
 	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(
-		openrouter.EmbeddingResponse{Data: []openrouter.EmbeddingObject{{Embedding: []float32{0.1, 0.2}}}}, nil).Maybe()
+		llm.EmbeddingResponse{Data: []llm.EmbeddingObject{{Embedding: []float32{0.1, 0.2}}}}, nil).Maybe()
 
 	mockExtractor := new(agenttesting.MockAgent)
 	mockExtractor.On("Type").Return(agent.TypeExtractor).Maybe()
@@ -707,7 +707,7 @@ func TestProcessArtifactExtraction_DefaultMaxConcurrent(t *testing.T) {
 		&storage.Artifact{ID: 1, UserID: userID, FilePath: "/tmp/test.jpg"}, nil).Maybe()
 	mockArtifactRepo.On("GetArtifacts", mock.Anything, mock.Anything, mock.Anything).Return([]storage.Artifact{}, int64(0), nil).Maybe()
 	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(
-		openrouter.EmbeddingResponse{Data: []openrouter.EmbeddingObject{{Embedding: []float32{0.1, 0.2}}}}, nil).Maybe()
+		llm.EmbeddingResponse{Data: []llm.EmbeddingObject{{Embedding: []float32{0.1, 0.2}}}}, nil).Maybe()
 
 	mockExtractor := new(agenttesting.MockAgent)
 	mockExtractor.On("Type").Return(agent.TypeExtractor).Maybe()

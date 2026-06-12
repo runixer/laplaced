@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/runixer/laplaced/internal/config"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -85,7 +85,7 @@ func TestToolDescriptionOverride(t *testing.T) {
 	// But we can verify the logic structure.
 
 	// 1. Configured Tools
-	var tools []openrouter.Tool
+	var tools []llm.Tool
 	for _, toolCfg := range cfg.Tools {
 		desc := toolCfg.Description
 		if desc == "" {
@@ -93,8 +93,8 @@ func TestToolDescriptionOverride(t *testing.T) {
 			desc = "Translated Description for " + toolCfg.Name
 		}
 
-		tool := openrouter.Tool{
-			Function: openrouter.ToolFunction{
+		tool := llm.Tool{
+			Function: llm.ToolFunction{
 				Name:        toolCfg.Name,
 				Description: desc,
 			},

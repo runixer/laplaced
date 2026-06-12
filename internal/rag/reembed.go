@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -173,7 +173,7 @@ func (s *Service) reembedOneBatch(ctx context.Context, t reembedTable, version s
 	for i, c := range batch {
 		inputs[i] = c.Content
 	}
-	req := openrouter.EmbeddingRequest{
+	req := llm.EmbeddingRequest{
 		Model:      s.cfg.Embedding.Model,
 		Input:      inputs,
 		Dimensions: s.cfg.Embedding.Dimensions,
@@ -186,7 +186,7 @@ func (s *Service) reembedOneBatch(ctx context.Context, t reembedTable, version s
 		return fmt.Errorf("embed batch: expected %d results, got %d", len(batch), len(resp.Data))
 	}
 	// OpenRouter MAY return out of order; sort by Index.
-	byIndex := make([]openrouter.EmbeddingObject, len(batch))
+	byIndex := make([]llm.EmbeddingObject, len(batch))
 	for _, item := range resp.Data {
 		if item.Index < 0 || item.Index >= len(batch) {
 			return fmt.Errorf("embed batch: bad index %d", item.Index)

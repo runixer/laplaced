@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/runixer/laplaced/internal/agentlog"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -72,7 +72,7 @@ type Response struct {
 	RAGInfo *rag.RetrievalDebugInfo
 
 	// Debug info
-	Messages          []openrouter.Message // Full conversation for logging
+	Messages          []llm.Message // Full conversation for logging
 	ConversationTurns *agentlog.ConversationTurns
 
 	// Anomaly signals for the orchestrator to surface as bot.anomaly.*
@@ -91,7 +91,7 @@ type Response struct {
 // images — e.g. generate_image — can access attached photos automatically).
 type ToolCallContext struct {
 	UserID               storage.ScopeID
-	CurrentMessageImages []openrouter.FilePart
+	CurrentMessageImages []llm.FilePart
 	// Iteration is the 1-based tool-loop iteration this dispatch belongs
 	// to. Recorded on the tool_executor span as tool.iteration so traces
 	// can answer "which turn dispatched this tool" without matching by

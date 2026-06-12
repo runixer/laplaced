@@ -22,9 +22,9 @@ import (
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/laplace"
 	"github.com/runixer/laplaced/internal/files"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/markdown"
 	"github.com/runixer/laplaced/internal/obs"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
 )
@@ -292,13 +292,13 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	}
 
 	// Record live attachments on the root span so triage can answer
-	// "what did the user just send" without parsing the openrouter llm.request
+	// "what did the user just send" without parsing the llm.request
 	// body. Each entry is {filename, mime, sha256, size, source}; the sha256
 	// matches artifacts.content_hash, so a snapshot replay can reconstruct
 	// the original FilePart bytes from the artifact storage.
 	hasCurrentMedia := false
 	for _, p := range currentUserMessageContent {
-		if _, ok := p.(openrouter.FilePart); ok {
+		if _, ok := p.(llm.FilePart); ok {
 			hasCurrentMedia = true
 			break
 		}
@@ -717,7 +717,7 @@ func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logge
 		textContent := b.incomingContent(msg)
 		if textContent != "" {
 			appendWithNewline(&historyBuilder, textContent)
-			llmParts = append(llmParts, openrouter.TextPart{Type: "text", Text: textContent})
+			llmParts = append(llmParts, llm.TextPart{Type: "text", Text: textContent})
 		}
 
 		// Process pre-downloaded files
@@ -727,7 +727,7 @@ func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logge
 
 			// Add instruction before file if present (e.g., voice handling instructions)
 			if f.Instruction != "" {
-				llmParts = append(llmParts, openrouter.TextPart{
+				llmParts = append(llmParts, llm.TextPart{
 					Type: "text",
 					Text: fmt.Sprintf("%s: %s", msg.Prefix, f.Instruction),
 				})
@@ -764,7 +764,7 @@ func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logge
 				// Extract text content from LLMParts for enricher/reranker
 				// Text documents have TextPart with "filename:\n\ncontent" format
 				for _, part := range f.LLMParts {
-					if tp, ok := part.(openrouter.TextPart); ok {
+					if tp, ok := part.(llm.TextPart); ok {
 						appendWithNewline(&rawQueryBuilder, tp.Text)
 					}
 				}

@@ -17,14 +17,14 @@ import (
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/obs"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
 // Reranker uses tool calls to select the most relevant topics from vector search candidates.
 type Reranker struct {
-	client      openrouter.Client
+	client      llm.Client
 	cfg         *config.Config
 	logger      *slog.Logger
 	translator  *i18n.Translator
@@ -34,7 +34,7 @@ type Reranker struct {
 
 // New creates a new Reranker agent.
 func New(
-	client openrouter.Client,
+	client llm.Client,
 	cfg *config.Config,
 	logger *slog.Logger,
 	translator *i18n.Translator,
@@ -337,10 +337,10 @@ func (r *Reranker) rerank(
 	tr.userPrompt = userPrompt
 
 	// Define tool
-	tools := []openrouter.Tool{
+	tools := []llm.Tool{
 		{
 			Type: "function",
-			Function: openrouter.ToolFunction{
+			Function: llm.ToolFunction{
 				Name:        "get_topics_content",
 				Description: r.translator.Get(lang, "rag.reranker_tool_description"),
 				Parameters: map[string]any{
@@ -368,7 +368,7 @@ func (r *Reranker) rerank(
 			promptWithMedia = userPrompt + "\n\n" + mediaInstruction
 		}
 		parts := []interface{}{
-			openrouter.TextPart{Type: "text", Text: promptWithMedia},
+			llm.TextPart{Type: "text", Text: promptWithMedia},
 		}
 		parts = append(parts, mediaParts...)
 		userMessageContent = parts
@@ -376,7 +376,7 @@ func (r *Reranker) rerank(
 		userMessageContent = userPrompt
 	}
 
-	messages := []openrouter.Message{
+	messages := []llm.Message{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: userMessageContent},
 	}
@@ -395,21 +395,21 @@ func (r *Reranker) rerank(
 		if iterations == 0 && len(candidates) > 0 {
 			toolChoice = "auto"
 		} else {
-			responseFormat = openrouter.ResponseFormat{Type: "json_object"}
+			responseFormat = llm.ResponseFormat{Type: "json_object"}
 		}
 
 		tr.tracker.StartTurn()
 
 		turnCtx, turnCancel := context.WithTimeout(ctx, turnTimeout)
 
-		var reasoning *openrouter.ReasoningConfig
+		var reasoning *llm.ReasoningConfig
 		if thinkingLevel != "off" && thinkingLevel != "" {
-			reasoning = &openrouter.ReasoningConfig{
+			reasoning = &llm.ReasoningConfig{
 				Effort: thinkingLevel,
 			}
 		}
 
-		resp, err := r.client.CreateChatCompletion(turnCtx, openrouter.ChatCompletionRequest{
+		resp, err := r.client.CreateChatCompletion(turnCtx, llm.ChatCompletionRequest{
 			Model:      cfg.GetModel(r.cfg.Agents.Default.Model),
 			Messages:   messages,
 			Tools:      tools,
@@ -470,7 +470,7 @@ func (r *Reranker) rerank(
 			logger.Debug("reranker reasoning",
 				"user_id", userID,
 				"iteration", iterations+1,
-				"reasoning", openrouter.FilterReasoningForLog(choice.Message.ReasoningDetails),
+				"reasoning", llm.FilterReasoningForLog(choice.Message.ReasoningDetails),
 			)
 			if reasoningText != "" {
 				tr.reasoning = append(tr.reasoning, ReasoningEntry{
@@ -484,7 +484,7 @@ func (r *Reranker) rerank(
 		if len(choice.Message.ToolCalls) > 0 {
 			iterations++
 
-			var toolResults []openrouter.Message
+			var toolResults []llm.Message
 			toolCall := storage.RerankerToolCall{Iteration: iterations}
 
 			for _, tc := range choice.Message.ToolCalls {
@@ -520,7 +520,7 @@ func (r *Reranker) rerank(
 					}
 
 					content := loadTopicsContent(ctx, userID, ids, candidateMap, r.msgRepo, logger, tr)
-					toolResults = append(toolResults, openrouter.Message{
+					toolResults = append(toolResults, llm.Message{
 						Role:       "tool",
 						Content:    content,
 						ToolCallID: tc.ID,
@@ -539,7 +539,7 @@ func (r *Reranker) rerank(
 				),
 			)
 
-			messages = append(messages, openrouter.Message{
+			messages = append(messages, llm.Message{
 				Role:             "assistant",
 				Content:          choice.Message.Content,
 				ToolCalls:        choice.Message.ToolCalls,

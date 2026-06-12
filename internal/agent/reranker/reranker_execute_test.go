@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/runixer/laplaced/internal/agent"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -717,7 +717,7 @@ func TestRerank_LLMError_Timeout(t *testing.T) {
 
 	// LLM timeout
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(openrouter.ChatCompletionResponse{}, context.DeadlineExceeded).Once()
+		Return(llm.ChatCompletionResponse{}, context.DeadlineExceeded).Once()
 
 	req := &agent.Request{
 		Params: map[string]any{
@@ -751,7 +751,7 @@ func TestRerank_LLMError_GenericError(t *testing.T) {
 	}
 
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(openrouter.ChatCompletionResponse{}, errors.New("LLM API error")).Once()
+		Return(llm.ChatCompletionResponse{}, errors.New("LLM API error")).Once()
 
 	req := &agent.Request{
 		Params: map[string]any{
@@ -1000,7 +1000,7 @@ func TestRerank_Fallback_UsesRequestedIDs(t *testing.T) {
 		Return(mockMessagesForTopic(3), nil).Once()
 	// Error after tool call - should use requested IDs
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(openrouter.ChatCompletionResponse{}, errors.New("API error")).Once()
+		Return(llm.ChatCompletionResponse{}, errors.New("API error")).Once()
 
 	req := &agent.Request{
 		Params: map[string]any{
@@ -1037,7 +1037,7 @@ func TestRerank_Fallback_VectorTopWhenNoState(t *testing.T) {
 
 	// Immediate error - no state accumulated
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(openrouter.ChatCompletionResponse{}, errors.New("API error")).Once()
+		Return(llm.ChatCompletionResponse{}, errors.New("API error")).Once()
 
 	req := &agent.Request{
 		Params: map[string]any{

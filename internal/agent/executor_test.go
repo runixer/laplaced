@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -15,7 +15,7 @@ func TestExecutor_ExecuteSingleShot(t *testing.T) {
 	tests := []struct {
 		name        string
 		req         SingleShotRequest
-		mockResp    openrouter.ChatCompletionResponse
+		mockResp    llm.ChatCompletionResponse
 		mockErr     error
 		wantContent string
 		wantErr     bool
@@ -42,7 +42,7 @@ func TestExecutor_ExecuteSingleShot(t *testing.T) {
 				SystemPrompt: "test",
 				UserPrompt:   "test",
 			},
-			mockResp: openrouter.ChatCompletionResponse{},
+			mockResp: llm.ChatCompletionResponse{},
 			mockErr:  assert.AnError,
 			wantErr:  true,
 		},
@@ -55,7 +55,7 @@ func TestExecutor_ExecuteSingleShot(t *testing.T) {
 				SystemPrompt: "test",
 				UserPrompt:   "test",
 			},
-			mockResp: openrouter.ChatCompletionResponse{}, // empty response for error case
+			mockResp: llm.ChatCompletionResponse{}, // empty response for error case
 			wantErr:  true,
 		},
 	}
@@ -90,7 +90,7 @@ func TestExecutor_ExecuteSingleShot(t *testing.T) {
 
 func TestExecutor_ExecuteSingleShot_JSONMode(t *testing.T) {
 	mockClient := &testutil.MockOpenRouterClient{}
-	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req openrouter.ChatCompletionRequest) bool {
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
 		return req.ResponseFormat != nil
 	})).Return(testutil.MockChatResponse(`{"result": "success"}`), nil)
 
@@ -112,7 +112,7 @@ func TestExecutor_ExecuteSingleShot_JSONMode(t *testing.T) {
 
 func TestExecutor_ExecuteSingleShot_WithMessages(t *testing.T) {
 	mockClient := &testutil.MockOpenRouterClient{}
-	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req openrouter.ChatCompletionRequest) bool {
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
 		return len(req.Messages) == 3 // system + user + assistant
 	})).Return(testutil.MockChatResponse("Response based on context"), nil)
 
@@ -122,7 +122,7 @@ func TestExecutor_ExecuteSingleShot_WithMessages(t *testing.T) {
 		AgentType: TypeLaplace,
 		UserID:    "123",
 		Model:     "test-model",
-		Messages: []openrouter.Message{
+		Messages: []llm.Message{
 			{Role: "system", Content: "You are helpful"},
 			{Role: "user", Content: "Hi"},
 			{Role: "assistant", Content: "Hello!"},
@@ -188,31 +188,31 @@ func TestExecutor_ExecuteAgentic(t *testing.T) {
 			},
 			opts: AgenticOptions{
 				MaxTurns: 5,
-				Tools: []openrouter.Tool{
+				Tools: []llm.Tool{
 					{
 						Type: "function",
-						Function: openrouter.ToolFunction{
+						Function: llm.ToolFunction{
 							Name:        "search",
 							Description: "Search",
 							Parameters:  map[string]any{},
 						},
 					},
 				},
-				ToolHandler: func(ctx context.Context, calls []openrouter.ToolCall) []openrouter.Message {
-					return []openrouter.Message{
+				ToolHandler: func(ctx context.Context, calls []llm.ToolCall) []llm.Message {
+					return []llm.Message{
 						{Role: "tool", Content: "search results", ToolCallID: calls[0].ID},
 					}
 				},
 			},
 			setupMocks: func(mc *testutil.MockOpenRouterClient) {
 				// First turn returns tool call
-				mc.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req openrouter.ChatCompletionRequest) bool {
+				mc.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
 					return len(req.Tools) > 0
 				})).Return(testutil.MockChatResponseWithToolCalls("I'll search for that",
-					[]openrouter.ToolCall{testutil.MockToolCall("call_1", "search", "{}")}), nil).Once()
+					[]llm.ToolCall{testutil.MockToolCall("call_1", "search", "{}")}), nil).Once()
 
 				// Second turn returns final answer
-				mc.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req openrouter.ChatCompletionRequest) bool {
+				mc.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
 					return len(req.Messages) > 2 // system, user, assistant(tool), tool result
 				})).Return(testutil.MockChatResponseWithTokens("Based on search results: answer", 30, 15), nil).Once()
 			},
@@ -230,18 +230,18 @@ func TestExecutor_ExecuteAgentic(t *testing.T) {
 			},
 			opts: AgenticOptions{
 				MaxTurns: 2,
-				Tools: []openrouter.Tool{
+				Tools: []llm.Tool{
 					{
 						Type: "function",
-						Function: openrouter.ToolFunction{
+						Function: llm.ToolFunction{
 							Name:        "tool",
 							Description: "A tool",
 							Parameters:  map[string]any{},
 						},
 					},
 				},
-				ToolHandler: func(ctx context.Context, calls []openrouter.ToolCall) []openrouter.Message {
-					return []openrouter.Message{
+				ToolHandler: func(ctx context.Context, calls []llm.ToolCall) []llm.Message {
+					return []llm.Message{
 						{Role: "tool", Content: "result", ToolCallID: calls[0].ID},
 					}
 				},
@@ -250,7 +250,7 @@ func TestExecutor_ExecuteAgentic(t *testing.T) {
 				// Always return tool call
 				mc.On("CreateChatCompletion", mock.Anything, mock.Anything).
 					Return(testutil.MockChatResponseWithToolCalls("",
-						[]openrouter.ToolCall{testutil.MockToolCall("call_1", "tool", "{}")}), nil)
+						[]llm.ToolCall{testutil.MockToolCall("call_1", "tool", "{}")}), nil)
 			},
 			wantErr:         true,
 			wantErrContains: "max turns",
@@ -269,7 +269,7 @@ func TestExecutor_ExecuteAgentic(t *testing.T) {
 			},
 			setupMocks: func(mc *testutil.MockOpenRouterClient) {
 				mc.On("CreateChatCompletion", mock.Anything, mock.Anything).
-					Return(openrouter.ChatCompletionResponse{}, assert.AnError)
+					Return(llm.ChatCompletionResponse{}, assert.AnError)
 			},
 			wantErr:         true,
 			wantErrContains: "turn 0 failed",
@@ -288,7 +288,7 @@ func TestExecutor_ExecuteAgentic(t *testing.T) {
 			},
 			setupMocks: func(mc *testutil.MockOpenRouterClient) {
 				// Empty Choices slice
-				var resp openrouter.ChatCompletionResponse
+				var resp llm.ChatCompletionResponse
 				mc.On("CreateChatCompletion", mock.Anything, mock.Anything).
 					Return(resp, nil)
 			},
@@ -309,7 +309,7 @@ func TestExecutor_ExecuteAgentic(t *testing.T) {
 				Timeout:  10 * time.Second,
 			},
 			setupMocks: func(mc *testutil.MockOpenRouterClient) {
-				mc.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req openrouter.ChatCompletionRequest) bool {
+				mc.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
 					return true
 				})).Return(testutil.MockChatResponseWithTokens("quick response", 5, 3), nil)
 			},
@@ -348,14 +348,14 @@ func TestExecutor_ExecuteAgentic_ToolChoice(t *testing.T) {
 	mockClient := &testutil.MockOpenRouterClient{}
 
 	var capturedToolChoice any
-	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req openrouter.ChatCompletionRequest) bool {
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
 		capturedToolChoice = req.ToolChoice
 		return true
 	})).Return(testutil.MockChatResponseWithToolCalls("response",
-		[]openrouter.ToolCall{testutil.MockToolCall("call_1", "tool", "{}")}), nil).Once()
+		[]llm.ToolCall{testutil.MockToolCall("call_1", "tool", "{}")}), nil).Once()
 
 	// Second call returns final answer without tool calls
-	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req openrouter.ChatCompletionRequest) bool {
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
 		return len(req.Messages) > 2
 	})).Return(testutil.MockChatResponseWithTokens("final answer", 20, 10), nil).Once()
 
@@ -370,18 +370,18 @@ func TestExecutor_ExecuteAgentic_ToolChoice(t *testing.T) {
 	}, AgenticOptions{
 		MaxTurns:   3,
 		ToolChoice: "required",
-		Tools: []openrouter.Tool{
+		Tools: []llm.Tool{
 			{
 				Type: "function",
-				Function: openrouter.ToolFunction{
+				Function: llm.ToolFunction{
 					Name:        "tool",
 					Description: "Tool",
 					Parameters:  map[string]any{},
 				},
 			},
 		},
-		ToolHandler: func(ctx context.Context, calls []openrouter.ToolCall) []openrouter.Message {
-			return []openrouter.Message{
+		ToolHandler: func(ctx context.Context, calls []llm.ToolCall) []llm.Message {
+			return []llm.Message{
 				{Role: "tool", Content: "result", ToolCallID: calls[0].ID},
 			}
 		},
@@ -398,11 +398,11 @@ func TestExecutor_ExecuteAgentic_NoToolHandler(t *testing.T) {
 
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponseWithToolCalls("I need tools",
-			[]openrouter.ToolCall{testutil.MockToolCall("call_1", "search", "{}")}), nil).Once()
+			[]llm.ToolCall{testutil.MockToolCall("call_1", "search", "{}")}), nil).Once()
 
 	// Second call should still work even without tool handler
 	// (messages are appended but no tool results)
-	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req openrouter.ChatCompletionRequest) bool {
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
 		return len(req.Messages) > 2
 	})).Return(testutil.MockChatResponseWithTokens("final response", 15, 8), nil).Once()
 
@@ -416,10 +416,10 @@ func TestExecutor_ExecuteAgentic_NoToolHandler(t *testing.T) {
 		UserPrompt:   "test",
 	}, AgenticOptions{
 		MaxTurns: 3,
-		Tools: []openrouter.Tool{
+		Tools: []llm.Tool{
 			{
 				Type: "function",
-				Function: openrouter.ToolFunction{
+				Function: llm.ToolFunction{
 					Name:        "search",
 					Description: "Search",
 					Parameters:  map[string]any{},

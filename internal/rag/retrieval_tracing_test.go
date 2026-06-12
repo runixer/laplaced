@@ -14,9 +14,9 @@ import (
 	sdkcodes "go.opentelemetry.io/otel/codes"
 
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/memory"
 	"github.com/runixer/laplaced/internal/obs"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 )
@@ -65,8 +65,8 @@ func TestRetrieve_RecordsSpan(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
 	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(
-		openrouter.EmbeddingResponse{
-			Data: []openrouter.EmbeddingObject{{Embedding: []float32{0.1, 0.2, 0.3}}},
+		llm.EmbeddingResponse{
+			Data: []llm.EmbeddingObject{{Embedding: []float32{0.1, 0.2, 0.3}}},
 		}, nil,
 	).Maybe()
 
@@ -93,8 +93,8 @@ func TestRetrieve_ContentEventsGatedByToggle(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
 	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(
-		openrouter.EmbeddingResponse{
-			Data: []openrouter.EmbeddingObject{{Embedding: []float32{0.1, 0.2, 0.3}}},
+		llm.EmbeddingResponse{
+			Data: []llm.EmbeddingObject{{Embedding: []float32{0.1, 0.2, 0.3}}},
 		}, nil,
 	).Maybe()
 	svc := buildRetrieveServiceForTracing(t, mockStore, mockClient)
@@ -144,7 +144,7 @@ func TestRetrieve_EmbeddingError_SetsErrorStatus(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 	mockClient := new(testutil.MockOpenRouterClient)
 	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(
-		openrouter.EmbeddingResponse{}, errors.New("embeddings boom"),
+		llm.EmbeddingResponse{}, errors.New("embeddings boom"),
 	)
 
 	svc := buildRetrieveServiceForTracing(t, mockStore, mockClient)

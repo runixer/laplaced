@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -158,8 +158,8 @@ func (e *ToolExecutor) performImageGeneration(ctx context.Context, cc CallContex
 // "here's a new photo, mix it with that one from memory" works as expected.
 // Artifacts whose underlying file matches a current-message photo by content
 // hash are de-duplicated so we don't send the same image twice.
-func (e *ToolExecutor) resolveInputImages(ctx context.Context, cc CallContext, args map[string]interface{}) ([]openrouter.FilePart, error) {
-	parts := make([]openrouter.FilePart, 0, len(cc.CurrentMessageImages)+4)
+func (e *ToolExecutor) resolveInputImages(ctx context.Context, cc CallContext, args map[string]interface{}) ([]llm.FilePart, error) {
+	parts := make([]llm.FilePart, 0, len(cc.CurrentMessageImages)+4)
 	parts = append(parts, cc.CurrentMessageImages...)
 
 	ids := parseArtifactIDs(args["input_artifact_ids"])
@@ -190,9 +190,9 @@ func (e *ToolExecutor) resolveInputImages(ctx context.Context, cc CallContext, a
 		if partsContainDataURL(parts, dataURL) {
 			continue
 		}
-		parts = append(parts, openrouter.FilePart{
+		parts = append(parts, llm.FilePart{
 			Type: "file",
-			File: openrouter.File{
+			File: llm.File{
 				FileName: art.OriginalName,
 				FileData: dataURL,
 			},
@@ -201,7 +201,7 @@ func (e *ToolExecutor) resolveInputImages(ctx context.Context, cc CallContext, a
 	return parts, nil
 }
 
-func partsContainDataURL(parts []openrouter.FilePart, url string) bool {
+func partsContainDataURL(parts []llm.FilePart, url string) bool {
 	for _, p := range parts {
 		if p.File.FileData == url {
 			return true
@@ -211,7 +211,7 @@ func partsContainDataURL(parts []openrouter.FilePart, url string) bool {
 }
 
 // readArtifactAsDataURL reads an artifact file from storage and returns a
-// base64 data URL suitable for use as openrouter.FilePart.FileData.
+// base64 data URL suitable for use as llm.FilePart.FileData.
 func (e *ToolExecutor) readArtifactAsDataURL(ctx context.Context, art *storage.Artifact) (string, error) {
 	data, err := e.fileStorage.ReadFile(ctx, art.FilePath)
 	if err != nil {

@@ -10,7 +10,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -141,13 +141,13 @@ func TestPerformImageGeneration_CurrentMessageImagesUsedWhenNoArtifactIDs(t *tes
 	mockStore.On("GetByHash", mock.Anything, mock.Anything).Return(nil, nil)
 	mockStore.On("AddArtifact", mock.Anything).Return(int64(42), nil)
 
-	attached := openrouter.FilePart{
+	attached := llm.FilePart{
 		Type: "file",
-		File: openrouter.File{FileName: "photo.jpg", FileData: "data:image/jpeg;base64,AAAA"},
+		File: llm.File{FileName: "photo.jpg", FileData: "data:image/jpeg;base64,AAAA"},
 	}
 
 	_, err := exec.performImageGeneration(context.Background(),
-		CallContext{UserID: "1", CurrentMessageImages: []openrouter.FilePart{attached}},
+		CallContext{UserID: "1", CurrentMessageImages: []llm.FilePart{attached}},
 		map[string]interface{}{"prompt": "add sepia"},
 	)
 	require.NoError(t, err)
@@ -318,13 +318,13 @@ func TestPerformImageGeneration_MergesCurrentMessageAndArtifactIDs(t *testing.T)
 	mockStore.On("GetByHash", mock.Anything, mock.Anything).Return(nil, nil)
 	mockStore.On("AddArtifact", mock.Anything).Return(int64(200), nil)
 
-	currentAttached := openrouter.FilePart{
+	currentAttached := llm.FilePart{
 		Type: "file",
-		File: openrouter.File{FileName: "new.jpg", FileData: "data:image/jpeg;base64,TkVX"},
+		File: llm.File{FileName: "new.jpg", FileData: "data:image/jpeg;base64,TkVX"},
 	}
 
 	_, err := exec.performImageGeneration(context.Background(),
-		CallContext{UserID: "1", CurrentMessageImages: []openrouter.FilePart{currentAttached}},
+		CallContext{UserID: "1", CurrentMessageImages: []llm.FilePart{currentAttached}},
 		map[string]interface{}{
 			"prompt":             "mix these",
 			"input_artifact_ids": []interface{}{float64(42)},

@@ -1,32 +1,32 @@
 package laplace
 
 import (
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 )
 
 // Test helpers for creating mock OpenRouter responses in tests.
 // These helpers reduce boilerplate in test files.
 
 // HelperOption allows customizing mock responses.
-type HelperOption func(*openrouter.ChatCompletionResponse)
+type HelperOption func(*llm.ChatCompletionResponse)
 
 // WithID sets the response ID.
 func WithID(id string) HelperOption {
-	return func(r *openrouter.ChatCompletionResponse) {
+	return func(r *llm.ChatCompletionResponse) {
 		r.ID = id
 	}
 }
 
 // WithModel sets the model name.
 func WithModel(model string) HelperOption {
-	return func(r *openrouter.ChatCompletionResponse) {
+	return func(r *llm.ChatCompletionResponse) {
 		r.Model = model
 	}
 }
 
 // WithTokens sets token counts.
 func WithTokens(prompt, completion, total int) HelperOption {
-	return func(r *openrouter.ChatCompletionResponse) {
+	return func(r *llm.ChatCompletionResponse) {
 		r.Usage.PromptTokens = prompt
 		r.Usage.CompletionTokens = completion
 		r.Usage.TotalTokens = total
@@ -34,10 +34,10 @@ func WithTokens(prompt, completion, total int) HelperOption {
 }
 
 // newChoice creates a new choice with the given role and content.
-func newChoice(role, content string) openrouter.ResponseChoice {
-	return openrouter.ResponseChoice{
+func newChoice(role, content string) llm.ResponseChoice {
+	return llm.ResponseChoice{
 		Index: 0,
-		Message: openrouter.ResponseMessage{
+		Message: llm.ResponseMessage{
 			Role:    role,
 			Content: content,
 		},
@@ -46,12 +46,12 @@ func newChoice(role, content string) openrouter.ResponseChoice {
 }
 
 // makeChatResponse creates a simple chat completion response for testing.
-func makeChatResponse(content string, opts ...HelperOption) openrouter.ChatCompletionResponse {
-	resp := openrouter.ChatCompletionResponse{
+func makeChatResponse(content string, opts ...HelperOption) llm.ChatCompletionResponse {
+	resp := llm.ChatCompletionResponse{
 		ID:      "test-response-id",
 		Model:   "test-model",
-		Choices: []openrouter.ResponseChoice{newChoice("assistant", content)},
-		Usage: openrouter.Usage{
+		Choices: []llm.ResponseChoice{newChoice("assistant", content)},
+		Usage: llm.Usage{
 			PromptTokens:     10,
 			CompletionTokens: 20,
 			TotalTokens:      30,
@@ -64,9 +64,9 @@ func makeChatResponse(content string, opts ...HelperOption) openrouter.ChatCompl
 }
 
 // makeToolCallResponse creates a response with a tool call for testing.
-func makeToolCallResponse(toolName, args string, opts ...HelperOption) openrouter.ChatCompletionResponse {
+func makeToolCallResponse(toolName, args string, opts ...HelperOption) llm.ChatCompletionResponse {
 	choice := newChoice("assistant", "")
-	choice.Message.ToolCalls = []openrouter.ToolCall{
+	choice.Message.ToolCalls = []llm.ToolCall{
 		{
 			ID:   "test-call-id",
 			Type: "function",
@@ -81,11 +81,11 @@ func makeToolCallResponse(toolName, args string, opts ...HelperOption) openroute
 	}
 	choice.FinishReason = "tool_calls"
 
-	resp := openrouter.ChatCompletionResponse{
+	resp := llm.ChatCompletionResponse{
 		ID:      "test-response-id",
 		Model:   "test-model",
-		Choices: []openrouter.ResponseChoice{choice},
-		Usage: openrouter.Usage{
+		Choices: []llm.ResponseChoice{choice},
+		Usage: llm.Usage{
 			PromptTokens:     10,
 			CompletionTokens: 20,
 			TotalTokens:      30,
@@ -98,21 +98,21 @@ func makeToolCallResponse(toolName, args string, opts ...HelperOption) openroute
 }
 
 // makeEmptyResponse creates an empty response for testing retry logic.
-func makeEmptyResponse(opts ...HelperOption) openrouter.ChatCompletionResponse {
-	resp := openrouter.ChatCompletionResponse{
+func makeEmptyResponse(opts ...HelperOption) llm.ChatCompletionResponse {
+	resp := llm.ChatCompletionResponse{
 		ID:    "test-response-id",
 		Model: "test-model",
-		Choices: []openrouter.ResponseChoice{
+		Choices: []llm.ResponseChoice{
 			{
 				Index: 0,
-				Message: openrouter.ResponseMessage{
+				Message: llm.ResponseMessage{
 					Role:    "assistant",
 					Content: "",
 				},
 				FinishReason: "stop",
 			},
 		},
-		Usage: openrouter.Usage{
+		Usage: llm.Usage{
 			PromptTokens:     10,
 			CompletionTokens: 0,
 			TotalTokens:      10,
@@ -126,9 +126,9 @@ func makeEmptyResponse(opts ...HelperOption) openrouter.ChatCompletionResponse {
 
 // makeToolCallWithContentResponse creates a response with both content and a tool call.
 // This happens when LLM provides intermediate text before calling a tool.
-func makeToolCallWithContentResponse(content, toolName, args string, toolCallID string, opts ...HelperOption) openrouter.ChatCompletionResponse {
+func makeToolCallWithContentResponse(content, toolName, args string, toolCallID string, opts ...HelperOption) llm.ChatCompletionResponse {
 	choice := newChoice("assistant", content)
-	choice.Message.ToolCalls = []openrouter.ToolCall{
+	choice.Message.ToolCalls = []llm.ToolCall{
 		{
 			ID:   toolCallID,
 			Type: "function",
@@ -143,11 +143,11 @@ func makeToolCallWithContentResponse(content, toolName, args string, toolCallID 
 	}
 	choice.FinishReason = "tool_calls"
 
-	resp := openrouter.ChatCompletionResponse{
+	resp := llm.ChatCompletionResponse{
 		ID:      "test-response-id",
 		Model:   "test-model",
-		Choices: []openrouter.ResponseChoice{choice},
-		Usage: openrouter.Usage{
+		Choices: []llm.ResponseChoice{choice},
+		Usage: llm.Usage{
 			PromptTokens:     10,
 			CompletionTokens: 20,
 			TotalTokens:      30,

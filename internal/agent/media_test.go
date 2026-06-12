@@ -12,14 +12,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 )
 
-func makeFilePart(name, mime string, raw []byte) openrouter.FilePart {
+func makeFilePart(name, mime string, raw []byte) llm.FilePart {
 	url := "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(raw)
-	return openrouter.FilePart{
+	return llm.FilePart{
 		Type: "file",
-		File: openrouter.File{FileName: name, FileData: url},
+		File: llm.File{FileName: name, FileData: url},
 	}
 }
 
@@ -30,7 +30,7 @@ func TestFormatMediaParts_EmptyInput(t *testing.T) {
 
 func TestFormatMediaParts_SkipsNonFileParts(t *testing.T) {
 	parts := []interface{}{
-		openrouter.TextPart{Type: "text", Text: "hello"},
+		llm.TextPart{Type: "text", Text: "hello"},
 		"not a part",
 	}
 	assert.Equal(t, "", FormatMediaParts(parts, ""))
@@ -106,8 +106,8 @@ func TestFormatMediaParts_MalformedDataURL_RecordsZeroSize(t *testing.T) {
 	// Non-base64 payload: still record the FilePart (we know name/mime
 	// from the part itself), but size_bytes=0 and sha256 omitted. Replay
 	// can't reconstruct it, but at least the trace shows the part existed.
-	fp := openrouter.FilePart{
-		File: openrouter.File{
+	fp := llm.FilePart{
+		File: llm.File{
 			FileName: "broken.png",
 			FileData: "data:image/png;base64,!!!INVALID!!!",
 		},

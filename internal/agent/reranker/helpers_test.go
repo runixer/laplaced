@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/runixer/laplaced/internal/config"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -56,17 +56,17 @@ func testConfigDisabled() *config.Config {
 }
 
 // makeChatResponse creates a simple text response from the LLM.
-func makeChatResponse(content string) openrouter.ChatCompletionResponse {
-	return openrouter.ChatCompletionResponse{
-		Choices: []openrouter.ResponseChoice{
+func makeChatResponse(content string) llm.ChatCompletionResponse {
+	return llm.ChatCompletionResponse{
+		Choices: []llm.ResponseChoice{
 			{
-				Message: openrouter.ResponseMessage{
+				Message: llm.ResponseMessage{
 					Role:    "assistant",
 					Content: content,
 				},
 			},
 		},
-		Usage: openrouter.Usage{
+		Usage: llm.Usage{
 			PromptTokens:     100,
 			CompletionTokens: 50,
 			TotalTokens:      150,
@@ -75,13 +75,13 @@ func makeChatResponse(content string) openrouter.ChatCompletionResponse {
 }
 
 // makeToolCallResponse creates a response with a tool call.
-func makeToolCallResponse(toolName, arguments string) openrouter.ChatCompletionResponse {
-	return openrouter.ChatCompletionResponse{
-		Choices: []openrouter.ResponseChoice{
+func makeToolCallResponse(toolName, arguments string) llm.ChatCompletionResponse {
+	return llm.ChatCompletionResponse{
+		Choices: []llm.ResponseChoice{
 			{
-				Message: openrouter.ResponseMessage{
+				Message: llm.ResponseMessage{
 					Role: "assistant",
-					ToolCalls: []openrouter.ToolCall{
+					ToolCalls: []llm.ToolCall{
 						{
 							ID:   "call_123",
 							Type: "function",
@@ -97,7 +97,7 @@ func makeToolCallResponse(toolName, arguments string) openrouter.ChatCompletionR
 				},
 			},
 		},
-		Usage: openrouter.Usage{
+		Usage: llm.Usage{
 			PromptTokens:     100,
 			CompletionTokens: 50,
 			TotalTokens:      150,
@@ -106,15 +106,15 @@ func makeToolCallResponse(toolName, arguments string) openrouter.ChatCompletionR
 }
 
 // makeFinalJSONResponse creates a response with final JSON output.
-func makeFinalJSONResponse(jsonContent string) openrouter.ChatCompletionResponse {
+func makeFinalJSONResponse(jsonContent string) llm.ChatCompletionResponse {
 	return makeChatResponse(jsonContent)
 }
 
 // makeEmptyResponse creates an empty response (no choices).
-func makeEmptyResponse() openrouter.ChatCompletionResponse {
-	return openrouter.ChatCompletionResponse{
-		Choices: []openrouter.ResponseChoice{},
-		Usage: openrouter.Usage{
+func makeEmptyResponse() llm.ChatCompletionResponse {
+	return llm.ChatCompletionResponse{
+		Choices: []llm.ResponseChoice{},
+		Usage: llm.Usage{
 			PromptTokens:     100,
 			CompletionTokens: 0,
 			TotalTokens:      100,

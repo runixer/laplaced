@@ -16,8 +16,8 @@ import (
 	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/obs"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -84,7 +84,7 @@ func (m *Merger) Execute(ctx context.Context, req *agent.Request) (response *age
 	// Get profile and recent topics
 	userID := m.getUserID(req)
 
-	// Span boundary so the child openrouter span lands under merger.Execute
+	// Span boundary so the child llm span lands under merger.Execute
 	// and merge decisions become queryable via `{ span.merger.should_merge = false }`.
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/merger").Start(
 		ctx, "merger.Execute",
@@ -129,9 +129,9 @@ func (m *Merger) Execute(ctx context.Context, req *agent.Request) (response *age
 
 	// Make LLM call
 	start := time.Now()
-	resp, err := m.executor.Client().CreateChatCompletion(ctx, openrouter.ChatCompletionRequest{
+	resp, err := m.executor.Client().CreateChatCompletion(ctx, llm.ChatCompletionRequest{
 		Model: model,
-		Messages: []openrouter.Message{
+		Messages: []llm.Message{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt},
 		},

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -15,49 +15,49 @@ import (
 
 // makeStreamChunks builds a slice of ChatCompletionChunks. helpers below.
 
-func contentChunk(text string, finishReason string) openrouter.ChatCompletionChunk {
-	return openrouter.ChatCompletionChunk{
+func contentChunk(text string, finishReason string) llm.ChatCompletionChunk {
+	return llm.ChatCompletionChunk{
 		Object: "chat.completion.chunk",
-		Choices: []openrouter.ChunkChoice{{
+		Choices: []llm.ChunkChoice{{
 			Index:        0,
-			Delta:        openrouter.ChunkDelta{Content: text},
+			Delta:        llm.ChunkDelta{Content: text},
 			FinishReason: finishReason,
 		}},
 	}
 }
 
-func reasoningChunk(reasoningText string, detail interface{}) openrouter.ChatCompletionChunk {
-	return openrouter.ChatCompletionChunk{
+func reasoningChunk(reasoningText string, detail interface{}) llm.ChatCompletionChunk {
+	return llm.ChatCompletionChunk{
 		Object: "chat.completion.chunk",
-		Choices: []openrouter.ChunkChoice{{
+		Choices: []llm.ChunkChoice{{
 			Index: 0,
-			Delta: openrouter.ChunkDelta{Reasoning: reasoningText, ReasoningDetails: detail},
+			Delta: llm.ChunkDelta{Reasoning: reasoningText, ReasoningDetails: detail},
 		}},
 	}
 }
 
-func toolCallChunk(idx int, id, name, argsFragment string) openrouter.ChatCompletionChunk {
-	tc := openrouter.ChunkToolCall{Index: idx, ID: id, Type: "function"}
+func toolCallChunk(idx int, id, name, argsFragment string) llm.ChatCompletionChunk {
+	tc := llm.ChunkToolCall{Index: idx, ID: id, Type: "function"}
 	tc.Function.Name = name
 	tc.Function.Arguments = argsFragment
-	return openrouter.ChatCompletionChunk{
+	return llm.ChatCompletionChunk{
 		Object: "chat.completion.chunk",
-		Choices: []openrouter.ChunkChoice{{
+		Choices: []llm.ChunkChoice{{
 			Index: 0,
-			Delta: openrouter.ChunkDelta{ToolCalls: []openrouter.ChunkToolCall{tc}},
+			Delta: llm.ChunkDelta{ToolCalls: []llm.ChunkToolCall{tc}},
 		}},
 	}
 }
 
-func usageChunk(prompt, completion int) openrouter.ChatCompletionChunk {
-	return openrouter.ChatCompletionChunk{
+func usageChunk(prompt, completion int) llm.ChatCompletionChunk {
+	return llm.ChatCompletionChunk{
 		Object: "chat.completion.chunk",
-		Choices: []openrouter.ChunkChoice{{
+		Choices: []llm.ChunkChoice{{
 			Index:        0,
-			Delta:        openrouter.ChunkDelta{},
+			Delta:        llm.ChunkDelta{},
 			FinishReason: "stop",
 		}},
-		Usage: &openrouter.ChunkUsage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: prompt + completion},
+		Usage: &llm.ChunkUsage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: prompt + completion},
 	}
 }
 
@@ -86,7 +86,7 @@ func TestStreaming_ContentDeltasForwarded(t *testing.T) {
 		UserID:              userID,
 		RawQuery:            "hi",
 		HistoryContent:      "hi",
-		CurrentMessageParts: []interface{}{openrouter.TextPart{Type: "text", Text: "hi"}},
+		CurrentMessageParts: []interface{}{llm.TextPart{Type: "text", Text: "hi"}},
 		UseStreaming:        true,
 		OnContentDelta:      func(s string) { deltas = append(deltas, s) },
 	}
@@ -142,7 +142,7 @@ func TestStreaming_ToolCallSuppressesContentForwarding(t *testing.T) {
 		UserID:                userID,
 		RawQuery:              "hi",
 		HistoryContent:        "hi",
-		CurrentMessageParts:   []interface{}{openrouter.TextPart{Type: "text", Text: "hi"}},
+		CurrentMessageParts:   []interface{}{llm.TextPart{Type: "text", Text: "hi"}},
 		UseStreaming:          true,
 		OnContentDelta:        func(s string) { deltas = append(deltas, s) },
 		OnIntermediateMessage: func(s string) { intermediates = append(intermediates, s) },
@@ -210,7 +210,7 @@ func TestStreaming_ReasoningDetailsAccumulated(t *testing.T) {
 		UserID:              userID,
 		RawQuery:            "hi",
 		HistoryContent:      "hi",
-		CurrentMessageParts: []interface{}{openrouter.TextPart{Type: "text", Text: "hi"}},
+		CurrentMessageParts: []interface{}{llm.TextPart{Type: "text", Text: "hi"}},
 		UseStreaming:        true,
 	}
 
@@ -271,7 +271,7 @@ func TestStreaming_ToolCallArgumentsConcatenated(t *testing.T) {
 		UserID:              userID,
 		RawQuery:            "hi",
 		HistoryContent:      "hi",
-		CurrentMessageParts: []interface{}{openrouter.TextPart{Type: "text", Text: "hi"}},
+		CurrentMessageParts: []interface{}{llm.TextPart{Type: "text", Text: "hi"}},
 		UseStreaming:        true,
 	}
 
@@ -316,7 +316,7 @@ func TestStreaming_OnToolStartReceivesToolName(t *testing.T) {
 		UserID:              userID,
 		RawQuery:            "hi",
 		HistoryContent:      "hi",
-		CurrentMessageParts: []interface{}{openrouter.TextPart{Type: "text", Text: "hi"}},
+		CurrentMessageParts: []interface{}{llm.TextPart{Type: "text", Text: "hi"}},
 		UseStreaming:        true,
 		OnToolStart:         func(name, _ string) { seen = append(seen, name) },
 	}
@@ -352,7 +352,7 @@ func TestStreaming_DebugBodiesShapeForAgentLog(t *testing.T) {
 		usageChunk(7, 2),
 	)
 	mockOR.On("CreateChatCompletionStream", mock.Anything, mock.Anything).Return(
-		&openrouter.ChatCompletionStream{Events: events, DebugRequestBody: debugReq},
+		&llm.ChatCompletionStream{Events: events, DebugRequestBody: debugReq},
 		nil,
 	).Once()
 
@@ -360,7 +360,7 @@ func TestStreaming_DebugBodiesShapeForAgentLog(t *testing.T) {
 		UserID:              userID,
 		RawQuery:            "hi",
 		HistoryContent:      "hi",
-		CurrentMessageParts: []interface{}{openrouter.TextPart{Type: "text", Text: "hi"}},
+		CurrentMessageParts: []interface{}{llm.TextPart{Type: "text", Text: "hi"}},
 		UseStreaming:        true,
 	}
 

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/runixer/laplaced/internal/config"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -82,10 +82,10 @@ func TestReembedIfNeeded_TopicsReembedded(t *testing.T) {
 	// the current implementation processes all candidates in one pass.
 
 	// The embed call receives both contents in one batch; echo fake vectors back.
-	mockClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req openrouter.EmbeddingRequest) bool {
+	mockClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req llm.EmbeddingRequest) bool {
 		return req.Model == "new-model" && req.Dimensions == 1536 && len(req.Input) == 2
-	})).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{
+	})).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{
 			{Embedding: []float32{0.1, 0.2}, Index: 0},
 			{Embedding: []float32{0.3, 0.4}, Index: 1},
 		},
@@ -117,7 +117,7 @@ func TestReembedIfNeeded_EmbedError(t *testing.T) {
 	candidates := []storage.ReembedCandidate{{ID: 10, UserID: "1", Content: "topic"}}
 	mockStore.On("GetTopicsNeedingReembed", mock.Anything, 0).Return(candidates, nil).Once()
 	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).
-		Return(openrouter.EmbeddingResponse{}, errors.New("provider down")).Once()
+		Return(llm.EmbeddingResponse{}, errors.New("provider down")).Once()
 
 	svc := newTestRAGServiceNoStart(t, mockStore, mockClient, func(c *config.Config) {
 		c.Embedding.Model = "new-model"

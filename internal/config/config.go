@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/ilyakaznacheev/cleanenv"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -454,14 +454,14 @@ type ProviderRoutingConfig struct {
 	AllowFallbacks *bool `yaml:"allow_fallbacks"`
 }
 
-// ToRouting converts the YAML config to an openrouter.ProviderRouting pointer.
+// ToRouting converts the YAML config to an llm.ProviderRouting pointer.
 // Returns nil when no preference is configured, so the client stays on
 // OpenRouter's default behavior.
-func (c ProviderRoutingConfig) ToRouting() *openrouter.ProviderRouting {
+func (c ProviderRoutingConfig) ToRouting() *llm.ProviderRouting {
 	if len(c.Order) == 0 && c.AllowFallbacks == nil {
 		return nil
 	}
-	return &openrouter.ProviderRouting{
+	return &llm.ProviderRouting{
 		Order:          c.Order,
 		AllowFallbacks: c.AllowFallbacks,
 	}

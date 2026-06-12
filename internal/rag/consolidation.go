@@ -15,7 +15,7 @@ import (
 	"github.com/runixer/laplaced/internal/agent/merger"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/jobtype"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -306,7 +306,7 @@ func (s *Service) mergeTopics(ctx context.Context, candidate storage.MergeCandid
 	embeddingInput := fmt.Sprintf("Topic Summary: %s\n\nConversation Log:\n%s", newSummary, contentBuilder.String())
 
 	// Generate embedding
-	resp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
+	resp, err := s.client.CreateEmbeddings(ctx, llm.EmbeddingRequest{
 		Model:      s.cfg.Embedding.Model,
 		Dimensions: s.cfg.Embedding.Dimensions,
 		Input:      []string{embeddingInput},

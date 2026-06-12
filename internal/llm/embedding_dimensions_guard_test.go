@@ -1,4 +1,4 @@
-package openrouter_test
+package llm_test
 
 import (
 	"os"
@@ -9,7 +9,7 @@ import (
 )
 
 // TestAllEmbeddingRequestsSetDimensions walks the tree for every
-// `openrouter.EmbeddingRequest{...}` literal in non-test production code and
+// `llm.EmbeddingRequest{...}` literal in non-test production code and
 // asserts it sets a `Dimensions:` field.
 //
 // Why this test exists (v0.7.0 post-mortem): the re-embed migration used the
@@ -29,7 +29,7 @@ func TestAllEmbeddingRequestsSetDimensions(t *testing.T) {
 	// Fields we care about are multi-line literals. Capture from the opening
 	// brace until the matching closing brace on its own indented line.
 	// This is good enough for our codebase, which uses gofmt-style layout.
-	re := regexp.MustCompile(`openrouter\.EmbeddingRequest\{[\s\S]*?\n\s*\}`)
+	re := regexp.MustCompile(`llm\.EmbeddingRequest\{[\s\S]*?\n\s*\}`)
 
 	var offenders []string
 	walkErr := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {

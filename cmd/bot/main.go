@@ -24,9 +24,9 @@ import (
 	botTools "github.com/runixer/laplaced/internal/bot/tools"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/mattermost"
 	"github.com/runixer/laplaced/internal/obs"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/secrets"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
@@ -305,7 +305,7 @@ func run() int {
 
 	logger.Info("Database initialized successfully.")
 
-	openrouterClient, err := openrouter.NewClientWithBaseURL(logger, cfg.OpenRouter.APIKey, cfg.OpenRouter.ProxyURL, cfg.OpenRouter.BaseURL, cfg.OpenRouter.Provider.ToRouting())
+	openrouterClient, err := llm.NewClientWithBaseURL(logger, cfg.OpenRouter.APIKey, cfg.OpenRouter.ProxyURL, cfg.OpenRouter.BaseURL, cfg.OpenRouter.Provider.ToRouting())
 	if err != nil {
 		logger.Error("failed to create openrouter client", "error", err)
 		return 1

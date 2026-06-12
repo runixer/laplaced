@@ -11,8 +11,8 @@ import (
 	"github.com/runixer/laplaced/internal/agent/splitter"
 	agenttesting "github.com/runixer/laplaced/internal/agent/testing"
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/memory"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 
@@ -272,11 +272,11 @@ func TestProcessChunkWithStats(t *testing.T) {
 		}, nil)
 
 		// Mock embeddings
-		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{
-			Data: []openrouter.EmbeddingObject{
+		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
+			Data: []llm.EmbeddingObject{
 				{Embedding: []float32{0.1, 0.2, 0.3}, Index: 0},
 			},
-			Usage: openrouter.Usage{TotalTokens: 10},
+			Usage: llm.Usage{TotalTokens: 10},
 		}, nil)
 
 		// Mock AddTopic
@@ -347,7 +347,7 @@ func TestProcessChunkWithStats(t *testing.T) {
 		}, nil)
 
 		// Mock embeddings error
-		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{}, assert.AnError)
+		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{}, assert.AnError)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc, err := NewServiceBuilder().

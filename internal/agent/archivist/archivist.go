@@ -21,8 +21,8 @@ import (
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/obs"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -339,7 +339,7 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (response *
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Span boundary for the archivist call. Child openrouter span(s) attach
+	// Span boundary for the archivist call. Child llm span(s) attach
 	// here; deferred closure captures fact/people extraction counts and routes
 	// terminal err through obs.ObserveErr. See plan: ticklish-giggling-hearth.md.
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/archivist").Start(
@@ -410,7 +410,7 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (response *
 		return nil, fmt.Errorf("failed to build user prompt: %w", err)
 	}
 
-	llmMessages := []openrouter.Message{
+	llmMessages := []llm.Message{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: userPrompt},
 	}
@@ -418,19 +418,19 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (response *
 	// Single LLM call (v0.5.1: no agentic loop - all people info is in prompt)
 	tracker.StartTurn()
 
-	var reasoning *openrouter.ReasoningConfig
+	var reasoning *llm.ReasoningConfig
 	if thinkingLevel != "off" && thinkingLevel != "" {
-		reasoning = &openrouter.ReasoningConfig{
+		reasoning = &llm.ReasoningConfig{
 			Effort: thinkingLevel,
 		}
 	}
 
-	llmReq := openrouter.ChatCompletionRequest{
+	llmReq := llm.ChatCompletionRequest{
 		Model:    model,
 		Messages: llmMessages,
 		// NOTE: response-healing plugin breaks reasoning visibility when combined with json_object format.
 		// Reasoning works correctly without plugins.
-		ResponseFormat: openrouter.ResponseFormat{Type: "json_object"},
+		ResponseFormat: llm.ResponseFormat{Type: "json_object"},
 		Reasoning:      reasoning,
 		UserID:         string(userID),
 	}

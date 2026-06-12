@@ -8,7 +8,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/agent/laplace"
 	"github.com/runixer/laplaced/internal/files"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
@@ -249,7 +249,7 @@ func TestProcessMessageGroup_LLMExecutionError_SendsErrorMessage(t *testing.T) {
 
 	// LLM returns error
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(openrouter.ChatCompletionResponse{}, errors.New("LLM API error")).Maybe()
+		Return(llm.ChatCompletionResponse{}, errors.New("LLM API error")).Maybe()
 
 	// Note: SendMessage is handled by flexible mock from setupBotForErrorTests
 

@@ -9,7 +9,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 )
 
 // TestLogger returns a discarding logger for tests.
@@ -124,16 +124,16 @@ func Ptr[T any](v T) *T {
 }
 
 // MockEmbeddingResponse returns a mock embedding response for tests.
-func MockEmbeddingResponse() *openrouter.EmbeddingResponse {
+func MockEmbeddingResponse() *llm.EmbeddingResponse {
 	embedding := TestEmbedding()
-	return &openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{
+	return &llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{
 			{
 				Embedding: embedding,
 				Index:     0,
 			},
 		},
-		Usage: openrouter.Usage{
+		Usage: llm.Usage{
 			PromptTokens: 10,
 			TotalTokens:  10,
 		},

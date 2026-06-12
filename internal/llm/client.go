@@ -1,4 +1,4 @@
-package openrouter
+package llm
 
 import (
 	"bytes"
@@ -883,8 +883,8 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 	// (attempts, retry_delays_ms) land as attrs, not child spans, so we
 	// don't multiply cardinality. Named returns let the deferred closure
 	// route any terminal err through ObserveErr.
-	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/openrouter").Start(
-		ctx, "openrouter.CreateChatCompletion",
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/llm").Start(
+		ctx, "llm.CreateChatCompletion",
 		trace.WithAttributes(
 			attribute.String("gen_ai.system", "openrouter"),
 			attribute.String("gen_ai.request.model", req.Model),
@@ -1157,8 +1157,8 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 		totalChars += len(s)
 	}
 	jt := jobtype.FromContext(ctx).String()
-	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/openrouter").Start(
-		ctx, "openrouter.CreateEmbeddings",
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/llm").Start(
+		ctx, "llm.CreateEmbeddings",
 		trace.WithAttributes(
 			attribute.String("gen_ai.system", "openrouter"),
 			attribute.String("gen_ai.request.model", req.Model),

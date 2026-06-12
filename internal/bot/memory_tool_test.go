@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/runixer/laplaced/internal/bot/tools"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 
@@ -87,10 +87,10 @@ func TestPerformManageMemory_Add(t *testing.T) {
 	queryJSON := `{"action": "add", "content": "Likes pizza", "category": "food", "type": "preference", "importance": 80}`
 
 	// Mocks
-	mockORClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req openrouter.EmbeddingRequest) bool {
+	mockORClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req llm.EmbeddingRequest) bool {
 		return req.Input[0] == "Likes pizza"
-	})).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{
+	})).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{
 			{Embedding: []float32{0.1, 0.2}},
 		},
 	}, nil)

@@ -10,7 +10,7 @@ import (
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
@@ -385,7 +385,7 @@ func TestBuildMessages_Minimal(t *testing.T) {
 	assert.Equal(t, "system", messages[0].Role)
 	content, ok := messages[0].Content.([]interface{})
 	require.True(t, ok)
-	textPart, ok := content[0].(openrouter.TextPart)
+	textPart, ok := content[0].(llm.TextPart)
 	require.True(t, ok)
 	assert.Contains(t, textPart.Text, "You are a helpful assistant.")
 }
@@ -406,7 +406,7 @@ func TestBuildMessages_FullContext(t *testing.T) {
 	}
 
 	messages := lap.BuildMessages(context.Background(), contextData, "Hello",
-		[]interface{}{openrouter.TextPart{Type: "text", Text: "Hello"}}, "Hello")
+		[]interface{}{llm.TextPart{Type: "text", Text: "Hello"}}, "Hello")
 
 	// Should have: system message, user message with history
 	require.GreaterOrEqual(t, len(messages), 2)
@@ -417,7 +417,7 @@ func TestBuildMessages_FullContext(t *testing.T) {
 	// System prompt should include all components
 	content, ok := messages[0].Content.([]interface{})
 	require.True(t, ok)
-	textPart, ok := content[0].(openrouter.TextPart)
+	textPart, ok := content[0].(llm.TextPart)
 	require.True(t, ok)
 	assert.Contains(t, textPart.Text, "You are a helpful assistant.")
 	assert.Contains(t, textPart.Text, "Test User")
@@ -452,7 +452,7 @@ func TestBuildMessages_WithRAGResults(t *testing.T) {
 		if msg.Role == "user" {
 			if content, ok := msg.Content.([]interface{}); ok {
 				if len(content) > 0 {
-					if textPart, ok := content[0].(openrouter.TextPart); ok {
+					if textPart, ok := content[0].(llm.TextPart); ok {
 						if strings.HasPrefix(textPart.Text, "<retrieved_context query=") {
 							foundRAGContext = true
 							break
@@ -514,7 +514,7 @@ func TestBuildMessages_WithArtifacts(t *testing.T) {
 		if msg.Role == "user" {
 			if content, ok := msg.Content.([]interface{}); ok {
 				if len(content) > 0 {
-					if textPart, ok := content[0].(openrouter.TextPart); ok {
+					if textPart, ok := content[0].(llm.TextPart); ok {
 						if strings.HasPrefix(textPart.Text, "<artifact_context query=") {
 							foundArtifacts = true
 							assert.Contains(t, textPart.Text, "document.pdf")
@@ -543,7 +543,7 @@ func TestBuildMessages_WithRecentHistory(t *testing.T) {
 	}
 
 	currentMessageParts := []interface{}{
-		openrouter.TextPart{Type: "text", Text: "Second message"},
+		llm.TextPart{Type: "text", Text: "Second message"},
 	}
 
 	messages := lap.BuildMessages(context.Background(), contextData, "Second message",
@@ -563,7 +563,7 @@ func TestBuildMessages_WithRecentHistory(t *testing.T) {
 			if cs, ok := msg.Content.(string); ok {
 				content = cs
 			} else if parts, ok := msg.Content.([]interface{}); ok && len(parts) > 0 {
-				if tp, ok := parts[0].(openrouter.TextPart); ok {
+				if tp, ok := parts[0].(llm.TextPart); ok {
 					content = tp.Text
 				}
 			}
@@ -601,7 +601,7 @@ func TestBuildMessages_HistoryUsesMultimodalContentForLastMessage(t *testing.T) 
 	}
 
 	currentMessageParts := []interface{}{
-		openrouter.TextPart{Type: "text", Text: "Multimodal message"},
+		llm.TextPart{Type: "text", Text: "Multimodal message"},
 	}
 
 	messages := lap.BuildMessages(context.Background(), contextData, "Multimodal message",
@@ -613,7 +613,7 @@ func TestBuildMessages_HistoryUsesMultimodalContentForLastMessage(t *testing.T) 
 		if msg.Role == "user" {
 			if content, ok := msg.Content.([]interface{}); ok {
 				if len(content) > 0 {
-					if tp, ok := content[0].(openrouter.TextPart); ok && tp.Text == "Multimodal message" {
+					if tp, ok := content[0].(llm.TextPart); ok && tp.Text == "Multimodal message" {
 						foundMultimodal = true
 						break
 					}
@@ -637,7 +637,7 @@ func TestBuildMessages_FallbackCurrentMessage(t *testing.T) {
 	}
 
 	currentMessageParts := []interface{}{
-		openrouter.TextPart{Type: "text", Text: "Current message"},
+		llm.TextPart{Type: "text", Text: "Current message"},
 	}
 
 	messages := lap.BuildMessages(context.Background(), contextData, "Current message",
@@ -652,7 +652,7 @@ func TestBuildMessages_FallbackCurrentMessage(t *testing.T) {
 		if msg.Role == "user" {
 			if content, ok := msg.Content.([]interface{}); ok {
 				if len(content) > 0 {
-					if tp, ok := content[0].(openrouter.TextPart); ok && tp.Text == "Current message" {
+					if tp, ok := content[0].(llm.TextPart); ok && tp.Text == "Current message" {
 						foundCurrent = true
 						break
 					}
@@ -690,7 +690,7 @@ func TestBuildMessages_WithNonEmptyRelevantPeople(t *testing.T) {
 		if msg.Role == "user" {
 			if content, ok := msg.Content.([]interface{}); ok {
 				if len(content) > 0 {
-					if tp, ok := content[0].(openrouter.TextPart); ok {
+					if tp, ok := content[0].(llm.TextPart); ok {
 						if strings.Contains(tp.Text, "<relevant_people>") {
 							foundRelevantPeople = true
 							assert.Contains(t, tp.Text, "Alice")

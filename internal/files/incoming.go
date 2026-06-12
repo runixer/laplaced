@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -175,7 +175,7 @@ func (p *Processor) processOne(ctx context.Context, f IncomingFile, userID stora
 		textContent := fmt.Sprintf("%s:\n\n%s", f.FileName, string(data))
 		artifactID := p.saveArtifact(ctx, userID, "document", f.FileName, f.MIME, data, groupText, f.SourceID)
 		return &ProcessedFile{
-			LLMParts: []interface{}{openrouter.TextPart{Type: "text", Text: textContent}},
+			LLMParts: []interface{}{llm.TextPart{Type: "text", Text: textContent}},
 			FileType: FileTypeDocument, FileID: f.SourceID, FileName: f.FileName, MimeType: f.MIME,
 			Size: int64(len(data)), Duration: duration, ArtifactID: artifactID,
 		}, nil
@@ -188,7 +188,7 @@ func (p *Processor) processOne(ctx context.Context, f IncomingFile, userID stora
 // chokepoint for inbound media encoding.
 func (p *Processor) mediaPart(fileName, mimeType, base64Data string) interface{} {
 	dataURL := fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data)
-	return openrouter.MediaPart(p.imageInputFormat, mimeType, fileName, dataURL)
+	return llm.MediaPart(p.imageInputFormat, mimeType, fileName, dataURL)
 }
 
 // saveArtifact persists a file as an artifact when a file handler is configured.

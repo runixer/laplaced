@@ -16,8 +16,8 @@ import (
 	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/obs"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -65,7 +65,7 @@ func (e *Enricher) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 		}, nil
 	}
 
-	// Span wraps the whole enricher call so the nested openrouter span
+	// Span wraps the whole enricher call so the nested llm span
 	// attaches at a clear pipeline boundary instead of dangling under
 	// rag.Retrieve. Parallel to reranker.Execute and laplace.Execute.
 	var userID storage.ScopeID
@@ -193,8 +193,8 @@ func (e *Enricher) getMediaParts(req *agent.Request) []interface{} {
 }
 
 // buildMessages constructs OpenRouter messages, handling multimodal content.
-func (e *Enricher) buildMessages(systemPrompt, userPrompt string, req *agent.Request) []openrouter.Message {
-	messages := []openrouter.Message{
+func (e *Enricher) buildMessages(systemPrompt, userPrompt string, req *agent.Request) []llm.Message {
+	messages := []llm.Message{
 		{Role: "system", Content: systemPrompt},
 	}
 
@@ -215,12 +215,12 @@ func (e *Enricher) buildMessages(systemPrompt, userPrompt string, req *agent.Req
 
 		// Build multimodal content
 		parts := []interface{}{
-			openrouter.TextPart{Type: "text", Text: userPrompt + "\n\n" + mediaInstruction},
+			llm.TextPart{Type: "text", Text: userPrompt + "\n\n" + mediaInstruction},
 		}
 		parts = append(parts, mediaParts...)
-		messages = append(messages, openrouter.Message{Role: "user", Content: parts})
+		messages = append(messages, llm.Message{Role: "user", Content: parts})
 	} else {
-		messages = append(messages, openrouter.Message{Role: "user", Content: userPrompt})
+		messages = append(messages, llm.Message{Role: "user", Content: userPrompt})
 	}
 
 	return messages

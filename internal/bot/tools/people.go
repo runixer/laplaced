@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -124,7 +124,7 @@ func (e *ToolExecutor) performCreatePerson(ctx context.Context, userID storage.S
 	if person.Bio != "" {
 		embText += " " + person.Bio
 	}
-	resp, err := e.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
+	resp, err := e.orClient.CreateEmbeddings(ctx, llm.EmbeddingRequest{
 		Model:      e.cfg.Embedding.Model,
 		Dimensions: e.cfg.Embedding.Dimensions,
 		Input:      []string{embText},
@@ -223,7 +223,7 @@ func (e *ToolExecutor) performUpdatePerson(ctx context.Context, userID storage.S
 		if person.Bio != "" {
 			embText += " " + person.Bio
 		}
-		resp, err := e.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
+		resp, err := e.orClient.CreateEmbeddings(ctx, llm.EmbeddingRequest{
 			Model:      e.cfg.Embedding.Model,
 			Dimensions: e.cfg.Embedding.Dimensions,
 			Input:      []string{embText},

@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/runixer/laplaced/internal/agent"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 )
@@ -262,9 +262,9 @@ func TestEnricher_buildMessages(t *testing.T) {
 		{
 			name: "with file",
 			mediaParts: []interface{}{
-				openrouter.FilePart{
+				llm.FilePart{
 					Type: "file",
-					File: openrouter.File{
+					File: llm.File{
 						FileName: "image.png",
 						FileData: "data:image/png;base64,iVBORw0KG...",
 					},
@@ -277,16 +277,16 @@ func TestEnricher_buildMessages(t *testing.T) {
 		{
 			name: "multiple media",
 			mediaParts: []interface{}{
-				openrouter.FilePart{
+				llm.FilePart{
 					Type: "file",
-					File: openrouter.File{
+					File: llm.File{
 						FileName: "image.png",
 						FileData: "data:image/png;base64,iVBORw0KG...",
 					},
 				},
-				openrouter.FilePart{
+				llm.FilePart{
 					Type: "file",
-					File: openrouter.File{
+					File: llm.File{
 						FileName: "audio.ogg",
 						FileData: "data:audio/ogg;base64,...",
 					},
@@ -327,7 +327,7 @@ func TestEnricher_buildMessages(t *testing.T) {
 					content, ok := userMsg.Content.([]interface{})
 					require.True(t, ok, "user content should be a slice when media is present")
 					// First part is text with instruction
-					_, isTextPart := content[0].(openrouter.TextPart)
+					_, isTextPart := content[0].(llm.TextPart)
 					assert.True(t, isTextPart, "first part should be TextPart")
 					assert.GreaterOrEqual(t, len(content), 2)
 				} else {

@@ -9,7 +9,7 @@ import (
 	"github.com/runixer/laplaced/internal/agent/laplace"
 	"github.com/runixer/laplaced/internal/bot/tools"
 	"github.com/runixer/laplaced/internal/config"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
@@ -111,15 +111,15 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 	// Mock OpenRouter calls
 	// First call: Model returns intermediate text + tool call
 	intermediateText := "Let me search for that information..."
-	mockORClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req openrouter.ChatCompletionRequest) bool {
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
 		// First call has only system + user message
 		return len(req.Messages) == 2
-	})).Return(openrouter.ChatCompletionResponse{
-		Choices: []openrouter.ResponseChoice{
-			{Message: openrouter.ResponseMessage{
+	})).Return(llm.ChatCompletionResponse{
+		Choices: []llm.ResponseChoice{
+			{Message: llm.ResponseMessage{
 				Role:    "assistant",
 				Content: intermediateText,
-				ToolCalls: []openrouter.ToolCall{
+				ToolCalls: []llm.ToolCall{
 					{
 						ID:   "call_123",
 						Type: "function",
@@ -134,36 +134,36 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 				},
 			}, FinishReason: "tool_calls"},
 		},
-		Usage: openrouter.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+		Usage: llm.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 	}, nil).Once()
 
 	// Mock the tool execution
-	mockORClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req openrouter.ChatCompletionRequest) bool {
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
 		// Tool execution call
 		return req.Model == "test-tool-model"
-	})).Return(openrouter.ChatCompletionResponse{
-		Choices: []openrouter.ResponseChoice{
-			{Message: openrouter.ResponseMessage{
+	})).Return(llm.ChatCompletionResponse{
+		Choices: []llm.ResponseChoice{
+			{Message: llm.ResponseMessage{
 				Role:    "assistant",
 				Content: "Tool result data",
 			}, FinishReason: "stop"},
 		},
-		Usage: openrouter.Usage{PromptTokens: 5, CompletionTokens: 10, TotalTokens: 15},
+		Usage: llm.Usage{PromptTokens: 5, CompletionTokens: 10, TotalTokens: 15},
 	}, nil).Once()
 
 	// Second call: Model returns final response after tool execution
 	finalText := "Based on the search results, here is the answer..."
-	mockORClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req openrouter.ChatCompletionRequest) bool {
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
 		// Second call has system + user + assistant (with tool call) + tool result
 		return len(req.Messages) == 4
-	})).Return(openrouter.ChatCompletionResponse{
-		Choices: []openrouter.ResponseChoice{
-			{Message: openrouter.ResponseMessage{
+	})).Return(llm.ChatCompletionResponse{
+		Choices: []llm.ResponseChoice{
+			{Message: llm.ResponseMessage{
 				Role:    "assistant",
 				Content: finalText,
 			}, FinishReason: "stop"},
 		},
-		Usage: openrouter.Usage{PromptTokens: 20, CompletionTokens: 10, TotalTokens: 30},
+		Usage: llm.Usage{PromptTokens: 20, CompletionTokens: 10, TotalTokens: 30},
 	}, nil).Once()
 
 	// Execute

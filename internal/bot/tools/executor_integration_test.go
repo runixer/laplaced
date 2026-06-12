@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/runixer/laplaced/internal/config"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -72,10 +72,10 @@ func TestExecuteToolCall_ManageMemory(t *testing.T) {
 	mockORClient := new(testutil.MockOpenRouterClient)
 
 	embedding := testutil.TestEmbedding()
-	mockORClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req openrouter.EmbeddingRequest) bool {
+	mockORClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req llm.EmbeddingRequest) bool {
 		return len(req.Input) > 0
-	})).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{{Embedding: embedding}},
+	})).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{{Embedding: embedding}},
 	}, nil)
 
 	mockStore.On("AddFact", mock.Anything).Return(int64(1), nil)
@@ -140,10 +140,10 @@ func TestExecuteToolCall_ManagePeople(t *testing.T) {
 
 	// Mock embedding creation for person
 	embedding := testutil.TestEmbedding()
-	mockORClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req openrouter.EmbeddingRequest) bool {
+	mockORClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req llm.EmbeddingRequest) bool {
 		return len(req.Input) > 0
-	})).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{{Embedding: embedding}},
+	})).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{{Embedding: embedding}},
 	}, nil)
 
 	mockStore.On("FindPersonByName", storage.ScopeID("123"), "Alice").Return(nil, nil)
@@ -177,10 +177,10 @@ func TestExecuteToolCall_ModelTool(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
 	mockORClient := new(testutil.MockOpenRouterClient)
 
-	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(openrouter.ChatCompletionResponse{
-		Choices: []openrouter.ResponseChoice{
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(llm.ChatCompletionResponse{
+		Choices: []llm.ResponseChoice{
 			{
-				Message: openrouter.ResponseMessage{
+				Message: llm.ResponseMessage{
 					Role:    "assistant",
 					Content: "Model response",
 				},

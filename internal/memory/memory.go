@@ -16,8 +16,8 @@ import (
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/jobtype"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/obs"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -33,7 +33,7 @@ type Service struct {
 	factHistoryRepo storage.FactHistoryRepository
 	topicRepo       storage.TopicRepository
 	peopleRepo      storage.PeopleRepository
-	orClient        openrouter.Client
+	orClient        llm.Client
 	translator      *i18n.Translator
 	vectorSearcher  VectorSearcher
 	agentLogger     *agentlog.Logger
@@ -41,7 +41,7 @@ type Service struct {
 	scopeRepo       storage.ScopeRepository // channel-scope detection (Phase 6); nil without a resolver (Telegram-only path)
 }
 
-func NewService(logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, factHistoryRepo storage.FactHistoryRepository, orClient openrouter.Client, translator *i18n.Translator) *Service {
+func NewService(logger *slog.Logger, cfg *config.Config, factRepo storage.FactRepository, userRepo storage.UserRepository, factHistoryRepo storage.FactHistoryRepository, orClient llm.Client, translator *i18n.Translator) *Service {
 	return &Service{
 		logger:          logger.With("component", "memory"),
 		cfg:             cfg,
@@ -172,8 +172,7 @@ func (s *Service) ProcessSessionWithStats(ctx context.Context, userID storage.Sc
 	defer cancel()
 
 	// Root span for the background fact-extraction call. Without this the
-	// archivist + openrouter spans were orphan roots in Tempo. See plan:
-	// ticklish-giggling-hearth.md.
+	// archivist + llm spans were orphan roots in Tempo.
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/memory").Start(
 		ctx, "memory.ProcessSession",
 		trace.WithAttributes(
@@ -547,7 +546,7 @@ type embeddingUsage struct {
 }
 
 func (s *Service) getEmbedding(ctx context.Context, text string) ([]float32, embeddingUsage, error) {
-	resp, err := s.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
+	resp, err := s.orClient.CreateEmbeddings(ctx, llm.EmbeddingRequest{
 		Model:      s.cfg.Embedding.Model,
 		Dimensions: s.cfg.Embedding.Dimensions,
 		Input:      []string{text},

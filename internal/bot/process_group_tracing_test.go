@@ -7,7 +7,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/agent/laplace"
 	"github.com/runixer/laplaced/internal/files"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
 	"github.com/runixer/laplaced/internal/testutil"
@@ -81,11 +81,11 @@ func TestProcessMessageGroup_RecordsRootSpan(t *testing.T) {
 	mockStore.On("AddMessageToHistory", userID, mock.Anything).Return(nil)
 	mockStore.On("AddStat", mock.Anything).Return(nil)
 
-	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(openrouter.ChatCompletionResponse{
-		Choices: []openrouter.ResponseChoice{
-			{Message: openrouter.ResponseMessage{Role: "assistant", Content: "ok"}, FinishReason: "stop"},
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(llm.ChatCompletionResponse{
+		Choices: []llm.ResponseChoice{
+			{Message: llm.ResponseMessage{Role: "assistant", Content: "ok"}, FinishReason: "stop"},
 		},
-		Usage: openrouter.Usage{TotalTokens: 5},
+		Usage: llm.Usage{TotalTokens: 5},
 	}, nil)
 
 	b.processMessageGroup(context.Background(), &MessageGroup{
@@ -189,11 +189,11 @@ func runAnomalyTraceCase(t *testing.T, userText, llmContent string) map[attribut
 	mockStore.On("AddMessageToHistory", userID, mock.Anything).Return(nil)
 	mockStore.On("AddStat", mock.Anything).Return(nil)
 
-	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(openrouter.ChatCompletionResponse{
-		Choices: []openrouter.ResponseChoice{
-			{Message: openrouter.ResponseMessage{Role: "assistant", Content: llmContent}, FinishReason: "stop"},
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(llm.ChatCompletionResponse{
+		Choices: []llm.ResponseChoice{
+			{Message: llm.ResponseMessage{Role: "assistant", Content: llmContent}, FinishReason: "stop"},
 		},
-		Usage: openrouter.Usage{TotalTokens: 5},
+		Usage: llm.Usage{TotalTokens: 5},
 	}, nil)
 
 	b.processMessageGroup(context.Background(), &MessageGroup{

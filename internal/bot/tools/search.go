@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -83,7 +83,7 @@ func (e *ToolExecutor) performSearchPeople(ctx context.Context, userID storage.S
 	// If still no results, try vector search via RAG service
 	if len(people) == 0 && e.ragService != nil {
 		// Generate embedding for the query
-		resp, err := e.orClient.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
+		resp, err := e.orClient.CreateEmbeddings(ctx, llm.EmbeddingRequest{
 			Model:      e.cfg.Embedding.Model,
 			Dimensions: e.cfg.Embedding.Dimensions,
 			Input:      []string{query},

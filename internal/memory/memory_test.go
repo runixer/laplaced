@@ -11,7 +11,7 @@ import (
 	"github.com/runixer/laplaced/internal/agent/archivist"
 	agenttesting "github.com/runixer/laplaced/internal/agent/testing"
 	"github.com/runixer/laplaced/internal/config"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 
@@ -131,8 +131,8 @@ func TestProcessSession_AddFact_RecordsHistory(t *testing.T) {
 	svc.SetArchivistAgent(mockArchivist)
 
 	// Mock Embedding
-	embResp := openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{{Embedding: []float32{0.1, 0.2}}},
+	embResp := llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{{Embedding: []float32{0.1, 0.2}}},
 	}
 	mockOR.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(&embResp, nil)
 
@@ -200,8 +200,8 @@ func TestProcessSession_UpdateFact_RecordsHistory(t *testing.T) {
 	svc.SetArchivistAgent(mockArchivist)
 
 	// Mock Embedding
-	embResp := openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{{Embedding: []float32{0.1, 0.2}}},
+	embResp := llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{{Embedding: []float32{0.1, 0.2}}},
 	}
 	mockOR.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(&embResp, nil)
 
@@ -306,10 +306,10 @@ func TestGetEmbedding(t *testing.T) {
 
 	svc := NewService(logger, cfg, nil, nil, nil, mockOR, translator)
 
-	embResp := openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{{Embedding: []float32{0.1, 0.2, 0.3}}},
+	embResp := llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{{Embedding: []float32{0.1, 0.2, 0.3}}},
 	}
-	mockOR.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req openrouter.EmbeddingRequest) bool {
+	mockOR.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req llm.EmbeddingRequest) bool {
 		return req.Model == "test-model" && len(req.Input) == 1 && req.Input[0] == "test text"
 	})).Return(&embResp, nil)
 
@@ -327,7 +327,7 @@ func TestGetEmbedding_EmptyResponse(t *testing.T) {
 
 	svc := NewService(logger, cfg, nil, nil, nil, mockOR, translator)
 
-	embResp := openrouter.EmbeddingResponse{Data: []openrouter.EmbeddingObject{}}
+	embResp := llm.EmbeddingResponse{Data: []llm.EmbeddingObject{}}
 	mockOR.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(&embResp, nil)
 
 	_, _, err := svc.getEmbedding(context.Background(), "test text")

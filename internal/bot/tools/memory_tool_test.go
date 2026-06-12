@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -18,10 +18,10 @@ func TestPerformAddFact_Success(t *testing.T) {
 	mockORClient := new(testutil.MockOpenRouterClient)
 
 	embedding := testutil.TestEmbedding()
-	mockORClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req openrouter.EmbeddingRequest) bool {
+	mockORClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req llm.EmbeddingRequest) bool {
 		return len(req.Input) > 0 && req.Input[0] == "Test fact content"
-	})).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{{Embedding: embedding}},
+	})).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{{Embedding: embedding}},
 	}, nil)
 
 	mockStore.On("AddFact", mock.MatchedBy(func(f storage.Fact) bool {
@@ -56,8 +56,8 @@ func TestPerformAddFact_WithCustomFields(t *testing.T) {
 	mockORClient := new(testutil.MockOpenRouterClient)
 
 	embedding := testutil.TestEmbedding()
-	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{{Embedding: embedding}},
+	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{{Embedding: embedding}},
 	}, nil)
 
 	mockStore.On("AddFact", mock.MatchedBy(func(f storage.Fact) bool {
@@ -116,7 +116,7 @@ func TestPerformAddFact_EmbeddingAPIError(t *testing.T) {
 	mockORClient := new(testutil.MockOpenRouterClient)
 
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).
-		Return(openrouter.EmbeddingResponse{}, errors.New("API error"))
+		Return(llm.EmbeddingResponse{}, errors.New("API error"))
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 
@@ -139,7 +139,7 @@ func TestPerformAddFact_EmbeddingError(t *testing.T) {
 	mockORClient := new(testutil.MockOpenRouterClient)
 
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).
-		Return(openrouter.EmbeddingResponse{Data: []openrouter.EmbeddingObject{}}, errors.New("empty embedding"))
+		Return(llm.EmbeddingResponse{Data: []llm.EmbeddingObject{}}, errors.New("empty embedding"))
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 
@@ -162,8 +162,8 @@ func TestPerformAddFact_StorageError(t *testing.T) {
 	mockORClient := new(testutil.MockOpenRouterClient)
 
 	embedding := testutil.TestEmbedding()
-	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{{Embedding: embedding}},
+	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{{Embedding: embedding}},
 	}, nil)
 
 	mockStore.On("AddFact", mock.Anything).Return(int64(0), errors.New("database error"))
@@ -266,8 +266,8 @@ func TestPerformUpdateFact_Success(t *testing.T) {
 	mockORClient := new(testutil.MockOpenRouterClient)
 
 	embedding := testutil.TestEmbedding()
-	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{{Embedding: embedding}},
+	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{{Embedding: embedding}},
 	}, nil)
 
 	oldFact := storage.Fact{
@@ -311,8 +311,8 @@ func TestPerformUpdateFact_WithCustomTypeAndImportance(t *testing.T) {
 	mockORClient := new(testutil.MockOpenRouterClient)
 
 	embedding := testutil.TestEmbedding()
-	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{{Embedding: embedding}},
+	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{{Embedding: embedding}},
 	}, nil)
 
 	mockStore.On("GetFactsByIDs", storage.ScopeID("123"), []int64{42}).Return([]storage.Fact{{ID: 42}}, nil)
@@ -365,7 +365,7 @@ func TestPerformUpdateFact_EmbeddingError(t *testing.T) {
 	mockORClient := new(testutil.MockOpenRouterClient)
 
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).
-		Return(openrouter.EmbeddingResponse{}, errors.New("API error"))
+		Return(llm.EmbeddingResponse{}, errors.New("API error"))
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 
@@ -389,8 +389,8 @@ func TestPerformManageMemory_SingleOperation(t *testing.T) {
 	mockORClient := new(testutil.MockOpenRouterClient)
 
 	embedding := testutil.TestEmbedding()
-	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{{Embedding: embedding}},
+	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{{Embedding: embedding}},
 	}, nil)
 
 	mockStore.On("AddFact", mock.Anything).Return(int64(1), nil)
@@ -419,8 +419,8 @@ func TestPerformManageMemory_BatchOperations(t *testing.T) {
 	mockORClient := new(testutil.MockOpenRouterClient)
 
 	embedding := testutil.TestEmbedding()
-	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{{Embedding: embedding}},
+	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{{Embedding: embedding}},
 	}, nil)
 
 	mockStore.On("AddFact", mock.Anything).Return(int64(1), nil).Times(2)
@@ -510,8 +510,8 @@ func TestPerformManageMemory_UpdateOperation(t *testing.T) {
 	mockORClient := new(testutil.MockOpenRouterClient)
 
 	embedding := testutil.TestEmbedding()
-	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{{Embedding: embedding}},
+	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{{Embedding: embedding}},
 	}, nil)
 
 	mockStore.On("GetFactsByIDs", storage.ScopeID("123"), []int64{42}).Return([]storage.Fact{{ID: 42}}, nil)
@@ -561,8 +561,8 @@ func TestPerformManageMemory_MixedSuccessFailure(t *testing.T) {
 
 	embedding := testutil.TestEmbedding()
 	// First call succeeds (add)
-	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{{Embedding: embedding}},
+	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{{Embedding: embedding}},
 	}, nil).Once()
 
 	// Second operation fails (delete with missing fact_id)

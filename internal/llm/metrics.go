@@ -1,4 +1,4 @@
-package openrouter
+package llm
 
 import (
 	"github.com/prometheus/client_golang/prometheus"

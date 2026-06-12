@@ -9,8 +9,8 @@ import (
 	"github.com/runixer/laplaced/internal/agent"
 	agenttesting "github.com/runixer/laplaced/internal/agent/testing"
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/memory"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 
@@ -97,10 +97,10 @@ func TestRetrieve_TopicsGrouping(t *testing.T) {
 	}, nil)
 
 	// CreateEmbeddings for "Enriched Query" -> Returns [1, 0, 0]
-	mockClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req openrouter.EmbeddingRequest) bool {
+	mockClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req llm.EmbeddingRequest) bool {
 		return len(req.Input) > 0 && req.Input[0] == "Enriched Query"
-	})).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{
+	})).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{
 			{Embedding: []float32{1.0, 0.0, 0.0}},
 		},
 	}, nil)
@@ -222,10 +222,10 @@ func TestRetrieveFacts(t *testing.T) {
 		mockStore.On("GetAllFacts").Return(facts, nil)
 
 		// Query embedding
-		mockClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req openrouter.EmbeddingRequest) bool {
+		mockClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req llm.EmbeddingRequest) bool {
 			return len(req.Input) > 0 && req.Input[0] == "coffee query"
-		})).Return(openrouter.EmbeddingResponse{
-			Data: []openrouter.EmbeddingObject{{Embedding: []float32{1.0, 0.0, 0.0}}},
+		})).Return(llm.EmbeddingResponse{
+			Data: []llm.EmbeddingObject{{Embedding: []float32{1.0, 0.0, 0.0}}},
 		}, nil)
 
 		// GetFactsByIDs for fetching fact data (updated from GetFacts)
@@ -264,7 +264,7 @@ func TestRetrieveFacts(t *testing.T) {
 
 		mockStore.On("GetAllTopics").Return([]storage.Topic{}, nil)
 		mockStore.On("GetAllFacts").Return([]storage.Fact{}, nil)
-		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{}, assert.AnError)
+		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{}, assert.AnError)
 
 		translator := testutil.TestTranslator(t)
 
@@ -297,7 +297,7 @@ func TestRetrieveFacts(t *testing.T) {
 		mockStore.On("GetAllTopics").Return([]storage.Topic{}, nil)
 		mockStore.On("GetAllFacts").Return([]storage.Fact{}, nil)
 		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(
-			openrouter.EmbeddingResponse{Data: []openrouter.EmbeddingObject{}}, nil,
+			llm.EmbeddingResponse{Data: []llm.EmbeddingObject{}}, nil,
 		)
 
 		translator := testutil.TestTranslator(t)
@@ -349,8 +349,8 @@ func TestRetrieve_SkipEnrichment(t *testing.T) {
 
 		// Embedding call for the query
 		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(
-			openrouter.EmbeddingResponse{
-				Data: []openrouter.EmbeddingObject{{Embedding: []float32{0.1, 0.2, 0.3}}},
+			llm.EmbeddingResponse{
+				Data: []llm.EmbeddingObject{{Embedding: []float32{0.1, 0.2, 0.3}}},
 			}, nil,
 		)
 
@@ -402,8 +402,8 @@ func TestRetrieve_NilOptions(t *testing.T) {
 		mockStore.On("GetTopicsByIDs", mock.Anything, mock.Anything).Return([]storage.Topic{}, nil)
 
 		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(
-			openrouter.EmbeddingResponse{
-				Data: []openrouter.EmbeddingObject{{Embedding: []float32{0.1, 0.2, 0.3}}},
+			llm.EmbeddingResponse{
+				Data: []llm.EmbeddingObject{{Embedding: []float32{0.1, 0.2, 0.3}}},
 			}, nil,
 		)
 

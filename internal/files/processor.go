@@ -23,7 +23,7 @@ type Processor struct {
 	maxRetries          int
 	retryDelay          time.Duration
 	minVoiceDurationSec int    // Minimum voice duration (seconds) to save as artifact. 0 = save all, -1 = disable
-	imageInputFormat    string // How image/video parts are encoded for the LLM (openrouter.ImageInputFormat*). "" = file.
+	imageInputFormat    string // How image/video parts are encoded for the LLM (llm.ImageInputFormat*). "" = file.
 }
 
 // FileSaver is the interface for saving artifacts (to avoid circular dependency).
@@ -62,7 +62,7 @@ func (p *Processor) SetMinVoiceDurationSec(seconds int) {
 }
 
 // SetImageInputFormat selects how image/video attachments are encoded as LLM
-// content parts (openrouter.ImageInputFormatFile | ImageInputFormatOpenAI).
+// content parts (llm.ImageInputFormatFile | ImageInputFormatOpenAI).
 func (p *Processor) SetImageInputFormat(format string) {
 	p.imageInputFormat = format
 }

@@ -11,8 +11,8 @@ import (
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/memory"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -30,7 +30,7 @@ type ServiceBuilder struct {
 	// Required dependencies
 	logger          *slog.Logger
 	cfg             *config.Config
-	client          openrouter.Client
+	client          llm.Client
 	topicRepo       storage.TopicRepository
 	factRepo        storage.FactRepository
 	factHistoryRepo storage.FactHistoryRepository
@@ -82,7 +82,7 @@ func (b *ServiceBuilder) WithConfig(c *config.Config) *ServiceBuilder {
 }
 
 // WithOpenRouterClient sets the required OpenRouter client dependency.
-func (b *ServiceBuilder) WithOpenRouterClient(c openrouter.Client) *ServiceBuilder {
+func (b *ServiceBuilder) WithOpenRouterClient(c llm.Client) *ServiceBuilder {
 	if c == nil {
 		b.errors = append(b.errors, errors.New("openrouter client required"))
 	}

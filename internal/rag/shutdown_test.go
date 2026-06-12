@@ -12,8 +12,8 @@ import (
 	"github.com/runixer/laplaced/internal/agent/splitter"
 	agenttesting "github.com/runixer/laplaced/internal/agent/testing"
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/memory"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 
@@ -90,8 +90,8 @@ func TestGracefulShutdown(t *testing.T) {
 	mockStore.On("AddRAGLog", mock.Anything).Return(nil).Maybe()
 
 	// Embeddings for topic
-	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(openrouter.EmbeddingResponse{
-		Data: []openrouter.EmbeddingObject{{Embedding: []float32{0.1, 0.2}}},
+	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
+		Data: []llm.EmbeddingObject{{Embedding: []float32{0.1, 0.2}}},
 	}, nil).Maybe()
 
 	// AddTopic for extracted topics

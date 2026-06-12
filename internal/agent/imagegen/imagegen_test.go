@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/runixer/laplaced/internal/config"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -27,20 +27,20 @@ func testCfg() *config.ImageGeneratorConfig {
 	}
 }
 
-func buildResponse(content string, images ...string) openrouter.ChatCompletionResponse {
-	outs := make([]openrouter.ImageOutput, 0, len(images))
+func buildResponse(content string, images ...string) llm.ChatCompletionResponse {
+	outs := make([]llm.ImageOutput, 0, len(images))
 	for _, url := range images {
-		outs = append(outs, openrouter.ImageOutput{
+		outs = append(outs, llm.ImageOutput{
 			Type: "image_url",
-			ImageURL: openrouter.ImageURLValue{
+			ImageURL: llm.ImageURLValue{
 				URL: url,
 			},
 		})
 	}
-	return openrouter.ChatCompletionResponse{
-		Choices: []openrouter.ResponseChoice{
+	return llm.ChatCompletionResponse{
+		Choices: []llm.ResponseChoice{
 			{
-				Message: openrouter.ResponseMessage{
+				Message: llm.ResponseMessage{
 					Role:    "assistant",
 					Content: content,
 					Images:  outs,
@@ -66,7 +66,7 @@ func TestGenerate_SendsModalitiesAndImageConfig(t *testing.T) {
 	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(buildResponse("here is your image", dataURL), nil).
 		Run(func(args mock.Arguments) {
-			req := args.Get(1).(openrouter.ChatCompletionRequest)
+			req := args.Get(1).(llm.ChatCompletionRequest)
 			assert.Equal(t, []string{"image", "text"}, req.Modalities)
 			require.NotNil(t, req.ImageConfig)
 			assert.Equal(t, "16:9", req.ImageConfig.AspectRatio)
@@ -97,7 +97,7 @@ func TestGenerate_UsesDefaultsWhenRequestFieldsEmpty(t *testing.T) {
 	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(buildResponse("", dataURL), nil).
 		Run(func(args mock.Arguments) {
-			req := args.Get(1).(openrouter.ChatCompletionRequest)
+			req := args.Get(1).(llm.ChatCompletionRequest)
 			require.NotNil(t, req.ImageConfig)
 			assert.Equal(t, "1:1", req.ImageConfig.AspectRatio)
 			assert.Equal(t, "1K", req.ImageConfig.ImageSize)
@@ -118,7 +118,7 @@ func TestGenerate_EditingSkipsDefaultAspectRatio(t *testing.T) {
 	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(buildResponse("", dataURL), nil).
 		Run(func(args mock.Arguments) {
-			req := args.Get(1).(openrouter.ChatCompletionRequest)
+			req := args.Get(1).(llm.ChatCompletionRequest)
 			// ImageConfig may be non-nil due to ImageSize default, but
 			// AspectRatio must be empty so the model uses the input image's.
 			if req.ImageConfig != nil {
@@ -129,9 +129,9 @@ func TestGenerate_EditingSkipsDefaultAspectRatio(t *testing.T) {
 	agent := New(mockOR, cfg, testutil.TestLogger())
 	_, err := agent.Generate(context.Background(), Request{
 		Prompt: "make it sepia",
-		InputImages: []openrouter.FilePart{{
+		InputImages: []llm.FilePart{{
 			Type: "file",
-			File: openrouter.File{FileName: "photo.jpg", FileData: "data:image/jpeg;base64,AAAA"},
+			File: llm.File{FileName: "photo.jpg", FileData: "data:image/jpeg;base64,AAAA"},
 		}},
 	})
 	require.NoError(t, err)
@@ -140,9 +140,9 @@ func TestGenerate_EditingSkipsDefaultAspectRatio(t *testing.T) {
 func TestGenerate_PassesInputImagesAsContentParts(t *testing.T) {
 	mockOR := new(testutil.MockOpenRouterClient)
 	dataURL := "data:image/png;base64," + tinyPNGBase64
-	input := openrouter.FilePart{
+	input := llm.FilePart{
 		Type: "file",
-		File: openrouter.File{
+		File: llm.File{
 			FileName: "input.png",
 			FileData: "data:image/png;base64,SGVsbG8=",
 		},
@@ -150,16 +150,16 @@ func TestGenerate_PassesInputImagesAsContentParts(t *testing.T) {
 	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(buildResponse("edited", dataURL), nil).
 		Run(func(args mock.Arguments) {
-			req := args.Get(1).(openrouter.ChatCompletionRequest)
+			req := args.Get(1).(llm.ChatCompletionRequest)
 			require.Len(t, req.Messages, 1)
 			parts, ok := req.Messages[0].Content.([]interface{})
 			require.True(t, ok, "content should be multimodal parts slice")
 			// First part is the text prompt
-			_, isText := parts[0].(openrouter.TextPart)
+			_, isText := parts[0].(llm.TextPart)
 			assert.True(t, isText, "first part must be text")
 			// Second part is the input image as an OpenAI-compatible
 			// image_url part (image-generation models reject the "file" shape).
-			ip, isImg := parts[1].(openrouter.ImageURLPart)
+			ip, isImg := parts[1].(llm.ImageURLPart)
 			assert.True(t, isImg, "second part must be ImageURLPart")
 			assert.Equal(t, "image_url", ip.Type)
 			assert.Equal(t, "data:image/png;base64,SGVsbG8=", ip.ImageURL.URL)
@@ -168,7 +168,7 @@ func TestGenerate_PassesInputImagesAsContentParts(t *testing.T) {
 	agent := New(mockOR, testCfg(), testutil.TestLogger())
 	_, err := agent.Generate(context.Background(), Request{
 		Prompt:      "make it sepia",
-		InputImages: []openrouter.FilePart{input},
+		InputImages: []llm.FilePart{input},
 	})
 	require.NoError(t, err)
 }
@@ -212,7 +212,7 @@ func TestGenerate_UpstreamErrorReturnsTypedFailure(t *testing.T) {
 	mockOR := new(testutil.MockOpenRouterClient)
 	upstream := errors.New("rate limited")
 	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(openrouter.ChatCompletionResponse{}, upstream)
+		Return(llm.ChatCompletionResponse{}, upstream)
 
 	agent := New(mockOR, testCfg(), testutil.TestLogger())
 	_, err := agent.Generate(context.Background(), Request{Prompt: "a cat"})
@@ -283,7 +283,7 @@ func TestDecodeDataURL(t *testing.T) {
 func TestGenerate_CancelledContextPropagates(t *testing.T) {
 	mockOR := new(testutil.MockOpenRouterClient)
 	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(openrouter.ChatCompletionResponse{}, context.Canceled)
+		Return(llm.ChatCompletionResponse{}, context.Canceled)
 
 	agent := New(mockOR, testCfg(), testutil.TestLogger())
 	ctx, cancel := context.WithCancel(context.Background())

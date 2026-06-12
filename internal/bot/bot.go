@@ -18,7 +18,7 @@ import (
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
@@ -44,7 +44,7 @@ type Bot struct {
 	factHistoryRepo   storage.FactHistoryRepository
 	peopleRepo        storage.PeopleRepository   // v0.5.1: People management
 	artifactRepo      storage.ArtifactRepository // v0.6.0: Link artifacts to messages
-	orClient          openrouter.Client
+	orClient          llm.Client
 	ragService        *rag.Service
 	contextService    *agent.ContextService
 	laplaceAgent      *laplace.Laplace
@@ -68,7 +68,7 @@ type Bot struct {
 	wg                   sync.WaitGroup
 }
 
-func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRepo storage.UserRepository, msgRepo storage.MessageRepository, statsRepo storage.StatsRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, peopleRepo storage.PeopleRepository, orClient openrouter.Client, ragService *rag.Service, contextService *agent.ContextService, translator *i18n.Translator) (*Bot, error) {
+func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRepo storage.UserRepository, msgRepo storage.MessageRepository, statsRepo storage.StatsRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, peopleRepo storage.PeopleRepository, orClient llm.Client, ragService *rag.Service, contextService *agent.ContextService, translator *i18n.Translator) (*Bot, error) {
 	botLogger := logger.With("component", "bot")
 	downloader, err := telegram.NewHTTPFileDownloader(api, "https://api.telegram.org", cfg.Telegram.ProxyURL)
 	if err != nil {
@@ -724,7 +724,7 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID storage.ScopeID, text 
 
 	// Build request
 	currentUserMessageContent := []interface{}{
-		openrouter.TextPart{Type: "text", Text: text},
+		llm.TextPart{Type: "text", Text: text},
 	}
 	req := &laplace.Request{
 		UserID:              userID,

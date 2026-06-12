@@ -21,9 +21,9 @@ import (
 	"github.com/runixer/laplaced/internal/bot"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/markdown"
 	"github.com/runixer/laplaced/internal/obs"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/secrets"
 	"github.com/runixer/laplaced/internal/storage"
@@ -317,7 +317,7 @@ func setupTestBot(cfg *config.Config, logger *slog.Logger, dbPath string, dbChan
 	}
 
 	// Create the LLM client against the configured OpenAI-compatible endpoint (openrouter.base_url)
-	client, err := openrouter.NewClientWithBaseURL(tb.logger, cfg.OpenRouter.APIKey, cfg.OpenRouter.ProxyURL, cfg.OpenRouter.BaseURL, cfg.OpenRouter.Provider.ToRouting())
+	client, err := llm.NewClientWithBaseURL(tb.logger, cfg.OpenRouter.APIKey, cfg.OpenRouter.ProxyURL, cfg.OpenRouter.BaseURL, cfg.OpenRouter.Provider.ToRouting())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OpenRouter client: %w", err)
 	}

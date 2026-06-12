@@ -1,4 +1,4 @@
-package openrouter
+package llm
 
 import (
 	"context"
@@ -73,7 +73,7 @@ func TestCreateChatCompletion_RecordsSpan(t *testing.T) {
 	spans := getSpans()
 	require.Len(t, spans, 1)
 	span := spans[0]
-	assert.Equal(t, "openrouter.CreateChatCompletion", span.Name)
+	assert.Equal(t, "llm.CreateChatCompletion", span.Name)
 
 	attrs := map[attribute.Key]attribute.Value{}
 	for _, kv := range span.Attributes {
@@ -259,7 +259,7 @@ func TestCreateChatCompletion_PopulatesBroadcastFields(t *testing.T) {
 
 	trc, ok := gotBody["trace"].(map[string]any)
 	require.True(t, ok, "trace field must be a map")
-	// Active span is the openrouter.CreateChatCompletion one — so
+	// Active span is the llm.CreateChatCompletion one — so
 	// trace_id matches the span's trace, and parent_span_id is that
 	// span's id. We do not know the IDs ahead of time; assert shape only.
 	assert.NotEmpty(t, trc["trace_id"], "trace.trace_id must be populated from ctx")
@@ -326,7 +326,7 @@ func TestCreateEmbeddings_RecordsSpan(t *testing.T) {
 	spans := getSpans()
 	require.Len(t, spans, 1)
 	span := spans[0]
-	assert.Equal(t, "openrouter.CreateEmbeddings", span.Name)
+	assert.Equal(t, "llm.CreateEmbeddings", span.Name)
 
 	attrs := map[attribute.Key]attribute.Value{}
 	for _, kv := range span.Attributes {
@@ -814,7 +814,7 @@ func drainStream(ch <-chan StreamEvent, deadline time.Duration) {
 }
 
 // TestCreateChatCompletionStream_RecordsSpan mirrors the non-stream span test:
-// happy path emits a single span named openrouter.CreateChatCompletionStream
+// happy path emits a single span named llm.CreateChatCompletionStream
 // with the same gen_ai.* / llm.* attribute surface. Without this, streaming
 // requests (used by the main chat agent) are invisible in Tempo and TraceQL
 // queries like {span.gen_ai.request.model = "google/gemini-3.5-flash"} match
@@ -843,7 +843,7 @@ func TestCreateChatCompletionStream_RecordsSpan(t *testing.T) {
 	spans := getSpans()
 	require.Len(t, spans, 1)
 	span := spans[0]
-	assert.Equal(t, "openrouter.CreateChatCompletionStream", span.Name)
+	assert.Equal(t, "llm.CreateChatCompletionStream", span.Name)
 
 	attrs := map[attribute.Key]attribute.Value{}
 	for _, kv := range span.Attributes {

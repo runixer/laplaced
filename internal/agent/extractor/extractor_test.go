@@ -15,7 +15,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/files"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 )
@@ -420,7 +420,7 @@ func TestExtractor_Execute_FileReadError(t *testing.T) {
 func TestExtractor_Execute_LLMError(t *testing.T) {
 	mockClient := &testutil.MockOpenRouterClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(openrouter.ChatCompletionResponse{}, assert.AnError)
+		Return(llm.ChatCompletionResponse{}, assert.AnError)
 
 	mockStorage := &testutil.MockStorage{}
 	mockStorage.On("UpdateArtifact", mock.Anything).Return(nil)
@@ -563,7 +563,7 @@ func TestExtractor_Execute_EmbeddingError(t *testing.T) {
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).
-		Return(openrouter.EmbeddingResponse{}, assert.AnError)
+		Return(llm.EmbeddingResponse{}, assert.AnError)
 
 	mockStorage := &testutil.MockStorage{}
 	mockStorage.On("UpdateArtifact", mock.Anything).Return(nil)
@@ -679,7 +679,7 @@ func TestExtractor_BuildMultimodalMessages_Image(t *testing.T) {
 	require.Len(t, contentParts, 2)
 
 	// First part should be FilePart
-	filePart, ok := contentParts[0].(openrouter.FilePart)
+	filePart, ok := contentParts[0].(llm.FilePart)
 	require.True(t, ok)
 	assert.Equal(t, "file", filePart.Type)
 	assert.Contains(t, filePart.File.FileData, "data:image/png;base64,")
@@ -719,7 +719,7 @@ func TestExtractor_BuildMultimodalMessages_PDF(t *testing.T) {
 
 	userMsg := messages[1]
 	contentParts := userMsg.Content.([]interface{})
-	filePart := contentParts[0].(openrouter.FilePart)
+	filePart := contentParts[0].(llm.FilePart)
 
 	assert.Contains(t, filePart.File.FileData, "data:application/pdf;base64,")
 	assert.Equal(t, "document.pdf", filePart.File.FileName)
@@ -754,7 +754,7 @@ func TestExtractor_BuildMultimodalMessages_Audio(t *testing.T) {
 
 	userMsg := messages[1]
 	contentParts := userMsg.Content.([]interface{})
-	filePart := contentParts[0].(openrouter.FilePart)
+	filePart := contentParts[0].(llm.FilePart)
 
 	// Should use fallback mime type for voice
 	assert.Contains(t, filePart.File.FileData, "data:audio/ogg;base64,")
@@ -789,7 +789,7 @@ func TestExtractor_BuildMultimodalMessages_VideoNote(t *testing.T) {
 
 	userMsg := messages[1]
 	contentParts := userMsg.Content.([]interface{})
-	filePart := contentParts[0].(openrouter.FilePart)
+	filePart := contentParts[0].(llm.FilePart)
 
 	assert.Contains(t, filePart.File.FileData, "data:video/mp4;base64,")
 }
@@ -824,7 +824,7 @@ func TestExtractor_BuildMultimodalMessages_Document(t *testing.T) {
 	contentParts := userMsg.Content.([]interface{})
 
 	// Documents use TextPart instead of FilePart
-	textPart := contentParts[0].(openrouter.TextPart)
+	textPart := contentParts[0].(llm.TextPart)
 	assert.Equal(t, "text", textPart.Type)
 	assert.Equal(t, string(testData), textPart.Text)
 }
@@ -858,7 +858,7 @@ func TestExtractor_BuildMultimodalMessages_UnknownType(t *testing.T) {
 
 	userMsg := messages[1]
 	contentParts := userMsg.Content.([]interface{})
-	filePart := contentParts[0].(openrouter.FilePart)
+	filePart := contentParts[0].(llm.FilePart)
 
 	// Should use application/octet-stream for unknown types
 	assert.Contains(t, filePart.File.FileData, "data:application/octet-stream;base64,")
@@ -913,7 +913,7 @@ func TestExtractor_Execute_WithUserContext(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify the context was passed and XML escaped
-	mockClient.AssertCalled(t, "CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req openrouter.ChatCompletionRequest) bool {
+	mockClient.AssertCalled(t, "CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
 		if len(req.Messages) < 2 {
 			return false
 		}
@@ -923,7 +923,7 @@ func TestExtractor_Execute_WithUserContext(t *testing.T) {
 			return false
 		}
 		// Second part should be the user prompt text
-		textPart, ok := contentParts[1].(openrouter.TextPart)
+		textPart, ok := contentParts[1].(llm.TextPart)
 		if !ok {
 			return false
 		}
@@ -939,7 +939,7 @@ func TestExtractor_Execute_WithUserContext(t *testing.T) {
 func TestExtractor_Execute_RetryTracking(t *testing.T) {
 	mockClient := &testutil.MockOpenRouterClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(openrouter.ChatCompletionResponse{}, assert.AnError)
+		Return(llm.ChatCompletionResponse{}, assert.AnError)
 
 	mockStorage := &testutil.MockStorage{}
 	mockStorage.On("UpdateArtifact", mock.Anything).Return(nil)

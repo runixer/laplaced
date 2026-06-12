@@ -11,7 +11,7 @@ import (
 	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/jobtype"
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -196,7 +196,7 @@ func (s *Service) splitTopic(ctx context.Context, topic storage.Topic) ([]int64,
 		embeddingInputs = append(embeddingInputs, embeddingInput)
 	}
 
-	embResp, err := s.client.CreateEmbeddings(ctx, openrouter.EmbeddingRequest{
+	embResp, err := s.client.CreateEmbeddings(ctx, llm.EmbeddingRequest{
 		Model:      s.cfg.Embedding.Model,
 		Dimensions: s.cfg.Embedding.Dimensions,
 		Input:      embeddingInputs,
@@ -390,9 +390,9 @@ func (s *Service) extractTopicsWithPrompt(ctx context.Context, userID storage.Sc
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	resp, err := s.client.CreateChatCompletion(ctx, openrouter.ChatCompletionRequest{
+	resp, err := s.client.CreateChatCompletion(ctx, llm.ChatCompletionRequest{
 		Model: model,
-		Messages: []openrouter.Message{
+		Messages: []llm.Message{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userMessage},
 		},

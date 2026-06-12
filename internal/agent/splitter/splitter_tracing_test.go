@@ -21,8 +21,7 @@ import (
 
 // withTracingCapture installs an in-memory exporter for the duration of the
 // test and restores the previous TracerProvider on cleanup. Inlined here to
-// avoid coupling to internal/testutil — the test util package already imports
-// openrouter, and pulling tracetest into testutil would invert that dependency.
+// avoid coupling to internal/testutil — the test util package // llm, and pulling tracetest into testutil would invert that dependency.
 func withTracingCapture(t *testing.T) func() tracetest.SpanStubs {
 	t.Helper()
 	exporter := tracetest.NewInMemoryExporter()
@@ -46,7 +45,7 @@ func collectAttrs(kvs []attribute.KeyValue) map[attribute.Key]attribute.Value {
 
 // TestSplitter_Execute_RecordsSpan verifies the splitter.Execute span carries
 // input shape on entry and topics_returned on exit. This is the parent the
-// child openrouter.CreateChatCompletion span attaches to, so without it the
+// child llm.CreateChatCompletion span attaches to, so without it the
 // motivating splitter incident has no traceable context.
 func TestSplitter_Execute_RecordsSpan(t *testing.T) {
 	getSpans := withTracingCapture(t)

@@ -17,8 +17,8 @@ import (
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/files"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/obs"
-	"github.com/runixer/laplaced/internal/openrouter"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -30,8 +30,8 @@ func (l *Laplace) BuildMessages(
 	currentMessageContent string,
 	currentMessageParts []interface{},
 	enrichedQuery string,
-) []openrouter.Message {
-	var orMessages []openrouter.Message
+) []llm.Message {
+	var orMessages []llm.Message
 
 	// System Prompt + Core Identity + Inner Circle
 	fullSystemPrompt := contextData.BaseSystemPrompt
@@ -46,10 +46,10 @@ func (l *Laplace) BuildMessages(
 	}
 
 	if fullSystemPrompt != "" {
-		orMessages = append(orMessages, openrouter.Message{
+		orMessages = append(orMessages, llm.Message{
 			Role: "system",
 			Content: []interface{}{
-				openrouter.TextPart{Type: "text", Text: fullSystemPrompt},
+				llm.TextPart{Type: "text", Text: fullSystemPrompt},
 			},
 		})
 	}
@@ -66,10 +66,10 @@ func (l *Laplace) BuildMessages(
 		contextParts = append(contextParts, storage.FormatPeople(contextData.RelevantPeople, storage.TagRelevantPeople))
 	}
 	if len(contextParts) > 0 {
-		orMessages = append(orMessages, openrouter.Message{
+		orMessages = append(orMessages, llm.Message{
 			Role: "user",
 			Content: []interface{}{
-				openrouter.TextPart{Type: "text", Text: strings.Join(contextParts, "\n\n")},
+				llm.TextPart{Type: "text", Text: strings.Join(contextParts, "\n\n")},
 			},
 		})
 	}
@@ -102,16 +102,16 @@ func (l *Laplace) BuildMessages(
 			if len(currentMessageParts) > 0 {
 				contentParts = append(contentParts, currentMessageParts...)
 			} else {
-				contentParts = append(contentParts, openrouter.TextPart{Type: "text", Text: hMsg.Content})
+				contentParts = append(contentParts, llm.TextPart{Type: "text", Text: hMsg.Content})
 			}
 			contentParts = append(contentParts, artifactParts...)
 			currentMessageAdded = true
 		} else {
 			contentParts = []interface{}{
-				openrouter.TextPart{Type: "text", Text: hMsg.Content},
+				llm.TextPart{Type: "text", Text: hMsg.Content},
 			}
 		}
-		orMessages = append(orMessages, openrouter.Message{Role: hMsg.Role, Content: contentParts})
+		orMessages = append(orMessages, llm.Message{Role: hMsg.Role, Content: contentParts})
 	}
 
 	// Fallback: if the current message wasn't added via history (edge case, e.g.
@@ -120,7 +120,7 @@ func (l *Laplace) BuildMessages(
 	if !currentMessageAdded && (len(currentMessageParts) > 0 || len(artifactParts) > 0) {
 		parts := append([]interface{}{}, currentMessageParts...)
 		parts = append(parts, artifactParts...)
-		orMessages = append(orMessages, openrouter.Message{Role: "user", Content: parts})
+		orMessages = append(orMessages, llm.Message{Role: "user", Content: parts})
 	}
 
 	return orMessages
@@ -234,7 +234,7 @@ func (l *Laplace) LoadContextData(
 		// Extract media parts for multimodal RAG (v0.6.0: unified on FilePart)
 		var mediaParts []interface{}
 		for _, part := range currentMessageParts {
-			if _, ok := part.(openrouter.FilePart); ok {
+			if _, ok := part.(llm.FilePart); ok {
 				mediaParts = append(mediaParts, part)
 			}
 		}
@@ -387,7 +387,7 @@ func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID storage.Sc
 		// Explicit "memory artifact #ID" cue lets the model distinguish a historical
 		// FilePart from a live attachment that may share the same OriginalName —
 		// Telegram photos default to "photo.jpg" both on download and in storage.
-		contentParts = append(contentParts, openrouter.TextPart{
+		contentParts = append(contentParts, llm.TextPart{
 			Type: "text",
 			Text: fmt.Sprintf("📄 %s — memory artifact #%d (%s)", displayName, artifact.ID, dateStr),
 		})
@@ -415,7 +415,7 @@ func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID storage.Sc
 			}
 			// Normalize MIME type for Gemini (e.g., text/x-web-markdown -> text/plain)
 			mimeType = files.NormalizeMimeForGemini(mimeType)
-			contentParts = append(contentParts, openrouter.MediaPart(
+			contentParts = append(contentParts, llm.MediaPart(
 				l.cfg.OpenRouter.ImageInputFormat, mimeType, fileName,
 				fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data)))
 		case "image", "photo":
@@ -430,7 +430,7 @@ func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID storage.Sc
 			fileName = fmt.Sprintf("memory_%d_%s", artifact.ID, fileName)
 			// Normalize MIME type for Gemini
 			mimeType = files.NormalizeMimeForGemini(mimeType)
-			contentParts = append(contentParts, openrouter.MediaPart(
+			contentParts = append(contentParts, llm.MediaPart(
 				l.cfg.OpenRouter.ImageInputFormat, mimeType, fileName,
 				"data:"+mimeType+";base64,"+base64Data))
 		case "voice", "audio", "video_note", "video":
@@ -462,7 +462,7 @@ func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID storage.Sc
 			}
 			// Normalize MIME type for Gemini
 			mimeType = files.NormalizeMimeForGemini(mimeType)
-			contentParts = append(contentParts, openrouter.MediaPart(
+			contentParts = append(contentParts, llm.MediaPart(
 				l.cfg.OpenRouter.ImageInputFormat, mimeType, fileName,
 				fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data)))
 		default:

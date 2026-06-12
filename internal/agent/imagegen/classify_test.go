@@ -5,17 +5,17 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/runixer/laplaced/internal/openrouter"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestClassifyFailure(t *testing.T) {
-	imgPresent := []openrouter.ImageOutput{{Type: "image_url"}}
+	imgPresent := []llm.ImageOutput{{Type: "image_url"}}
 
 	tests := []struct {
 		name     string
 		genErr   error
-		msg      openrouter.ResponseMessage
+		msg      llm.ResponseMessage
 		provider string
 		want     FailureKind
 	}{
@@ -36,31 +36,31 @@ func TestClassifyFailure(t *testing.T) {
 		},
 		{
 			name:     "google text refusal → text_refusal",
-			msg:      openrouter.ResponseMessage{Content: "I cannot fulfill this request."},
+			msg:      llm.ResponseMessage{Content: "I cannot fulfill this request."},
 			provider: "Google",
 			want:     KindTextRefusal,
 		},
 		{
 			name:     "openai silent empty → silent_block_oai",
-			msg:      openrouter.ResponseMessage{Content: ""},
+			msg:      llm.ResponseMessage{Content: ""},
 			provider: "OpenAI",
 			want:     KindSilentBlockOAI,
 		},
 		{
 			name:     "openai whitespace-only content treated as empty → silent_block_oai",
-			msg:      openrouter.ResponseMessage{Content: "   \n\t  "},
+			msg:      llm.ResponseMessage{Content: "   \n\t  "},
 			provider: "OpenAI",
 			want:     KindSilentBlockOAI,
 		},
 		{
 			name:     "google empty (no text) → unknown_no_images",
-			msg:      openrouter.ResponseMessage{Content: ""},
+			msg:      llm.ResponseMessage{Content: ""},
 			provider: "Google",
 			want:     KindUnknownNoImages,
 		},
 		{
 			name:     "unknown provider empty → unknown_no_images",
-			msg:      openrouter.ResponseMessage{Content: ""},
+			msg:      llm.ResponseMessage{Content: ""},
 			provider: "",
 			want:     KindUnknownNoImages,
 		},
@@ -69,7 +69,7 @@ func TestClassifyFailure(t *testing.T) {
 			// already present, but if they do, return KindUnknown rather
 			// than silently miscategorizing.
 			name:     "images present (caller bug) → unknown",
-			msg:      openrouter.ResponseMessage{Images: imgPresent},
+			msg:      llm.ResponseMessage{Images: imgPresent},
 			provider: "Google",
 			want:     KindUnknown,
 		},

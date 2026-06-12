@@ -1,4 +1,4 @@
-package openrouter_test
+package llm_test
 
 import (
 	"os"
@@ -21,7 +21,7 @@ var imageGenModelPattern = regexp.MustCompile(
 		`openai/gpt-[0-9]+\.?[0-9]*-image[a-z0-9\-]*)"`)
 
 // TestAllImageGenerationRequestsSetModalities walks the tree for every
-// openrouter.ChatCompletionRequest{...} literal that targets an image-output
+// llm.ChatCompletionRequest{...} literal that targets an image-output
 // model and asserts it sets a Modalities field.
 //
 // Why this test exists: Modalities is a shape-changing field. Without it,
@@ -36,7 +36,7 @@ func TestAllImageGenerationRequestsSetModalities(t *testing.T) {
 
 	// Capture multi-line literal from opening brace to matching closing brace
 	// on its own indented line (gofmt-style layout).
-	re := regexp.MustCompile(`openrouter\.ChatCompletionRequest\{[\s\S]*?\n\s*\}`)
+	re := regexp.MustCompile(`llm\.ChatCompletionRequest\{[\s\S]*?\n\s*\}`)
 
 	var offenders []string
 	walkErr := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
