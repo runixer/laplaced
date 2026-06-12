@@ -51,15 +51,16 @@ type OutgoingResponse struct {
 }
 
 // OutgoingMedia is a transport-neutral media reply: one or more files sharing a
-// single caption, threaded/replied like a text response. Caption is canonical
-// markdown (rendered per-transport, like OutgoingResponse.Text); it is already
-// trimmed to the transport's MaxMediaCaptionLen by the caller, any overflow
-// being delivered as a follow-up text message.
+// single caption, threaded/replied like a text response. Caption is in the
+// transport's wire format (HTML for Telegram, markdown for Mattermost) as
+// produced by the transport's Renderer.RenderCaption, already fitted to the
+// transport's caption budget; any overflow is delivered by the caller as a
+// follow-up text message.
 type OutgoingMedia struct {
 	ConversationID string
 	ThreadRoot     string // keeps the media threaded
 	ReplyTo        string // message id to reply to; first item only
-	Caption        string // canonical markdown
+	Caption        string // wire-format caption (may be empty)
 	Items          []OutgoingMediaItem
 }
 
@@ -82,7 +83,6 @@ type Capabilities struct {
 	SupportsReactions     bool   // Telegram true | Mattermost true (by emoji name)
 	SupportsMedia         bool   // can SendMedia deliver files
 	MaxMediaItemsPerGroup int    // Telegram 10; Mattermost 5 (files per post)
-	MaxMediaCaptionLen    int    // caption budget before overflow becomes follow-up text
 	EmojiStyle            string // "unicode" (Telegram) | "shortcode" (Mattermost)
 	MaxFileSize           int64  // 0 = unset/unlimited (files are Phase 4)
 	// AvailableReactions are the reaction tokens the bot may use on this
@@ -125,4 +125,9 @@ type Transport interface {
 // re-splits after HTML expansion).
 type Renderer interface {
 	Render(ctx context.Context, canonicalMarkdown string) (chunks []string, err error)
+	// RenderCaption fits the start of a canonical-markdown response into the
+	// transport's media caption budget (measured on the rendered wire format)
+	// and returns the wire-format caption plus the remaining markdown to send
+	// as follow-up text via Render.
+	RenderCaption(ctx context.Context, canonicalMarkdown string) (wireCaption, overflowMarkdown string)
 }

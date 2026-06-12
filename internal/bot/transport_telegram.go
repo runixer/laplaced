@@ -65,7 +65,6 @@ func (t *TelegramTransport) Capabilities() Capabilities {
 		SupportsReactions:     true,
 		SupportsMedia:         true,
 		MaxMediaItemsPerGroup: 10, // Telegram album limit
-		MaxMediaCaptionLen:    telegramCaptionLimit,
 		EmojiStyle:            "unicode",
 		AvailableReactions:    telegramReactionEmoji,
 	}
@@ -88,9 +87,13 @@ func (t *TelegramTransport) AllowlistConfigured() bool {
 	return len(t.cfg.Bot.AllowedUserIDs) > 0
 }
 
-// SendText sends one rendered HTML chunk. It preserves the legacy
-// "can't parse entities" recovery: on a parse error it retries once as plain
-// text (ParseMode cleared) using a fresh, non-cancellable context.
+// SendText sends one rendered HTML chunk. Two last-resort recoveries keep a
+// reply from being lost (both should be unreachable with a correct renderer,
+// and are surfaced as bot.anomaly.* span attributes when they fire):
+//   - "can't parse entities": retried once as plain text (ParseMode cleared);
+//   - "message is too long": resent as plain text hard-split by UTF-16.
+//
+// Both retries use a fresh, non-cancellable context.
 func (t *TelegramTransport) SendText(ctx context.Context, r OutgoingResponse) (string, error) {
 	chatID, err := strconv.ParseInt(r.ConversationID, 10, 64)
 	if err != nil {
@@ -110,10 +113,37 @@ func (t *TelegramTransport) SendText(ctx context.Context, r OutgoingResponse) (s
 	sent, err := t.api.SendMessage(ctx, req)
 	if err != nil && strings.Contains(err.Error(), "can't parse entities") {
 		t.logger.Warn("retrying send without HTML parse mode due to parsing error")
+		span := trace.SpanFromContext(ctx)
+		span.SetAttributes(attribute.Bool("bot.anomaly.send_fallback_parse_entities", true))
+		obs.RecordContent(span, "bot.anomaly.unparsable_html", r.Text)
 		retryCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		req.ParseMode = ""
 		sent, err = t.api.SendMessage(retryCtx, req)
+	}
+	if err != nil && strings.Contains(err.Error(), "message is too long") {
+		t.logger.Warn("message over the wire limit at send time, resending as hard-split plain text",
+			"utf16_length", markdown.UTF16Length(req.Text))
+		span := trace.SpanFromContext(ctx)
+		span.SetAttributes(attribute.Bool("bot.anomaly.send_fallback_too_long", true))
+		obs.RecordContent(span, "bot.anomaly.oversized_html", r.Text)
+		retryCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		for i, piece := range markdown.HardSplitUTF16(req.Text, telegramMessageLimit) {
+			pieceReq := req
+			pieceReq.Text = piece
+			pieceReq.ParseMode = ""
+			if i > 0 {
+				pieceReq.ReplyToMessageID = 0
+			}
+			pieceSent, pieceErr := t.api.SendMessage(retryCtx, pieceReq)
+			if pieceErr != nil {
+				return "", pieceErr
+			}
+			if i == 0 {
+				sent, err = pieceSent, nil
+			}
+		}
 	}
 	if err != nil {
 		return "", err
@@ -153,9 +183,10 @@ func (t *TelegramTransport) SetReaction(ctx context.Context, conversationID, mes
 	})
 }
 
-// telegramCaptionLimit is the Telegram caption budget for sendPhoto /
-// sendMediaGroup items (rune proxy for the 1024 UTF-16 limit). We stay under to
-// leave room for emoji and HTML entities; overflow is sent as follow-up text.
+// telegramCaptionLimit is the initial markdown budget RenderCaption tries for
+// sendPhoto / sendMediaGroup captions; the real constraint is
+// telegramCaptionWireLimit on the rendered HTML, which RenderCaption enforces
+// by shrinking this budget. Overflow is sent as follow-up text.
 const telegramCaptionLimit = 1000
 
 // SendMedia delivers a batch of files as Telegram photos and/or documents. It
@@ -176,7 +207,13 @@ func (t *TelegramTransport) SendMedia(ctx context.Context, m OutgoingMedia) (str
 	thread := intPtrOrNil(atoiOrZero(m.ThreadRoot))
 	replyTo := atoiOrZero(m.ReplyTo)
 
-	caption, parseMode := renderCaptionHTML(m.Caption, t.logger)
+	// Caption arrives in wire format (HTML) from the renderer, already fitted
+	// to the caption budget.
+	caption := m.Caption
+	parseMode := ""
+	if caption != "" {
+		parseMode = "HTML"
+	}
 
 	// Split into photo-size and document-size batches. Threshold default covers
 	// 2K/4K outputs (Telegram re-encodes photos to ~1280px; documents preserve
@@ -323,25 +360,64 @@ func messageIDOrEmpty(m *telegram.Message) string {
 	return strconv.Itoa(m.MessageID)
 }
 
-// renderCaptionHTML converts a markdown caption to HTML with a caption-size
-// budget check. If the HTML render exceeds Telegram's 1024 UTF-16 char limit, or
-// markdown.ToHTML fails, it falls back to the raw plain-text caption (Telegram
-// accepts any text when parse_mode is unset). Returns the caption and parse_mode.
-func renderCaptionHTML(plain string, logger *slog.Logger) (string, string) {
-	if plain == "" {
+// telegramCaptionWireLimit is Telegram's hard caption limit in UTF-16 units.
+const telegramCaptionWireLimit = 1024
+
+// RenderCaption fits the start of the markdown response into Telegram's
+// caption budget measured on the RENDERED HTML (markdown length is a poor
+// proxy: tags and entity escaping expand the text). The split point shrinks
+// by the observed expansion ratio until the HTML fits; overflow markdown is
+// returned for the caller to send as follow-up text. The caption is always
+// valid HTML — never raw markdown.
+func (r *TelegramRenderer) RenderCaption(ctx context.Context, text string) (string, string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
 		return "", ""
 	}
-	htmlStr, err := markdown.ToHTML(plain)
-	if err != nil {
-		logger.Warn("caption markdown → HTML failed, falling back to plain", "err", err)
-		return plain, ""
+
+	budget := telegramCaptionLimit
+	shrinks := 0
+	for attempt := 0; attempt < 6; attempt++ {
+		caption, overflow := splitCaption(text, budget)
+		htmlStr, err := markdown.ToHTML(caption)
+		if err != nil {
+			r.logger.Warn("caption markdown -> HTML failed, using escaped plain text", "error", err)
+			htmlStr = html.EscapeString(caption)
+		}
+		utf16Len := markdown.UTF16Length(htmlStr)
+		if utf16Len <= telegramCaptionWireLimit {
+			if shrinks > 0 {
+				r.logger.Warn("caption over the wire budget after HTML render, shrunk",
+					"iterations", shrinks)
+				r.recordCaptionShrink(ctx, shrinks)
+			}
+			return htmlStr, overflow
+		}
+		shrinks++
+		newBudget := budget * telegramCaptionWireLimit / utf16Len
+		if newBudget >= budget {
+			newBudget = budget - 1
+		}
+		if newBudget < 1 {
+			break
+		}
+		budget = newBudget
 	}
-	if markdown.UTF16Length(htmlStr) > 1024 {
-		logger.Warn("HTML caption over 1024 chars, falling back to plain text",
-			"utf16_len", markdown.UTF16Length(htmlStr))
-		return plain, ""
-	}
-	return htmlStr, "HTML"
+
+	// Terminal fallback (pathological expansion): send the media without a
+	// caption and deliver the whole text as follow-up messages — lossless.
+	r.logger.Warn("caption could not be fitted into the wire budget, demoting to follow-up text")
+	r.recordCaptionShrink(ctx, shrinks)
+	return "", text
+}
+
+// recordCaptionShrink surfaces caption demotion on the root span.
+func (r *TelegramRenderer) recordCaptionShrink(ctx context.Context, iterations int) {
+	span := trace.SpanFromContext(ctx)
+	span.SetAttributes(
+		attribute.Bool("bot.anomaly.caption_demoted", true),
+		attribute.Int("bot.anomaly.caption_shrink_iterations", iterations),
+	)
 }
 
 // strPtrOrNil returns a pointer to s, or nil when s is empty — for nullable

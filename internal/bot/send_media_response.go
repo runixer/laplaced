@@ -70,15 +70,9 @@ func (b *Bot) sendResponseWithGeneratedImages(
 		}
 	}
 
-	// 5. Split the caption to the transport's media caption budget; the rest is
-	// sent as follow-up text. Caption is canonical markdown — the transport's
-	// SendMedia renders it (HTML for Telegram, pass-through for Mattermost).
-	caps := b.transport.Capabilities()
-	captionLimit := caps.MaxMediaCaptionLen
-	if captionLimit <= 0 {
-		captionLimit = len([]rune(responseText)) // no budget configured: keep it all
-	}
-	caption, followUp := splitCaption(responseText, captionLimit)
+	// 5. Fit the caption to the transport's media caption budget measured on
+	// the rendered wire format; the rest is sent as follow-up text.
+	caption, followUp := b.renderer.RenderCaption(ctx, responseText)
 
 	items := make([]OutgoingMediaItem, 0, len(loaded))
 	for _, la := range loaded {

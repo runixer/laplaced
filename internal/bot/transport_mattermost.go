@@ -54,10 +54,6 @@ func (t *MMTransport) Kind() string { return transportMattermost }
 
 func (t *MMTransport) Capabilities() Capabilities {
 	maxPost := t.client.MaxPostSize()
-	captionLen := maxPost - mmMarkdownSafeMargin
-	if captionLen < 1 {
-		captionLen = maxPost
-	}
 	return Capabilities{
 		MaxMessageLen:         maxPost,
 		ParseMode:             "",   // native markdown — no HTML conversion
@@ -66,7 +62,6 @@ func (t *MMTransport) Capabilities() Capabilities {
 		SupportsReactions:     true,
 		SupportsMedia:         true,
 		MaxMediaItemsPerGroup: mmMaxFilesPerPost,
-		MaxMediaCaptionLen:    captionLen,
 		EmojiStyle:            "shortcode",
 		AvailableReactions:    mmReactions,
 	}
@@ -204,6 +199,13 @@ func NewMattermostRenderer(maxPostSize int, logger *slog.Logger) *MMRenderer {
 		limit = maxPostSize
 	}
 	return &MMRenderer{maxLen: limit, logger: logger.With("component", "mm-renderer")}
+}
+
+// RenderCaption fits the start of the response into the post budget; markdown
+// passes through unchanged (Mattermost renders it natively), so a rune split
+// is exact — no expansion to account for.
+func (r *MMRenderer) RenderCaption(_ context.Context, text string) (string, string) {
+	return splitCaption(text, r.maxLen)
 }
 
 func (r *MMRenderer) Render(_ context.Context, text string) ([]string, error) {
