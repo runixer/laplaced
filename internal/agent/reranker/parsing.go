@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+
+	"github.com/runixer/laplaced/internal/agent"
 )
 
 // parseResponse parses the JSON response from Flash.
@@ -15,7 +17,7 @@ import (
 // - Wrapped array: {"topics": [42, 18, 5]}
 // - New format with reasons: {"topics": [{"id": "Topic:42", "reason": "..."}]}
 func parseResponse(content string, logger *slog.Logger) (*Result, error) {
-	content = extractJSONFromResponse(content)
+	content = agent.ExtractJSON(content)
 
 	// Try bare array format (only topics, no people)
 	var bareArray []TopicSelection
@@ -146,69 +148,4 @@ func parseArtifactArray(data json.RawMessage, logger *slog.Logger) []ArtifactSel
 	}
 
 	return nil
-}
-
-// extractJSONFromResponse finds JSON object/array in LLM response.
-// Handles: markdown blocks, preamble text, escaped strings.
-func extractJSONFromResponse(content string) string {
-	startArray := stringsIndex(content, "[")
-	startObj := stringsIndex(content, "{")
-
-	var startIdx int
-	var openBrace, closeBrace byte
-	switch {
-	case startArray >= 0 && (startObj < 0 || startArray < startObj):
-		startIdx = startArray
-		openBrace = '['
-		closeBrace = ']'
-	case startObj >= 0:
-		startIdx = startObj
-		openBrace = '{'
-		closeBrace = '}'
-	default:
-		return content
-	}
-
-	depth := 0
-	inString := false
-	escaped := false
-	for i := startIdx; i < len(content); i++ {
-		c := content[i]
-		if escaped {
-			escaped = false
-			continue
-		}
-		if c == '\\' && inString {
-			escaped = true
-			continue
-		}
-		if c == '"' {
-			inString = !inString
-			continue
-		}
-		if inString {
-			continue
-		}
-		switch c {
-		case openBrace:
-			depth++
-		case closeBrace:
-			depth--
-			if depth == 0 {
-				return content[startIdx : i+1]
-			}
-		}
-	}
-
-	return content
-}
-
-// stringsIndex is a wrapper around strings.Index to avoid import conflict.
-func stringsIndex(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
 }
