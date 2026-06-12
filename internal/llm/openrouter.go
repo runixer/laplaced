@@ -77,42 +77,70 @@ func (e *providerBodyError) Error() string {
 	return fmt.Sprintf("provider body error: %s", e.Message)
 }
 
-// detectProviderBodyError inspects a raw response body for a top-level "error"
-// field. Returns non-nil if the body reports an error despite HTTP 200 status.
-func detectProviderBodyError(body []byte) *providerBodyError {
-	var probe struct {
-		Error *struct {
-			Message  string          `json:"message"`
-			Code     json.RawMessage `json:"code"`
-			Metadata *struct {
-				Raw          string            `json:"raw"`
-				ProviderName string            `json:"provider_name"`
-				Headers      map[string]string `json:"headers"`
-			} `json:"metadata"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(body, &probe); err != nil || probe.Error == nil {
-		return nil
-	}
-	bodyErr := &providerBodyError{Message: probe.Error.Message}
-	if len(probe.Error.Code) > 0 {
+// orErrorEnvelope is the wire shape of an OpenRouter error block. It appears
+// at the body top level (provider unavailable) or inside a choice — OpenRouter
+// injects mid-generation provider failures as choices[i].error ("JSON error
+// injected into SSE stream") while the message content stays truncated.
+type orErrorEnvelope struct {
+	Message  string          `json:"message"`
+	Code     json.RawMessage `json:"code"`
+	Metadata *struct {
+		Raw          string            `json:"raw"`
+		ProviderName string            `json:"provider_name"`
+		Headers      map[string]string `json:"headers"`
+	} `json:"metadata"`
+}
+
+// toBodyError converts a parsed envelope into a providerBodyError.
+func (env *orErrorEnvelope) toBodyError() *providerBodyError {
+	bodyErr := &providerBodyError{Message: env.Message}
+	if len(env.Code) > 0 {
 		// Code can be number or string — try number first, then quoted string.
-		if err := json.Unmarshal(probe.Error.Code, &bodyErr.Code); err != nil {
+		if err := json.Unmarshal(env.Code, &bodyErr.Code); err != nil {
 			var s string
-			if err := json.Unmarshal(probe.Error.Code, &s); err == nil {
+			if err := json.Unmarshal(env.Code, &s); err == nil {
 				_, _ = fmt.Sscanf(s, "%d", &bodyErr.Code)
 			}
 		}
 	}
-	if probe.Error.Metadata != nil {
+	if env.Metadata != nil {
 		bodyErr.MetadataPresent = true
-		bodyErr.ProviderName = probe.Error.Metadata.ProviderName
-		bodyErr.Raw = probe.Error.Metadata.Raw
-		bodyErr.RateLimitResetMs = parseInt64Header(probe.Error.Metadata.Headers, "X-RateLimit-Reset")
-		bodyErr.RateLimitRemaining = parseInt64Header(probe.Error.Metadata.Headers, "X-RateLimit-Remaining")
-		bodyErr.RetryAfterSeconds = parseInt64Header(probe.Error.Metadata.Headers, "Retry-After")
+		bodyErr.ProviderName = env.Metadata.ProviderName
+		bodyErr.Raw = env.Metadata.Raw
+		bodyErr.RateLimitResetMs = parseInt64Header(env.Metadata.Headers, "X-RateLimit-Reset")
+		bodyErr.RateLimitRemaining = parseInt64Header(env.Metadata.Headers, "X-RateLimit-Remaining")
+		bodyErr.RetryAfterSeconds = parseInt64Header(env.Metadata.Headers, "Retry-After")
 	}
 	return bodyErr
+}
+
+// detectProviderBodyError inspects a raw response body for an error envelope:
+// the top-level "error" field, or — when that is absent — a choice-level
+// "choices[i].error" (mid-generation provider failure with truncated content).
+// Returns non-nil if the body reports an error despite HTTP 200 status.
+func detectProviderBodyError(body []byte) *providerBodyError {
+	var probe struct {
+		Error   *orErrorEnvelope `json:"error"`
+		Choices []struct {
+			Error *orErrorEnvelope `json:"error"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return nil
+	}
+	env := probe.Error
+	if env == nil {
+		for _, ch := range probe.Choices {
+			if ch.Error != nil {
+				env = ch.Error
+				break
+			}
+		}
+	}
+	if env == nil {
+		return nil
+	}
+	return env.toBodyError()
 }
 
 // parseInt64Header pulls a string value from an OR error.metadata.headers map

@@ -288,3 +288,24 @@ func TestStream_RetriesOn5xx(t *testing.T) {
 	assert.Equal(t, "ok", chunks[0].Choices[0].Delta.Content)
 	assert.GreaterOrEqual(t, attempts, 2, "retried at least once")
 }
+
+func TestStream_ChoiceLevelErrorAbortsStream(t *testing.T) {
+	// OpenRouter injects mid-generation provider failures as a choice-level
+	// error ("JSON error injected into SSE stream") while content stays
+	// truncated. The stream must surface an error, not finish cleanly with
+	// the partial text.
+	frames := []string{
+		`data: {"id":"g","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"partial answ"}}]}`,
+		`data: {"id":"g","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"finish_reason":null,"delta":{},"error":{"code":429,"message":"JSON error injected into SSE stream","metadata":{"error_type":"rate_limit_exceeded"}}}]}`,
+		`data: [DONE]`,
+	}
+	_, client := newStreamTestClient(t, sseHandler(t, frames))
+
+	stream, err := client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}})
+	require.NoError(t, err)
+
+	chunks, err := collectChunks(t, stream.Events, 2*time.Second)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "JSON error injected into SSE stream")
+	require.Len(t, chunks, 1, "only the pre-error chunk is delivered")
+}

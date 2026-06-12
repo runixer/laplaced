@@ -709,6 +709,25 @@ func TestDetectProviderBodyError(t *testing.T) {
 			wantMsg:  "HTTP 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"Quota exceeded for aiplatform.googleapis.com/online_prediction_requests_per_base_model with base model: gemini-embedding-2.\",\n    \"status\": \"RESOURCE_EXHAUSTED\"\n  }\n}\n",
 			wantCode: 429,
 		},
+		{
+			// Choice-level error injected mid-generation (captured 2026-06-12
+			// on a dev extractor run): HTTP 200, no top-level error, but
+			// choices[0].error carries a 429 and message.content is truncated
+			// mid-JSON. Must be detected so the retry path engages instead of
+			// handing truncated content to the parser.
+			name:         "choice-level mid-stream error with truncated content",
+			body:         `{"id":"gen-1","object":"chat.completion","model":"test-model","choices":[{"index":0,"finish_reason":null,"error":{"code":429,"message":"JSON error injected into SSE stream","metadata":{"error_type":"rate_limit_exceeded"}},"message":{"role":"assistant","content":"{\n  \"summary\": \"Itinerary receipt for John D"}}],"usage":{"prompt_tokens":0,"completion_tokens":0}}`,
+			wantMsg:      "JSON error injected into SSE stream",
+			wantCode:     429,
+			wantMetadata: true, // metadata block present (error_type); provider_name absent
+		},
+		{
+			// A normal successful completion must NOT be flagged: choices
+			// carry no error field.
+			name:    "successful completion with choices is not an error",
+			body:    `{"id":"gen-2","object":"chat.completion","model":"test-model","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"hello"}}]}`,
+			wantNil: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

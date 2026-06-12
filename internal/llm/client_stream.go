@@ -36,10 +36,11 @@ type ChatCompletionChunk struct {
 }
 
 type ChunkChoice struct {
-	Index              int        `json:"index"`
-	Delta              ChunkDelta `json:"delta"`
-	FinishReason       string     `json:"finish_reason,omitempty"`
-	NativeFinishReason string     `json:"native_finish_reason,omitempty"`
+	Index              int              `json:"index"`
+	Delta              ChunkDelta       `json:"delta"`
+	FinishReason       string           `json:"finish_reason,omitempty"`
+	NativeFinishReason string           `json:"native_finish_reason,omitempty"`
+	Error              *orErrorEnvelope `json:"error,omitempty"` // mid-stream provider failure injected by OpenRouter
 }
 
 type ChunkDelta struct {
@@ -366,6 +367,22 @@ func (c *clientImpl) pumpStream(
 			case <-ctx.Done():
 			}
 			return
+		}
+
+		// A choice-level error means the provider failed mid-generation and the
+		// accumulated content is truncated — surface as a stream error so the
+		// caller retries instead of shipping a half-baked response.
+		for _, ch := range chunk.Choices {
+			if ch.Error != nil {
+				streamErr = ch.Error.toBodyError()
+				c.logger.Warn("LLM stream: provider error injected mid-stream",
+					"error", streamErr)
+				select {
+				case events <- StreamEvent{Err: streamErr}:
+				case <-ctx.Done():
+				}
+				return
+			}
 		}
 
 		// Accumulate identity / usage as chunks arrive. Most chunks carry
