@@ -1510,7 +1510,7 @@ func TestEscapedDollarInFormula(t *testing.T) {
 			input:    "$Total = \\$50 + \\$30 = \\$80$$",
 			expected: "Total = $50 + $30 = $80$",
 		},
-		// Real-world formula tests from OpenRouter responses
+		// Real-world formula tests from LLM responses
 		{
 			name:     "kitchen formula",
 			input:    "$2 \\text{ eggs} \\times 3 \\text{ people} = 6 \\text{ eggs}$",

@@ -117,8 +117,8 @@ OpenRouter Response Healing plugin автоматически исправляе
 - Посторонний текст вокруг JSON
 
 ```go
-Plugins: []openrouter.Plugin{{ID: "response-healing"}},
-ResponseFormat: openrouter.ResponseFormat{Type: "json_object"},
+Plugins: []llm.Plugin{{ID: "response-healing"}},
+ResponseFormat: llm.ResponseFormat{Type: "json_object"},
 ```
 
 ## Форматы данных

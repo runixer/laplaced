@@ -7,7 +7,7 @@
 
 English | [Русский](README.ru.md)
 
-A smart Telegram bot for family use. Powered by Google Gemini via OpenRouter.
+A smart Telegram bot for family use. Powered by Google Gemini via any OpenAI-compatible LLM API (OpenRouter, litellm, vLLM).
 
 **What it does:**
 - Chats using LLM with long-term memory (RAG)
@@ -24,7 +24,7 @@ A smart Telegram bot for family use. Powered by Google Gemini via OpenRouter.
 mkdir -p data
 cat > .env << 'EOF'
 LAPLACED_TELEGRAM_TOKEN=your_bot_token
-LAPLACED_OPENROUTER_API_KEY=your_api_key
+LAPLACED_LLM_API_KEY=your_api_key
 LAPLACED_ALLOWED_USER_IDS=123456789
 EOF
 
@@ -62,7 +62,7 @@ Configure via environment variables (recommended) or YAML config.
 **Required variables:**
 ```bash
 LAPLACED_TELEGRAM_TOKEN=your_bot_token
-LAPLACED_OPENROUTER_API_KEY=your_api_key
+LAPLACED_LLM_API_KEY=your_api_key
 LAPLACED_ALLOWED_USER_IDS=123456789,987654321  # ⚠️ Required! Empty = reject all
 ```
 

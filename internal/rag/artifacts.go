@@ -189,7 +189,7 @@ func (s *Service) processSingleArtifact(ctx context.Context, artifact storage.Ar
 		"file_type", artifact.FileType,
 	)
 
-	// Root span for one artifact extraction so the extractor + openrouter
+	// Root span for one artifact extraction so the extractor + llm
 	// spans nest under a queryable parent. The JSON parse failure we saw
 	// on artifact 1768 was visible only in logs without this.
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/rag").Start(

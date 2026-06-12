@@ -29,7 +29,7 @@ func TestGracefulShutdown(t *testing.T) {
 	})
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	// Mock splitter agent with delay to simulate long-running task
@@ -114,7 +114,7 @@ func TestGracefulShutdown(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).

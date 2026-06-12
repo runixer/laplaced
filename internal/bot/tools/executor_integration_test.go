@@ -16,7 +16,7 @@ import (
 // TestExecuteToolCall_UnknownTool tests error when tool name is unknown.
 func TestExecuteToolCall_UnknownTool(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	cfg := testutil.TestConfig()
 	cfg.Tools = []config.ToolConfig{{Name: "known_tool"}}
@@ -33,7 +33,7 @@ func TestExecuteToolCall_UnknownTool(t *testing.T) {
 // TestExecuteToolCall_InvalidArguments tests error when arguments JSON is invalid.
 func TestExecuteToolCall_InvalidArguments(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	cfg := testutil.TestConfig()
 	cfg.Tools = []config.ToolConfig{{Name: "search_history"}}
@@ -50,7 +50,7 @@ func TestExecuteToolCall_InvalidArguments(t *testing.T) {
 // TestExecuteToolCall_SearchHistory tests search_history tool execution.
 func TestExecuteToolCall_SearchHistory(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	cfg := testutil.TestConfig()
 	cfg.Tools = []config.ToolConfig{{Name: "search_history"}}
@@ -69,7 +69,7 @@ func TestExecuteToolCall_SearchHistory(t *testing.T) {
 // TestExecuteToolCall_ManageMemory tests manage_memory tool execution.
 func TestExecuteToolCall_ManageMemory(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	embedding := testutil.TestEmbedding()
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req llm.EmbeddingRequest) bool {
@@ -103,7 +103,7 @@ func TestExecuteToolCall_ManageMemory(t *testing.T) {
 // TestExecuteToolCall_SearchPeople tests search_people tool execution.
 func TestExecuteToolCall_SearchPeople(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	username := "alice"
 	testPerson := storage.Person{
@@ -136,7 +136,7 @@ func TestExecuteToolCall_SearchPeople(t *testing.T) {
 // TestExecuteToolCall_ManagePeople tests manage_people tool execution.
 func TestExecuteToolCall_ManagePeople(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	// Mock embedding creation for person
 	embedding := testutil.TestEmbedding()
@@ -175,7 +175,7 @@ func TestExecuteToolCall_ManagePeople(t *testing.T) {
 // TestExecuteToolCall_ModelTool tests custom model tool execution.
 func TestExecuteToolCall_ModelTool(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(llm.ChatCompletionResponse{
 		Choices: []llm.ResponseChoice{
@@ -229,7 +229,7 @@ func TestToolExecutor_SetRAGService(t *testing.T) {
 
 // TestNewToolExecutor verifies ToolExecutor initialization.
 func TestNewToolExecutor(t *testing.T) {
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	mockStore := new(testutil.MockStorage)
 	cfg := testutil.TestConfig()
 	logger := testutil.TestLogger()

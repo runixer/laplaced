@@ -15,7 +15,7 @@ import (
 type testServices struct {
 	Service    *Service
 	Store      *testutil.MockStorage
-	ORClient   *testutil.MockOpenRouterClient
+	ORClient   *testutil.MockLLMClient
 	Agent      *agenttesting.MockAgent
 	Logger     *slog.Logger
 	Cfg        *config.Config
@@ -27,7 +27,7 @@ func setupTestServices(t *testing.T) *testServices {
 	t.Helper()
 
 	store := new(testutil.MockStorage)
-	orClient := new(testutil.MockOpenRouterClient)
+	orClient := new(testutil.MockLLMClient)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := testutil.TestConfig()
 	translator := testutil.TestTranslator(t)

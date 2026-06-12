@@ -22,7 +22,7 @@ func TestExecuteToolCall_UnknownTool_RecordsSpan(t *testing.T) {
 	getSpans := testutil.WithTracingCapture(t)
 
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 	cfg.Tools = []config.ToolConfig{{Name: "known_tool"}}
 
@@ -48,7 +48,7 @@ func TestExecuteToolCall_UnknownTool_RecordsSpan(t *testing.T) {
 
 func TestExecuteToolCall_ContentEventsGatedByToggle(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 	cfg.Tools = []config.ToolConfig{{Name: "known_tool"}}
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, cfg, testutil.TestLogger())

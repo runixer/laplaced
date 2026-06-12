@@ -183,10 +183,10 @@ type AgentLog struct {
 	UserID            ScopeID
 	AgentType         string // laplace, reranker, splitter, merger, enricher, archivist, scout
 	InputPrompt       string
-	InputContext      string // JSON - full OpenRouter API request
+	InputContext      string // JSON - full LLM API request
 	OutputResponse    string
 	OutputParsed      string // JSON - structured output
-	OutputContext     string // JSON - full OpenRouter API response
+	OutputContext     string // JSON - full LLM API response
 	Model             string
 	PromptTokens      int
 	CompletionTokens  int

@@ -738,12 +738,12 @@ func (m *MockStorage) GetPeopleWithoutEmbedding(userID storage.ScopeID) ([]stora
 	return args.Get(0).([]storage.Person), args.Error(1)
 }
 
-// MockOpenRouterClient implements llm.Client for tests.
-type MockOpenRouterClient struct {
+// MockLLMClient implements llm.Client for tests.
+type MockLLMClient struct {
 	mock.Mock
 }
 
-func (m *MockOpenRouterClient) CreateChatCompletion(ctx context.Context, req llm.ChatCompletionRequest) (llm.ChatCompletionResponse, error) {
+func (m *MockLLMClient) CreateChatCompletion(ctx context.Context, req llm.ChatCompletionRequest) (llm.ChatCompletionResponse, error) {
 	args := m.Called(ctx, req)
 	if args.Get(0) == nil {
 		return llm.ChatCompletionResponse{}, args.Error(1)
@@ -760,7 +760,7 @@ func (m *MockOpenRouterClient) CreateChatCompletion(ctx context.Context, req llm
 // *llm.ChatCompletionStream or, for convenience, a bare
 // <-chan llm.StreamEvent (auto-wrapped with an empty DebugRequestBody).
 // The helper StreamEventsFromChunks(chunks...) builds such a channel.
-func (m *MockOpenRouterClient) CreateChatCompletionStream(ctx context.Context, req llm.ChatCompletionRequest) (*llm.ChatCompletionStream, error) {
+func (m *MockLLMClient) CreateChatCompletionStream(ctx context.Context, req llm.ChatCompletionRequest) (*llm.ChatCompletionStream, error) {
 	args := m.Called(ctx, req)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -790,7 +790,7 @@ func StreamEventsFromChunks(chunks ...llm.ChatCompletionChunk) <-chan llm.Stream
 	return ch
 }
 
-func (m *MockOpenRouterClient) CreateEmbeddings(ctx context.Context, req llm.EmbeddingRequest) (llm.EmbeddingResponse, error) {
+func (m *MockLLMClient) CreateEmbeddings(ctx context.Context, req llm.EmbeddingRequest) (llm.EmbeddingResponse, error) {
 	args := m.Called(ctx, req)
 	if args.Get(0) == nil {
 		return llm.EmbeddingResponse{}, args.Error(1)

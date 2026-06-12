@@ -328,7 +328,7 @@ func TestConfigGetters(t *testing.T) {
 // TestPerformHistorySearch_Success tests successful history search with RAG service.
 func TestPerformHistorySearch_Success(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	// We need to mock the RAG service. Since it's not an interface, we'll create a minimal one
 	// For now, test with nil RAG service to get "not available" message
@@ -346,7 +346,7 @@ func TestPerformHistorySearch_NoResults(t *testing.T) {
 	// This test requires mocking the full RAG service, which is complex
 	// For now, we test the error path
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 
 	ctx := context.Background()
@@ -359,7 +359,7 @@ func TestPerformHistorySearch_NoResults(t *testing.T) {
 // TestPerformSearchPeople_Success tests successful people search by username.
 func TestPerformSearchPeople_Success(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	username := "testuser"
 
 	testPerson := storage.Person{
@@ -392,7 +392,7 @@ func TestPerformSearchPeople_Success(t *testing.T) {
 // TestPerformSearchPeople_ByName tests people search by name.
 func TestPerformSearchPeople_ByName(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	testPerson := storage.Person{
 		ID:          1,
@@ -420,7 +420,7 @@ func TestPerformSearchPeople_ByName(t *testing.T) {
 // TestPerformSearchPeople_ByAlias tests people search by alias.
 func TestPerformSearchPeople_ByAlias(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	testPerson := storage.Person{
 		ID:          1,
@@ -449,7 +449,7 @@ func TestPerformSearchPeople_ByAlias(t *testing.T) {
 // TestPerformSearchPeople_NoResults tests people search with no matches.
 func TestPerformSearchPeople_NoResults(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	// For "unknown" query (no @ prefix), FindPersonByUsername is not called
 	mockStore.On("FindPersonByName", storage.ScopeID("123"), "unknown").Return(nil, nil)
@@ -470,7 +470,7 @@ func TestPerformSearchPeople_NoResults(t *testing.T) {
 // TestPerformSearchPeople_VectorSearchFallback tests vector search when direct matches fail.
 func TestPerformSearchPeople_VectorSearchFallback(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	mockStore.On("FindPersonByName", storage.ScopeID("123"), "semantics").Return(nil, nil)
 	mockStore.On("FindPersonByAlias", storage.ScopeID("123"), "semantics").Return([]storage.Person{}, nil)
@@ -492,7 +492,7 @@ func TestPerformSearchPeople_VectorSearchFallback(t *testing.T) {
 // TestPerformSearchPeople_LongBioTruncation tests that long bios are truncated in output.
 func TestPerformSearchPeople_LongBioTruncation(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	longBio := string(make([]byte, 300)) // 300 byte bio
 
@@ -522,7 +522,7 @@ func TestPerformSearchPeople_LongBioTruncation(t *testing.T) {
 // TestPerformSearchPeople_MultipleResults tests multiple people search results.
 func TestPerformSearchPeople_MultipleResults(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	alice := storage.Person{
 		ID:          1,

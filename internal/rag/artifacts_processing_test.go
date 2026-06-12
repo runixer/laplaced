@@ -25,7 +25,7 @@ func TestProcessSingleArtifact_Success(t *testing.T) {
 	cfg.Artifacts.Enabled = true
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
@@ -74,7 +74,7 @@ func TestProcessSingleArtifact_Success(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -104,7 +104,7 @@ func TestProcessSingleArtifact_AgentError(t *testing.T) {
 	cfg.Artifacts.Enabled = true
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
@@ -139,7 +139,7 @@ func TestProcessSingleArtifact_AgentError(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -167,7 +167,7 @@ func TestProcessSingleArtifact_EmbeddingError(t *testing.T) {
 	cfg.Artifacts.Enabled = true
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
@@ -202,7 +202,7 @@ func TestProcessSingleArtifact_EmbeddingError(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -231,7 +231,7 @@ func TestProcessSingleArtifact_RetryLogic(t *testing.T) {
 	cfg.Agents.Extractor.MaxRetries = 3
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
@@ -278,7 +278,7 @@ func TestProcessSingleArtifact_RetryLogic(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -313,7 +313,7 @@ func TestProcessSingleArtifact_ShuttingDown(t *testing.T) {
 	cfg.Artifacts.Enabled = true
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
@@ -350,7 +350,7 @@ func TestProcessSingleArtifact_ShuttingDown(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -382,7 +382,7 @@ func TestProcessSingleArtifact_WithSharedContext(t *testing.T) {
 	cfg.Artifacts.Enabled = true
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
@@ -430,7 +430,7 @@ func TestProcessSingleArtifact_WithSharedContext(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -463,7 +463,7 @@ func TestProcessArtifactExtraction_RespectsShuttingDown(t *testing.T) {
 	cfg.Bot.AllowedUserIDs = []int64{123}
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
@@ -484,7 +484,7 @@ func TestProcessArtifactExtraction_RespectsShuttingDown(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -520,7 +520,7 @@ func TestProcessArtifactExtraction_ProcessesAllPending(t *testing.T) {
 	cfg.Agents.Extractor.MaxConcurrent = 2
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
@@ -557,7 +557,7 @@ func TestProcessArtifactExtraction_ProcessesAllPending(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -588,7 +588,7 @@ func TestProcessArtifactExtraction_EmptyUserIDs(t *testing.T) {
 	cfg.Bot.AllowedUserIDs = []int64{} // Empty user IDs
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
@@ -598,7 +598,7 @@ func TestProcessArtifactExtraction_EmptyUserIDs(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -631,7 +631,7 @@ func TestProcessArtifactExtraction_DefaultMaxRetries(t *testing.T) {
 	cfg.Agents.Extractor.MaxRetries = 0 // Should use default 3
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
@@ -663,7 +663,7 @@ func TestProcessArtifactExtraction_DefaultMaxRetries(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -692,7 +692,7 @@ func TestProcessArtifactExtraction_DefaultMaxConcurrent(t *testing.T) {
 	cfg.Agents.Extractor.MaxConcurrent = 0 // Should use default 3
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
@@ -723,7 +723,7 @@ func TestProcessArtifactExtraction_DefaultMaxConcurrent(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).

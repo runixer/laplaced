@@ -37,7 +37,7 @@ func TestArchivist_Execute_AddFacts(t *testing.T) {
 		}
 	}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 
@@ -97,7 +97,7 @@ func TestArchivist_Execute_UpdateFacts(t *testing.T) {
 		}
 	}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 
@@ -152,7 +152,7 @@ func TestArchivist_Execute_RemoveFacts(t *testing.T) {
 		}
 	}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 
@@ -228,7 +228,7 @@ func TestArchivist_Execute_LegacyFormat(t *testing.T) {
 		"removed": []
 	}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 
@@ -290,7 +290,7 @@ func TestArchivist_Execute_ArrayFieldsFormat(t *testing.T) {
 		}]
 	}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 
@@ -454,7 +454,7 @@ func TestArchivist_Execute_PeopleResult(t *testing.T) {
 		}
 	}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 
@@ -529,7 +529,7 @@ func TestArchivist_Execute_OnlyPeople(t *testing.T) {
 		}
 	}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 
@@ -589,7 +589,7 @@ func TestArchivist_Execute_PeopleEmptyFields(t *testing.T) {
 		}
 	}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 
@@ -655,7 +655,7 @@ func TestArchivist_Execute_PeopleAndFacts(t *testing.T) {
 		}
 	}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 
@@ -728,7 +728,7 @@ func TestArchivist_Execute_RawArraysFormat(t *testing.T) {
 		]
 	}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 
@@ -1337,7 +1337,7 @@ func TestArchivist_NoModel(t *testing.T) {
 func TestArchivist_ParseError(t *testing.T) {
 	llmResponse := `not valid json at all`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 
@@ -1392,7 +1392,7 @@ func TestArchivist_MaxFacts(t *testing.T) {
 		"people": {"added": [], "updated": [], "merged": []}
 	}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 

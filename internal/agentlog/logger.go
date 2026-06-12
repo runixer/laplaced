@@ -19,8 +19,8 @@ type AgentType string
 // ConversationTurn represents one request-response cycle in a multi-turn conversation.
 type ConversationTurn struct {
 	Iteration  int         `json:"iteration"`
-	Request    interface{} `json:"request"`  // Raw OpenRouter request
-	Response   interface{} `json:"response"` // Raw OpenRouter response
+	Request    interface{} `json:"request"`  // Raw LLM API request
+	Response   interface{} `json:"response"` // Raw LLM API response
 	DurationMs int         `json:"duration_ms"`
 }
 

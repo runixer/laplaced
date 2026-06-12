@@ -4,7 +4,7 @@ import (
 	"github.com/runixer/laplaced/internal/llm"
 )
 
-// Test helpers for creating mock OpenRouter responses in tests.
+// Test helpers for creating mock LLM responses in tests.
 // These helpers reduce boilerplate in test files.
 
 // HelperOption allows customizing mock responses.

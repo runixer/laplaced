@@ -332,7 +332,7 @@ func TestStreaming_OnToolStartReceivesToolName(t *testing.T) {
 
 // TestStreaming_DebugBodiesShapeForAgentLog locks down the contract the web
 // agent-log UI relies on: each ConversationTurn must carry the raw request
-// body and a synthetic response shaped like the buffered OpenRouter payload
+// body and a synthetic response shaped like the buffered chat-completion payload
 // (choices[0].message.content). Regression guard for the two display bugs
 // where the streaming path left Request="" and Response in a flat shape with
 // no "choices" array.
@@ -383,7 +383,7 @@ func TestStreaming_DebugBodiesShapeForAgentLog(t *testing.T) {
 	assert.Equal(t, "stream-reconstructed", respObj["_synthetic"], "synthetic marker preserved")
 
 	choices, ok := respObj["choices"].([]interface{})
-	require.True(t, ok, "synthetic response must have a choices array (OpenRouter buffered shape)")
+	require.True(t, ok, "synthetic response must have a choices array (buffered chat-completion shape)")
 	require.Len(t, choices, 1)
 	choice, ok := choices[0].(map[string]interface{})
 	require.True(t, ok)

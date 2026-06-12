@@ -49,7 +49,7 @@ func TestSplitStats_AddCost(t *testing.T) {
 func TestServiceSplitLargeTopics_Success(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -79,7 +79,7 @@ func TestServiceSplitLargeTopics_Success(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -94,7 +94,7 @@ func TestServiceSplitLargeTopics_Success(t *testing.T) {
 	mockAgent := new(agenttesting.MockAgent)
 	svc.SetSplitterAgent(mockAgent)
 
-	// Mock OpenRouter client for extractTopicsWithPrompt (actual code path)
+	// Mock LLM client for extractTopicsWithPrompt (actual code path)
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
 		testutil.MockChatResponse(`{"topics":[{"summary":"Single topic","start_msg_id":1,"end_msg_id":2}]}`),
 		nil,
@@ -115,7 +115,7 @@ func TestServiceSplitLargeTopics_Success(t *testing.T) {
 func TestServiceSplitLargeTopics_AllUsers(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	topics := []storage.Topic{
@@ -140,7 +140,7 @@ func TestServiceSplitLargeTopics_AllUsers(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -154,7 +154,7 @@ func TestServiceSplitLargeTopics_AllUsers(t *testing.T) {
 	mockAgent := new(agenttesting.MockAgent)
 	svc.SetSplitterAgent(mockAgent)
 
-	// Mock OpenRouter client for extractTopicsWithPrompt (actual code path)
+	// Mock LLM client for extractTopicsWithPrompt (actual code path)
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
 		testutil.MockChatResponse(`{"topics":[{"summary":"Single","start_msg_id":1,"end_msg_id":5}]}`),
 		nil,
@@ -172,7 +172,7 @@ func TestServiceSplitLargeTopics_AllUsers(t *testing.T) {
 func TestServiceSplitLargeTopics_NoLargeTopics(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -188,7 +188,7 @@ func TestServiceSplitLargeTopics_NoLargeTopics(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -212,7 +212,7 @@ func TestServiceSplitLargeTopics_NoLargeTopics(t *testing.T) {
 func TestServiceSplitLargeTopics_ContextCanceled(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -228,7 +228,7 @@ func TestServiceSplitLargeTopics_ContextCanceled(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -253,7 +253,7 @@ func TestServiceSplitLargeTopics_ContextCanceled(t *testing.T) {
 func TestServiceSplitLargeTopics_GetTopicsError(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -264,7 +264,7 @@ func TestServiceSplitLargeTopics_GetTopicsError(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -286,7 +286,7 @@ func TestServiceSplitLargeTopics_GetTopicsError(t *testing.T) {
 func TestServiceSplitTopic_EmptyTopic(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	topic := storage.Topic{ID: 1, UserID: "123", SizeChars: 1000}
@@ -298,7 +298,7 @@ func TestServiceSplitTopic_EmptyTopic(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -321,7 +321,7 @@ func TestServiceSplitTopic_EmptyTopic(t *testing.T) {
 func TestServiceSplitTopic_CannotSplit(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	topic := storage.Topic{ID: 1, UserID: "123", SizeChars: 30000}
@@ -339,7 +339,7 @@ func TestServiceSplitTopic_CannotSplit(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -353,7 +353,7 @@ func TestServiceSplitTopic_CannotSplit(t *testing.T) {
 	mockAgent := new(agenttesting.MockAgent)
 	svc.SetSplitterAgent(mockAgent)
 
-	// Mock OpenRouter client for extractTopicsWithPrompt (actual code path)
+	// Mock LLM client for extractTopicsWithPrompt (actual code path)
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
 		testutil.MockChatResponse(`{"topics":[{"summary":"Single topic","start_msg_id":1,"end_msg_id":2}]}`),
 		nil,
@@ -371,7 +371,7 @@ func TestServiceSplitTopic_CannotSplit(t *testing.T) {
 func TestServiceExtractTopicsForSplit_Success(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -388,7 +388,7 @@ func TestServiceExtractTopicsForSplit_Success(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -402,7 +402,7 @@ func TestServiceExtractTopicsForSplit_Success(t *testing.T) {
 	mockAgent := new(agenttesting.MockAgent)
 	svc.SetSplitterAgent(mockAgent)
 
-	// Mock OpenRouter client for extractTopicsWithPrompt (actual code path)
+	// Mock LLM client for extractTopicsWithPrompt (actual code path)
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
 		testutil.MockChatResponseWithTokens(`{"topics":[`+
 			`{"summary":"Part 1","start_msg_id":1,"end_msg_id":1},`+
@@ -427,7 +427,7 @@ func TestServiceExtractTopicsForSplit_Success(t *testing.T) {
 func TestServiceExtractTopicsForSplit_AgentError(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -441,7 +441,7 @@ func TestServiceExtractTopicsForSplit_AgentError(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -455,7 +455,7 @@ func TestServiceExtractTopicsForSplit_AgentError(t *testing.T) {
 	mockAgent := new(agenttesting.MockAgent)
 	svc.SetSplitterAgent(mockAgent)
 
-	// Mock OpenRouter client to return error
+	// Mock LLM client to return error
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(llm.ChatCompletionResponse{}, errors.New("LLM error")).Once()
 
@@ -471,7 +471,7 @@ func TestServiceExtractTopicsForSplit_AgentError(t *testing.T) {
 func TestServiceExtractTopicsForSplit_NoFacts(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -486,7 +486,7 @@ func TestServiceExtractTopicsForSplit_NoFacts(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -500,7 +500,7 @@ func TestServiceExtractTopicsForSplit_NoFacts(t *testing.T) {
 	mockAgent := new(agenttesting.MockAgent)
 	svc.SetSplitterAgent(mockAgent)
 
-	// Mock OpenRouter client for extractTopicsWithPrompt (actual code path)
+	// Mock LLM client for extractTopicsWithPrompt (actual code path)
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
 		testutil.MockChatResponseWithTokens(`{"topics":[{"summary":"Single","start_msg_id":1,"end_msg_id":1}]}`, 50, 20),
 		nil,
@@ -519,14 +519,14 @@ func TestServiceExtractTopicsForSplit_NoFacts(t *testing.T) {
 func TestExtractTopics_NoSplitterAgent(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockClient, translator)
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -551,14 +551,14 @@ func TestExtractTopics_NoSplitterAgent(t *testing.T) {
 func TestExtractTopicsViaAgent_UnexpectedResult(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockClient, translator)
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -590,7 +590,7 @@ func TestExtractTopicsViaAgent_UnexpectedResult(t *testing.T) {
 func TestServiceSplitTopic_SuccessfulSplit(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -664,7 +664,7 @@ func TestServiceSplitTopic_SuccessfulSplit(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).

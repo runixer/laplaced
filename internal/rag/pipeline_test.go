@@ -24,14 +24,14 @@ func TestSearchTopicCandidates(t *testing.T) {
 	cfg := testutil.TestConfig()
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -74,14 +74,14 @@ func TestPrepareRerankerContext_SharedContext(t *testing.T) {
 	cfg := testutil.TestConfig()
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -124,7 +124,7 @@ func TestPrepareRerankerContext_Fallback(t *testing.T) {
 	cfg := testutil.TestConfig()
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -145,7 +145,7 @@ func TestPrepareRerankerContext_Fallback(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -174,14 +174,14 @@ func TestFormatSessionMessages(t *testing.T) {
 	cfg := testutil.TestConfig()
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -213,14 +213,14 @@ func TestFormatSessionMessages_EmptyHistory(t *testing.T) {
 	cfg := testutil.TestConfig()
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -244,14 +244,14 @@ func TestFormatSessionMessages_Truncation(t *testing.T) {
 	cfg := testutil.TestConfig()
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -337,7 +337,7 @@ func TestLoadTopicMap(t *testing.T) {
 	cfg := testutil.TestConfig()
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -353,7 +353,7 @@ func TestLoadTopicMap(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -547,14 +547,14 @@ func TestExecuteReranker_AgentNil(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -583,7 +583,7 @@ func TestBuildRetrievalResult(t *testing.T) {
 	cfg := testutil.TestConfig()
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -605,7 +605,7 @@ func TestBuildRetrievalResult(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -655,7 +655,7 @@ func TestBuildRetrievalResult_WithoutReranker(t *testing.T) {
 	cfg.RAG.RetrievedTopicsCount = 2
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -684,7 +684,7 @@ func TestBuildRetrievalResult_WithoutReranker(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -728,7 +728,7 @@ func TestSearchPeopleAndArtifacts(t *testing.T) {
 	cfg.Agents.Reranker.Enabled = true
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
@@ -750,7 +750,7 @@ func TestSearchPeopleAndArtifacts(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -811,7 +811,7 @@ func TestSearchPeopleAndArtifacts_SessionMergePrepend(t *testing.T) {
 	cfg.Agents.Reranker.Artifacts.Session.MaxAge = "24h"
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	mockArtifactRepo := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
@@ -835,7 +835,7 @@ func TestSearchPeopleAndArtifacts_SessionMergePrepend(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -882,14 +882,14 @@ func TestSearchPeopleAndArtifacts_Disabled(t *testing.T) {
 	cfg.Agents.Reranker.Enabled = false
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -922,14 +922,14 @@ func TestFormatSessionMessages_Omission(t *testing.T) {
 	cfg := testutil.TestConfig()
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -990,7 +990,7 @@ func TestBuildRetrievalResult_WithArtifacts(t *testing.T) {
 	cfg.Agents.Reranker.Artifacts.Max = 5
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -1009,7 +1009,7 @@ func TestBuildRetrievalResult_WithArtifacts(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -1087,7 +1087,7 @@ func TestBuildRetrievalResult_ArtifactsNoReranker(t *testing.T) {
 	cfg.Agents.Reranker.Artifacts.Max = 2
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -1106,7 +1106,7 @@ func TestBuildRetrievalResult_ArtifactsNoReranker(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -1158,7 +1158,7 @@ func TestBuildRetrievalResult_MissingTopicInMap(t *testing.T) {
 	cfg := testutil.TestConfig()
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -1183,7 +1183,7 @@ func TestBuildRetrievalResult_MissingTopicInMap(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).

@@ -21,7 +21,7 @@ const (
 var (
 	// === Embedding API Metrics ===
 
-	// embeddingRequestDuration measures embedding generation time via the OpenRouter API.
+	// embeddingRequestDuration measures embedding generation time via the LLM API.
 	// Labels:
 	//   - user_id: user identifier
 	//   - model: model name (google/gemini-embedding-001)

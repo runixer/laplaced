@@ -23,7 +23,7 @@ import (
 	"github.com/runixer/laplaced/internal/storage"
 )
 
-// BuildMessages assembles OpenRouter messages from context data.
+// BuildMessages assembles LLM messages from context data.
 func (l *Laplace) BuildMessages(
 	ctx context.Context,
 	contextData *ContextData,
@@ -416,7 +416,7 @@ func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID storage.Sc
 			// Normalize MIME type for Gemini (e.g., text/x-web-markdown -> text/plain)
 			mimeType = files.NormalizeMimeForGemini(mimeType)
 			contentParts = append(contentParts, llm.MediaPart(
-				l.cfg.OpenRouter.ImageInputFormat, mimeType, fileName,
+				l.cfg.LLM.ImageInputFormat, mimeType, fileName,
 				fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data)))
 		case "image", "photo":
 			mimeType := artifact.MimeType
@@ -431,7 +431,7 @@ func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID storage.Sc
 			// Normalize MIME type for Gemini
 			mimeType = files.NormalizeMimeForGemini(mimeType)
 			contentParts = append(contentParts, llm.MediaPart(
-				l.cfg.OpenRouter.ImageInputFormat, mimeType, fileName,
+				l.cfg.LLM.ImageInputFormat, mimeType, fileName,
 				"data:"+mimeType+";base64,"+base64Data))
 		case "voice", "audio", "video_note", "video":
 			// Audio and video use FilePart
@@ -463,7 +463,7 @@ func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID storage.Sc
 			// Normalize MIME type for Gemini
 			mimeType = files.NormalizeMimeForGemini(mimeType)
 			contentParts = append(contentParts, llm.MediaPart(
-				l.cfg.OpenRouter.ImageInputFormat, mimeType, fileName,
+				l.cfg.LLM.ImageInputFormat, mimeType, fileName,
 				fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data)))
 		default:
 			l.logger.Warn("unknown artifact file type", "artifact_id", artifactID, "file_type", artifact.FileType)

@@ -305,7 +305,7 @@ func run() int {
 
 	logger.Info("Database initialized successfully.")
 
-	llmClient, err := llm.NewClient(logger, cfg.OpenRouter.APIKey, cfg.OpenRouter.ProxyURL, cfg.OpenRouter.BaseURL, cfg.OpenRouter.Provider.ToRouting())
+	llmClient, err := llm.NewClient(logger, cfg.LLM.APIKey, cfg.LLM.ProxyURL, cfg.LLM.BaseURL, cfg.LLM.Provider.ToRouting())
 	if err != nil {
 		logger.Error("failed to create llm client", "error", err)
 		return 1

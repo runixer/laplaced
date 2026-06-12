@@ -22,7 +22,7 @@ func TestFindMergeCandidates(t *testing.T) {
 
 	t.Run("filters out low similarity candidates", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		// Candidate with low similarity
 		candidates := []storage.MergeCandidate{
@@ -46,7 +46,7 @@ func TestFindMergeCandidates(t *testing.T) {
 
 	t.Run("returns high similarity candidates", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		// Candidate with high similarity
 		candidates := []storage.MergeCandidate{
@@ -69,7 +69,7 @@ func TestFindMergeCandidates(t *testing.T) {
 
 	t.Run("skips candidates without embeddings", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		// Candidate without embeddings
 		candidates := []storage.MergeCandidate{
@@ -94,7 +94,7 @@ func TestFindMergeCandidates(t *testing.T) {
 func TestVerifyMerge(t *testing.T) {
 	t.Run("should merge", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		// Mock merger agent that returns should_merge: true
 		mockMerger := new(agenttesting.MockAgent)
@@ -123,7 +123,7 @@ func TestVerifyMerge(t *testing.T) {
 
 	t.Run("should not merge", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		// Mock merger agent that returns should_merge: false
 		mockMerger := new(agenttesting.MockAgent)
@@ -150,7 +150,7 @@ func TestVerifyMerge(t *testing.T) {
 
 	t.Run("agent error", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		// Mock merger agent that returns error
 		mockMerger := new(agenttesting.MockAgent)
@@ -174,7 +174,7 @@ func TestVerifyMerge(t *testing.T) {
 func TestMergeTopics(t *testing.T) {
 	t.Run("successful merge", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		// GetMessagesByTopicID for building embedding input (called separately for each topic)
 		mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return([]storage.Message{
@@ -227,7 +227,7 @@ func TestMergeTopics(t *testing.T) {
 
 	t.Run("GetMessagesByTopicID error", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return([]storage.Message{}, assert.AnError)
 
@@ -245,7 +245,7 @@ func TestMergeTopics(t *testing.T) {
 
 	t.Run("CreateEmbeddings error", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return([]storage.Message{
 			{ID: 1, Role: "user", Content: "Hello"},
@@ -269,7 +269,7 @@ func TestMergeTopics(t *testing.T) {
 
 	t.Run("no embedding returned", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetMessagesByTopicID", mock.Anything, int64(1)).Return([]storage.Message{
 			{ID: 1, Role: "user", Content: "Hello"},
@@ -298,7 +298,7 @@ func TestMergeTopics(t *testing.T) {
 func TestRunConsolidationSync(t *testing.T) {
 	t.Run("no merge candidates", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		// No candidates
 		mockStore.On("GetMergeCandidates", storage.ScopeID("123"), mock.Anything).Return([]storage.MergeCandidate{}, nil)
@@ -317,7 +317,7 @@ func TestRunConsolidationSync(t *testing.T) {
 
 	t.Run("findMergeCandidates error", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetMergeCandidates", storage.ScopeID("123"), mock.Anything).Return([]storage.MergeCandidate{}, assert.AnError)
 		mockStore.On("SetTopicConsolidationChecked", storage.ScopeID("123"), mock.Anything, true).Return(nil).Maybe()
@@ -334,7 +334,7 @@ func TestRunConsolidationSync(t *testing.T) {
 
 	t.Run("context cancellation during verification", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		topic1 := storage.Topic{ID: 1, UserID: "123"}
 		topic2 := storage.Topic{ID: 2, UserID: "123"}
@@ -361,7 +361,7 @@ func TestRunConsolidationSync(t *testing.T) {
 func TestMarkOrphanTopicsChecked(t *testing.T) {
 	t.Run("handles GetTopicsPendingFacts error gracefully", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetTopicsPendingFacts", storage.ScopeID("123")).Return([]storage.Topic{}, assert.AnError)
 
@@ -373,7 +373,7 @@ func TestMarkOrphanTopicsChecked(t *testing.T) {
 
 	t.Run("marks topics with no potential partner", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		// Only one topic - automatically an orphan
 		pendingTopics := []storage.Topic{
@@ -394,7 +394,7 @@ func TestMarkOrphanTopicsChecked(t *testing.T) {
 func TestFindMergeCandidates_SizeLimit(t *testing.T) {
 	userID := storage.ScopeID("123")
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 
 	// Candidate exceeding size limit (max 50K)
 	candidates := []storage.MergeCandidate{
@@ -422,7 +422,7 @@ func TestFindMergeCandidates_SizeLimit(t *testing.T) {
 func TestFindMergeCandidates_AlreadyChecked(t *testing.T) {
 	userID := storage.ScopeID("123")
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 
 	// Topic1 already checked, should still be processed
 	candidates := []storage.MergeCandidate{
@@ -446,7 +446,7 @@ func TestFindMergeCandidates_AlreadyChecked(t *testing.T) {
 // TestVerifyMerge_NoMergerAgent tests error when merger agent is not configured.
 func TestVerifyMerge_NoMergerAgent(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 
 	svc := newTestRAGService(t, mockStore, mockClient)
 	// Don't set merger agent
@@ -466,7 +466,7 @@ func TestVerifyMerge_NoMergerAgent(t *testing.T) {
 // TestProcessConsolidation_ShouldNotMerge tests the flow when topics should not be merged.
 func TestProcessConsolidation_ShouldNotMerge(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 
 	userID := storage.PassthroughScopeID("telegram", "123")
 	// Topics with embeddings and small enough to pass size check
@@ -507,7 +507,7 @@ func TestProcessConsolidation_ShouldNotMerge(t *testing.T) {
 // TestProcessConsolidation_SetTopicCheckedError tests error handling when SetTopicConsolidationChecked fails.
 func TestProcessConsolidation_SetTopicCheckedError(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 
 	userID := storage.PassthroughScopeID("telegram", "123")
 	// Topics with embeddings and small enough to pass size check
@@ -549,7 +549,7 @@ func TestProcessConsolidation_SetTopicCheckedError(t *testing.T) {
 // TestProcessConsolidation_VerifyMergeError tests error handling when verifyMerge fails.
 func TestProcessConsolidation_VerifyMergeError(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 
 	userID := storage.PassthroughScopeID("telegram", "123")
 	// Topics with embeddings and small enough to pass size check
@@ -585,7 +585,7 @@ func TestProcessConsolidation_VerifyMergeError(t *testing.T) {
 // TestMarkOrphanTopicsChecked_HasPartner tests that a topic with a potential partner is not marked as checked.
 func TestMarkOrphanTopicsChecked_HasPartner(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 
 	userID := storage.PassthroughScopeID("telegram", "123")
 
@@ -611,7 +611,7 @@ func TestMarkOrphanTopicsChecked_HasPartner(t *testing.T) {
 // TestMarkOrphanTopicsChecked_NoPartner tests that a topic without a potential partner is marked as checked.
 func TestMarkOrphanTopicsChecked_NoPartner(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 
 	userID := storage.PassthroughScopeID("telegram", "123")
 
@@ -634,7 +634,7 @@ func TestMarkOrphanTopicsChecked_NoPartner(t *testing.T) {
 // TestMarkOrphanTopicsChecked_LastTopicAlreadyChecked tests that already-checked topics are skipped.
 func TestMarkOrphanTopicsChecked_LastTopicAlreadyChecked(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 
 	userID := storage.PassthroughScopeID("telegram", "123")
 
@@ -662,7 +662,7 @@ func TestMarkOrphanTopicsChecked_LastTopicAlreadyChecked(t *testing.T) {
 // 5. Loop breaks after merge (only one candidate processed)
 func TestProcessConsolidation_ShouldMerge_Success(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 
 	userID := storage.PassthroughScopeID("telegram", "123")
 

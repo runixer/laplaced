@@ -31,7 +31,7 @@ func setupArtifactTest(t *testing.T) (*config.Config, *i18n.Translator, *Laplace
 	require.NoError(t, err)
 
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	// Create a temporary directory for artifact files
 	tempDir := t.TempDir()

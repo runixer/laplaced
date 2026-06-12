@@ -30,7 +30,7 @@ func TestRetrieve_TopicsGrouping(t *testing.T) {
 	cfg.Agents.Default.Model = "test-model"
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 
 	// User ID
 	userID := storage.ScopeID("123")
@@ -126,7 +126,7 @@ func TestRetrieve_TopicsGrouping(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -176,7 +176,7 @@ func TestRetrieveFacts(t *testing.T) {
 		disabledCfg.RAG.Enabled = false
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		// Init mocks
 		mockStore.On("GetAllTopics").Return([]storage.Topic{}, nil)
@@ -188,7 +188,7 @@ func TestRetrieveFacts(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(disabledCfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -209,7 +209,7 @@ func TestRetrieveFacts(t *testing.T) {
 
 	t.Run("success with matching facts", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		// Facts for user
 		facts := []storage.Fact{
@@ -237,7 +237,7 @@ func TestRetrieveFacts(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -260,7 +260,7 @@ func TestRetrieveFacts(t *testing.T) {
 
 	t.Run("embedding error", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetAllTopics").Return([]storage.Topic{}, nil)
 		mockStore.On("GetAllFacts").Return([]storage.Fact{}, nil)
@@ -272,7 +272,7 @@ func TestRetrieveFacts(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -292,7 +292,7 @@ func TestRetrieveFacts(t *testing.T) {
 
 	t.Run("empty embedding response", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetAllTopics").Return([]storage.Topic{}, nil)
 		mockStore.On("GetAllFacts").Return([]storage.Fact{}, nil)
@@ -306,7 +306,7 @@ func TestRetrieveFacts(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -341,7 +341,7 @@ func TestRetrieve_SkipEnrichment(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetAllTopics").Return([]storage.Topic{}, nil)
 		mockStore.On("GetAllFacts").Return([]storage.Fact{}, nil)
@@ -360,7 +360,7 @@ func TestRetrieve_SkipEnrichment(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -395,7 +395,7 @@ func TestRetrieve_NilOptions(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetAllTopics").Return([]storage.Topic{}, nil)
 		mockStore.On("GetAllFacts").Return([]storage.Fact{}, nil)
@@ -413,7 +413,7 @@ func TestRetrieve_NilOptions(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -442,14 +442,14 @@ func TestEnrichQuery(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -482,7 +482,7 @@ func TestEnrichQuery(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 		translator := testutil.TestTranslator(t)
 
 		// Mock enricher agent that returns error
@@ -494,7 +494,7 @@ func TestEnrichQuery(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -524,7 +524,7 @@ func TestEnrichQuery(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 		translator := testutil.TestTranslator(t)
 
 		// Mock enricher agent that returns enriched query
@@ -542,7 +542,7 @@ func TestEnrichQuery(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -579,7 +579,7 @@ func TestEnrichQuery(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 		translator := testutil.TestTranslator(t)
 
 		// Mock enricher agent that returns enriched query
@@ -599,7 +599,7 @@ func TestEnrichQuery(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -634,7 +634,7 @@ func TestEnrichQuery(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 		translator := testutil.TestTranslator(t)
 
 		// Even though we set an enricher agent, it should be skipped when model is empty
@@ -645,7 +645,7 @@ func TestEnrichQuery(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -678,7 +678,7 @@ func TestEnrichQuery(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 		translator := testutil.TestTranslator(t)
 
 		// Mock enricher agent that returns enriched query with extra whitespace
@@ -693,7 +693,7 @@ func TestEnrichQuery(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).

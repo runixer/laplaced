@@ -368,7 +368,7 @@ func (ex *Extractor) buildMultimodalMessages(ctx context.Context, req *agent.Req
 	// Add file part based on type. Visual media (image/video) is encoded per the
 	// configured backend format via llm.MediaPart (image_url/video_url on
 	// OpenAI-compatible backends, else `file`); other types use `file`.
-	format := ex.cfg.OpenRouter.ImageInputFormat
+	format := ex.cfg.LLM.ImageInputFormat
 	mediaPart := func(mimeType, fileName string) interface{} {
 		return llm.MediaPart(format, mimeType, fileName, fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data))
 	}

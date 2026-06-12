@@ -205,7 +205,7 @@ func TestExtractor_Execute_Success(t *testing.T) {
 		"rag_hints": ["What time of day was this photo taken?", "What are the dominant colors?"]
 	}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).
@@ -274,7 +274,7 @@ func TestExtractor_Execute_Success(t *testing.T) {
 
 // TestExtractor_Execute_FileTooLarge tests file size validation.
 func TestExtractor_Execute_FileTooLarge(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	mockStorage.On("UpdateArtifact", mock.Anything).Return(nil)
 
@@ -315,7 +315,7 @@ func TestExtractor_Execute_FileTooLarge(t *testing.T) {
 
 // TestExtractor_Execute_ZeroSizeFile tests zero-size file validation.
 func TestExtractor_Execute_ZeroSizeFile(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	mockStorage.On("UpdateArtifact", mock.Anything).Return(nil)
 
@@ -356,7 +356,7 @@ func TestExtractor_Execute_ZeroSizeFile(t *testing.T) {
 
 // TestExtractor_Execute_NoArtifact tests missing artifact in request.
 func TestExtractor_Execute_NoArtifact(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
@@ -380,7 +380,7 @@ func TestExtractor_Execute_NoArtifact(t *testing.T) {
 
 // TestExtractor_Execute_FileReadError tests file read failure.
 func TestExtractor_Execute_FileReadError(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	mockStorage.On("UpdateArtifact", mock.Anything).Return(nil)
 
@@ -418,7 +418,7 @@ func TestExtractor_Execute_FileReadError(t *testing.T) {
 
 // TestExtractor_Execute_LLMError tests LLM call failure.
 func TestExtractor_Execute_LLMError(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(llm.ChatCompletionResponse{}, assert.AnError)
 
@@ -463,7 +463,7 @@ func TestExtractor_Execute_LLMError(t *testing.T) {
 
 // TestExtractor_Execute_EmptyLLMResponse tests empty LLM response.
 func TestExtractor_Execute_EmptyLLMResponse(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	// Return empty response (no choices)
 	emptyResp := testutil.MockChatResponse("")
 	emptyResp.Choices = nil // Override with nil to simulate empty response
@@ -507,7 +507,7 @@ func TestExtractor_Execute_EmptyLLMResponse(t *testing.T) {
 
 // TestExtractor_Execute_InvalidJSON tests invalid JSON response.
 func TestExtractor_Execute_InvalidJSON(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse("this is not valid json"), nil)
 
@@ -559,7 +559,7 @@ func TestExtractor_Execute_EmbeddingError(t *testing.T) {
 		"rag_hints": []
 	}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).
@@ -610,7 +610,7 @@ func TestExtractor_Execute_UpdateArtifactError(t *testing.T) {
 	// The actual error path is exercised in other tests (LLMError, EmbeddingError, etc.)
 	// Here we test markFailed directly to verify retry tracking.
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	mockStorage.On("UpdateArtifact", mock.Anything).Return(nil)
 
@@ -642,7 +642,7 @@ func TestExtractor_Execute_UpdateArtifactError(t *testing.T) {
 
 // TestExtractor_BuildMultimodalMessages_Image tests image file message building.
 func TestExtractor_BuildMultimodalMessages_Image(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
@@ -692,7 +692,7 @@ func TestExtractor_BuildMultimodalMessages_Image(t *testing.T) {
 
 // TestExtractor_BuildMultimodalMessages_PDF tests PDF file message building.
 func TestExtractor_BuildMultimodalMessages_PDF(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
@@ -727,7 +727,7 @@ func TestExtractor_BuildMultimodalMessages_PDF(t *testing.T) {
 
 // TestExtractor_BuildMultimodalMessages_Audio tests audio/voice message building.
 func TestExtractor_BuildMultimodalMessages_Audio(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
@@ -762,7 +762,7 @@ func TestExtractor_BuildMultimodalMessages_Audio(t *testing.T) {
 
 // TestExtractor_BuildMultimodalMessages_VideoNote tests video_note message building.
 func TestExtractor_BuildMultimodalMessages_VideoNote(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
@@ -796,7 +796,7 @@ func TestExtractor_BuildMultimodalMessages_VideoNote(t *testing.T) {
 
 // TestExtractor_BuildMultimodalMessages_Document tests document (text) message building.
 func TestExtractor_BuildMultimodalMessages_Document(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
@@ -831,7 +831,7 @@ func TestExtractor_BuildMultimodalMessages_Document(t *testing.T) {
 
 // TestExtractor_BuildMultimodalMessages_UnknownType tests fallback for unknown file types.
 func TestExtractor_BuildMultimodalMessages_UnknownType(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
@@ -873,7 +873,7 @@ func TestExtractor_Execute_WithUserContext(t *testing.T) {
 		"rag_hints": []
 	}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).
@@ -937,7 +937,7 @@ func TestExtractor_Execute_WithUserContext(t *testing.T) {
 
 // TestExtractor_Execute_RetryTracking tests retry count tracking on failure.
 func TestExtractor_Execute_RetryTracking(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(llm.ChatCompletionResponse{}, assert.AnError)
 
@@ -993,7 +993,7 @@ func TestExtractor_Execute_SuccessResetsRetry(t *testing.T) {
 		"rag_hints": []
 	}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).

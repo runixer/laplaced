@@ -71,7 +71,7 @@ func TestFindSimilarFacts(t *testing.T) {
 
 	t.Run("no similar facts", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		// Facts with low similarity
 		facts := []storage.Fact{
@@ -90,7 +90,7 @@ func TestFindSimilarFacts(t *testing.T) {
 
 	t.Run("finds similar facts", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		facts := []storage.Fact{
 			{ID: 1, UserID: userID, Content: "similar fact", Embedding: []float32{0.95, 0.05, 0.0}},
@@ -112,7 +112,7 @@ func TestFindSimilarFacts(t *testing.T) {
 func TestLoadNewVectors(t *testing.T) {
 	t.Run("loads new topics and facts", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		embedding := []float32{0.1, 0.2, 0.3}
 		mockStore.On("GetTopicsAfterID", int64(0)).Return([]storage.Topic{
@@ -133,7 +133,7 @@ func TestLoadNewVectors(t *testing.T) {
 
 	t.Run("returns early when no new data", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetTopicsAfterID", int64(0)).Return([]storage.Topic{}, nil)
 		mockStore.On("GetFactsAfterID", int64(0)).Return([]storage.Fact{}, nil)
@@ -148,7 +148,7 @@ func TestLoadNewVectors(t *testing.T) {
 
 	t.Run("handles topic load error", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetTopicsAfterID", int64(0)).Return([]storage.Topic{}, assert.AnError)
 
@@ -162,7 +162,7 @@ func TestLoadNewVectors(t *testing.T) {
 
 	t.Run("handles fact load error", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetTopicsAfterID", int64(0)).Return([]storage.Topic{}, nil)
 		mockStore.On("GetFactsAfterID", int64(0)).Return([]storage.Fact{}, assert.AnError)
@@ -177,7 +177,7 @@ func TestLoadNewVectors(t *testing.T) {
 
 	t.Run("skips topics without embeddings", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		embedding := []float32{0.1, 0.2, 0.3}
 		mockStore.On("GetTopicsAfterID", int64(0)).Return([]storage.Topic{

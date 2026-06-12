@@ -17,7 +17,7 @@ import (
 func TestServiceGetDatabaseHealth_Success(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -40,7 +40,7 @@ func TestServiceGetDatabaseHealth_Success(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -72,7 +72,7 @@ func TestServiceGetDatabaseHealth_Success(t *testing.T) {
 func TestServiceGetDatabaseHealth_AllUsers(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	topics := []storage.Topic{
@@ -89,7 +89,7 @@ func TestServiceGetDatabaseHealth_AllUsers(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -113,7 +113,7 @@ func TestServiceGetDatabaseHealth_AllUsers(t *testing.T) {
 func TestServiceGetDatabaseHealth_DefaultThreshold(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -131,7 +131,7 @@ func TestServiceGetDatabaseHealth_DefaultThreshold(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -217,7 +217,7 @@ func TestServiceGetDatabaseHealth_Errors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := testutil.TestConfig()
 			mockStore := new(testutil.MockStorage)
-			mockClient := new(testutil.MockOpenRouterClient)
+			mockClient := new(testutil.MockLLMClient)
 			translator := testutil.TestTranslator(t)
 
 			tt.setupMocks(mockStore)
@@ -226,7 +226,7 @@ func TestServiceGetDatabaseHealth_Errors(t *testing.T) {
 			svc, err := NewServiceBuilder().
 				WithLogger(testutil.TestLogger()).
 				WithConfig(cfg).
-				WithOpenRouterClient(mockClient).
+				WithLLMClient(mockClient).
 				WithTopicRepository(mockStore).
 				WithFactRepository(mockStore).
 				WithFactHistoryRepository(mockStore).
@@ -257,7 +257,7 @@ func TestServiceGetDatabaseHealth_Errors(t *testing.T) {
 func TestServiceRepairDatabase_DryRun(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -275,7 +275,7 @@ func TestServiceRepairDatabase_DryRun(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -301,7 +301,7 @@ func TestServiceRepairDatabase_DryRun(t *testing.T) {
 func TestServiceRepairDatabase_RealRun(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -340,7 +340,7 @@ func TestServiceRepairDatabase_RealRun(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -366,7 +366,7 @@ func TestServiceRepairDatabase_RealRun(t *testing.T) {
 func TestServiceRepairDatabase_NoOrphans(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -386,7 +386,7 @@ func TestServiceRepairDatabase_NoOrphans(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -412,7 +412,7 @@ func TestServiceRepairDatabase_AllUsers(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	orphanedIDs := []int64{10, 20}
@@ -439,7 +439,7 @@ func TestServiceRepairDatabase_AllUsers(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -462,7 +462,7 @@ func TestServiceRepairDatabase_AllUsers(t *testing.T) {
 func TestServiceGetContaminationInfo_Success(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -479,7 +479,7 @@ func TestServiceGetContaminationInfo_Success(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -504,7 +504,7 @@ func TestServiceGetContaminationInfo_Success(t *testing.T) {
 func TestServiceGetContaminationInfo_AllUsers(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	contaminated := []storage.ContaminatedTopic{
@@ -518,7 +518,7 @@ func TestServiceGetContaminationInfo_AllUsers(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -541,7 +541,7 @@ func TestServiceGetContaminationInfo_AllUsers(t *testing.T) {
 func TestServiceFixContamination_DryRun(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -557,7 +557,7 @@ func TestServiceFixContamination_DryRun(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -582,7 +582,7 @@ func TestServiceFixContamination_RealRun(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -608,7 +608,7 @@ func TestServiceFixContamination_RealRun(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -632,7 +632,7 @@ func TestServiceFixContamination_RealRun(t *testing.T) {
 func TestServiceFixContamination_NoContamination(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -645,7 +645,7 @@ func TestServiceFixContamination_NoContamination(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -669,7 +669,7 @@ func TestServiceFixContamination_NoContamination(t *testing.T) {
 func TestServiceRelinkFactsFromOrphanedTopics_Success(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -695,7 +695,7 @@ func TestServiceRelinkFactsFromOrphanedTopics_Success(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -717,7 +717,7 @@ func TestServiceRelinkFactsFromOrphanedTopics_Success(t *testing.T) {
 func TestServiceRelinkFactsFromOrphanedTopics_NoValidTopic(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	userID := storage.ScopeID("123")
@@ -734,7 +734,7 @@ func TestServiceRelinkFactsFromOrphanedTopics_NoValidTopic(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -756,14 +756,14 @@ func TestServiceRelinkFactsFromOrphanedTopics_NoValidTopic(t *testing.T) {
 func TestServiceRelinkFactsFromOrphanedTopics_EmptyList(t *testing.T) {
 	cfg := testutil.TestConfig()
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	translator := testutil.TestTranslator(t)
 
 	memSvc := memory.NewService(testutil.TestLogger(), cfg, mockStore, mockStore, mockStore, mockClient, translator)
 	svc, err := NewServiceBuilder().
 		WithLogger(testutil.TestLogger()).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).

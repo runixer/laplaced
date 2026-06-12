@@ -44,7 +44,7 @@ func (m *mockRetriever) Retrieve(ctx context.Context, userID storage.ScopeID, qu
 }
 
 // setupContextTest creates a test Laplace agent with all mocks.
-func setupContextTest(t *testing.T) (*config.Config, *i18n.Translator, *Laplace, *testutil.MockStorage, *testutil.MockOpenRouterClient, *mockRetriever) {
+func setupContextTest(t *testing.T) (*config.Config, *i18n.Translator, *Laplace, *testutil.MockStorage, *testutil.MockLLMClient, *mockRetriever) {
 	t.Helper()
 
 	cfg := testutil.TestConfig()
@@ -53,7 +53,7 @@ func setupContextTest(t *testing.T) (*config.Config, *i18n.Translator, *Laplace,
 	require.NoError(t, err)
 
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	mockRAG := new(mockRetriever)
 
 	// Setup default RAG mock expectations (return empty results)

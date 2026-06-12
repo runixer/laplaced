@@ -16,7 +16,7 @@ server:
 telegram:
   token: "test_token"
   webhook_url: "https://test.com/webhook"
-openrouter:
+llm:
   api_key: "test_api_key"
 bot:
   allowed_user_ids:
@@ -53,7 +53,7 @@ database:
 	assert.Equal(t, "9001", cfg.Server.ListenPort)
 	assert.Equal(t, "test_token", cfg.Telegram.Token)
 	assert.Equal(t, "https://test.com/webhook", cfg.Telegram.WebhookURL)
-	assert.Equal(t, "test_api_key", cfg.OpenRouter.APIKey)
+	assert.Equal(t, "test_api_key", cfg.LLM.APIKey)
 	assert.Equal(t, []int64{123, 456}, cfg.Bot.AllowedUserIDs)
 	assert.Equal(t, "test.db", cfg.Database.Path)
 
@@ -95,7 +95,7 @@ server:
 telegram:
   token: "$TEST_TOKEN"
   webhook_url: "https://test.com/webhook"
-openrouter:
+llm:
   api_key: "${TEST_API_KEY}"
 bot:
   system_prompt: "You are a test assistant from env."
@@ -124,7 +124,7 @@ database:
 
 	// Assert that the environment variables were expanded
 	assert.Equal(t, "secret-from-env", cfg.Telegram.Token)
-	assert.Equal(t, "api-key-from-env", cfg.OpenRouter.APIKey)
+	assert.Equal(t, "api-key-from-env", cfg.LLM.APIKey)
 	assert.Equal(t, "https://test.com/webhook", cfg.Telegram.WebhookURL) // Ensure other values are still correct
 }
 
@@ -171,7 +171,7 @@ func TestValidate(t *testing.T) {
 	validConfig := func() *Config {
 		cfg, _ := LoadDefault()
 		cfg.Telegram.Token = "test_token"
-		cfg.OpenRouter.APIKey = "test_api_key"
+		cfg.LLM.APIKey = "test_api_key"
 		cfg.Database.Path = "test.db"
 		// Default has auth.enabled=true, set password to avoid validation error
 		cfg.Server.Auth.Password = "test_password"
@@ -196,10 +196,10 @@ func TestValidate(t *testing.T) {
 			errContains: "telegram.token is required",
 		},
 		{
-			name:        "missing openrouter api key",
-			modify:      func(c *Config) { c.OpenRouter.APIKey = "" },
+			name:        "missing llm api key",
+			modify:      func(c *Config) { c.LLM.APIKey = "" },
 			wantErr:     true,
-			errContains: "openrouter.api_key is required",
+			errContains: "llm.api_key is required",
 		},
 		{
 			name:        "missing database path",
@@ -275,7 +275,7 @@ func TestValidate(t *testing.T) {
 			name: "multiple errors collected",
 			modify: func(c *Config) {
 				c.Telegram.Token = ""
-				c.OpenRouter.APIKey = ""
+				c.LLM.APIKey = ""
 			},
 			wantErr:     true,
 			errContains: "telegram.token is required",
@@ -763,7 +763,7 @@ func TestValidate_RerankerConfig(t *testing.T) {
 	validConfig := func() *Config {
 		cfg, _ := LoadDefault()
 		cfg.Telegram.Token = "test_token"
-		cfg.OpenRouter.APIKey = "test_api_key"
+		cfg.LLM.APIKey = "test_api_key"
 		cfg.Database.Path = "test.db"
 		return cfg
 	}
@@ -908,7 +908,7 @@ func TestValidate_BotTurnWaitDuration(t *testing.T) {
 	validConfig := func() *Config {
 		cfg, _ := LoadDefault()
 		cfg.Telegram.Token = "test_token"
-		cfg.OpenRouter.APIKey = "test_api_key"
+		cfg.LLM.APIKey = "test_api_key"
 		cfg.Database.Path = "test.db"
 		return cfg
 	}
@@ -945,7 +945,7 @@ func TestValidate_Artifacts(t *testing.T) {
 	validConfig := func() *Config {
 		cfg, _ := LoadDefault()
 		cfg.Telegram.Token = "test_token"
-		cfg.OpenRouter.APIKey = "test_api_key"
+		cfg.LLM.APIKey = "test_api_key"
 		cfg.Database.Path = "test.db"
 		return cfg
 	}
@@ -1022,7 +1022,7 @@ func TestValidate_RAGDurationFormats(t *testing.T) {
 	validConfig := func() *Config {
 		cfg, _ := LoadDefault()
 		cfg.Telegram.Token = "test_token"
-		cfg.OpenRouter.APIKey = "test_api_key"
+		cfg.LLM.APIKey = "test_api_key"
 		cfg.Database.Path = "test.db"
 		cfg.RAG.Enabled = true
 		return cfg
@@ -1080,7 +1080,7 @@ func TestValidate_AgentsDefaults(t *testing.T) {
 	validConfig := func() *Config {
 		cfg, _ := LoadDefault()
 		cfg.Telegram.Token = "test_token"
-		cfg.OpenRouter.APIKey = "test_api_key"
+		cfg.LLM.APIKey = "test_api_key"
 		cfg.Database.Path = "test.db"
 		return cfg
 	}
@@ -1141,7 +1141,7 @@ func TestValidate_EmbeddingModel(t *testing.T) {
 	validConfig := func() *Config {
 		cfg, _ := LoadDefault()
 		cfg.Telegram.Token = "test_token"
-		cfg.OpenRouter.APIKey = "test_api_key"
+		cfg.LLM.APIKey = "test_api_key"
 		cfg.Database.Path = "test.db"
 		return cfg
 	}
@@ -1168,7 +1168,7 @@ func TestValidate_AllRAGPositiveIntegers(t *testing.T) {
 	validConfig := func() *Config {
 		cfg, _ := LoadDefault()
 		cfg.Telegram.Token = "test_token"
-		cfg.OpenRouter.APIKey = "test_api_key"
+		cfg.LLM.APIKey = "test_api_key"
 		cfg.Database.Path = "test.db"
 		cfg.RAG.Enabled = true
 		return cfg
@@ -1212,7 +1212,7 @@ func TestValidate_RAGThresholdsRange(t *testing.T) {
 	validConfig := func() *Config {
 		cfg, _ := LoadDefault()
 		cfg.Telegram.Token = "test_token"
-		cfg.OpenRouter.APIKey = "test_api_key"
+		cfg.LLM.APIKey = "test_api_key"
 		cfg.Database.Path = "test.db"
 		cfg.RAG.Enabled = true
 		return cfg
@@ -1261,7 +1261,7 @@ func TestValidate_Telemetry(t *testing.T) {
 	validConfig := func() *Config {
 		cfg, _ := LoadDefault()
 		cfg.Telegram.Token = "test_token"
-		cfg.OpenRouter.APIKey = "test_api_key"
+		cfg.LLM.APIKey = "test_api_key"
 		cfg.Database.Path = "test.db"
 		return cfg
 	}

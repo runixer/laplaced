@@ -44,7 +44,7 @@ func collectAttrs(kvs []attribute.KeyValue) map[attribute.Key]attribute.Value {
 func TestMerger_Execute_RecordsSpan(t *testing.T) {
 	getSpans := withTracingCapture(t)
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(`{"should_merge": true, "new_summary": "merged"}`), nil)
 

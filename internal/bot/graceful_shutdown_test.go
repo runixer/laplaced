@@ -28,7 +28,7 @@ func TestProcessMessageGroup_CompletesOnContextCancel(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
@@ -36,7 +36,7 @@ func TestProcessMessageGroup_CompletesOnContextCancel(t *testing.T) {
 	ragService, err := rag.NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockORClient).
+		WithLLMClient(mockORClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -149,7 +149,7 @@ func TestProcessMessageGroup_LLMContextNotCancelled(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
@@ -157,7 +157,7 @@ func TestProcessMessageGroup_LLMContextNotCancelled(t *testing.T) {
 	ragService, err := rag.NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockORClient).
+		WithLLMClient(mockORClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -264,7 +264,7 @@ func TestProcessMessageGroup_VoiceCompletesOnContextCancel(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	mockDownloader := new(testutil.MockFileDownloader)
 
 	cfg := testutil.TestConfig()
@@ -273,7 +273,7 @@ func TestProcessMessageGroup_VoiceCompletesOnContextCancel(t *testing.T) {
 	ragService, err := rag.NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockORClient).
+		WithLLMClient(mockORClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -384,7 +384,7 @@ func TestProcessMessageGroup_VoiceDownloadContextNotCancelled(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	mockDownloader := new(testutil.MockFileDownloader)
 
 	cfg := testutil.TestConfig()
@@ -393,7 +393,7 @@ func TestProcessMessageGroup_VoiceDownloadContextNotCancelled(t *testing.T) {
 	ragService, err := rag.NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockORClient).
+		WithLLMClient(mockORClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).

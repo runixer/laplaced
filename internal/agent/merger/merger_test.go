@@ -16,7 +16,7 @@ import (
 func TestMerger_Execute_ShouldMerge(t *testing.T) {
 	llmResponse := `{"should_merge": true, "new_summary": "Обсуждение Go и его применения в разработке"}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 
@@ -54,7 +54,7 @@ func TestMerger_Execute_ShouldMerge(t *testing.T) {
 func TestMerger_Execute_ShouldNotMerge(t *testing.T) {
 	llmResponse := `{"should_merge": false, "new_summary": ""}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 
@@ -227,7 +227,7 @@ func TestMerger_SameTopics(t *testing.T) {
 	// Test merger with identical topic summaries
 	llmResponse := `{"should_merge": true, "new_summary": "Обсуждение Go"}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 
@@ -264,7 +264,7 @@ func TestMerger_DifferentTopics(t *testing.T) {
 	// Test merger with completely different topics
 	llmResponse := `{"should_merge": false, "new_summary": ""}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 
@@ -299,7 +299,7 @@ func TestMerger_DifferentTopics(t *testing.T) {
 
 func TestMerger_ParseError(t *testing.T) {
 	// Test invalid JSON response from LLM
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse("not valid json"), nil)
 

@@ -111,7 +111,7 @@ func (c *Config) secretFields() []struct {
 		ptr  *string
 	}{
 		{"telegram.token", &c.Telegram.Token},
-		{"openrouter.api_key", &c.OpenRouter.APIKey},
+		{"llm.api_key", &c.LLM.APIKey},
 		{"mattermost.bot_token", &c.Mattermost.BotToken},
 		{"database.postgres.password", &c.Database.Postgres.Password},
 		{"server.auth.password", &c.Server.Auth.Password},

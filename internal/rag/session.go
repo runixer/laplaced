@@ -162,7 +162,7 @@ func (s *Service) ForceProcessUserWithProgress(ctx context.Context, userID stora
 	})
 
 	// Root span for the forced-process path so splitter coverage diagnostics
-	// (via recordCoverage in processChunkWithStats) and the child openrouter
+	// (via recordCoverage in processChunkWithStats) and the child llm
 	// span have a queryable parent. Uses the same `rag.processChunk` name as
 	// the background loop; chunk.kind distinguishes the two flows.
 	chunkCtx, span := otel.Tracer("github.com/runixer/laplaced/internal/rag").Start(

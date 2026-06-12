@@ -48,7 +48,7 @@ Examples:
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
 
-		agent := imagegen.New(tb.services.OpenRouterClient, &tb.cfg.Agents.ImageGenerator, tb.logger)
+		agent := imagegen.New(tb.services.LLMClient, &tb.cfg.Agents.ImageGenerator, tb.logger)
 
 		fmt.Printf("Generating with model %s\n", tb.cfg.Agents.ImageGenerator.Model)
 		fmt.Printf("  Prompt: %s\n", prompt)

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Laplaced is a Telegram bot written in Go, powered by Google Gemini via OpenRouter. It features:
+Laplaced is a Telegram bot written in Go, powered by Google Gemini via any OpenAI-compatible LLM API (OpenRouter, litellm, vLLM). It features:
 - Long-term memory using RAG (Retrieval-Augmented Generation)
 - Native voice message understanding (Gemini multimodal)
 - Image/PDF analysis
@@ -49,7 +49,7 @@ internal/
   storage/               # SQLite repository layer (pure Go, no CGO)
   rag/                   # Vector search, topic/artifact retrieval, context building
   memory/                # Facts extraction, topic processing, long-term memory
-  openrouter/            # LLM client (Gemini/OpenRouter API)
+  llm/                   # LLM client (OpenAI-compatible API: OpenRouter, litellm, vLLM)
   telegram/              # Telegram API client wrapper
   testutil/              # Centralized test mocks, fixtures, and helpers
   web/                   # HTTP server for dashboard and webhooks
@@ -73,7 +73,7 @@ internal/
 3. File handling: save artifacts (images, voice, PDF, documents) with deduplication
 4. RAG retrieval: vector search for relevant topics/facts/artifacts
 5. Context assembly: system prompt + profile facts + RAG results + session messages (+ artifact content)
-6. LLM generation via OpenRouter
+6. LLM generation via the configured LLM API
 7. Response sent to user
 8. Background: Extractor agent processes pending artifacts (summary, keywords, entities)
 9. Session archival → topic creation → facts extraction (async)
@@ -154,8 +154,8 @@ When you add a config field that changes the **shape** of data the system produc
 
 **Checklist when adding such a field:**
 
-1. **Grep every existing call site** of the affected API/struct and audit each one. Example: `git grep -n "openrouter\.EmbeddingRequest{"` before landing a new field on `EmbeddingRequest`.
-2. **Add a static guard test** that walks the source tree and fails the build if a literal of the target struct is missing the required field. Canonical example: `internal/openrouter/embedding_dimensions_guard_test.go`. Cheap insurance against the same regression recurring.
+1. **Grep every existing call site** of the affected API/struct and audit each one. Example: `git grep -n "llm\.EmbeddingRequest{"` before landing a new field on `EmbeddingRequest`.
+2. **Add a static guard test** that walks the source tree and fails the build if a literal of the target struct is missing the required field. Canonical example: `internal/llm/embedding_dimensions_guard_test.go`. Cheap insurance against the same regression recurring.
 3. **Post-migration smoke test on a real query path.** A migration test that only verifies schema-level state (rows updated, column set) doesn't catch shape mismatch between storage and query. Run an actual retrieval / read and assert non-empty results on a known input.
 4. **Watch for metrics that should not be zero.** `laplaced_rag_candidates_sum{type="topics"} = 0` across every user was the diagnostic that unlocked the v0.7.1 post-mortem — all other health signals (container healthy, API calls succeeding, tests green) lied.
 
@@ -441,7 +441,7 @@ Config loaded from `configs/config.yaml`, overridable via environment variables 
 
 Key env vars:
 - `LAPLACED_TELEGRAM_TOKEN` - Bot token
-- `LAPLACED_OPENROUTER_API_KEY` - LLM API key
+- `LAPLACED_LLM_API_KEY` - LLM API key
 - `LAPLACED_ALLOWED_USER_IDS` - Comma-separated Telegram user IDs
 - `LAPLACED_ARTIFACTS_ENABLED` - Enable/disable artifacts system
 - `LAPLACED_ARTIFACTS_STORAGE_PATH` - Path for artifact file storage

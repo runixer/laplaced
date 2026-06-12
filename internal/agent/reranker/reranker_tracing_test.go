@@ -45,7 +45,7 @@ func TestReranker_RecordsSpan_EarlyFallback(t *testing.T) {
 			Default: config.AgentConfig{Model: "test-model"},
 		},
 	}
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	mockStore := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 
@@ -101,7 +101,7 @@ func TestReranker_RecordsModelRawCounts_EmptyResponse(t *testing.T) {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	cfg := testConfig()
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -197,7 +197,7 @@ func TestReranker_RecordsModelResponseEvent_Hallucination(t *testing.T) {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	cfg := testConfig()
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -286,7 +286,7 @@ func TestReranker_RecordsSessionInputCount(t *testing.T) {
 			Default: config.AgentConfig{Model: "test-model"},
 		},
 	}
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	mockStore := new(testutil.MockStorage)
 	translator := testutil.TestTranslator(t)
 

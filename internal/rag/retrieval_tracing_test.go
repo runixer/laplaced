@@ -21,7 +21,7 @@ import (
 	"github.com/runixer/laplaced/internal/testutil"
 )
 
-func buildRetrieveServiceForTracing(t *testing.T, mockStore *testutil.MockStorage, mockClient *testutil.MockOpenRouterClient) *Service {
+func buildRetrieveServiceForTracing(t *testing.T, mockStore *testutil.MockStorage, mockClient *testutil.MockLLMClient) *Service {
 	t.Helper()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	cfg := &config.Config{
@@ -41,7 +41,7 @@ func buildRetrieveServiceForTracing(t *testing.T, mockStore *testutil.MockStorag
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -63,7 +63,7 @@ func TestRetrieve_RecordsSpan(t *testing.T) {
 	getSpans := testutil.WithTracingCapture(t)
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(
 		llm.EmbeddingResponse{
 			Data: []llm.EmbeddingObject{{Embedding: []float32{0.1, 0.2, 0.3}}},
@@ -91,7 +91,7 @@ func TestRetrieve_RecordsSpan(t *testing.T) {
 
 func TestRetrieve_ContentEventsGatedByToggle(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(
 		llm.EmbeddingResponse{
 			Data: []llm.EmbeddingObject{{Embedding: []float32{0.1, 0.2, 0.3}}},
@@ -142,7 +142,7 @@ func TestRetrieve_EmbeddingError_SetsErrorStatus(t *testing.T) {
 	getSpans := testutil.WithTracingCapture(t)
 
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(
 		llm.EmbeddingResponse{}, errors.New("embeddings boom"),
 	)

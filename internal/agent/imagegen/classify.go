@@ -17,7 +17,7 @@ import (
 //
 // Inputs:
 //
-//	genErr   — error returned by the OpenRouter client (nil on a successful
+//	genErr   — error returned by the LLM client (nil on a successful
 //	           HTTP exchange that nonetheless produced no images).
 //	msg      — the assistant message from choices[0]; consulted only when
 //	           genErr is nil.

@@ -38,8 +38,8 @@ mattermost:
   #   # auth_service. Local accounts (auth_service == "") are never linked.
   #   trusted_auth_services: ["saml"]
 
-# OpenRouter API Configuration
-openrouter:
+# LLM API configuration (any OpenAI-compatible endpoint: OpenRouter, litellm, vLLM)
+llm:
   api_key: ""
   base_url: "https://openrouter.ai/api/v1"  # OpenAI-compatible endpoint; override for self-hosted (litellm/vLLM)
   image_input_format: "file"  # "file" (OpenRouter/Gemini) | "openai" (image_url/video_url for litellm/vLLM)
@@ -53,11 +53,12 @@ openrouter:
     - up_to_tokens: 1048576
       prompt_cost: 2.50
       completion_cost: 15.0
-  # Provider routing: prefer Vertex (Google) first, fall back to AI Studio.
-  # AI Studio has been less reliable for Gemini 3 preview models; keeping it as
-  # a safety net so a single-provider outage doesn't take the bot down.
+  # Provider routing (OpenRouter-only extension; ignored by other backends):
+  # prefer Vertex (Google) first, fall back to AI Studio. AI Studio has been
+  # less reliable for Gemini 3 preview models; keeping it as a safety net so
+  # a single-provider outage doesn't take the bot down.
   # See https://openrouter.ai/docs/features/provider-routing
-  # Override by setting LAPLACED_OPENROUTER_PROVIDER_ORDER (comma-separated)
+  # Override by setting LAPLACED_LLM_PROVIDER_ORDER (comma-separated)
   # or clearing the list in a local config. For strict routing (no fallback),
   # set allow_fallbacks: false in YAML.
   provider:

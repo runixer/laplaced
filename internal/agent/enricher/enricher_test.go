@@ -44,7 +44,7 @@ func TestEnricher_Execute(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup mocks
-			mockClient := &testutil.MockOpenRouterClient{}
+			mockClient := &testutil.MockLLMClient{}
 			mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 				Return(testutil.MockChatResponse(tt.llmResponse), nil)
 
@@ -93,7 +93,7 @@ func TestEnricher_Execute(t *testing.T) {
 
 func TestEnricher_NoModel(t *testing.T) {
 	// When no model is configured, enricher should return original query
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
 	cfg := testutil.TestConfig()
 	cfg.Agents.Enricher.Model = "" // No model configured
@@ -364,7 +364,7 @@ func TestEnricher_SpecialCharacters(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockClient := &testutil.MockOpenRouterClient{}
+			mockClient := &testutil.MockLLMClient{}
 			mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 				Return(testutil.MockChatResponse(tt.llmResponse), nil)
 

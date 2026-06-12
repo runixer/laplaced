@@ -141,7 +141,7 @@ func (s *Service) runChunkWithBreaker(_ context.Context, userID storage.ScopeID,
 	defer cancel()
 
 	// Root span for the background chunk pipeline. Without this, splitter +
-	// openrouter calls appeared as orphan roots in Tempo with no chunk/user
+	// llm calls appeared as orphan roots in Tempo with no chunk/user
 	// context — see plan: ticklish-giggling-hearth.md. The deferred closure
 	// routes terminal err through obs.ObserveErr and span.End.
 	runCtx, span := otel.Tracer("github.com/runixer/laplaced/internal/rag").Start(

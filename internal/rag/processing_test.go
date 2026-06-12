@@ -132,7 +132,7 @@ func TestProcessChunk(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		translator := testutil.TestTranslator(t)
 
@@ -140,7 +140,7 @@ func TestProcessChunk(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -167,14 +167,14 @@ func TestProcessChunkWithStats(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 		translator := testutil.TestTranslator(t)
 
 		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -202,7 +202,7 @@ func TestProcessChunkWithStats(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 		translator := testutil.TestTranslator(t)
 
 		// Mock splitter agent that returns error
@@ -214,7 +214,7 @@ func TestProcessChunkWithStats(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -246,7 +246,7 @@ func TestProcessChunkWithStats(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 		translator := testutil.TestTranslator(t)
 
 		now := time.Now()
@@ -290,7 +290,7 @@ func TestProcessChunkWithStats(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -322,7 +322,7 @@ func TestProcessChunkWithStats(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 		translator := testutil.TestTranslator(t)
 
 		now := time.Now()
@@ -353,7 +353,7 @@ func TestProcessChunkWithStats(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -383,7 +383,7 @@ func TestProcessTopicChunking(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetUnprocessedMessages", storage.ScopeID("123")).Return([]storage.Message{}, assert.AnError)
 
@@ -393,7 +393,7 @@ func TestProcessTopicChunking(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -418,7 +418,7 @@ func TestProcessTopicChunking(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetUnprocessedMessages", storage.ScopeID("123")).Return([]storage.Message{}, nil)
 
@@ -428,7 +428,7 @@ func TestProcessTopicChunking(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -456,7 +456,7 @@ func TestProcessTopicChunking(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetUnprocessedMessages", storage.ScopeID("123")).Return([]storage.Message{}, nil)
 
@@ -466,7 +466,7 @@ func TestProcessTopicChunking(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -496,7 +496,7 @@ func TestProcessTopicChunking(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		// Messages with time gap > 1h
 		baseTime := time.Now().Add(-2 * time.Hour)
@@ -514,7 +514,7 @@ func TestProcessTopicChunking(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -544,7 +544,7 @@ func TestProcessTopicChunking(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		// Messages close in time but exceeding max chunk size
 		baseTime := time.Now().Add(-1 * time.Hour)
@@ -562,7 +562,7 @@ func TestProcessTopicChunking(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -592,7 +592,7 @@ func TestProcessTopicChunking(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		// Old messages (more than 1 minute ago)
 		oldTime := time.Now().Add(-2 * time.Minute)
@@ -609,7 +609,7 @@ func TestProcessTopicChunking(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -638,7 +638,7 @@ func TestProcessFactExtraction(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		translator := testutil.TestTranslator(t)
 
@@ -646,7 +646,7 @@ func TestProcessFactExtraction(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -677,7 +677,7 @@ func TestProcessFactExtraction(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetTopicsPendingFacts", storage.PassthroughScopeID("telegram", "123")).Return([]storage.Topic{}, assert.AnError)
 
@@ -687,7 +687,7 @@ func TestProcessFactExtraction(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -713,7 +713,7 @@ func TestProcessFactExtraction(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		// Return topic that hasn't been checked for consolidation
 		mockStore.On("GetTopicsPendingFacts", storage.PassthroughScopeID("telegram", "123")).Return([]storage.Topic{
@@ -726,7 +726,7 @@ func TestProcessFactExtraction(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -753,7 +753,7 @@ func TestProcessFactExtraction(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetTopicsPendingFacts", storage.PassthroughScopeID("telegram", "123")).Return([]storage.Topic{
 			{ID: 1, UserID: storage.PassthroughScopeID("telegram", "123"), ConsolidationChecked: true, StartMsgID: 1, EndMsgID: 10},
@@ -767,7 +767,7 @@ func TestProcessFactExtraction(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -793,7 +793,7 @@ func TestProcessFactExtraction(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetTopicsPendingFacts", storage.PassthroughScopeID("telegram", "123")).Return([]storage.Topic{
 			{ID: 1, UserID: storage.PassthroughScopeID("telegram", "123"), ConsolidationChecked: true, StartMsgID: 1, EndMsgID: 10},
@@ -806,7 +806,7 @@ func TestProcessFactExtraction(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -835,7 +835,7 @@ func TestProcessConsolidation(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		translator := testutil.TestTranslator(t)
 
@@ -843,7 +843,7 @@ func TestProcessConsolidation(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -874,7 +874,7 @@ func TestProcessConsolidation(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		// Return error for GetMergeCandidates
 		mockStore.On("GetMergeCandidates", storage.PassthroughScopeID("telegram", "123")).Return([]storage.MergeCandidate{}, assert.AnError)
@@ -885,7 +885,7 @@ func TestProcessConsolidation(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -911,7 +911,7 @@ func TestProcessConsolidation(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		// Return empty merge candidates
 		mockStore.On("GetMergeCandidates", storage.PassthroughScopeID("telegram", "123")).Return([]storage.MergeCandidate{}, nil)
@@ -924,7 +924,7 @@ func TestProcessConsolidation(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -952,7 +952,7 @@ func TestProcessAllUsers(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		translator := testutil.TestTranslator(t)
 
@@ -960,7 +960,7 @@ func TestProcessAllUsers(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -988,7 +988,7 @@ func TestProcessAllUsers(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		// Mock GetUnprocessedMessages returning empty (no work to do)
 		mockStore.On("GetUnprocessedMessages", storage.PassthroughScopeID("telegram", "123")).Return([]storage.Message{}, nil)
@@ -999,7 +999,7 @@ func TestProcessAllUsers(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).

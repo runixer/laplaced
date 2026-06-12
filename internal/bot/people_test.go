@@ -16,15 +16,15 @@ import (
 )
 
 // setupBotForPeopleTests creates a test Bot with all required dependencies for people tests.
-// Returns the bot, mock storage, mock OpenRouter client, translator, and logger.
-func setupBotForPeopleTests(t *testing.T) (*Bot, *testutil.MockStorage, *testutil.MockOpenRouterClient, *slog.Logger) {
+// Returns the bot, mock storage, mock LLM client, translator, and logger.
+func setupBotForPeopleTests(t *testing.T) (*Bot, *testutil.MockStorage, *testutil.MockLLMClient, *slog.Logger) {
 	t.Helper()
 
 	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 	mockDownloader := new(testutil.MockFileDownloader)
 
@@ -330,7 +330,7 @@ func TestPerformSearchPeople_FoundByUsername(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
@@ -369,7 +369,7 @@ func TestPerformSearchPeople_FoundByName(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
@@ -404,7 +404,7 @@ func TestPerformSearchPeople_NotFound(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
@@ -429,7 +429,7 @@ func TestPerformUpdatePerson_Success(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
@@ -475,7 +475,7 @@ func TestPerformUpdatePerson_PersonNotFound(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
@@ -502,7 +502,7 @@ func TestPerformMergePeople_Success(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
@@ -560,7 +560,7 @@ func TestPerformMergePeople_SelfMerge(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
@@ -595,7 +595,7 @@ func TestPerformMergePeople_SourceNotFound(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
@@ -631,7 +631,7 @@ func TestPerformCreatePerson_Success(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
@@ -672,7 +672,7 @@ func TestPerformCreatePerson_AlreadyExists(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
@@ -705,7 +705,7 @@ func TestPerformCreatePerson_AliasAlreadyExists(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
@@ -742,7 +742,7 @@ func TestPerformCreatePerson_WithUsername(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
@@ -776,7 +776,7 @@ func TestPerformDeletePerson_Success(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
@@ -810,7 +810,7 @@ func TestPerformDeletePerson_ByID(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)
@@ -844,7 +844,7 @@ func TestPerformDeletePerson_NotFound(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
 	toolExecutor := tools.NewToolExecutor(mockORClient, mockStore, mockStore, cfg, logger)

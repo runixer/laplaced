@@ -192,7 +192,7 @@ func (e *Enricher) getMediaParts(req *agent.Request) []interface{} {
 	return nil
 }
 
-// buildMessages constructs OpenRouter messages, handling multimodal content.
+// buildMessages constructs LLM messages, handling multimodal content.
 func (e *Enricher) buildMessages(systemPrompt, userPrompt string, req *agent.Request) []llm.Message {
 	messages := []llm.Message{
 		{Role: "system", Content: systemPrompt},

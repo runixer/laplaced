@@ -15,7 +15,7 @@ import (
 // TestPerformAddFact_Success tests successful fact addition.
 func TestPerformAddFact_Success(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	embedding := testutil.TestEmbedding()
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req llm.EmbeddingRequest) bool {
@@ -53,7 +53,7 @@ func TestPerformAddFact_Success(t *testing.T) {
 // TestPerformAddFact_WithCustomFields tests fact addition with custom category, type, and importance.
 func TestPerformAddFact_WithCustomFields(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	embedding := testutil.TestEmbedding()
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
@@ -93,7 +93,7 @@ func TestPerformAddFact_WithCustomFields(t *testing.T) {
 // TestPerformAddFact_EmptyContent tests error when content is empty.
 func TestPerformAddFact_EmptyContent(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 
@@ -113,7 +113,7 @@ func TestPerformAddFact_EmptyContent(t *testing.T) {
 // TestPerformAddFact_EmbeddingAPIError tests error when embedding API call fails.
 func TestPerformAddFact_EmbeddingAPIError(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).
 		Return(llm.EmbeddingResponse{}, errors.New("API error"))
@@ -136,7 +136,7 @@ func TestPerformAddFact_EmbeddingAPIError(t *testing.T) {
 // TestPerformAddFact_EmbeddingError tests error when embedding generation returns empty data.
 func TestPerformAddFact_EmbeddingError(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).
 		Return(llm.EmbeddingResponse{Data: []llm.EmbeddingObject{}}, errors.New("empty embedding"))
@@ -159,7 +159,7 @@ func TestPerformAddFact_EmbeddingError(t *testing.T) {
 // TestPerformAddFact_StorageError tests error when fact storage fails.
 func TestPerformAddFact_StorageError(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	embedding := testutil.TestEmbedding()
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
@@ -263,7 +263,7 @@ func TestPerformDeleteFact_StorageError(t *testing.T) {
 // TestPerformUpdateFact_Success tests successful fact update.
 func TestPerformUpdateFact_Success(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	embedding := testutil.TestEmbedding()
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
@@ -308,7 +308,7 @@ func TestPerformUpdateFact_Success(t *testing.T) {
 // TestPerformUpdateFact_WithCustomTypeAndImportance tests update with custom fields.
 func TestPerformUpdateFact_WithCustomTypeAndImportance(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	embedding := testutil.TestEmbedding()
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
@@ -341,7 +341,7 @@ func TestPerformUpdateFact_WithCustomTypeAndImportance(t *testing.T) {
 // TestPerformUpdateFact_MissingFactID tests error when fact ID is missing.
 func TestPerformUpdateFact_MissingFactID(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 
@@ -362,7 +362,7 @@ func TestPerformUpdateFact_MissingFactID(t *testing.T) {
 // TestPerformUpdateFact_EmbeddingError tests error when embedding generation fails.
 func TestPerformUpdateFact_EmbeddingError(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).
 		Return(llm.EmbeddingResponse{}, errors.New("API error"))
@@ -386,7 +386,7 @@ func TestPerformUpdateFact_EmbeddingError(t *testing.T) {
 // TestPerformManageMemory_SingleOperation tests single memory operation.
 func TestPerformManageMemory_SingleOperation(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	embedding := testutil.TestEmbedding()
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
@@ -416,7 +416,7 @@ func TestPerformManageMemory_SingleOperation(t *testing.T) {
 // TestPerformManageMemory_BatchOperations tests batch memory operations.
 func TestPerformManageMemory_BatchOperations(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	embedding := testutil.TestEmbedding()
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
@@ -447,7 +447,7 @@ func TestPerformManageMemory_BatchOperations(t *testing.T) {
 // TestPerformManageMemory_InvalidJSON tests error when JSON is invalid.
 func TestPerformManageMemory_InvalidJSON(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 
@@ -466,7 +466,7 @@ func TestPerformManageMemory_InvalidJSON(t *testing.T) {
 // TestPerformManageMemory_MissingQuery tests error when query is missing.
 func TestPerformManageMemory_MissingQuery(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 
@@ -483,7 +483,7 @@ func TestPerformManageMemory_MissingQuery(t *testing.T) {
 // TestPerformManageMemory_DeleteOperation tests delete operation in batch.
 func TestPerformManageMemory_DeleteOperation(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	mockStore.On("GetFactsByIDs", storage.ScopeID("123"), []int64{42}).Return([]storage.Fact{{ID: 42}}, nil)
 	mockStore.On("DeleteFact", storage.ScopeID("123"), int64(42)).Return(nil)
@@ -507,7 +507,7 @@ func TestPerformManageMemory_DeleteOperation(t *testing.T) {
 // TestPerformManageMemory_UpdateOperation tests update operation in batch.
 func TestPerformManageMemory_UpdateOperation(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	embedding := testutil.TestEmbedding()
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
@@ -537,7 +537,7 @@ func TestPerformManageMemory_UpdateOperation(t *testing.T) {
 // TestPerformManageMemory_UnknownAction tests error on unknown action.
 func TestPerformManageMemory_UnknownAction(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 
@@ -557,7 +557,7 @@ func TestPerformManageMemory_UnknownAction(t *testing.T) {
 // TestPerformManageMemory_MixedSuccessFailure tests batch with some failures.
 func TestPerformManageMemory_MixedSuccessFailure(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	embedding := testutil.TestEmbedding()
 	// First call succeeds (add)
@@ -589,7 +589,7 @@ func TestPerformManageMemory_MixedSuccessFailure(t *testing.T) {
 // TestPerformManageMemory_NumericFactID tests backward compatibility with numeric fact_id.
 func TestPerformManageMemory_NumericFactID(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	mockStore.On("GetFactsByIDs", storage.ScopeID("123"), []int64{42}).Return([]storage.Fact{{ID: 42}}, nil)
 	mockStore.On("DeleteFact", storage.ScopeID("123"), int64(42)).Return(nil)

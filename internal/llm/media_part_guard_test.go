@@ -52,7 +52,7 @@ func TestMediaEncodingGoesThroughMediaPart(t *testing.T) {
 	}
 	if len(offenders) > 0 {
 		t.Fatalf("found raw llm.FilePart{ literal(s) in media-encoding packages — "+
-			"encode files via llm.MediaPart(cfg.OpenRouter.ImageInputFormat, …) so images/"+
+			"encode files via llm.MediaPart(cfg.LLM.ImageInputFormat, …) so images/"+
 			"videos use image_url/video_url on OpenAI-compatible backends (%d offender(s)): %s",
 			len(offenders), strings.Join(offenders, ", "))
 	}

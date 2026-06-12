@@ -24,7 +24,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 	cfg.Tools = []config.ToolConfig{
@@ -37,7 +37,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 	ragService, err := rag.NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockORClient).
+		WithLLMClient(mockORClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -108,7 +108,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 		sentMessages = append(sentMessages, req.Text)
 	}).Return(&telegram.Message{}, nil)
 
-	// Mock OpenRouter calls
+	// Mock LLM calls
 	// First call: Model returns intermediate text + tool call
 	intermediateText := "Let me search for that information..."
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {

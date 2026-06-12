@@ -26,7 +26,7 @@ func setupBotForHandlerTests(t *testing.T) (*Bot, *testutil.MockStorage, *testut
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	mockDownloader := new(testutil.MockFileDownloader)
 
 	cfg := &config.Config{

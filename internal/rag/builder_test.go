@@ -42,7 +42,7 @@ func TestServiceBuilder_RequiredDeps(t *testing.T) {
 				b.WithConfig(testutil.TestConfig())
 			},
 			wantErr:     true,
-			errContains: "openrouter client not set",
+			errContains: "llm client not set",
 		},
 		{
 			name: "nil logger parameter",
@@ -62,21 +62,21 @@ func TestServiceBuilder_RequiredDeps(t *testing.T) {
 			errContains: "config required",
 		},
 		{
-			name: "nil openrouter client parameter",
+			name: "nil llm client parameter",
 			setup: func(b *ServiceBuilder) {
 				b.WithLogger(testutil.TestLogger())
 				b.WithConfig(testutil.TestConfig())
-				b.WithOpenRouterClient(nil)
+				b.WithLLMClient(nil)
 			},
 			wantErr:     true,
-			errContains: "openrouter client required",
+			errContains: "llm client required",
 		},
 		{
 			name: "nil topic repository parameter",
 			setup: func(b *ServiceBuilder) {
 				b.WithLogger(testutil.TestLogger())
 				b.WithConfig(testutil.TestConfig())
-				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithLLMClient(&testutil.MockLLMClient{})
 				b.WithTopicRepository(nil)
 			},
 			wantErr:     true,
@@ -87,7 +87,7 @@ func TestServiceBuilder_RequiredDeps(t *testing.T) {
 			setup: func(b *ServiceBuilder) {
 				b.WithLogger(testutil.TestLogger())
 				b.WithConfig(testutil.TestConfig())
-				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithLLMClient(&testutil.MockLLMClient{})
 				b.WithTopicRepository(&testutil.MockStorage{})
 				b.WithFactRepository(nil)
 			},
@@ -99,7 +99,7 @@ func TestServiceBuilder_RequiredDeps(t *testing.T) {
 			setup: func(b *ServiceBuilder) {
 				b.WithLogger(testutil.TestLogger())
 				b.WithConfig(testutil.TestConfig())
-				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithLLMClient(&testutil.MockLLMClient{})
 				b.WithTopicRepository(&testutil.MockStorage{})
 				b.WithFactRepository(&testutil.MockStorage{})
 				b.WithFactHistoryRepository(nil)
@@ -112,7 +112,7 @@ func TestServiceBuilder_RequiredDeps(t *testing.T) {
 			setup: func(b *ServiceBuilder) {
 				b.WithLogger(testutil.TestLogger())
 				b.WithConfig(testutil.TestConfig())
-				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithLLMClient(&testutil.MockLLMClient{})
 				b.WithTopicRepository(&testutil.MockStorage{})
 				b.WithFactRepository(&testutil.MockStorage{})
 				b.WithFactHistoryRepository(&testutil.MockStorage{})
@@ -126,7 +126,7 @@ func TestServiceBuilder_RequiredDeps(t *testing.T) {
 			setup: func(b *ServiceBuilder) {
 				b.WithLogger(testutil.TestLogger())
 				b.WithConfig(testutil.TestConfig())
-				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithLLMClient(&testutil.MockLLMClient{})
 				b.WithTopicRepository(&testutil.MockStorage{})
 				b.WithFactRepository(&testutil.MockStorage{})
 				b.WithFactHistoryRepository(&testutil.MockStorage{})
@@ -141,7 +141,7 @@ func TestServiceBuilder_RequiredDeps(t *testing.T) {
 			setup: func(b *ServiceBuilder) {
 				b.WithLogger(testutil.TestLogger())
 				b.WithConfig(testutil.TestConfig())
-				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithLLMClient(&testutil.MockLLMClient{})
 				b.WithTopicRepository(&testutil.MockStorage{})
 				b.WithFactRepository(&testutil.MockStorage{})
 				b.WithFactHistoryRepository(&testutil.MockStorage{})
@@ -157,7 +157,7 @@ func TestServiceBuilder_RequiredDeps(t *testing.T) {
 			setup: func(b *ServiceBuilder) {
 				b.WithLogger(testutil.TestLogger())
 				b.WithConfig(testutil.TestConfig())
-				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithLLMClient(&testutil.MockLLMClient{})
 				b.WithTopicRepository(&testutil.MockStorage{})
 				b.WithFactRepository(&testutil.MockStorage{})
 				b.WithFactHistoryRepository(&testutil.MockStorage{})
@@ -174,7 +174,7 @@ func TestServiceBuilder_RequiredDeps(t *testing.T) {
 			setup: func(b *ServiceBuilder) {
 				b.WithLogger(testutil.TestLogger())
 				b.WithConfig(testutil.TestConfig())
-				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithLLMClient(&testutil.MockLLMClient{})
 			},
 			wantErr:     true,
 			errContains: "topic repository not set",
@@ -184,7 +184,7 @@ func TestServiceBuilder_RequiredDeps(t *testing.T) {
 			setup: func(b *ServiceBuilder) {
 				b.WithLogger(testutil.TestLogger())
 				b.WithConfig(testutil.TestConfig())
-				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithLLMClient(&testutil.MockLLMClient{})
 				b.WithTopicRepository(&testutil.MockStorage{})
 			},
 			wantErr:     true,
@@ -195,7 +195,7 @@ func TestServiceBuilder_RequiredDeps(t *testing.T) {
 			setup: func(b *ServiceBuilder) {
 				b.WithLogger(testutil.TestLogger())
 				b.WithConfig(testutil.TestConfig())
-				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithLLMClient(&testutil.MockLLMClient{})
 				b.WithTopicRepository(&testutil.MockStorage{})
 				b.WithFactRepository(&testutil.MockStorage{})
 			},
@@ -207,7 +207,7 @@ func TestServiceBuilder_RequiredDeps(t *testing.T) {
 			setup: func(b *ServiceBuilder) {
 				b.WithLogger(testutil.TestLogger())
 				b.WithConfig(testutil.TestConfig())
-				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithLLMClient(&testutil.MockLLMClient{})
 				b.WithTopicRepository(&testutil.MockStorage{})
 				b.WithFactRepository(&testutil.MockStorage{})
 				b.WithFactHistoryRepository(&testutil.MockStorage{})
@@ -220,7 +220,7 @@ func TestServiceBuilder_RequiredDeps(t *testing.T) {
 			setup: func(b *ServiceBuilder) {
 				b.WithLogger(testutil.TestLogger())
 				b.WithConfig(testutil.TestConfig())
-				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithLLMClient(&testutil.MockLLMClient{})
 				b.WithTopicRepository(&testutil.MockStorage{})
 				b.WithFactRepository(&testutil.MockStorage{})
 				b.WithFactHistoryRepository(&testutil.MockStorage{})
@@ -234,7 +234,7 @@ func TestServiceBuilder_RequiredDeps(t *testing.T) {
 			setup: func(b *ServiceBuilder) {
 				b.WithLogger(testutil.TestLogger())
 				b.WithConfig(testutil.TestConfig())
-				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithLLMClient(&testutil.MockLLMClient{})
 				b.WithTopicRepository(&testutil.MockStorage{})
 				b.WithFactRepository(&testutil.MockStorage{})
 				b.WithFactHistoryRepository(&testutil.MockStorage{})
@@ -249,7 +249,7 @@ func TestServiceBuilder_RequiredDeps(t *testing.T) {
 			setup: func(b *ServiceBuilder) {
 				b.WithLogger(testutil.TestLogger())
 				b.WithConfig(testutil.TestConfig())
-				b.WithOpenRouterClient(&testutil.MockOpenRouterClient{})
+				b.WithLLMClient(&testutil.MockLLMClient{})
 				b.WithTopicRepository(&testutil.MockStorage{})
 				b.WithFactRepository(&testutil.MockStorage{})
 				b.WithFactHistoryRepository(&testutil.MockStorage{})
@@ -284,7 +284,7 @@ func TestServiceBuilder_RequiredDeps(t *testing.T) {
 func TestServiceBuilder_ValidBuild(t *testing.T) {
 	logger := testutil.TestLogger()
 	cfg := testutil.TestConfig()
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStore := &testutil.MockStorage{}
 	mockMemory := &mockMemoryService{}
 	translator := testutil.TestTranslator(t)
@@ -292,7 +292,7 @@ func TestServiceBuilder_ValidBuild(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -325,7 +325,7 @@ func TestServiceBuilder_ValidBuild(t *testing.T) {
 func TestServiceBuilder_OptionalDeps(t *testing.T) {
 	logger := testutil.TestLogger()
 	cfg := testutil.TestConfig()
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStore := &testutil.MockStorage{}
 	mockMemory := &mockMemoryService{}
 	translator := testutil.TestTranslator(t)
@@ -337,7 +337,7 @@ func TestServiceBuilder_OptionalDeps(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -362,7 +362,7 @@ func TestServiceBuilder_OptionalDeps(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -392,7 +392,7 @@ func TestServiceBuilder_OptionalDeps(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -415,7 +415,7 @@ func TestServiceBuilder_OptionalDeps(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -439,7 +439,7 @@ func TestServiceBuilder_OptionalDeps(t *testing.T) {
 func TestServiceBuilder_FluentChaining(t *testing.T) {
 	logger := testutil.TestLogger()
 	cfg := testutil.TestConfig()
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStore := &testutil.MockStorage{}
 	mockMemory := &mockMemoryService{}
 	translator := testutil.TestTranslator(t)
@@ -449,7 +449,7 @@ func TestServiceBuilder_FluentChaining(t *testing.T) {
 	builder := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -477,7 +477,7 @@ func TestServiceBuilder_FluentChaining(t *testing.T) {
 func TestServiceBuilder_WithAgentLogger(t *testing.T) {
 	logger := testutil.TestLogger()
 	cfg := testutil.TestConfig()
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStore := &testutil.MockStorage{}
 	mockMemory := &mockMemoryService{}
 	translator := testutil.TestTranslator(t)
@@ -489,7 +489,7 @@ func TestServiceBuilder_WithAgentLogger(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -509,7 +509,7 @@ func TestServiceBuilder_WithAgentLogger(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -528,7 +528,7 @@ func TestServiceBuilder_WithAgentLogger(t *testing.T) {
 func TestServiceBuilder_WithContextService(t *testing.T) {
 	logger := testutil.TestLogger()
 	cfg := testutil.TestConfig()
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStore := &testutil.MockStorage{}
 	mockMemory := &mockMemoryService{}
 	translator := testutil.TestTranslator(t)
@@ -540,7 +540,7 @@ func TestServiceBuilder_WithContextService(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -560,7 +560,7 @@ func TestServiceBuilder_WithContextService(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -579,7 +579,7 @@ func TestServiceBuilder_WithContextService(t *testing.T) {
 func TestServiceBuilder_AllOptionalDeps(t *testing.T) {
 	logger := testutil.TestLogger()
 	cfg := testutil.TestConfig()
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStore := &testutil.MockStorage{}
 	mockMemory := &mockMemoryService{}
 	translator := testutil.TestTranslator(t)
@@ -591,7 +591,7 @@ func TestServiceBuilder_AllOptionalDeps(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -629,7 +629,7 @@ func TestServiceBuilder_AllOptionalDeps(t *testing.T) {
 func TestServiceBuilder_VectorMapsInitialized(t *testing.T) {
 	logger := testutil.TestLogger()
 	cfg := testutil.TestConfig()
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStore := &testutil.MockStorage{}
 	mockMemory := &mockMemoryService{}
 	translator := testutil.TestTranslator(t)
@@ -637,7 +637,7 @@ func TestServiceBuilder_VectorMapsInitialized(t *testing.T) {
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockClient).
+		WithLLMClient(mockClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).

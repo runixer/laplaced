@@ -96,9 +96,9 @@ func main() {
 	if err != nil {
 		die("load config: %v", err)
 	}
-	apiKey := cfg.OpenRouter.APIKey
+	apiKey := cfg.LLM.APIKey
 	if apiKey == "" {
-		die("LAPLACED_OPENROUTER_API_KEY not set")
+		die("LAPLACED_LLM_API_KEY not set")
 	}
 
 	ctx := context.Background()

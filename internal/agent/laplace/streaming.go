@@ -31,7 +31,7 @@ type streamTurnResult struct {
 	// (e.g. the iteration was a pure tool-call iteration or empty response).
 	FirstContentDelay time.Duration
 
-	// DebugRequestBody is the raw JSON request body sent to OpenRouter.
+	// DebugRequestBody is the raw JSON request body sent to the LLM API.
 	// Captured from llm.ChatCompletionStream so the agentlog turn
 	// tracker mirrors what the buffered path records.
 	DebugRequestBody string
@@ -39,7 +39,7 @@ type streamTurnResult struct {
 	// DebugResponseBody is a synthetic JSON serialization of the synthesized
 	// turn, kept for the agentlog turn tracker. Tagged "stream-reconstructed"
 	// so debug viewers can tell it apart from a real provider response body.
-	// Shape matches the OpenRouter buffered response (choices[0].message.*)
+	// Shape matches the buffered chat-completion response (choices[0].message.*)
 	// so the web log UI can render it without special-casing.
 	DebugResponseBody string
 }
@@ -199,7 +199,7 @@ func (l *Laplace) runStreamingTurn(
 	}
 
 	// Build a synthetic response body for agentlog. Shape mirrors the
-	// buffered OpenRouter response (choices[0].message.*) so the web log UI
+	// buffered chat-completion response (choices[0].message.*) so the web log UI
 	// renders it through the same path. The "_synthetic" marker lets debug
 	// consumers tell this apart from a real provider payload.
 	message := map[string]interface{}{

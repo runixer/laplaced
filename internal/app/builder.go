@@ -37,14 +37,14 @@ type Services struct {
 	LaplaceAgent   *laplace.Laplace
 
 	// Services
-	MemoryService    *memory.Service
-	RAGService       *rag.Service
-	ContextService   *agent.ContextService
-	AgentLogger      *agentlog.Logger
-	AgentExecutor    *agent.Executor
-	Translator       *i18n.Translator
-	FileStorage      files.Storage
-	OpenRouterClient llm.Client
+	MemoryService  *memory.Service
+	RAGService     *rag.Service
+	ContextService *agent.ContextService
+	AgentLogger    *agentlog.Logger
+	AgentExecutor  *agent.Executor
+	Translator     *i18n.Translator
+	FileStorage    files.Storage
+	LLMClient      llm.Client
 }
 
 // NewArtifactStorage selects the artifact blob backend from config: an
@@ -100,13 +100,13 @@ func SetupServices(
 		return nil, fmt.Errorf("store is required")
 	}
 	if client == nil {
-		return nil, fmt.Errorf("OpenRouter client is required")
+		return nil, fmt.Errorf("llm client is required")
 	}
 	if translator == nil {
 		return nil, fmt.Errorf("translator is required")
 	}
 
-	services := &Services{OpenRouterClient: client}
+	services := &Services{LLMClient: client}
 
 	// Create agent logger for debugging LLM calls
 	services.AgentLogger = agentlog.NewLogger(store, logger, cfg.Server.DebugMode)
@@ -156,7 +156,7 @@ func SetupServices(
 	services.RAGService, err = rag.NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(client).
+		WithLLMClient(client).
 		WithTopicRepository(store).
 		WithFactRepository(store).
 		WithFactHistoryRepository(store).

@@ -24,7 +24,7 @@ func TestSplitter_Execute(t *testing.T) {
 
 	llmResponse := `{"topics":[{"summary":"Приветствие и начало разговора","start_msg_id":100,"end_msg_id":101},{"summary":"Обсуждение языка Go","start_msg_id":102,"end_msg_id":103}]}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 
@@ -254,7 +254,7 @@ func TestSplitter_SingleMessage(t *testing.T) {
 
 	llmResponse := `{"topics":[{"summary":"Greeting","start_msg_id":100,"end_msg_id":100}]}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 
@@ -295,7 +295,7 @@ func TestSplitter_ParseError(t *testing.T) {
 
 	llmResponse := `not valid json at all`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 

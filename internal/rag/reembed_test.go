@@ -49,7 +49,7 @@ func TestBatchCandidates(t *testing.T) {
 // TestReembedIfNeeded_NoCandidates verifies fast path: no rows to re-embed.
 func TestReembedIfNeeded_NoCandidates(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 
 	SetupCommonRAGMocks(mockStore)
 
@@ -69,7 +69,7 @@ func TestReembedIfNeeded_NoCandidates(t *testing.T) {
 // embed → persist → next batch.
 func TestReembedIfNeeded_TopicsReembedded(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 
 	candidates := []storage.ReembedCandidate{
 		{ID: 10, UserID: "1", Content: "topic one"},
@@ -110,7 +110,7 @@ func TestReembedIfNeeded_TopicsReembedded(t *testing.T) {
 // TestReembedIfNeeded_EmbedError propagates a hard error and leaves the DB alone.
 func TestReembedIfNeeded_EmbedError(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockClient := new(testutil.MockOpenRouterClient)
+	mockClient := new(testutil.MockLLMClient)
 
 	SetupCommonRAGMocks(mockStore)
 

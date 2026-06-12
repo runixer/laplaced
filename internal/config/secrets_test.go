@@ -60,22 +60,22 @@ func (f *fakeProvider) Get(_ context.Context, ref VaultRef) (string, error) {
 func TestResolveSecrets(t *testing.T) {
 	t.Run("replaces ref, leaves literal untouched", func(t *testing.T) {
 		cfg := &Config{}
-		cfg.OpenRouter.APIKey = "vault:secret/laplaced/dev#api_key"
+		cfg.LLM.APIKey = "vault:secret/laplaced/dev#api_key"
 		cfg.Telegram.Token = "123:literal-token"
 		p := &fakeProvider{vals: map[string]string{"secret/laplaced/dev#api_key": "resolved-key"}}
 
 		require.NoError(t, cfg.ResolveSecrets(context.Background(), p))
-		assert.Equal(t, "resolved-key", cfg.OpenRouter.APIKey)
+		assert.Equal(t, "resolved-key", cfg.LLM.APIKey)
 		assert.Equal(t, "123:literal-token", cfg.Telegram.Token)
 	})
 
 	t.Run("ref present but no provider errors", func(t *testing.T) {
 		cfg := &Config{}
-		cfg.OpenRouter.APIKey = "vault:secret/laplaced/dev#api_key"
+		cfg.LLM.APIKey = "vault:secret/laplaced/dev#api_key"
 
 		err := cfg.ResolveSecrets(context.Background(), nil)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "openrouter.api_key")
+		assert.Contains(t, err.Error(), "llm.api_key")
 		assert.Contains(t, err.Error(), "no [vault] block")
 	})
 
@@ -102,9 +102,9 @@ func TestResolveSecrets(t *testing.T) {
 
 	t.Run("no refs is a no-op", func(t *testing.T) {
 		cfg := &Config{}
-		cfg.OpenRouter.APIKey = "literal"
+		cfg.LLM.APIKey = "literal"
 		require.NoError(t, cfg.ResolveSecrets(context.Background(), nil))
-		assert.Equal(t, "literal", cfg.OpenRouter.APIKey)
+		assert.Equal(t, "literal", cfg.LLM.APIKey)
 	})
 }
 
@@ -175,7 +175,7 @@ func TestVaultConfigValidate(t *testing.T) {
 // TestValidateWiresVault confirms Config.Validate surfaces vault block errors.
 func TestValidateWiresVault(t *testing.T) {
 	cfg := &Config{}
-	cfg.OpenRouter.APIKey = "k"
+	cfg.LLM.APIKey = "k"
 	cfg.Telegram.Token = "t"
 	cfg.Database.Driver = "sqlite"
 	cfg.Database.Path = "x.db"

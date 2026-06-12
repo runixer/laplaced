@@ -70,7 +70,7 @@ func TestSetCommands_APIError_ReturnsError(t *testing.T) {
 func TestGetActiveSessions_DelegatesToRAG(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	mockAPI := new(testutil.MockBotAPI)
 
 	cfg := testutil.TestConfig()
@@ -80,7 +80,7 @@ func TestGetActiveSessions_DelegatesToRAG(t *testing.T) {
 	ragService, buildErr := rag.NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockORClient).
+		WithLLMClient(mockORClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -139,7 +139,7 @@ func TestGetActiveSessions_RAGServiceNil_Panics(t *testing.T) {
 func TestForceCloseSession_DelegatesToRAG(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	mockAPI := new(testutil.MockBotAPI)
 
 	cfg := testutil.TestConfig()
@@ -149,7 +149,7 @@ func TestForceCloseSession_DelegatesToRAG(t *testing.T) {
 	ragService, buildErr := rag.NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockORClient).
+		WithLLMClient(mockORClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -335,7 +335,7 @@ func TestSetFileProcessor_VerifiesAssignment(t *testing.T) {
 func TestSetAgentLogger_VerifiesAssignment(t *testing.T) {
 	bot := &Bot{}
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	logger := testutil.TestLogger()
 
 	cfg := testutil.TestConfig()
@@ -355,7 +355,7 @@ func TestSetAgentLogger_VerifiesAssignment(t *testing.T) {
 func TestSetLaplaceAgent_VerifiesAssignment(t *testing.T) {
 	bot := &Bot{}
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	logger := testutil.TestLogger()
 	translator := testutil.TestTranslator(t)
 

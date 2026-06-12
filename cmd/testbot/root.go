@@ -145,8 +145,8 @@ checking database state, and processing sessions for fact extraction.`,
 		}
 
 		// Validate API key from config
-		if cfg.OpenRouter.APIKey == "" {
-			return fmt.Errorf("LAPLACED_OPENROUTER_API_KEY not set in config/env")
+		if cfg.LLM.APIKey == "" {
+			return fmt.Errorf("LAPLACED_LLM_API_KEY not set in config/env")
 		}
 
 		// Create logger (quiet by default, verbose shows all logs)
@@ -316,8 +316,8 @@ func setupTestBot(cfg *config.Config, logger *slog.Logger, dbPath string, dbChan
 		return nil, fmt.Errorf("failed to create translator: %w", err)
 	}
 
-	// Create the LLM client against the configured OpenAI-compatible endpoint (openrouter.base_url)
-	client, err := llm.NewClient(tb.logger, cfg.OpenRouter.APIKey, cfg.OpenRouter.ProxyURL, cfg.OpenRouter.BaseURL, cfg.OpenRouter.Provider.ToRouting())
+	// Create the LLM client against the configured OpenAI-compatible endpoint (llm.base_url)
+	client, err := llm.NewClient(tb.logger, cfg.LLM.APIKey, cfg.LLM.ProxyURL, cfg.LLM.BaseURL, cfg.LLM.Provider.ToRouting())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create LLM client: %w", err)
 	}

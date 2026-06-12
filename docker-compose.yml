@@ -31,7 +31,6 @@ services:
       - LAPLACED_BOT_LANGUAGE=ru
       - LAPLACED_BOT_NAME=Laplaced
       - LAPLACED_BOT_SYSTEM_PROMPT_EXTRA=You are a development version (Dev Version), a testing ground.
-      # - LAPLACED_OPENROUTER_MODEL=google/gemini-3-flash-preview
     
     # Volumes for persistent data and configuration
     volumes:

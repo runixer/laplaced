@@ -31,7 +31,7 @@ func TestClassifyFailure(t *testing.T) {
 		},
 		{
 			name:   "generic upstream error → upstream_error",
-			genErr: errors.New("openrouter API error: 502 Bad Gateway"),
+			genErr: errors.New("llm API error: 502 Bad Gateway"),
 			want:   KindUpstreamError,
 		},
 		{

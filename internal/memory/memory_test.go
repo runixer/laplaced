@@ -93,7 +93,7 @@ func TestAddFactWithHistory(t *testing.T) {
 func TestProcessSession_AddFact_RecordsHistory(t *testing.T) {
 	// Arrange
 	mockStore := new(testutil.MockStorage)
-	mockOR := new(testutil.MockOpenRouterClient)
+	mockOR := new(testutil.MockLLMClient)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
 	cfg.Server.DebugMode = true
@@ -156,7 +156,7 @@ func TestProcessSession_AddFact_RecordsHistory(t *testing.T) {
 func TestProcessSession_UpdateFact_RecordsHistory(t *testing.T) {
 	// Arrange
 	mockStore := new(testutil.MockStorage)
-	mockOR := new(testutil.MockOpenRouterClient)
+	mockOR := new(testutil.MockLLMClient)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
 	cfg.Server.DebugMode = true
@@ -225,7 +225,7 @@ func TestProcessSession_UpdateFact_RecordsHistory(t *testing.T) {
 func TestProcessSession_RemoveFact_RecordsHistory(t *testing.T) {
 	// Arrange
 	mockStore := new(testutil.MockStorage)
-	mockOR := new(testutil.MockOpenRouterClient)
+	mockOR := new(testutil.MockLLMClient)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
 	cfg.Server.DebugMode = true
@@ -298,7 +298,7 @@ func TestSetVectorSearcher(t *testing.T) {
 }
 
 func TestGetEmbedding(t *testing.T) {
-	mockOR := new(testutil.MockOpenRouterClient)
+	mockOR := new(testutil.MockLLMClient)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
 	cfg.Embedding.Model = "test-model"
@@ -320,7 +320,7 @@ func TestGetEmbedding(t *testing.T) {
 }
 
 func TestGetEmbedding_EmptyResponse(t *testing.T) {
-	mockOR := new(testutil.MockOpenRouterClient)
+	mockOR := new(testutil.MockLLMClient)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
 	translator := testutil.TestTranslator(t)
@@ -337,7 +337,7 @@ func TestGetEmbedding_EmptyResponse(t *testing.T) {
 }
 
 func TestGetEmbedding_Error(t *testing.T) {
-	mockOR := new(testutil.MockOpenRouterClient)
+	mockOR := new(testutil.MockLLMClient)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	cfg := &config.Config{}
 	translator := testutil.TestTranslator(t)
@@ -446,7 +446,7 @@ func TestApplyUpdateWithStats(t *testing.T) {
 		name          string
 		update        *MemoryUpdate
 		existingFacts []storage.Fact
-		mockSetup     func(*testutil.MockStorage, *testutil.MockOpenRouterClient)
+		mockSetup     func(*testutil.MockStorage, *testutil.MockLLMClient)
 		wantStats     FactStats
 		wantErr       bool
 	}{
@@ -466,7 +466,7 @@ func TestApplyUpdateWithStats(t *testing.T) {
 				},
 			},
 			existingFacts: []storage.Fact{},
-			mockSetup: func(store *testutil.MockStorage, orClient *testutil.MockOpenRouterClient) {
+			mockSetup: func(store *testutil.MockStorage, orClient *testutil.MockLLMClient) {
 				orClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(testutil.MockEmbeddingResponse(), nil).Times(2)
 				store.On("AddFact", mock.Anything).Return(int64(1), nil).Times(2)
 			},
@@ -488,7 +488,7 @@ func TestApplyUpdateWithStats(t *testing.T) {
 			existingFacts: []storage.Fact{
 				{ID: 1, UserID: "123", Content: "Old content", Type: "identity", Importance: 50, Embedding: []float32{0.1, 0.2}},
 			},
-			mockSetup: func(store *testutil.MockStorage, orClient *testutil.MockOpenRouterClient) {
+			mockSetup: func(store *testutil.MockStorage, orClient *testutil.MockLLMClient) {
 				orClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(testutil.MockEmbeddingResponse(), nil).Once()
 				store.On("UpdateFact", mock.Anything).Return(nil).Once()
 			},
@@ -507,7 +507,7 @@ func TestApplyUpdateWithStats(t *testing.T) {
 			existingFacts: []storage.Fact{
 				{ID: 1, UserID: "123", Content: "Old fact", Relation: "name", Category: "bio", Importance: 50},
 			},
-			mockSetup: func(store *testutil.MockStorage, orClient *testutil.MockOpenRouterClient) {
+			mockSetup: func(store *testutil.MockStorage, orClient *testutil.MockLLMClient) {
 				store.On("DeleteFact", storage.ScopeID("123"), int64(1)).Return(nil).Once()
 			},
 			wantStats: FactStats{Deleted: 1},
@@ -545,7 +545,7 @@ func TestApplyUpdateWithStats(t *testing.T) {
 				{ID: 1, UserID: "123", Content: "Same content", Type: "identity", Importance: 50, Embedding: []float32{0.1}},
 				{ID: 2, UserID: "123", Content: "To remove", Relation: "name", Category: "bio", Importance: 50},
 			},
-			mockSetup: func(store *testutil.MockStorage, orClient *testutil.MockOpenRouterClient) {
+			mockSetup: func(store *testutil.MockStorage, orClient *testutil.MockLLMClient) {
 				orClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(testutil.MockEmbeddingResponse(), nil).Once()
 				store.On("AddFact", mock.Anything).Return(int64(3), nil).Once()
 				store.On("UpdateFact", mock.Anything).Return(nil).Once()
@@ -558,7 +558,7 @@ func TestApplyUpdateWithStats(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockStore := new(testutil.MockStorage)
-			mockOR := new(testutil.MockOpenRouterClient)
+			mockOR := new(testutil.MockLLMClient)
 			logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 			cfg := &config.Config{}
 			cfg.Server.DebugMode = false // Disable history for simpler tests

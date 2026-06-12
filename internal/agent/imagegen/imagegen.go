@@ -59,7 +59,7 @@ func outcomeFromKind(k FailureKind) string {
 	}
 }
 
-// Agent wraps an OpenRouter client and emits image-generation requests with
+// Agent wraps an LLM client and emits image-generation requests with
 // modalities=["image","text"] set.
 type Agent struct {
 	client llm.Client

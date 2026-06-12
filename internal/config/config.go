@@ -394,7 +394,7 @@ type ToolConfig struct {
 
 // MattermostConfig configures the Mattermost/Time transport (used when
 // transport == "mattermost"). The proxy is per-client (HTTP proxy); never set a
-// process-wide HTTP_PROXY, which would also route the litellm/openrouter client.
+// process-wide HTTP_PROXY, which would also route the LLM client.
 type MattermostConfig struct {
 	ServerURL      string   `yaml:"server_url" env:"LAPLACED_MATTERMOST_SERVER_URL"`
 	BotToken       string   `yaml:"bot_token" env:"LAPLACED_MATTERMOST_BOT_TOKEN"`
@@ -424,17 +424,17 @@ type PrincipalResolverConfig struct {
 	AccessDeniedMessage string `yaml:"access_denied_message" env:"LAPLACED_MATTERMOST_ACCESS_DENIED_MESSAGE"`
 }
 
-type OpenRouterConfig struct {
-	APIKey string `yaml:"api_key" env:"LAPLACED_OPENROUTER_API_KEY"`
+type LLMConfig struct {
+	APIKey string `yaml:"api_key" env:"LAPLACED_LLM_API_KEY"`
 	// BaseURL is the OpenAI-compatible endpoint the LLM client talks to.
 	// Defaults to the public OpenRouter API; override to point at a self-hosted
 	// OpenAI-compatible backend (litellm, vLLM, …).
-	BaseURL string `yaml:"base_url" env:"LAPLACED_OPENROUTER_BASE_URL"`
+	BaseURL string `yaml:"base_url" env:"LAPLACED_LLM_BASE_URL"`
 	// ImageInputFormat selects how images/videos are encoded as LLM content
 	// parts: "file" (default, OpenRouter/Gemini) or "openai" (image_url/video_url,
 	// required by OpenAI-compatible backends like litellm/vLLM which reject "file").
-	ImageInputFormat string                `yaml:"image_input_format" env:"LAPLACED_OPENROUTER_IMAGE_INPUT_FORMAT"`
-	ProxyURL         string                `yaml:"proxy_url" env:"LAPLACED_OPENROUTER_PROXY_URL"`
+	ImageInputFormat string                `yaml:"image_input_format" env:"LAPLACED_LLM_IMAGE_INPUT_FORMAT"`
+	ProxyURL         string                `yaml:"proxy_url" env:"LAPLACED_LLM_PROXY_URL"`
 	PDFParserEngine  string                `yaml:"pdf_parser_engine"`
 	RequestCost      float64               `yaml:"request_cost"`
 	PriceTiers       []PriceTier           `yaml:"price_tiers"`
@@ -447,7 +447,7 @@ type OpenRouterConfig struct {
 // AllowFallbacks is a pointer: unset means "use OpenRouter default (true)";
 // explicit false means "never fall back outside the order list".
 type ProviderRoutingConfig struct {
-	Order []string `yaml:"order" env:"LAPLACED_OPENROUTER_PROVIDER_ORDER" env-separator:","`
+	Order []string `yaml:"order" env:"LAPLACED_LLM_PROVIDER_ORDER" env-separator:","`
 	// AllowFallbacks is YAML-only: cleanenv doesn't support *bool via env tags.
 	// The common case (prefer a provider with default fallback) needs only Order,
 	// so this is not a practical limitation.
@@ -651,7 +651,7 @@ type Config struct {
 		ProxyURL      string `yaml:"proxy_url" env:"LAPLACED_TELEGRAM_PROXY_URL"`
 	} `yaml:"telegram"`
 	Mattermost MattermostConfig `yaml:"mattermost"`
-	OpenRouter OpenRouterConfig `yaml:"openrouter"`
+	LLM        LLMConfig        `yaml:"llm"`
 	Agents     AgentsConfig     `yaml:"agents"`
 	Embedding  EmbeddingConfig  `yaml:"embedding"`
 	RAG        RAGConfig        `yaml:"rag"`
@@ -762,8 +762,8 @@ func (c *Config) Validate() error {
 	if c.Mattermost.PrincipalResolver != nil && c.Transport != "mattermost" {
 		errs = append(errs, errors.New("mattermost.principal_resolver requires transport \"mattermost\""))
 	}
-	if c.OpenRouter.APIKey == "" {
-		errs = append(errs, errors.New("openrouter.api_key is required"))
+	if c.LLM.APIKey == "" {
+		errs = append(errs, errors.New("llm.api_key is required"))
 	}
 	if c.Vault != nil {
 		errs = append(errs, c.Vault.validate()...)

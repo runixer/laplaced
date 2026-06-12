@@ -77,7 +77,7 @@ func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRe
 
 	fileProcessor := files.NewProcessor(downloader, translator, cfg.Bot.Language, botLogger)
 	fileProcessor.SetMinVoiceDurationSec(cfg.Artifacts.MinVoiceDurationSeconds)
-	fileProcessor.SetImageInputFormat(cfg.OpenRouter.ImageInputFormat)
+	fileProcessor.SetImageInputFormat(cfg.LLM.ImageInputFormat)
 
 	// Create tool executor
 	toolExecutor := tools.NewToolExecutor(orClient, factRepo, factHistoryRepo, cfg, botLogger)
@@ -656,7 +656,7 @@ func (b *Bot) sendResponses(ctx context.Context, chatID int64, responses []teleg
 }
 
 func (b *Bot) getTieredCost(promptTokens, completionTokens int, logger *slog.Logger) float64 {
-	tiers := b.cfg.OpenRouter.PriceTiers
+	tiers := b.cfg.LLM.PriceTiers
 	if len(tiers) == 0 {
 		logger.Warn("no price tiers configured in config.yaml")
 		return 0.0
@@ -691,7 +691,7 @@ func (b *Bot) getTieredCost(promptTokens, completionTokens int, logger *slog.Log
 
 	promptCost := (float64(promptTokens) / 1_000_000) * selectedTier.PromptCost
 	completionCost := (float64(completionTokens) / 1_000_000) * selectedTier.CompletionCost
-	totalCost := promptCost + completionCost + b.cfg.OpenRouter.RequestCost
+	totalCost := promptCost + completionCost + b.cfg.LLM.RequestCost
 
 	return totalCost
 }

@@ -6,7 +6,7 @@ import (
 	"github.com/runixer/laplaced/internal/llm"
 )
 
-// BuildTools creates OpenRouter tool definitions from config.
+// BuildTools creates LLM tool definitions from config.
 func BuildTools(cfg *config.Config, translator *i18n.Translator) []llm.Tool {
 	var tools []llm.Tool
 	lang := cfg.Bot.Language

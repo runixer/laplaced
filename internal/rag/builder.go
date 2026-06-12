@@ -81,10 +81,10 @@ func (b *ServiceBuilder) WithConfig(c *config.Config) *ServiceBuilder {
 	return b
 }
 
-// WithOpenRouterClient sets the required OpenRouter client dependency.
-func (b *ServiceBuilder) WithOpenRouterClient(c llm.Client) *ServiceBuilder {
+// WithLLMClient sets the required LLM client dependency.
+func (b *ServiceBuilder) WithLLMClient(c llm.Client) *ServiceBuilder {
 	if c == nil {
-		b.errors = append(b.errors, errors.New("openrouter client required"))
+		b.errors = append(b.errors, errors.New("llm client required"))
 	}
 	b.client = c
 	return b
@@ -239,7 +239,7 @@ func (b *ServiceBuilder) Build() (*Service, error) {
 		return nil, errors.New("builder validation failed: config not set")
 	}
 	if b.client == nil {
-		return nil, errors.New("builder validation failed: openrouter client not set")
+		return nil, errors.New("builder validation failed: llm client not set")
 	}
 	if b.topicRepo == nil {
 		return nil, errors.New("builder validation failed: topic repository not set")

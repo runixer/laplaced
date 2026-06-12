@@ -56,7 +56,7 @@ func TestSplitter_Execute_RecordsSpan(t *testing.T) {
 	}
 	llmResponse := `{"topics":[{"summary":"greeting","start_msg_id":100,"end_msg_id":101}]}`
 
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse(llmResponse), nil)
 
@@ -100,7 +100,7 @@ func TestSplitter_Execute_ParseErrorFlag(t *testing.T) {
 	messages := []storage.Message{
 		{ID: 100, Role: "user", Content: "hi", CreatedAt: time.Now()},
 	}
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(testutil.MockChatResponse("not json at all"), nil)
 

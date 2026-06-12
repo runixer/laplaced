@@ -37,8 +37,8 @@ vault:[kind:]<mount>/<path>#<key>
 Examples:
 
 ```yaml
-openrouter:
-  api_key: "vault:secret/laplaced/dev#openrouter_key"   # kv2 (default)
+llm:
+  api_key: "vault:secret/laplaced/dev#api_key"   # kv2 (default)
 telegram:
   token: "vault:kv1:legacy/laplaced#telegram_token"     # different mount, KV v1
 database:
@@ -46,7 +46,7 @@ database:
     password: "vault:secret/laplaced/dev#pg_password"
 ```
 
-Fields that may hold a reference: `telegram.token`, `openrouter.api_key`,
+Fields that may hold a reference: `telegram.token`, `llm.api_key`,
 `mattermost.bot_token`, `database.postgres.password`, `server.auth.password`.
 
 > **Dynamic secrets caveat.** A `raw:` reference to a dynamic engine (e.g.

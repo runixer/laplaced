@@ -51,7 +51,7 @@ func buildResponse(content string, images ...string) llm.ChatCompletionResponse 
 }
 
 func TestGenerate_EmptyPromptReturnsError(t *testing.T) {
-	mockOR := new(testutil.MockOpenRouterClient)
+	mockOR := new(testutil.MockLLMClient)
 	agent := New(mockOR, testCfg(), testutil.TestLogger())
 
 	_, err := agent.Generate(context.Background(), Request{Prompt: "   "})
@@ -61,7 +61,7 @@ func TestGenerate_EmptyPromptReturnsError(t *testing.T) {
 }
 
 func TestGenerate_SendsModalitiesAndImageConfig(t *testing.T) {
-	mockOR := new(testutil.MockOpenRouterClient)
+	mockOR := new(testutil.MockLLMClient)
 	dataURL := "data:image/png;base64," + tinyPNGBase64
 	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(buildResponse("here is your image", dataURL), nil).
@@ -92,7 +92,7 @@ func TestGenerate_SendsModalitiesAndImageConfig(t *testing.T) {
 }
 
 func TestGenerate_UsesDefaultsWhenRequestFieldsEmpty(t *testing.T) {
-	mockOR := new(testutil.MockOpenRouterClient)
+	mockOR := new(testutil.MockLLMClient)
 	dataURL := "data:image/png;base64," + tinyPNGBase64
 	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(buildResponse("", dataURL), nil).
@@ -111,7 +111,7 @@ func TestGenerate_UsesDefaultsWhenRequestFieldsEmpty(t *testing.T) {
 // Regression: editing (input images present) must NOT force the default
 // aspect ratio — the model should preserve the input photo's own ratio.
 func TestGenerate_EditingSkipsDefaultAspectRatio(t *testing.T) {
-	mockOR := new(testutil.MockOpenRouterClient)
+	mockOR := new(testutil.MockLLMClient)
 	dataURL := "data:image/png;base64," + tinyPNGBase64
 	cfg := testCfg()
 	cfg.DefaultAspectRatio = "9:16" // mirror the new production default
@@ -138,7 +138,7 @@ func TestGenerate_EditingSkipsDefaultAspectRatio(t *testing.T) {
 }
 
 func TestGenerate_PassesInputImagesAsContentParts(t *testing.T) {
-	mockOR := new(testutil.MockOpenRouterClient)
+	mockOR := new(testutil.MockLLMClient)
 	dataURL := "data:image/png;base64," + tinyPNGBase64
 	input := llm.FilePart{
 		Type: "file",
@@ -174,7 +174,7 @@ func TestGenerate_PassesInputImagesAsContentParts(t *testing.T) {
 }
 
 func TestGenerate_NoImagesInResponseReturnsTextRefusal(t *testing.T) {
-	mockOR := new(testutil.MockOpenRouterClient)
+	mockOR := new(testutil.MockLLMClient)
 	resp := buildResponse("I cannot generate that kind of image.")
 	resp.Provider = "Google"
 	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(resp, nil)
@@ -191,7 +191,7 @@ func TestGenerate_NoImagesInResponseReturnsTextRefusal(t *testing.T) {
 }
 
 func TestGenerate_OpenAISilentEmptyReturnsSilentBlockOAI(t *testing.T) {
-	mockOR := new(testutil.MockOpenRouterClient)
+	mockOR := new(testutil.MockLLMClient)
 	// OpenAI safety-block shape: empty content, no images, provider="OpenAI".
 	resp := buildResponse("")
 	resp.Provider = "OpenAI"
@@ -209,7 +209,7 @@ func TestGenerate_OpenAISilentEmptyReturnsSilentBlockOAI(t *testing.T) {
 }
 
 func TestGenerate_UpstreamErrorReturnsTypedFailure(t *testing.T) {
-	mockOR := new(testutil.MockOpenRouterClient)
+	mockOR := new(testutil.MockLLMClient)
 	upstream := errors.New("rate limited")
 	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(llm.ChatCompletionResponse{}, upstream)
@@ -226,7 +226,7 @@ func TestGenerate_UpstreamErrorReturnsTypedFailure(t *testing.T) {
 }
 
 func TestGenerate_MultipleImagesAllReturned(t *testing.T) {
-	mockOR := new(testutil.MockOpenRouterClient)
+	mockOR := new(testutil.MockLLMClient)
 	dataURL := "data:image/png;base64," + tinyPNGBase64
 	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(buildResponse("three options", dataURL, dataURL, dataURL), nil)
@@ -239,7 +239,7 @@ func TestGenerate_MultipleImagesAllReturned(t *testing.T) {
 }
 
 func TestGenerate_MalformedDataURLSkipped(t *testing.T) {
-	mockOR := new(testutil.MockOpenRouterClient)
+	mockOR := new(testutil.MockLLMClient)
 	bad := "not-a-data-url"
 	good := "data:image/png;base64," + tinyPNGBase64
 	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).
@@ -281,7 +281,7 @@ func TestDecodeDataURL(t *testing.T) {
 
 // Simulate a context deadline by passing an already-expired context.
 func TestGenerate_CancelledContextPropagates(t *testing.T) {
-	mockOR := new(testutil.MockOpenRouterClient)
+	mockOR := new(testutil.MockLLMClient)
 	mockOR.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(llm.ChatCompletionResponse{}, context.Canceled)
 

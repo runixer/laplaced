@@ -15,7 +15,7 @@ import (
 // TestPerformManagePeople_MissingQuery tests error when query is missing.
 func TestPerformManagePeople_MissingQuery(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 	exec.SetPeopleRepository(mockStore)
@@ -31,7 +31,7 @@ func TestPerformManagePeople_MissingQuery(t *testing.T) {
 // TestPerformManagePeople_InvalidJSON tests error when JSON is invalid.
 func TestPerformManagePeople_InvalidJSON(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 	exec.SetPeopleRepository(mockStore)
@@ -49,7 +49,7 @@ func TestPerformManagePeople_InvalidJSON(t *testing.T) {
 // TestPerformManagePeople_UnknownOperation tests error on unknown operation.
 func TestPerformManagePeople_UnknownOperation(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 	exec.SetPeopleRepository(mockStore)
@@ -67,7 +67,7 @@ func TestPerformManagePeople_UnknownOperation(t *testing.T) {
 // TestPerformManagePeople_CreateSuccess tests successful person creation.
 func TestPerformManagePeople_CreateSuccess(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	embedding := testutil.TestEmbedding()
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req llm.EmbeddingRequest) bool {
@@ -101,7 +101,7 @@ func TestPerformManagePeople_CreateSuccess(t *testing.T) {
 // TestPerformManagePeople_CreateWithAllFields tests person creation with all optional fields.
 func TestPerformManagePeople_CreateWithAllFields(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	embedding := testutil.TestEmbedding()
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
@@ -136,7 +136,7 @@ func TestPerformManagePeople_CreateWithAllFields(t *testing.T) {
 // TestPerformManagePeople_CreateAlreadyExists tests error when person already exists.
 func TestPerformManagePeople_CreateAlreadyExists(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	existingPerson := storage.Person{ID: 42, DisplayName: "Alice"}
 
@@ -160,7 +160,7 @@ func TestPerformManagePeople_CreateAlreadyExists(t *testing.T) {
 // TestPerformManagePeople_CreateMissingName tests error when name is missing.
 func TestPerformManagePeople_CreateMissingName(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 	exec.SetPeopleRepository(mockStore)
@@ -178,7 +178,7 @@ func TestPerformManagePeople_CreateMissingName(t *testing.T) {
 // TestPerformManagePeople_UpdateByID tests successful update by person ID.
 func TestPerformManagePeople_UpdateByID(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	embedding := testutil.TestEmbedding()
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
@@ -216,7 +216,7 @@ func TestPerformManagePeople_UpdateByID(t *testing.T) {
 // TestPerformManagePeople_UpdateByName tests successful update by name.
 func TestPerformManagePeople_UpdateByName(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	existingPerson := storage.Person{
 		ID:          42,
@@ -250,7 +250,7 @@ func TestPerformManagePeople_UpdateByName(t *testing.T) {
 // TestPerformManagePeople_UpdateWithAliases tests update with adding aliases.
 func TestPerformManagePeople_UpdateWithAliases(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	embedding := testutil.TestEmbedding()
 	mockORClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
@@ -285,7 +285,7 @@ func TestPerformManagePeople_UpdateWithAliases(t *testing.T) {
 // TestPerformManagePeople_UpdateMissingUpdates tests error when updates object is missing.
 func TestPerformManagePeople_UpdateMissingUpdates(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	existingPerson := storage.Person{ID: 42, DisplayName: "Alice"}
 
@@ -309,7 +309,7 @@ func TestPerformManagePeople_UpdateMissingUpdates(t *testing.T) {
 // TestPerformManagePeople_DeleteByID tests successful deletion by person ID.
 func TestPerformManagePeople_DeleteByID(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	existingPerson := storage.Person{ID: 42, DisplayName: "Alice"}
 
@@ -334,7 +334,7 @@ func TestPerformManagePeople_DeleteByID(t *testing.T) {
 // TestPerformManagePeople_DeleteByName tests successful deletion by name.
 func TestPerformManagePeople_DeleteByName(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	existingPerson := storage.Person{ID: 42, DisplayName: "Alice"}
 
@@ -359,7 +359,7 @@ func TestPerformManagePeople_DeleteByName(t *testing.T) {
 // TestPerformManagePeople_MergeSuccess tests successful people merge.
 func TestPerformManagePeople_MergeSuccess(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	targetPerson := storage.Person{ID: 1, DisplayName: "Alice", Bio: "Original bio"}
 	sourcePerson := storage.Person{ID: 2, DisplayName: "Alice Smith", Bio: "Additional info"}
@@ -393,7 +393,7 @@ func TestPerformManagePeople_MergeSuccess(t *testing.T) {
 // TestPerformManagePeople_MergeSelfMerge tests error when trying to merge person with themselves.
 func TestPerformManagePeople_MergeSelfMerge(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	person := storage.Person{ID: 1, DisplayName: "Alice"}
 
@@ -417,7 +417,7 @@ func TestPerformManagePeople_MergeSelfMerge(t *testing.T) {
 // TestPerformManagePeople_UpdateRequiresPersonIDOrName tests error when neither provided.
 func TestPerformManagePeople_UpdateRequiresPersonIDOrName(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 	exec.SetPeopleRepository(mockStore)
@@ -435,7 +435,7 @@ func TestPerformManagePeople_UpdateRequiresPersonIDOrName(t *testing.T) {
 // TestPerformManagePeople_DeleteRequiresPersonIDOrName tests error when neither provided.
 func TestPerformManagePeople_DeleteRequiresPersonIDOrName(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 	exec.SetPeopleRepository(mockStore)
@@ -453,7 +453,7 @@ func TestPerformManagePeople_DeleteRequiresPersonIDOrName(t *testing.T) {
 // TestPerformManagePeople_MergeRequiresTargetAndSource tests error when target or source missing.
 func TestPerformManagePeople_MergeRequiresTargetAndSource(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
 	exec.SetPeopleRepository(mockStore)
@@ -484,7 +484,7 @@ func TestPerformManagePeople_MergeRequiresTargetAndSource(t *testing.T) {
 // TestPerformCreatePerson_WithEmbeddingFailure tests that person creation succeeds even if embedding fails.
 func TestPerformCreatePerson_WithEmbeddingFailure(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	mockStore.On("FindPersonByName", storage.ScopeID("123"), "Alice").Return(nil, nil)
 	mockStore.On("FindPersonByAlias", storage.ScopeID("123"), "Alice").Return([]storage.Person{}, nil)
@@ -516,7 +516,7 @@ func TestPerformCreatePerson_WithEmbeddingFailure(t *testing.T) {
 // docs/bugs/2026-04-21-manage-people-composite-name/
 func TestPerformManagePeople_UpdateByCompositeName(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	existingPerson := storage.Person{
 		ID:          22,
@@ -555,7 +555,7 @@ func TestPerformManagePeople_UpdateByCompositeName(t *testing.T) {
 // delete path (same fallback logic via lookupPersonByName).
 func TestPerformManagePeople_DeleteByCompositeName(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	existingPerson := storage.Person{
 		ID:          22,
@@ -590,7 +590,7 @@ func TestPerformManagePeople_DeleteByCompositeName(t *testing.T) {
 // and self-correct).
 func TestPerformManagePeople_UpdateCompositeNotFound(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	mockStore.On("FindPersonByName", storage.ScopeID("123"), "Ghost Person (@ghost)").
 		Return((*storage.Person)(nil), nil)

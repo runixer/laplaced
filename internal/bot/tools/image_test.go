@@ -44,7 +44,7 @@ func newImageTestExecutor(t *testing.T) (*ToolExecutor, *fakeImageGen, *testutil
 	tmp := t.TempDir()
 	fs := files.NewFileStorage(tmp, testutil.TestLogger())
 
-	exec := NewToolExecutor(new(testutil.MockOpenRouterClient), mockStore, mockStore, cfg, testutil.TestLogger())
+	exec := NewToolExecutor(new(testutil.MockLLMClient), mockStore, mockStore, cfg, testutil.TestLogger())
 	gen := &fakeImageGen{}
 	exec.SetImageGenerator(gen)
 	exec.SetArtifactRepository(mockStore)
@@ -202,7 +202,7 @@ func TestPerformImageGeneration_ArtifactIDsResolvedAndUserIsolated(t *testing.T)
 // whose Content explicitly tells the LLM to stop and apologize.
 func TestPerformImageGeneration_UntypedErrorReturnsStopRetryResult(t *testing.T) {
 	exec, gen, _, _ := newImageTestExecutor(t)
-	gen.err = errors.New("openrouter API error: 400 Bad Request")
+	gen.err = errors.New("llm API error: 400 Bad Request")
 
 	result, err := exec.performImageGeneration(context.Background(),
 		CallContext{UserID: "1"},

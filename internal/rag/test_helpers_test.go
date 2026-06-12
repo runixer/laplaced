@@ -30,11 +30,11 @@ func newTestRAGConfig(opts ...func(*config.Config)) *config.Config {
 // Usage:
 //
 //	mockStore := new(testutil.MockStorage)
-//	mockClient := new(testutil.MockOpenRouterClient)
+//	mockClient := new(testutil.MockLLMClient)
 //
 //	svc := newTestRAGService(t, mockStore, mockClient)
 //	// Use svc for testing...
-func newTestRAGService(t *testing.T, store *testutil.MockStorage, client *testutil.MockOpenRouterClient, opts ...func(*config.Config)) *Service {
+func newTestRAGService(t *testing.T, store *testutil.MockStorage, client *testutil.MockLLMClient, opts ...func(*config.Config)) *Service {
 	t.Helper()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -45,7 +45,7 @@ func newTestRAGService(t *testing.T, store *testutil.MockStorage, client *testut
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(client).
+		WithLLMClient(client).
 		WithTopicRepository(store).
 		WithFactRepository(store).
 		WithFactHistoryRepository(store).
@@ -71,7 +71,7 @@ func newTestRAGService(t *testing.T, store *testutil.MockStorage, client *testut
 
 // newTestRAGServiceNoStart creates a RAG service without starting it.
 // Use this when testing methods that don't require background loops.
-func newTestRAGServiceNoStart(t *testing.T, store *testutil.MockStorage, client *testutil.MockOpenRouterClient, opts ...func(*config.Config)) *Service {
+func newTestRAGServiceNoStart(t *testing.T, store *testutil.MockStorage, client *testutil.MockLLMClient, opts ...func(*config.Config)) *Service {
 	t.Helper()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -82,7 +82,7 @@ func newTestRAGServiceNoStart(t *testing.T, store *testutil.MockStorage, client 
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(client).
+		WithLLMClient(client).
 		WithTopicRepository(store).
 		WithFactRepository(store).
 		WithFactHistoryRepository(store).
@@ -103,7 +103,7 @@ func newTestRAGServiceNoStart(t *testing.T, store *testutil.MockStorage, client 
 func newTestRAGServiceWithSetup(
 	t *testing.T,
 	store *testutil.MockStorage,
-	client *testutil.MockOpenRouterClient,
+	client *testutil.MockLLMClient,
 	setup func(*Service, *memory.Service),
 	opts ...func(*config.Config),
 ) *Service {
@@ -117,7 +117,7 @@ func newTestRAGServiceWithSetup(
 	svc, err := NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(client).
+		WithLLMClient(client).
 		WithTopicRepository(store).
 		WithFactRepository(store).
 		WithFactHistoryRepository(store).

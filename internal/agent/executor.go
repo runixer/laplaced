@@ -230,7 +230,7 @@ func (e *Executor) logError(ctx context.Context, req SingleShotRequest, err erro
 		req.SystemPrompt, nil, err.Error(), req.Model, int(duration.Milliseconds()), nil)
 }
 
-// Client returns the underlying OpenRouter client.
+// Client returns the underlying LLM client.
 // Useful for agents that need custom request handling.
 func (e *Executor) Client() llm.Client {
 	return e.client

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Breaking:** the `openrouter:` config section and `LAPLACED_OPENROUTER_*` environment variables are renamed to `llm:` / `LAPLACED_LLM_*` — the client works with any OpenAI-compatible endpoint, not just OpenRouter; update your config and environment before upgrading.
+
 ### Fixed
 - `fact_history`/`agent_logs` retention cleanup failed on PostgreSQL 15 and older ("subquery in FROM must have an alias"), so those tables grew unbounded.
 

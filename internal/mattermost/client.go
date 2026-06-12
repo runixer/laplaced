@@ -223,7 +223,7 @@ func NewClient(ctx context.Context, cfg Config, logger *slog.Logger) (*Client, e
 		}
 		proxyURL = p
 		// Explicit per-client proxy ONLY — never a process-wide HTTP_PROXY, which
-		// would also route the litellm/openrouter client through the HTTP proxy.
+		// would also route the LLM client through the HTTP proxy.
 		transport.Proxy = http.ProxyURL(proxyURL)
 	}
 

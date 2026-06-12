@@ -93,7 +93,7 @@ func (l *Laplace) Type() agent.AgentType {
 func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHandler) (resp *Response, err error) {
 	logger := l.logger.With("user_id", req.UserID)
 
-	// Wrap the entire chat-agent loop in a span so child openrouter calls,
+	// Wrap the entire chat-agent loop in a span so child llm calls,
 	// tool dispatches, and artifact-loading events nest under one clear
 	// pipeline boundary. Pre-this commit they hung directly off bot.process-
 	// MessageGroup which made it hard to tell laplace turns from enricher /
@@ -161,11 +161,11 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 
 	// Prepare plugins
 	var plugins []llm.Plugin
-	if l.cfg.OpenRouter.PDFParserEngine != "" {
+	if l.cfg.LLM.PDFParserEngine != "" {
 		plugins = append(plugins, llm.Plugin{
 			ID: "file-parser",
 			PDF: llm.PDFConfig{
-				Engine: l.cfg.OpenRouter.PDFParserEngine,
+				Engine: l.cfg.LLM.PDFParserEngine,
 			},
 		})
 	}
@@ -218,7 +218,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 		totalLLMDuration += llmDuration
 
 		if err != nil {
-			logger.Error("failed to get completion from OpenRouter", "error", err)
+			logger.Error("failed to get LLM completion", "error", err)
 			return nil, fmt.Errorf("LLM call failed: %w", err)
 		}
 
@@ -386,7 +386,7 @@ type turnOutcome struct {
 }
 
 // runChatTurn dispatches one LLM turn through either the buffered or
-// streaming OpenRouter API based on req.UseStreaming.
+// streaming LLM API based on req.UseStreaming.
 func (l *Laplace) runChatTurn(
 	ctx context.Context,
 	orReq llm.ChatCompletionRequest,
@@ -618,7 +618,7 @@ func (l *Laplace) LogExecution(ctx context.Context, userID storage.ScopeID, resp
 	l.agentLogger.Log(ctx, entry)
 }
 
-// formatMessagesForLog formats OpenRouter messages into a human-readable string.
+// formatMessagesForLog formats LLM messages into a human-readable string.
 func formatMessagesForLog(messages []llm.Message) string {
 	var sb strings.Builder
 	for i, msg := range messages {

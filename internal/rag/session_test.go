@@ -29,7 +29,7 @@ func TestGetActiveSessions(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		// User 123 has unprocessed messages
 		user123Messages := []storage.Message{
@@ -48,7 +48,7 @@ func TestGetActiveSessions(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -81,7 +81,7 @@ func TestGetActiveSessions(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetUnprocessedMessages", storage.PassthroughScopeID("telegram", "123")).Return([]storage.Message{}, nil)
 
@@ -91,7 +91,7 @@ func TestGetActiveSessions(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -119,7 +119,7 @@ func TestForceProcessUserWithProgress(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetUnprocessedMessages", storage.ScopeID("123")).Return([]storage.Message{}, nil)
 
@@ -129,7 +129,7 @@ func TestForceProcessUserWithProgress(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -164,7 +164,7 @@ func TestForceProcessUserWithProgress(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetUnprocessedMessages", storage.ScopeID("123")).Return([]storage.Message{}, assert.AnError)
 
@@ -174,7 +174,7 @@ func TestForceProcessUserWithProgress(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -204,7 +204,7 @@ func TestForceProcessUser(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetUnprocessedMessages", storage.ScopeID("123")).Return([]storage.Message{}, nil)
 
@@ -214,7 +214,7 @@ func TestForceProcessUser(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).
@@ -240,7 +240,7 @@ func TestForceProcessUser(t *testing.T) {
 		}
 
 		mockStore := new(testutil.MockStorage)
-		mockClient := new(testutil.MockOpenRouterClient)
+		mockClient := new(testutil.MockLLMClient)
 
 		mockStore.On("GetUnprocessedMessages", storage.ScopeID("123")).Return([]storage.Message{}, assert.AnError)
 
@@ -250,7 +250,7 @@ func TestForceProcessUser(t *testing.T) {
 		svc, err := NewServiceBuilder().
 			WithLogger(logger).
 			WithConfig(cfg).
-			WithOpenRouterClient(mockClient).
+			WithLLMClient(mockClient).
 			WithTopicRepository(mockStore).
 			WithFactRepository(mockStore).
 			WithFactHistoryRepository(mockStore).

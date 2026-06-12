@@ -18,7 +18,7 @@ import (
 // TestExecute_MissingCandidatesParam verifies that Execute returns an error
 // when the candidates parameter is missing.
 func TestExecute_MissingCandidatesParam(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	cfg := testConfig()
 	translator := testutil.TestTranslator(t)
@@ -44,7 +44,7 @@ func TestExecute_MissingCandidatesParam(t *testing.T) {
 // TestExecute_EmptyCandidatesWithPeopleOnly verifies that Execute works
 // correctly when candidates is empty but person_candidates is provided.
 func TestExecute_EmptyCandidatesWithPeopleOnly(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	cfg := testConfig()
 	translator := testutil.TestTranslator(t)
@@ -80,7 +80,7 @@ func TestExecute_EmptyCandidatesWithPeopleOnly(t *testing.T) {
 // TestExecute_EmptyCandidatesWithArtifactsOnly verifies that Execute works
 // correctly when candidates is empty but artifact_candidates is provided.
 func TestExecute_EmptyCandidatesWithArtifactsOnly(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	cfg := testConfig()
 	translator := testutil.TestTranslator(t)
@@ -116,7 +116,7 @@ func TestExecute_EmptyCandidatesWithArtifactsOnly(t *testing.T) {
 // TestExecute_SharedContextFallbackToParams verifies that Execute uses
 // params when SharedContext is nil.
 func TestExecute_SharedContextFallbackToParams(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	cfg := testConfig()
 	translator := testutil.TestTranslator(t)
@@ -153,7 +153,7 @@ func TestExecute_SharedContextFallbackToParams(t *testing.T) {
 // TestExecute_SharedContextTakesPriority verifies that SharedContext
 // takes priority over context from context.Context.
 func TestExecute_SharedContextTakesPriority(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	cfg := testConfig()
 	translator := testutil.TestTranslator(t)
@@ -192,7 +192,7 @@ func TestExecute_SharedContextTakesPriority(t *testing.T) {
 // TestExecute_DisabledReranker_FallbackToVectorTop verifies that when
 // reranker is disabled, it immediately returns vector top results.
 func TestExecute_DisabledReranker_FallbackToVectorTop(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	cfg := testConfigDisabled() // Disabled reranker
 	translator := testutil.TestTranslator(t)
@@ -231,7 +231,7 @@ func TestExecute_DisabledReranker_FallbackToVectorTop(t *testing.T) {
 // TestRerank_Success_ToolCallThenJSON verifies the standard flow:
 // tool call to get topics content, then final JSON response.
 func TestRerank_Success_ToolCallThenJSON(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -284,7 +284,7 @@ func TestRerank_Success_ToolCallThenJSON(t *testing.T) {
 // TestRerank_Success_NoTopicsOnlyArtifacts verifies that when there are
 // no topic candidates, only artifacts, the tool call is skipped.
 func TestRerank_Success_NoTopicsOnlyArtifacts(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -326,7 +326,7 @@ func TestRerank_Success_NoTopicsOnlyArtifacts(t *testing.T) {
 // TestRerank_Success_AllThreeTypes verifies successful reranking
 // with topics, people, and artifacts all present.
 func TestRerank_Success_AllThreeTypes(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -386,7 +386,7 @@ func TestRerank_Success_AllThreeTypes(t *testing.T) {
 // TestRerank_OldFormatResponse verifies backward compatibility with
 // the old format {"topic_ids": [42, 18]}.
 func TestRerank_OldFormatResponse(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -426,7 +426,7 @@ func TestRerank_OldFormatResponse(t *testing.T) {
 
 // TestRerank_NewFormatWithReasons verifies the new format with reasons.
 func TestRerank_NewFormatWithReasons(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -464,7 +464,7 @@ func TestRerank_NewFormatWithReasons(t *testing.T) {
 
 // TestRerank_BareArrayFormat verifies the bare array format.
 func TestRerank_BareArrayFormat(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -502,7 +502,7 @@ func TestRerank_BareArrayFormat(t *testing.T) {
 
 // TestRerank_WrappedInArray verifies the wrapped array format.
 func TestRerank_WrappedInArray(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -542,7 +542,7 @@ func TestRerank_WrappedInArray(t *testing.T) {
 
 // TestRerank_WithPeopleAndArtifacts verifies full response with all types.
 func TestRerank_WithPeopleAndArtifacts(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -595,7 +595,7 @@ func TestRerank_WithPeopleAndArtifacts(t *testing.T) {
 
 // TestRerank_MultipleToolCalls verifies multiple tool calls in one session.
 func TestRerank_MultipleToolCalls(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -649,7 +649,7 @@ func TestRerank_MultipleToolCalls(t *testing.T) {
 // must NOT be added by vector-top — the model never chose them and dumping
 // 10 unrelated files by cosine into the chat prompt is what we're fixing.
 func TestRerank_MaxToolCallsReached(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -703,7 +703,7 @@ func TestRerank_MaxToolCallsReached(t *testing.T) {
 
 // TestRerank_LLMError_Timeout verifies fallback on context timeout.
 func TestRerank_LLMError_Timeout(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -739,7 +739,7 @@ func TestRerank_LLMError_Timeout(t *testing.T) {
 
 // TestRerank_LLMError_GenericError verifies fallback on generic LLM error.
 func TestRerank_LLMError_GenericError(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -772,7 +772,7 @@ func TestRerank_LLMError_GenericError(t *testing.T) {
 
 // TestRerank_EmptyResponse verifies fallback on empty choices array.
 func TestRerank_EmptyResponse(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -806,7 +806,7 @@ func TestRerank_EmptyResponse(t *testing.T) {
 // TestRerank_ProtocolViolation_NoToolCallFirstTurn verifies fallback
 // when there's no tool call on the first turn (with topics).
 func TestRerank_ProtocolViolation_NoToolCallFirstTurn(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -842,7 +842,7 @@ func TestRerank_ProtocolViolation_NoToolCallFirstTurn(t *testing.T) {
 
 // TestRerank_ParseError_InvalidJSON verifies fallback on invalid JSON.
 func TestRerank_ParseError_InvalidJSON(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -884,7 +884,7 @@ func TestRerank_ParseError_InvalidJSON(t *testing.T) {
 // empty selection rather than overriding the model's decision with
 // vector-top.
 func TestRerank_AllHallucinated_ReturnsEmpty(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -926,7 +926,7 @@ func TestRerank_AllHallucinated_ReturnsEmpty(t *testing.T) {
 // returns empty arrays (legitimate "nothing relevant"), the reranker respects
 // it instead of overriding with vector-top.
 func TestRerank_ModelEmpty_ReturnsEmpty(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -979,7 +979,7 @@ func TestRerank_ModelEmpty_ReturnsEmpty(t *testing.T) {
 // TestRerank_Fallback_UsesRequestedIDs verifies that fallback uses
 // requested IDs from state when available.
 func TestRerank_Fallback_UsesRequestedIDs(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -1023,7 +1023,7 @@ func TestRerank_Fallback_UsesRequestedIDs(t *testing.T) {
 // TestRerank_Fallback_VectorTopWhenNoState verifies that fallback
 // uses vector top when no state is available.
 func TestRerank_Fallback_VectorTopWhenNoState(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -1060,7 +1060,7 @@ func TestRerank_Fallback_VectorTopWhenNoState(t *testing.T) {
 // TestRerank_SomeHallucinatedTopics verifies that hallucinated topics
 // are filtered out while valid ones remain.
 func TestRerank_SomeHallucinatedTopics(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -1103,7 +1103,7 @@ func TestRerank_SomeHallucinatedTopics(t *testing.T) {
 
 // TestExecute_WithMediaParts verifies that media parts are properly handled.
 func TestExecute_WithMediaParts(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	cfg := testConfig()
 	translator := testutil.TestTranslator(t)
@@ -1154,7 +1154,7 @@ func TestExecute_WithMediaParts(t *testing.T) {
 // TestRerank_OnlyPeopleNoTopics verifies reranking with only people,
 // no topics or artifacts.
 func TestRerank_OnlyPeopleNoTopics(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -1191,7 +1191,7 @@ func TestRerank_OnlyPeopleNoTopics(t *testing.T) {
 // TestRerank_OnlyArtifactsNoTopics verifies reranking with only artifacts,
 // no topics or people.
 func TestRerank_OnlyArtifactsNoTopics(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 
@@ -1226,7 +1226,7 @@ func TestRerank_OnlyArtifactsNoTopics(t *testing.T) {
 
 // TestRerank_ResponseMetadata verifies that response metadata is populated correctly.
 func TestRerank_ResponseMetadata(t *testing.T) {
-	mockClient := &testutil.MockOpenRouterClient{}
+	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
 

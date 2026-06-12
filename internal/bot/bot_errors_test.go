@@ -19,13 +19,13 @@ import (
 )
 
 // setupBotForErrorTests creates a fully configured Bot for error testing.
-func setupBotForErrorTests(t *testing.T) (*Bot, *testutil.MockStorage, *testutil.MockOpenRouterClient, *testutil.MockBotAPI) {
+func setupBotForErrorTests(t *testing.T) (*Bot, *testutil.MockStorage, *testutil.MockLLMClient, *testutil.MockBotAPI) {
 	t.Helper()
 
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	mockDownloader := new(testutil.MockFileDownloader)
 
 	cfg := testutil.TestConfig()
@@ -37,7 +37,7 @@ func setupBotForErrorTests(t *testing.T) (*Bot, *testutil.MockStorage, *testutil
 	ragService, err := rag.NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockORClient).
+		WithLLMClient(mockORClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).

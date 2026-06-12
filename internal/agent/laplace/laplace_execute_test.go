@@ -472,14 +472,14 @@ func TestExecute_ResponseSanitization(t *testing.T) {
 // TestExecute_WithPDFParserPlugin tests PDF parser plugin configuration.
 func TestExecute_WithPDFParserPlugin(t *testing.T) {
 	cfg := testutil.TestConfig()
-	cfg.OpenRouter.PDFParserEngine = "legacy"
+	cfg.LLM.PDFParserEngine = "legacy"
 	cfg.RAG.Enabled = false // Disable RAG since we pass nil for ragService
 
 	translator, err := i18n.NewTranslator("en")
 	require.NoError(t, err)
 
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	// Pass nil for ragService and artifactRepo
 	agent := New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, testutil.TestLogger())
@@ -604,7 +604,7 @@ func TestLogExecution(t *testing.T) {
 	require.NoError(t, err)
 
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	// Pass nil for ragService and artifactRepo
 	agent := New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, testutil.TestLogger())
@@ -689,7 +689,7 @@ func TestExecute_WithToolStart(t *testing.T) {
 }
 
 // setupExecuteTest is a helper for Execute tests.
-func setupExecuteTest(t *testing.T) (*config.Config, *i18n.Translator, *Laplace, *testutil.MockStorage, *testutil.MockOpenRouterClient, *mockToolHandler) {
+func setupExecuteTest(t *testing.T) (*config.Config, *i18n.Translator, *Laplace, *testutil.MockStorage, *testutil.MockLLMClient, *mockToolHandler) {
 	t.Helper()
 
 	cfg := testutil.TestConfig()
@@ -698,7 +698,7 @@ func setupExecuteTest(t *testing.T) (*config.Config, *i18n.Translator, *Laplace,
 	require.NoError(t, err)
 
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	// Pass nil for ragService and artifactRepo (concrete structs, not interfaces)
 	agent := New(cfg, mockORClient, nil, mockStore, mockStore, nil, translator, testutil.TestLogger())

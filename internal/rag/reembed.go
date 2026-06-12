@@ -14,7 +14,7 @@ import (
 const (
 	// reembedBatchSize is the number of inputs per embedding request. Matches
 	// the pattern benchmarked in cmd/embed-benchmark and fits comfortably
-	// below OpenRouter request-size limits.
+	// below API request-size limits.
 	reembedBatchSize = 32
 
 	// reembedParallelism is the number of concurrent embedding requests
@@ -185,7 +185,7 @@ func (s *Service) reembedOneBatch(ctx context.Context, t reembedTable, version s
 	if len(resp.Data) != len(batch) {
 		return fmt.Errorf("embed batch: expected %d results, got %d", len(batch), len(resp.Data))
 	}
-	// OpenRouter MAY return out of order; sort by Index.
+	// The API MAY return out of order; sort by Index.
 	byIndex := make([]llm.EmbeddingObject, len(batch))
 	for _, item := range resp.Data {
 		if item.Index < 0 || item.Index >= len(batch) {

@@ -30,7 +30,7 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
 	mockDownloader := new(testutil.MockFileDownloader)
@@ -118,7 +118,7 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
-	// Mock OpenRouter call
+	// Mock LLM call
 	var capturedRequest llm.ChatCompletionRequest
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		capturedRequest = args.Get(1).(llm.ChatCompletionRequest)
@@ -164,14 +164,14 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
 	ragService, err := rag.NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockORClient).
+		WithLLMClient(mockORClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -247,7 +247,7 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
-	// Mock OpenRouter call
+	// Mock LLM call
 	var capturedRequest llm.ChatCompletionRequest
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		capturedRequest = args.Get(1).(llm.ChatCompletionRequest)
@@ -297,14 +297,14 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
 	ragService, err := rag.NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockORClient).
+		WithLLMClient(mockORClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -381,7 +381,7 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
-	// Mock OpenRouter call
+	// Mock LLM call
 	var capturedRequest llm.ChatCompletionRequest
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		capturedRequest = args.Get(1).(llm.ChatCompletionRequest)
@@ -431,15 +431,15 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
-	cfg.OpenRouter.PDFParserEngine = "native"
+	cfg.LLM.PDFParserEngine = "native"
 
 	ragService, err := rag.NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockORClient).
+		WithLLMClient(mockORClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -516,7 +516,7 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
-	// Mock OpenRouter call
+	// Mock LLM call
 	var capturedRequest llm.ChatCompletionRequest
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		capturedRequest = args.Get(1).(llm.ChatCompletionRequest)
@@ -571,14 +571,14 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
 	ragService, err := rag.NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockORClient).
+		WithLLMClient(mockORClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -663,7 +663,7 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
-	// Mock OpenRouter call
+	// Mock LLM call
 	var capturedRequest llm.ChatCompletionRequest
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		capturedRequest = args.Get(1).(llm.ChatCompletionRequest)
@@ -712,7 +712,7 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	mockDownloader := new(testutil.MockFileDownloader)
 
 	cfg := testutil.TestConfig()
@@ -721,7 +721,7 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 	ragService, err := rag.NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockORClient).
+		WithLLMClient(mockORClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -838,7 +838,7 @@ func TestProcessUpdate(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := &config.Config{
 		Bot: config.BotConfig{
 			AllowedUserIDs: []int64{123},
@@ -892,8 +892,8 @@ func TestGetTieredCost(t *testing.T) {
 	const requestCost = 0.01 // $0.01 per request for testing
 
 	baseCfg := &config.Config{}
-	baseCfg.OpenRouter.RequestCost = requestCost
-	baseCfg.OpenRouter.PriceTiers = testTiers
+	baseCfg.LLM.RequestCost = requestCost
+	baseCfg.LLM.PriceTiers = testTiers
 
 	logger := testutil.TestLogger()
 
@@ -979,8 +979,8 @@ func TestGetTieredCost(t *testing.T) {
 
 			// Create a temporary bot with the specific config for the test case
 			testCfg := &config.Config{}
-			testCfg.OpenRouter.RequestCost = requestCost
-			testCfg.OpenRouter.PriceTiers = tc.configTiers
+			testCfg.LLM.RequestCost = requestCost
+			testCfg.LLM.PriceTiers = tc.configTiers
 			testBot := &Bot{cfg: testCfg, logger: testLogger}
 
 			cost := testBot.getTieredCost(tc.promptTokens, tc.completionTokens, testLogger)
@@ -1000,14 +1000,14 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
 
 	ragService, err := rag.NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockORClient).
+		WithLLMClient(mockORClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -1078,7 +1078,7 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
-	// --- Capture the request to OpenRouter ---
+	// --- Capture the request to the LLM API ---
 	var capturedRequest llm.ChatCompletionRequest
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		capturedRequest = args.Get(1).(llm.ChatCompletionRequest)
@@ -1291,7 +1291,7 @@ func TestSendTestMessage_Success(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false // Disable RAG for testing
@@ -1300,7 +1300,7 @@ func TestSendTestMessage_Success(t *testing.T) {
 	ragService, err := rag.NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockORClient).
+		WithLLMClient(mockORClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -1376,7 +1376,7 @@ func TestSendTestMessage_SaveToHistoryFalse(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
@@ -1384,7 +1384,7 @@ func TestSendTestMessage_SaveToHistoryFalse(t *testing.T) {
 	ragService, err := rag.NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockORClient).
+		WithLLMClient(mockORClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -1444,12 +1444,12 @@ func TestSendTestMessage_SaveToHistoryFalse(t *testing.T) {
 	mockStore.AssertNotCalled(t, "AddRAGLog", mock.Anything)
 }
 
-func TestSendTestMessage_OpenRouterError(t *testing.T) {
+func TestSendTestMessage_LLMError(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
@@ -1457,7 +1457,7 @@ func TestSendTestMessage_OpenRouterError(t *testing.T) {
 	ragService, err := rag.NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockORClient).
+		WithLLMClient(mockORClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -1517,7 +1517,7 @@ func TestLogExecution_WithError(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	cfg := testutil.TestConfig()
 
@@ -1581,7 +1581,7 @@ func TestPrepareUserMessage_UnsupportedFormat(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 	mockDownloader := new(testutil.MockFileDownloader)
 
@@ -1638,7 +1638,7 @@ func TestPrepareUserMessage_FileTooLarge(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 	mockDownloader := new(testutil.MockFileDownloader)
 
@@ -1713,7 +1713,7 @@ func TestSendTestMessage_SaveToHistoryError_ReturnsError(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
@@ -1721,7 +1721,7 @@ func TestSendTestMessage_SaveToHistoryError_ReturnsError(t *testing.T) {
 	ragService, err := rag.NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockORClient).
+		WithLLMClient(mockORClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
@@ -1768,7 +1768,7 @@ func TestNewBot_Success(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
-	mockORClient := new(testutil.MockOpenRouterClient)
+	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
 	// Set required config fields that TestConfig() doesn't provide
@@ -1782,7 +1782,7 @@ func TestNewBot_Success(t *testing.T) {
 	ragService, err := rag.NewServiceBuilder().
 		WithLogger(logger).
 		WithConfig(cfg).
-		WithOpenRouterClient(mockORClient).
+		WithLLMClient(mockORClient).
 		WithTopicRepository(mockStore).
 		WithFactRepository(mockStore).
 		WithFactHistoryRepository(mockStore).
