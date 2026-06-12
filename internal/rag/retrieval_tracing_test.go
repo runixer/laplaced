@@ -52,6 +52,7 @@ func buildRetrieveServiceForTracing(t *testing.T, mockStore *testutil.MockStorag
 		Build()
 	require.NoError(t, err)
 	_ = svc.Start(context.Background())
+	t.Cleanup(svc.Stop)
 	return svc
 }
 

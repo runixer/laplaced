@@ -65,6 +65,10 @@ func newTestRAGService(t *testing.T, store *testutil.MockStorage, client *testut
 	if err != nil {
 		t.Fatalf("failed to start RAG service: %v", err)
 	}
+	// Stop background loops when the test ends: a leaked goroutine keeps
+	// updating the global vector-index gauges and races later tests in the
+	// package (TestUpdateVectorIndexMetrics flaked under -shuffle).
+	t.Cleanup(svc.Stop)
 
 	return svc
 }
@@ -141,6 +145,8 @@ func newTestRAGServiceWithSetup(
 	if err != nil {
 		t.Fatalf("failed to start RAG service: %v", err)
 	}
+	// See newTestRAGService: leaked background loops race the global gauges.
+	t.Cleanup(svc.Stop)
 
 	return svc
 }

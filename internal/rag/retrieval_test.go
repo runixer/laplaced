@@ -142,6 +142,7 @@ func TestRetrieve_TopicsGrouping(t *testing.T) {
 
 	err = svc.Start(context.Background())
 	assert.NoError(t, err)
+	t.Cleanup(svc.Stop)
 
 	result, _, err := svc.Retrieve(context.Background(), userID, "Test Query", nil)
 	assert.NoError(t, err)
@@ -201,6 +202,7 @@ func TestRetrieveFacts(t *testing.T) {
 			t.Fatalf("failed to build RAG service: %v", err)
 		}
 		_ = svc.Start(context.Background())
+		t.Cleanup(svc.Stop)
 
 		facts, err := svc.RetrieveFacts(context.Background(), userID, "query")
 		assert.NoError(t, err)
@@ -250,6 +252,7 @@ func TestRetrieveFacts(t *testing.T) {
 			t.Fatalf("failed to build RAG service: %v", err)
 		}
 		_ = svc.Start(context.Background())
+		t.Cleanup(svc.Stop)
 
 		result, err := svc.RetrieveFacts(context.Background(), userID, "coffee query")
 		assert.NoError(t, err)
@@ -285,6 +288,7 @@ func TestRetrieveFacts(t *testing.T) {
 			t.Fatalf("failed to build RAG service: %v", err)
 		}
 		_ = svc.Start(context.Background())
+		t.Cleanup(svc.Stop)
 
 		_, err = svc.RetrieveFacts(context.Background(), userID, "query")
 		assert.Error(t, err)
@@ -319,6 +323,7 @@ func TestRetrieveFacts(t *testing.T) {
 			t.Fatalf("failed to build RAG service: %v", err)
 		}
 		_ = svc.Start(context.Background())
+		t.Cleanup(svc.Stop)
 
 		_, err = svc.RetrieveFacts(context.Background(), userID, "query")
 		assert.Error(t, err)
@@ -373,6 +378,7 @@ func TestRetrieve_SkipEnrichment(t *testing.T) {
 			t.Fatalf("failed to build RAG service: %v", err)
 		}
 		_ = svc.Start(context.Background())
+		t.Cleanup(svc.Stop)
 
 		opts := &RetrievalOptions{SkipEnrichment: true}
 		results, debugInfo, err := svc.Retrieve(context.Background(), "123", "test query", opts)
@@ -426,6 +432,7 @@ func TestRetrieve_NilOptions(t *testing.T) {
 			t.Fatalf("failed to build RAG service: %v", err)
 		}
 		_ = svc.Start(context.Background())
+		t.Cleanup(svc.Stop)
 
 		// Call with nil options - should not panic
 		_, _, err = svc.Retrieve(context.Background(), "123", "test query", nil)
