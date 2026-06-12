@@ -206,7 +206,7 @@ func NewMattermostRenderer(maxPostSize int, logger *slog.Logger) *MMRenderer {
 	return &MMRenderer{maxLen: limit, logger: logger.With("component", "mm-renderer")}
 }
 
-func (r *MMRenderer) Render(text string) ([]string, error) {
+func (r *MMRenderer) Render(_ context.Context, text string) ([]string, error) {
 	parts := fixListNumbering(splitByDelimiter(text))
 
 	var out []string

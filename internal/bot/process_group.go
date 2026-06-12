@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"html"
 	"log/slog"
 	"path/filepath"
 	"regexp"
@@ -22,7 +21,6 @@ import (
 	"github.com/runixer/laplaced/internal/agent/laplace"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/llm"
-	"github.com/runixer/laplaced/internal/markdown"
 	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
@@ -435,7 +433,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		errText := b.translator.Get(b.cfg.Bot.Language, "bot.api_error")
 		tgStart := time.Now()
 		if sink != nil {
-			sink.Finalize(finalizeArgs{UserID: userID, HadError: true, ErrorText: errText}, b.streamFinalizeCallback(tgChatID, tgThreadID, userID, logger))
+			sink.Finalize(finalizeArgs{UserID: userID, HadError: true, ErrorText: errText}, b.streamFinalizeCallback(shutdownSafeCtx, tgChatID, tgThreadID, logger))
 		} else {
 			telegramCallCount += b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", errText, logger)
 		}
@@ -457,7 +455,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		errText := b.translator.Get(b.cfg.Bot.Language, "bot.api_error")
 		tgStart := time.Now()
 		if sink != nil {
-			sink.Finalize(finalizeArgs{UserID: userID, HadError: true, ErrorText: errText}, b.streamFinalizeCallback(tgChatID, tgThreadID, userID, logger))
+			sink.Finalize(finalizeArgs{UserID: userID, HadError: true, ErrorText: errText}, b.streamFinalizeCallback(shutdownSafeCtx, tgChatID, tgThreadID, logger))
 		} else {
 			telegramCallCount += b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", errText, logger)
 		}
@@ -555,7 +553,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		// finalize it with the response text so the placeholder doesn't
 		// linger. The media path then sends images and any follow-up text.
 		if sink != nil {
-			sink.Finalize(finalizeArgs{UserID: userID, FullText: resp.Content}, b.streamFinalizeCallback(tgChatID, tgThreadID, userID, logger))
+			sink.Finalize(finalizeArgs{UserID: userID, FullText: resp.Content}, b.streamFinalizeCallback(shutdownSafeCtx, tgChatID, tgThreadID, logger))
 			RecordMessageTelegramEditCount(userID, sink.editCount)
 		}
 		obs.RecordContent(span, "bot.reply_sent", resp.Content,
@@ -590,7 +588,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	if sink != nil {
 		extra, edits := sink.Finalize(
 			finalizeArgs{UserID: userID, FullText: resp.Content},
-			b.streamFinalizeCallback(tgChatID, tgThreadID, userID, logger),
+			b.streamFinalizeCallback(shutdownSafeCtx, tgChatID, tgThreadID, logger),
 		)
 		RecordMessageTelegramEditCount(userID, edits)
 		// Capture the final reply on the root span (under content toggle).
@@ -622,14 +620,14 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 }
 
 // streamFinalizeCallback returns a finalizeResponse adapter for the
-// streaming sink. The sink doesn't know about chatID/threadID/userID/logger,
+// streaming sink. The sink doesn't know about ctx/chatID/threadID/logger,
 // so we close over them here. Returned function is the second arg to
 // streamSink.Finalize.
-func (b *Bot) streamFinalizeCallback(chatID int64, threadID int, userID storage.ScopeID, logger *slog.Logger) func(string) ([]telegram.SendMessageRequest, error) {
+func (b *Bot) streamFinalizeCallback(ctx context.Context, chatID int64, threadID int, logger *slog.Logger) func(string) ([]telegram.SendMessageRequest, error) {
 	return func(text string) ([]telegram.SendMessageRequest, error) {
 		// replyToMsgID=0: only the placeholder (which we edit) had the reply
 		// link; overflow chunks are plain follow-up sends.
-		return b.finalizeResponse(chatID, threadID, userID, 0, text, logger)
+		return b.finalizeResponse(ctx, chatID, threadID, 0, text, logger)
 	}
 }
 
@@ -903,7 +901,7 @@ func fixListNumbering(parts []string) []string {
 // keeping every chunk in threadRoot. On a send failure it emits a single
 // generic-error message and stops. Returns the count of chunks sent.
 func (b *Bot) sendRendered(ctx context.Context, convID, threadRoot, replyTo, text string, logger *slog.Logger) int {
-	chunks, err := b.renderer.Render(text)
+	chunks, err := b.renderer.Render(ctx, text)
 	if err != nil {
 		logger.Error("failed to render response", "error", err)
 	}
@@ -929,7 +927,7 @@ func (b *Bot) sendRendered(ctx context.Context, convID, threadRoot, replyTo, tex
 
 // sendGenericError sends the localized generic-error message, best-effort.
 func (b *Bot) sendGenericError(ctx context.Context, convID, threadRoot string, logger *slog.Logger) {
-	chunks, _ := b.renderer.Render(b.translator.Get(b.cfg.Bot.Language, "bot.generic_error"))
+	chunks, _ := b.renderer.Render(ctx, b.translator.Get(b.cfg.Bot.Language, "bot.generic_error"))
 	for _, chunk := range chunks {
 		if _, err := b.transport.SendText(ctx, OutgoingResponse{ConversationID: convID, Text: chunk, ThreadRoot: threadRoot}); err != nil {
 			logger.Error("failed to send generic error message", "error", err)
@@ -938,47 +936,22 @@ func (b *Bot) sendGenericError(ctx context.Context, convID, threadRoot string, l
 	}
 }
 
-func (b *Bot) finalizeResponse(chatID int64, messageThreadID int, userID storage.ScopeID, replyToMsgID int, responseText string, logger *slog.Logger) ([]telegram.SendMessageRequest, error) {
-	// Split by explicit ###SPLIT### delimiter first (respects code blocks)
-	delimiterParts := splitByDelimiter(responseText)
-
-	// Fix numbered list continuity across split parts (LLM sometimes restarts from 1)
-	delimiterParts = fixListNumbering(delimiterParts)
-
-	// Then split each part by character limit (safety net for oversized chunks)
-	const markdownSafeLimit = 3500
-	var chunks []string
-	for _, part := range delimiterParts {
-		chunks = append(chunks, telegram.SplitMessageSmart(part, markdownSafeLimit)...)
+// finalizeResponse renders canonical markdown for the Telegram streaming path
+// (placeholder edit + overflow sends). It delegates to the Telegram renderer,
+// which owns chunking, list-numbering fixes, HTML conversion and the UTF-16
+// budget enforcement, and only wraps the chunks into send requests.
+func (b *Bot) finalizeResponse(ctx context.Context, chatID int64, messageThreadID int, replyToMsgID int, responseText string, logger *slog.Logger) ([]telegram.SendMessageRequest, error) {
+	chunks, err := NewTelegramRenderer(logger).Render(ctx, responseText)
+	if err != nil {
+		return nil, err
 	}
 
 	var responses []telegram.SendMessageRequest
 	for i, chunk := range chunks {
-		// Skip empty or whitespace-only chunks (LLM sometimes returns empty responses)
-		if strings.TrimSpace(chunk) == "" {
-			logger.Warn("skipping empty response chunk", "chunk_index", i)
-			continue
-		}
-
-		// Convert each chunk to HTML
-		htmlChunk, err := markdown.ToHTML(chunk)
-		if err != nil {
-			// Fallback: send as plain text with HTML escaping
-			logger.Warn("failed to convert markdown to HTML, using plain text", "error", err)
-			htmlChunk = html.EscapeString(chunk)
-		}
-
-		// Check UTF-16 length (Telegram's limit)
-		if markdown.UTF16Length(htmlChunk) > telegramMessageLimit {
-			logger.Warn("HTML chunk exceeds Telegram limit after conversion",
-				"utf16_length", markdown.UTF16Length(htmlChunk),
-				"limit", telegramMessageLimit)
-		}
-
 		newMsg := telegram.SendMessageRequest{
 			ChatID:          chatID,
 			MessageThreadID: intPtrOrNil(messageThreadID),
-			Text:            htmlChunk,
+			Text:            chunk,
 			ParseMode:       "HTML",
 		}
 		if i == 0 && replyToMsgID != 0 {

@@ -120,7 +120,9 @@ type Transport interface {
 
 // Renderer converts a canonical-markdown response into one or more wire-format
 // chunks for a transport (HTML for Telegram, markdown for Mattermost),
-// respecting the transport's message-length limit.
+// respecting the transport's message-length limit. The context carries the
+// root processing span so renderers can record anomaly attributes (e.g.
+// re-splits after HTML expansion).
 type Renderer interface {
-	Render(canonicalMarkdown string) (chunks []string, err error)
+	Render(ctx context.Context, canonicalMarkdown string) (chunks []string, err error)
 }

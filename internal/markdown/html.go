@@ -5,6 +5,7 @@ import (
 	"html"
 	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -714,4 +715,52 @@ func escapeHTML(b []byte) []byte {
 // This is how Telegram counts message length
 func UTF16Length(s string) int {
 	return len(utf16.Encode([]rune(s)))
+}
+
+// HardSplitUTF16 splits s into pieces of at most limit UTF-16 code units,
+// cutting on rune boundaries and preferring a whitespace boundary near the
+// cut. Last-resort plain-text splitter for content that cannot be delivered
+// formatted within the budget.
+func HardSplitUTF16(s string, limit int) []string {
+	if limit <= 0 || UTF16Length(s) <= limit {
+		return []string{s}
+	}
+
+	runes := []rune(s)
+	var out []string
+	for len(runes) > 0 {
+		units := 0
+		cut := 0
+		for i, r := range runes {
+			u := 1
+			if r > 0xFFFF {
+				u = 2
+			}
+			if units+u > limit {
+				break
+			}
+			units += u
+			cut = i + 1
+		}
+		if cut == 0 {
+			cut = 1 // single astral rune over a tiny limit: keep making progress
+		}
+		// Prefer a whitespace boundary within the tail of the piece.
+		if cut < len(runes) {
+			for i := cut - 1; i > 0 && i > cut-100; i-- {
+				if unicode.IsSpace(runes[i]) {
+					cut = i
+					break
+				}
+			}
+		}
+		if piece := strings.TrimSpace(string(runes[:cut])); piece != "" {
+			out = append(out, piece)
+		}
+		runes = runes[cut:]
+		for len(runes) > 0 && unicode.IsSpace(runes[0]) {
+			runes = runes[1:]
+		}
+	}
+	return out
 }

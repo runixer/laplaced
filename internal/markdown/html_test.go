@@ -1,7 +1,9 @@
 package markdown
 
 import (
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -773,6 +775,33 @@ func TestEscapingInLinksAndFences(t *testing.T) {
 			result, err := ToHTML(tt.input)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestHardSplitUTF16(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		limit int
+	}{
+		{"short text untouched", "привет мир", 100},
+		{"long cyrillic", strings.Repeat("слово ", 2000), 4096},
+		{"no whitespace", strings.Repeat("ё", 9000), 4096},
+		{"astral plane emoji", strings.Repeat("😀", 3000), 4096},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pieces := HardSplitUTF16(tt.input, tt.limit)
+			require.NotEmpty(t, pieces)
+			for i, p := range pieces {
+				assert.LessOrEqual(t, UTF16Length(p), tt.limit, "piece %d over limit", i)
+				assert.True(t, utf8.ValidString(p), "piece %d not valid UTF-8", i)
+			}
+			if UTF16Length(tt.input) <= tt.limit {
+				assert.Equal(t, []string{tt.input}, pieces)
+			}
 		})
 	}
 }

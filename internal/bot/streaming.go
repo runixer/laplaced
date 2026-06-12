@@ -470,7 +470,13 @@ func (s *streamSink) Finalize(
 	// status journey). Remaining chunks are returned for the caller to
 	// send as new messages — those don't carry the prefix since the
 	// journey only needs to appear once at the top of the conversation.
-	s.editLocked(prefix+chunks[0].Text, chunks[0].ParseMode)
+	// Drop the prefix when it would push the edit over the wire limit:
+	// chunks are budgeted by the renderer, the prefix is not.
+	firstText := prefix + chunks[0].Text
+	if markdown.UTF16Length(firstText) > telegramMessageLimit {
+		firstText = chunks[0].Text
+	}
+	s.editLocked(firstText, chunks[0].ParseMode)
 	return chunks[1:], s.editCount
 }
 

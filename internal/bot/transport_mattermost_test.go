@@ -18,7 +18,7 @@ func TestMMRenderer_PassThroughAndSplit(t *testing.T) {
 	r := NewMattermostRenderer(16383, testutil.TestLogger())
 
 	t.Run("markdown passes through unescaped", func(t *testing.T) {
-		chunks, err := r.Render("**bold** and `code` and <not html>")
+		chunks, err := r.Render(context.Background(), "**bold** and `code` and <not html>")
 		if err != nil {
 			t.Fatalf("Render: %v", err)
 		}
@@ -32,7 +32,7 @@ func TestMMRenderer_PassThroughAndSplit(t *testing.T) {
 	})
 
 	t.Run("splits on ###SPLIT### delimiter", func(t *testing.T) {
-		chunks, err := r.Render("part one###SPLIT###part two")
+		chunks, err := r.Render(context.Background(), "part one###SPLIT###part two")
 		if err != nil {
 			t.Fatalf("Render: %v", err)
 		}
@@ -42,7 +42,7 @@ func TestMMRenderer_PassThroughAndSplit(t *testing.T) {
 	})
 
 	t.Run("blank chunks dropped", func(t *testing.T) {
-		chunks, _ := r.Render("   ")
+		chunks, _ := r.Render(context.Background(), "   ")
 		if len(chunks) != 0 {
 			t.Errorf("want 0 chunks for blank input, got %d", len(chunks))
 		}
@@ -52,7 +52,7 @@ func TestMMRenderer_PassThroughAndSplit(t *testing.T) {
 func TestMMRenderer_RespectsMaxLen(t *testing.T) {
 	r := NewMattermostRenderer(300, testutil.TestLogger()) // tiny limit
 	long := strings.Repeat("word ", 200)                   // ~1000 chars
-	chunks, err := r.Render(long)
+	chunks, err := r.Render(context.Background(), long)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}

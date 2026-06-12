@@ -8,11 +8,15 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/runixer/laplaced/internal/storage"
 
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/markdown"
+	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/telegram"
 )
 
@@ -362,20 +366,26 @@ func atoiOrZero(s string) int {
 	return n
 }
 
-// TelegramRenderer reproduces the legacy finalizeResponse pipeline: split on the
-// ###SPLIT### delimiter, fix list numbering across parts, hard-split oversized
-// parts, then convert each chunk markdown -> HTML (falling back to escaped
-// plain text on conversion error).
+// TelegramRenderer converts canonical markdown into wire-format HTML chunks:
+// split on the ###SPLIT### delimiter, fix list numbering across parts, split
+// oversized parts, then convert each chunk markdown -> HTML. Chunks whose
+// rendered HTML exceeds the 4096 UTF-16 wire limit (tags and entity escaping
+// expand the text unpredictably) are re-split with a smaller source budget;
+// the terminal fallback is escaped plain text hard-split by UTF-16, so a
+// reply is never lost to "message is too long".
 type TelegramRenderer struct {
 	logger *slog.Logger
 }
+
+// maxRenderResplitDepth caps the render -> overflow -> re-split recursion.
+const maxRenderResplitDepth = 5
 
 // NewTelegramRenderer builds the Telegram HTML renderer.
 func NewTelegramRenderer(logger *slog.Logger) *TelegramRenderer {
 	return &TelegramRenderer{logger: logger}
 }
 
-func (r *TelegramRenderer) Render(text string) ([]string, error) {
+func (r *TelegramRenderer) Render(ctx context.Context, text string) ([]string, error) {
 	parts := fixListNumbering(splitByDelimiter(text))
 
 	var rawChunks []string
@@ -383,23 +393,73 @@ func (r *TelegramRenderer) Render(text string) ([]string, error) {
 		rawChunks = append(rawChunks, telegram.SplitMessageSmart(part, telegramMarkdownSafeLimit)...)
 	}
 
+	span := trace.SpanFromContext(ctx)
+	resplits := 0
+
 	var out []string
 	for _, chunk := range rawChunks {
 		if strings.TrimSpace(chunk) == "" {
 			continue
 		}
-		htmlChunk, err := markdown.ToHTML(chunk)
-		if err != nil {
-			r.logger.Warn("failed to convert markdown to HTML, using plain text", "error", err)
-			htmlChunk = html.EscapeString(chunk)
-		}
-		if markdown.UTF16Length(htmlChunk) > telegramMessageLimit {
-			r.logger.Warn("HTML chunk exceeds Telegram limit after conversion",
-				"utf16_length", markdown.UTF16Length(htmlChunk), "limit", telegramMessageLimit)
-		}
-		out = append(out, htmlChunk)
+		out = append(out, r.renderChunk(span, chunk, telegramMarkdownSafeLimit, 0, &resplits)...)
+	}
+
+	if resplits > 0 {
+		r.logger.Warn("HTML chunks exceeded Telegram limit; re-split from source",
+			"resplit_count", resplits)
+		span.SetAttributes(
+			attribute.Bool("bot.anomaly.chunk_resplit", true),
+			attribute.Int("bot.anomaly.chunk_resplit_count", resplits),
+		)
 	}
 	return out, nil
+}
+
+// renderChunk converts one markdown chunk to HTML. When the rendered HTML
+// exceeds the wire limit, the source markdown is re-split with a budget scaled
+// down by the observed expansion ratio and each piece is rendered again
+// (bounded by maxRenderResplitDepth); past the depth cap the chunk ships as
+// escaped plain text hard-split by UTF-16.
+func (r *TelegramRenderer) renderChunk(span trace.Span, chunk string, mdLimit, depth int, resplits *int) []string {
+	htmlChunk, err := markdown.ToHTML(chunk)
+	if err != nil {
+		r.logger.Warn("failed to convert markdown to HTML, using plain text", "error", err)
+		return markdown.HardSplitUTF16(html.EscapeString(chunk), telegramMessageLimit)
+	}
+
+	utf16Len := markdown.UTF16Length(htmlChunk)
+	if utf16Len <= telegramMessageLimit {
+		return []string{htmlChunk}
+	}
+
+	*resplits++
+	obs.RecordContent(span, "bot.anomaly.chunk_resplit_from", chunk,
+		attribute.Int("utf16_length", utf16Len))
+
+	if depth >= maxRenderResplitDepth {
+		r.logger.Warn("re-split depth exhausted, sending escaped plain text",
+			"utf16_length", utf16Len)
+		return markdown.HardSplitUTF16(html.EscapeString(chunk), telegramMessageLimit)
+	}
+
+	// Scale the source budget by the observed expansion ratio with a 10%
+	// safety margin; always strictly decrease so the recursion terminates.
+	newLimit := mdLimit * telegramMessageLimit / utf16Len * 9 / 10
+	if newLimit < 64 {
+		newLimit = 64
+	}
+	if newLimit >= mdLimit {
+		newLimit = mdLimit - 1
+	}
+
+	var out []string
+	for _, sub := range telegram.SplitMessageSmart(chunk, newLimit) {
+		if strings.TrimSpace(sub) == "" {
+			continue
+		}
+		out = append(out, r.renderChunk(span, sub, newLimit, depth+1, resplits)...)
+	}
+	return out
 }
 
 // incomingFromTelegram maps a Telegram message into the neutral envelope.
