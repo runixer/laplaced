@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- New `thinking_level: "auto"` for agents — lets Gemini pick its own reasoning budget per request (dynamic thinking) instead of a fixed effort level.
+
 ### Changed
 - **Breaking:** the `openrouter:` config section is renamed to `llm:` — the client works with any OpenAI-compatible endpoint, not just OpenRouter; `LAPLACED_OPENROUTER_*` environment variables are likewise renamed to `LAPLACED_LLM_*`, but the old names still work until v1.0.0 (with a deprecation warning in the logs).
 

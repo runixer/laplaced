@@ -387,6 +387,19 @@ type ReasoningConfig struct {
 	Exclude   bool   `json:"exclude,omitempty"`    // Suppress reasoning from response
 }
 
+// ReasoningFor maps a config thinking level to a request ReasoningConfig.
+// Returns nil — meaning the reasoning field is omitted from the request — for
+// "auto" and "off". On Gemini an absent reasoning field enables dynamic
+// thinking (the model picks its own budget), so "off" does NOT disable
+// reasoning there; "auto" is the honest name for that behavior. An empty
+// level also returns nil so callers apply their own defaults before calling.
+func ReasoningFor(level string) *ReasoningConfig {
+	if level == "" || level == "off" || level == "auto" {
+		return nil
+	}
+	return &ReasoningConfig{Effort: level}
+}
+
 // ImageConfig controls image generation output for models that support it
 // (e.g. google/gemini-3.1-flash-image-preview). Only meaningful when the
 // request sets Modalities to include "image".

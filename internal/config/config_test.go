@@ -876,8 +876,15 @@ func TestValidate_RerankerConfig(t *testing.T) {
 		{
 			name: "valid thinking levels",
 			modify: func(c *Config) {
-				validLevels := []string{"off", "minimal", "low", "medium", "high"}
+				validLevels := []string{"auto", "off", "minimal", "low", "medium", "high"}
 				c.Agents.Reranker.ThinkingLevel = validLevels[0]
+			},
+			wantErr: false,
+		},
+		{
+			name: "reranker thinking_level=auto is valid",
+			modify: func(c *Config) {
+				c.Agents.Reranker.ThinkingLevel = "auto"
 			},
 			wantErr: false,
 		},
@@ -1147,6 +1154,11 @@ func TestValidate_AgentsDefaults(t *testing.T) {
 		{
 			name:    "valid chat thinking_level=low",
 			modify:  func(c *Config) { c.Agents.Chat.ThinkingLevel = "low" },
+			wantErr: false,
+		},
+		{
+			name:    "valid chat thinking_level=auto",
+			modify:  func(c *Config) { c.Agents.Chat.ThinkingLevel = "auto" },
 			wantErr: false,
 		},
 		{

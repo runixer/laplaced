@@ -173,11 +173,8 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 	// Build reasoning config once — constant across tool iterations.
 	// Explicit reasoning.effort prevents Gemini 3.1 Pro from leaking internal
 	// chain-of-thought into message.content (see docs/bugs/2026-04-22-laplace-thought-leak/).
-	var reasoning *llm.ReasoningConfig
-	thinkingLevel := l.cfg.Agents.GetChatThinkingLevel()
-	if thinkingLevel != "" && thinkingLevel != "off" {
-		reasoning = &llm.ReasoningConfig{Effort: thinkingLevel}
-	}
+	// "auto" omits the field, letting Gemini pick its own thinking budget.
+	reasoning := llm.ReasoningFor(l.cfg.Agents.GetChatThinkingLevel())
 
 	// Tool loop
 	tracker := agentlog.NewTurnTracker()

@@ -418,12 +418,7 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (response *
 	// Single LLM call (v0.5.1: no agentic loop - all people info is in prompt)
 	tracker.StartTurn()
 
-	var reasoning *llm.ReasoningConfig
-	if thinkingLevel != "off" && thinkingLevel != "" {
-		reasoning = &llm.ReasoningConfig{
-			Effort: thinkingLevel,
-		}
-	}
+	reasoning := llm.ReasoningFor(thinkingLevel)
 
 	llmReq := llm.ChatCompletionRequest{
 		Model:    model,

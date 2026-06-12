@@ -402,12 +402,7 @@ func (r *Reranker) rerank(
 
 		turnCtx, turnCancel := context.WithTimeout(ctx, turnTimeout)
 
-		var reasoning *llm.ReasoningConfig
-		if thinkingLevel != "off" && thinkingLevel != "" {
-			reasoning = &llm.ReasoningConfig{
-				Effort: thinkingLevel,
-			}
-		}
+		reasoning := llm.ReasoningFor(thinkingLevel)
 
 		resp, err := r.client.CreateChatCompletion(turnCtx, llm.ChatCompletionRequest{
 			Model:      cfg.GetModel(r.cfg.Agents.Default.Model),

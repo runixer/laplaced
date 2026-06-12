@@ -82,6 +82,15 @@ type ChatAgentConfig struct {
 	ThinkingLevel string `yaml:"thinking_level" env:"LAPLACED_AGENTS_CHAT_THINKING_LEVEL"`
 }
 
+// validThinkingLevels are the accepted thinking_level values for all agents.
+// "minimal".."high" set an explicit reasoning effort. "auto" omits the
+// reasoning field, letting the model pick its own budget (Gemini dynamic
+// thinking). "off" also omits the field — on Gemini that means dynamic
+// thinking too, NOT disabled; kept for backward compatibility.
+var validThinkingLevels = map[string]bool{
+	"auto": true, "off": true, "minimal": true, "low": true, "medium": true, "high": true,
+}
+
 // RerankerTypeConfig defines per-type reranker limits (v0.6.0).
 // RerankerTypeConfig defines per-type reranker limits (v0.6.0).
 type RerankerTypeConfig struct {
@@ -316,6 +325,8 @@ func (a *AgentsConfig) GetChatModel() string {
 // Falls back to "low" when unset — the minimum supported on Gemini 3.1 Pro.
 // Passing an explicit level prevents the model from leaking internal reasoning
 // into content (see docs/bugs/2026-04-22-laplace-thought-leak/).
+// "auto" (and legacy "off") omit the reasoning field entirely — Gemini then
+// uses dynamic thinking and picks its own budget per request.
 func (a *AgentsConfig) GetChatThinkingLevel() string {
 	if a.Chat.ThinkingLevel != "" {
 		return a.Chat.ThinkingLevel
@@ -881,9 +892,8 @@ func (c *Config) Validate() error {
 		errs = append(errs, errors.New("agents.chat.name is required"))
 	}
 	if c.Agents.Chat.ThinkingLevel != "" {
-		validLevels := map[string]bool{"off": true, "minimal": true, "low": true, "medium": true, "high": true}
-		if !validLevels[c.Agents.Chat.ThinkingLevel] {
-			errs = append(errs, fmt.Errorf("agents.chat.thinking_level: must be one of 'off', 'minimal', 'low', 'medium', 'high', got %q", c.Agents.Chat.ThinkingLevel))
+		if !validThinkingLevels[c.Agents.Chat.ThinkingLevel] {
+			errs = append(errs, fmt.Errorf("agents.chat.thinking_level: must be one of 'auto', 'off', 'minimal', 'low', 'medium', 'high', got %q", c.Agents.Chat.ThinkingLevel))
 		}
 	}
 
@@ -948,9 +958,8 @@ func (c *Config) Validate() error {
 		}
 	}
 	if r.ThinkingLevel != "" {
-		validLevels := map[string]bool{"off": true, "minimal": true, "low": true, "medium": true, "high": true}
-		if !validLevels[r.ThinkingLevel] {
-			errs = append(errs, fmt.Errorf("agents.reranker.thinking_level: must be one of 'off', 'minimal', 'low', 'medium', 'high', got %q", r.ThinkingLevel))
+		if !validThinkingLevels[r.ThinkingLevel] {
+			errs = append(errs, fmt.Errorf("agents.reranker.thinking_level: must be one of 'auto', 'off', 'minimal', 'low', 'medium', 'high', got %q", r.ThinkingLevel))
 		}
 	}
 
