@@ -75,16 +75,17 @@ agents:
   # thinking_level: "minimal".."high" set an explicit reasoning effort;
   # "auto" omits the field so Gemini picks its own budget (dynamic thinking);
   # "off" is a legacy alias of "auto" on Gemini, not a real off-switch.
-  # Caveats measured on gemini-3.5-flash: "low" yields ZERO reasoning tokens
-  # (the model skips arithmetic/constraint checks on planning-heavy asks);
-  # an explicit level bounds per-turn latency and historically prevented
-  # reasoning from leaking into message.content (Gemini 3.1 Pro, see
-  # docs/bugs/2026-04-22-laplace-thought-leak/) — with "auto", watch the
-  # bot.anomaly.sanitized span attribute.
+  # "auto" is the default: measured on gemini-3.5-flash, "low" yields ZERO
+  # reasoning tokens — the model skips arithmetic/constraint checks on
+  # planning-heavy asks and answer quality becomes a dice roll. The costs of
+  # "auto" are moderate extra latency and unbounded per-turn thinking budget.
+  # An explicit level historically also prevented reasoning from leaking into
+  # message.content (Gemini 3.1 Pro, see docs/bugs/2026-04-22-laplace-thought-leak/)
+  # — with "auto", watch the bot.anomaly.sanitized span attribute.
   chat:
     name: "Laplaced"
     model: "google/gemini-3.5-flash"
-    thinking_level: "low"
+    thinking_level: "auto"
     # Alternative: "google/gemini-3.1-pro-preview" — stronger on complex
     # multi-tool reasoning, but slower and noticeably more expensive per turn.
 
