@@ -736,3 +736,43 @@ func TestBlockquoteVariations(t *testing.T) {
 		})
 	}
 }
+
+// TestEscapingInLinksAndFences guards the attribute/URL write sites: unescaped
+// bytes there produce Telegram "can't parse entities" errors (raw '<' or '&'
+// leaking into the HTML payload).
+func TestEscapingInLinksAndFences(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Autolink URL with ampersand",
+			input:    "https://example.com/?a=1&b=2",
+			expected: "<a href=\"https://example.com/?a=1&amp;b=2\">https://example.com/?a=1&amp;b=2</a>",
+		},
+		{
+			name:     "Link destination with ampersand",
+			input:    "[text](http://example.com/?a=1&b=2)",
+			expected: "<a href=\"http://example.com/?a=1&amp;b=2\">text</a>",
+		},
+		{
+			name:     "Link destination with quote",
+			input:    "[text](http://example.com/\"x)",
+			expected: "<a href=\"http://example.com/&#34;x\">text</a>",
+		},
+		{
+			name:     "Fence language tag with markup",
+			input:    "```go\"><b>\ncode\n```",
+			expected: "<pre><code class=\"language-go&#34;&gt;&lt;b&gt;\">code\n</code></pre>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ToHTML(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

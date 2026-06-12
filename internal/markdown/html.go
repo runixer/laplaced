@@ -139,7 +139,7 @@ func (r *TelegramHTMLRenderer) renderFencedCodeBlock(w util.BufWriter, source []
 		language := cb.Language(source)
 		if language != nil {
 			_, _ = w.WriteString("<code class=\"language-")
-			_, _ = w.Write(language)
+			_, _ = w.Write(escapeHTML(language))
 			_, _ = w.WriteString("\">")
 		} else {
 			_, _ = w.WriteString("<code>")
@@ -243,7 +243,7 @@ func (r *TelegramHTMLRenderer) renderAutoLink(w util.BufWriter, source []byte, n
 	n := node.(*ast.AutoLink)
 	if entering {
 		_, _ = w.WriteString("<a href=\"")
-		url := n.URL(source)
+		url := escapeHTML(n.URL(source))
 		_, _ = w.Write(url)
 		_, _ = w.WriteString("\">")
 		_, _ = w.Write(url)
@@ -292,7 +292,7 @@ func (r *TelegramHTMLRenderer) renderLink(w util.BufWriter, source []byte, node 
 	n := node.(*ast.Link)
 	if entering {
 		_, _ = w.WriteString("<a href=\"")
-		_, _ = w.Write(n.Destination)
+		_, _ = w.Write(escapeHTML(n.Destination))
 		_, _ = w.WriteString("\">")
 	} else {
 		_, _ = w.WriteString("</a>")
