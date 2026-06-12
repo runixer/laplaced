@@ -824,3 +824,26 @@ func TestCreateEmbeddingsContextCanceled(t *testing.T) {
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 }
+
+func TestGenAISystemFromBaseURL(t *testing.T) {
+	tests := []struct {
+		name        string
+		baseURL     string
+		wantSystem  string
+		wantAddress string
+	}{
+		{"public openrouter", "https://openrouter.ai/api/v1", "openrouter", "openrouter.ai"},
+		{"openrouter subdomain", "https://gateway.openrouter.ai/api/v1", "openrouter", "gateway.openrouter.ai"},
+		{"litellm gateway", "https://litellm.example.com/v1", "openai", "litellm.example.com"},
+		{"local vllm with port", "http://localhost:8000/v1", "openai", "localhost"},
+		{"unparseable", "://not-a-url", "openai", ""},
+		{"empty", "", "openai", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			system, address := genAISystemFromBaseURL(tt.baseURL)
+			assert.Equal(t, tt.wantSystem, system)
+			assert.Equal(t, tt.wantAddress, address)
+		})
+	}
+}

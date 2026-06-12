@@ -86,6 +86,28 @@ type clientImpl struct {
 	apiEndpoint     string
 	logger          *slog.Logger
 	defaultProvider *ProviderRouting
+
+	// genAISystem and serverAddress are derived from the base URL once at
+	// construction and stamped on every span; see genAISystemFromBaseURL.
+	genAISystem   string
+	serverAddress string
+}
+
+// genAISystemFromBaseURL derives the gen_ai.system span attribute from the
+// endpoint host. The public OpenRouter API keeps its well-known name; any
+// other OpenAI-compatible endpoint (litellm, vLLM, a test server) reports
+// the generic "openai" per OTel GenAI semconv, with the exact host exposed
+// separately via server.address.
+func genAISystemFromBaseURL(baseURL string) (system, serverAddress string) {
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Hostname() == "" {
+		return "openai", ""
+	}
+	host := u.Hostname()
+	if host == "openrouter.ai" || strings.HasSuffix(host, ".openrouter.ai") {
+		return "openrouter", host
+	}
+	return "openai", host
 }
 
 // countFilenameCollisions returns the number of FilePart pairs across
@@ -603,6 +625,7 @@ func NewClient(logger *slog.Logger, apiKey, proxyURL, baseURL string, defaultPro
 		clientLogger.Info("Using proxy for LLM API", "proxy_url", safeProxyURL)
 	}
 
+	genAISystem, serverAddress := genAISystemFromBaseURL(baseURL)
 	return &clientImpl{
 		httpClient: &http.Client{
 			Transport: transport,
@@ -612,7 +635,19 @@ func NewClient(logger *slog.Logger, apiKey, proxyURL, baseURL string, defaultPro
 		apiEndpoint:     baseURL,
 		logger:          clientLogger,
 		defaultProvider: defaultProvider,
+		genAISystem:     genAISystem,
+		serverAddress:   serverAddress,
 	}, nil
+}
+
+// spanBaseAttributes returns the attributes shared by every client span:
+// the GenAI system id and the endpoint host (when known).
+func (c *clientImpl) spanBaseAttributes() []attribute.KeyValue {
+	attrs := []attribute.KeyValue{attribute.String("gen_ai.system", c.genAISystem)}
+	if c.serverAddress != "" {
+		attrs = append(attrs, attribute.String("server.address", c.serverAddress))
+	}
+	return attrs
 }
 
 // newAPIRequest builds a POST request with the standard API headers and
@@ -642,12 +677,11 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 	// route any terminal err through ObserveErr.
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/llm").Start(
 		ctx, "llm.CreateChatCompletion",
-		trace.WithAttributes(
-			attribute.String("gen_ai.system", "openrouter"),
+		trace.WithAttributes(append(c.spanBaseAttributes(),
 			attribute.String("gen_ai.request.model", req.Model),
 			attribute.String("user.id", req.UserID),
 			attribute.String("job.type", jt),
-		),
+		)...),
 	)
 	var (
 		attempts    int
@@ -916,14 +950,13 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 	jt := jobtype.FromContext(ctx).String()
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/llm").Start(
 		ctx, "llm.CreateEmbeddings",
-		trace.WithAttributes(
-			attribute.String("gen_ai.system", "openrouter"),
+		trace.WithAttributes(append(c.spanBaseAttributes(),
 			attribute.String("gen_ai.request.model", req.Model),
 			attribute.Int("emb.dimensions", req.Dimensions),
 			attribute.Int("emb.input_count", len(req.Input)),
 			attribute.Int("emb.total_chars", totalChars),
 			attribute.String("job.type", jt),
-		),
+		)...),
 	)
 	defer func() {
 		if resp.Usage.PromptTokens > 0 {

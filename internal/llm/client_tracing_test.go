@@ -79,7 +79,8 @@ func TestCreateChatCompletion_RecordsSpan(t *testing.T) {
 	for _, kv := range span.Attributes {
 		attrs[kv.Key] = kv.Value
 	}
-	assert.Equal(t, "openrouter", attrs["gen_ai.system"].AsString())
+	assert.Equal(t, "openai", attrs["gen_ai.system"].AsString(), "non-openrouter.ai host reports generic openai system")
+	assert.Equal(t, "127.0.0.1", attrs["server.address"].AsString())
 	assert.Equal(t, "requested-model", attrs["gen_ai.request.model"].AsString())
 	assert.Equal(t, "test-model-resolved", attrs["gen_ai.response.model"].AsString())
 	assert.Equal(t, int64(100), attrs["gen_ai.usage.input_tokens"].AsInt64())
@@ -849,7 +850,8 @@ func TestCreateChatCompletionStream_RecordsSpan(t *testing.T) {
 	for _, kv := range span.Attributes {
 		attrs[kv.Key] = kv.Value
 	}
-	assert.Equal(t, "openrouter", attrs["gen_ai.system"].AsString())
+	assert.Equal(t, "openai", attrs["gen_ai.system"].AsString(), "non-openrouter.ai host reports generic openai system")
+	assert.Equal(t, "127.0.0.1", attrs["server.address"].AsString())
 	assert.Equal(t, "requested-model", attrs["gen_ai.request.model"].AsString())
 	assert.Equal(t, "resolved-model", attrs["gen_ai.response.model"].AsString())
 	assert.Equal(t, int64(7), attrs["gen_ai.usage.input_tokens"].AsInt64())

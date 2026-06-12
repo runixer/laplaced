@@ -105,13 +105,12 @@ func (c *clientImpl) CreateChatCompletionStream(ctx context.Context, req ChatCom
 
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/llm").Start(
 		ctx, "llm.CreateChatCompletionStream",
-		trace.WithAttributes(
-			attribute.String("gen_ai.system", "openrouter"),
+		trace.WithAttributes(append(c.spanBaseAttributes(),
 			attribute.String("gen_ai.request.model", req.Model),
 			attribute.String("user.id", req.UserID),
 			attribute.String("job.type", jt),
 			attribute.Int("prompt.media.filename_collisions", countFilenameCollisions(req.Messages)),
-		),
+		)...),
 	)
 	var (
 		attempts        int
