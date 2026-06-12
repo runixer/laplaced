@@ -52,19 +52,19 @@ type AddedFact struct {
 
 // UpdatedFact represents changes to an existing fact.
 type UpdatedFact struct {
-	ID         int64  `json:"id,omitempty"`      // Legacy: numeric fallback with warning
-	FactID     string `json:"fact_id,omitempty"` // Preferred: "Fact:1522" or "1522"
-	Content    string `json:"content"`
-	Type       string `json:"type,omitempty"`
-	Importance int    `json:"importance"`
-	Reason     string `json:"reason"`
+	ID         int64        `json:"id,omitempty"`      // Legacy: numeric fallback with warning
+	FactID     agent.FlexID `json:"fact_id,omitempty"` // Preferred: "Fact:1522" or "1522"; numbers tolerated
+	Content    string       `json:"content"`
+	Type       string       `json:"type,omitempty"`
+	Importance int          `json:"importance"`
+	Reason     string       `json:"reason"`
 }
 
 // RemovedFact represents a fact to be deleted.
 type RemovedFact struct {
-	ID     int64  `json:"id,omitempty"`      // Legacy: numeric fallback with warning
-	FactID string `json:"fact_id,omitempty"` // Preferred: "Fact:1234" or "1234"
-	Reason string `json:"reason"`
+	ID     int64        `json:"id,omitempty"`      // Legacy: numeric fallback with warning
+	FactID agent.FlexID `json:"fact_id,omitempty"` // Preferred: "Fact:1234" or "1234"; numbers tolerated
+	Reason string       `json:"reason"`
 }
 
 // FactsResult contains fact operations.
@@ -85,22 +85,22 @@ type AddedPerson struct {
 
 // UpdatedPerson represents changes to an existing person.
 type UpdatedPerson struct {
-	DisplayName    string   `json:"display_name,omitempty"`     // Fallback with warning
-	PersonID       string   `json:"person_id,omitempty"`        // Preferred: "Person:5"
-	NewDisplayName string   `json:"new_display_name,omitempty"` // Rename person, old name goes to aliases
-	Aliases        []string `json:"aliases,omitempty"`          // New aliases to add
-	Circle         string   `json:"circle,omitempty"`
-	Bio            string   `json:"bio"` // Complete rewritten bio
-	Reason         string   `json:"reason"`
+	DisplayName    string       `json:"display_name,omitempty"`     // Fallback with warning
+	PersonID       agent.FlexID `json:"person_id,omitempty"`        // Preferred: "Person:5"; numbers tolerated
+	NewDisplayName string       `json:"new_display_name,omitempty"` // Rename person, old name goes to aliases
+	Aliases        []string     `json:"aliases,omitempty"`          // New aliases to add
+	Circle         string       `json:"circle,omitempty"`
+	Bio            string       `json:"bio"` // Complete rewritten bio
+	Reason         string       `json:"reason"`
 }
 
 // MergedPerson represents a merge operation for duplicate people.
 type MergedPerson struct {
-	TargetName string `json:"target_name,omitempty"` // Fallback with warning
-	SourceName string `json:"source_name,omitempty"` // Fallback with warning
-	TargetID   string `json:"target_id,omitempty"`   // Preferred: "Person:10"
-	SourceID   string `json:"source_id,omitempty"`   // Preferred: "Person:5"
-	Reason     string `json:"reason"`
+	TargetName string       `json:"target_name,omitempty"` // Fallback with warning
+	SourceName string       `json:"source_name,omitempty"` // Fallback with warning
+	TargetID   agent.FlexID `json:"target_id,omitempty"`   // Preferred: "Person:10"; numbers tolerated
+	SourceID   agent.FlexID `json:"source_id,omitempty"`   // Preferred: "Person:5"; numbers tolerated
+	Reason     string       `json:"reason"`
 }
 
 // PeopleResult contains people operations.
@@ -130,7 +130,7 @@ func (f *UpdatedFact) GetFactID() (int64, error) {
 	// New format: "Fact:1522" or "1522" (string)
 	if f.FactID != "" {
 		re := regexp.MustCompile(`^(?:Fact:)?(\d+)$`)
-		matches := re.FindStringSubmatch(f.FactID)
+		matches := re.FindStringSubmatch(string(f.FactID))
 		if len(matches) == 2 {
 			return strconv.ParseInt(matches[1], 10, 64)
 		}
@@ -150,7 +150,7 @@ func (f *RemovedFact) GetFactID() (int64, error) {
 	// New format: "Fact:1234" or "1234" (string)
 	if f.FactID != "" {
 		re := regexp.MustCompile(`^(?:Fact:)?(\d+)$`)
-		matches := re.FindStringSubmatch(f.FactID)
+		matches := re.FindStringSubmatch(string(f.FactID))
 		if len(matches) == 2 {
 			return strconv.ParseInt(matches[1], 10, 64)
 		}
@@ -168,7 +168,7 @@ func (f *RemovedFact) GetFactID() (int64, error) {
 func (p *UpdatedPerson) GetPersonID() (string, bool) {
 	if p.PersonID != "" {
 		re := regexp.MustCompile(`^(?:Person:)?(\d+)$`)
-		matches := re.FindStringSubmatch(p.PersonID)
+		matches := re.FindStringSubmatch(string(p.PersonID))
 		if len(matches) == 2 {
 			return matches[1], true
 		}
@@ -181,7 +181,7 @@ func (p *UpdatedPerson) GetPersonID() (string, bool) {
 func (p *MergedPerson) GetTargetID() (string, bool) {
 	if p.TargetID != "" {
 		re := regexp.MustCompile(`^(?:Person:)?(\d+)$`)
-		matches := re.FindStringSubmatch(p.TargetID)
+		matches := re.FindStringSubmatch(string(p.TargetID))
 		if len(matches) == 2 {
 			return matches[1], true
 		}
@@ -194,7 +194,7 @@ func (p *MergedPerson) GetTargetID() (string, bool) {
 func (p *MergedPerson) GetSourceID() (string, bool) {
 	if p.SourceID != "" {
 		re := regexp.MustCompile(`^(?:Person:)?(\d+)$`)
-		matches := re.FindStringSubmatch(p.SourceID)
+		matches := re.FindStringSubmatch(string(p.SourceID))
 		if len(matches) == 2 {
 			return matches[1], true
 		}
@@ -355,6 +355,8 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (response *
 		peopleExtracted  int
 		archivistCostUSD float64
 		parseError       bool
+		jsonRepaired     bool
+		emptyRetry       bool
 	)
 	defer func() {
 		span.SetAttributes(
@@ -363,6 +365,8 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (response *
 			attribute.Int("archivist.people_extracted", peopleExtracted),
 			attribute.Float64("archivist.cost_usd", archivistCostUSD),
 			attribute.Bool("archivist.parse_error", parseError),
+			attribute.Bool("archivist.json_repaired", jsonRepaired),
+			attribute.Bool("archivist.empty_retry", emptyRetry),
 		)
 		_ = obs.ObserveErr(span, err)
 		span.End()
@@ -437,6 +441,7 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (response *
 	if err == nil && len(resp.Choices) > 0 && resp.Choices[0].Message.Content == "" {
 		a.logger.Warn("archivist: empty response with reasoning, retrying without",
 			"model", model, "thinking_level", thinkingLevel)
+		emptyRetry = true
 		llmReq.Reasoning = nil
 		resp, err = a.executor.Client().CreateChatCompletion(ctx, llmReq)
 		turns++
@@ -464,7 +469,8 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (response *
 
 	choice := resp.Choices[0]
 	content := choice.Message.Content
-	result, err := a.parseResponse(content)
+	result, repaired, err := a.parseResponse(content)
+	jsonRepaired = repaired
 	if err != nil {
 		parseError = true
 		a.logger.Warn("failed to parse archivist response", "error", err, "content_preview", truncate(content, 500))
@@ -514,16 +520,24 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (response *
 	}, nil
 }
 
-// parseResponse parses the JSON response, supporting both new and legacy formats.
-func (a *Archivist) parseResponse(content string) (*Result, error) {
-	content = strings.TrimSpace(content)
+// parseResponse parses the JSON response, supporting both new and legacy
+// formats. Fences, preamble and trailing garbage are stripped up front; the
+// bool result reports whether that stripping changed the content.
+func (a *Archivist) parseResponse(content string) (*Result, bool, error) {
+	trimmed := strings.TrimSpace(content)
+	content = agent.ExtractJSON(trimmed)
+	repaired := content != trimmed
+	if repaired {
+		a.logger.Warn("archivist response needed JSON extraction",
+			"content_preview", truncate(trimmed, 200))
+	}
 
 	// Try new format first (object)
 	var result Result
 	if err := json.Unmarshal([]byte(content), &result); err == nil {
 		// Check if it's the new format (has "facts" key) or legacy format
 		if hasStructuredContent(&result) {
-			return &result, nil
+			return &result, repaired, nil
 		}
 	}
 
@@ -531,7 +545,7 @@ func (a *Archivist) parseResponse(content string) (*Result, error) {
 	var arrayResult []Result
 	if err := json.Unmarshal([]byte(content), &arrayResult); err == nil && len(arrayResult) > 0 {
 		if hasStructuredContent(&arrayResult[0]) {
-			return &arrayResult[0], nil
+			return &arrayResult[0], repaired, nil
 		}
 	}
 
@@ -553,7 +567,7 @@ func (a *Archivist) parseResponse(content string) (*Result, error) {
 				converted.People.Merged = append(converted.People.Merged, p.Merged...)
 			}
 			if hasStructuredContent(converted) {
-				return converted, nil
+				return converted, repaired, nil
 			}
 		}
 	}
@@ -577,7 +591,7 @@ func (a *Archivist) parseResponse(content string) (*Result, error) {
 				converted.People.Added = append(converted.People.Added, p.toAddedPerson())
 			}
 			if hasStructuredContent(converted) {
-				return converted, nil
+				return converted, repaired, nil
 			}
 		}
 	}
@@ -589,15 +603,15 @@ func (a *Archivist) parseResponse(content string) (*Result, error) {
 			return &Result{
 				Facts:  FactsResult(legacy),
 				People: PeopleResult{},
-			}, nil
+			}, repaired, nil
 		}
 	}
 
 	// Default: try parsing as new format anyway
 	if err := json.Unmarshal([]byte(content), &result); err != nil {
-		return nil, err
+		return nil, repaired, err
 	}
-	return &result, nil
+	return &result, repaired, nil
 }
 
 // hasStructuredContent checks if result has any content (new format detection).

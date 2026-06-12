@@ -1421,3 +1421,115 @@ func TestArchivist_MaxFacts(t *testing.T) {
 	// Check that LLM was called with limit_exceeded warning
 	mockClient.AssertExpectations(t)
 }
+
+// TestArchivist_Execute_NumericFactID reproduces the 2026-06-07 production
+// failure: the model returned "fact_id" as a JSON number and a fully valid
+// extraction result was discarded with an unmarshal error.
+func TestArchivist_Execute_NumericFactID(t *testing.T) {
+	llmResponse := `{
+		"facts": {
+			"added": [{
+				"content": "Prefers careful handling of layered dishes",
+				"category": "preference",
+				"type": "context",
+				"importance": 70,
+				"reason": "observed behavior"
+			}],
+			"updated": [],
+			"removed": [{
+				"fact_id": 5215,
+				"reason": "Outdated status: replaced by a more relevant entry"
+			}]
+		},
+		"people": {
+			"added": [],
+			"updated": [],
+			"merged": []
+		}
+	}`
+
+	mockClient := &testutil.MockLLMClient{}
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(testutil.MockChatResponse(llmResponse), nil)
+
+	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
+	cfg := testutil.TestConfig()
+	cfg.Agents.Archivist.Model = "test-model"
+	translator := testutil.TestTranslator(t)
+
+	archivist := New(executor, translator, cfg, testutil.TestLogger(), nil)
+
+	req := &agent.Request{
+		Shared: &agent.SharedContext{UserID: "123"},
+		Params: map[string]any{
+			ParamMessages: []storage.Message{
+				{ID: 1, Role: "user", Content: "test", CreatedAt: time.Now()},
+			},
+			ParamFacts:         []storage.Fact{},
+			ParamReferenceDate: time.Now(),
+		},
+	}
+
+	resp, err := archivist.Execute(context.Background(), req)
+	require.NoError(t, err)
+
+	result, ok := resp.Structured.(*Result)
+	require.True(t, ok)
+	require.Len(t, result.Facts.Removed, 1)
+	id, err := result.Facts.Removed[0].GetFactID()
+	require.NoError(t, err)
+	assert.Equal(t, int64(5215), id)
+
+	mockClient.AssertExpectations(t)
+}
+
+// TestArchivist_Execute_GarbagePrefixedJSON verifies the lenient pre-strip:
+// a stray byte before the JSON object must not fail the extraction.
+func TestArchivist_Execute_GarbagePrefixedJSON(t *testing.T) {
+	llmResponse := "H" + `{
+		"facts": {
+			"added": [{
+				"content": "Likes tea",
+				"category": "preference",
+				"type": "context",
+				"importance": 50,
+				"reason": "stated directly"
+			}],
+			"updated": [],
+			"removed": []
+		},
+		"people": {"added": [], "updated": [], "merged": []}
+	}`
+
+	mockClient := &testutil.MockLLMClient{}
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(testutil.MockChatResponse(llmResponse), nil)
+
+	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
+	cfg := testutil.TestConfig()
+	cfg.Agents.Archivist.Model = "test-model"
+	translator := testutil.TestTranslator(t)
+
+	archivist := New(executor, translator, cfg, testutil.TestLogger(), nil)
+
+	req := &agent.Request{
+		Shared: &agent.SharedContext{UserID: "123"},
+		Params: map[string]any{
+			ParamMessages: []storage.Message{
+				{ID: 1, Role: "user", Content: "test", CreatedAt: time.Now()},
+			},
+			ParamFacts:         []storage.Fact{},
+			ParamReferenceDate: time.Now(),
+		},
+	}
+
+	resp, err := archivist.Execute(context.Background(), req)
+	require.NoError(t, err)
+
+	result, ok := resp.Structured.(*Result)
+	require.True(t, ok)
+	require.Len(t, result.Facts.Added, 1)
+	assert.Equal(t, "Likes tea", result.Facts.Added[0].Content)
+
+	mockClient.AssertExpectations(t)
+}
