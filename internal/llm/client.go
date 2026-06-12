@@ -88,123 +88,6 @@ type clientImpl struct {
 	defaultProvider *ProviderRouting
 }
 
-// openRouterBodyError represents an error reported inside an HTTP 200 response
-// body. OpenRouter returns 200 with {"error":{"message":...,"code":...}} when
-// the upstream provider is unavailable; this must be treated as retryable,
-// not as a silent success.
-type openRouterBodyError struct {
-	Message      string
-	Code         int
-	ProviderName string // from error.metadata.provider_name when OR proxies an upstream error
-	Raw          string // upstream provider's raw error body, mirrored at error.metadata.raw
-
-	// MetadataPresent distinguishes "OR sent an error.metadata{} block (even
-	// if provider_name=null) → OR-gateway-level rejection on our API key"
-	// from "no metadata at all → upstream provider rejected and OR just wrapped
-	// the response body in HTTP 200" (the Vertex gemini-embedding-2 quota case
-	// looks like the latter). The two need different ops responses, so the
-	// distinction has to survive the parse boundary.
-	MetadataPresent bool
-
-	// Rate-limit signals from error.metadata.headers, parsed from string to
-	// int64 once at the boundary. Zero means "absent" — for 429s, treat zero
-	// as "no reset hint" rather than "now". OpenRouter populates X-RateLimit-*
-	// on its own gateway throttles; some upstream providers populate Retry-After.
-	RateLimitResetMs   int64
-	RateLimitRemaining int64
-	RetryAfterSeconds  int64
-}
-
-func (e *openRouterBodyError) Error() string {
-	if e.Code != 0 {
-		return fmt.Sprintf("openrouter body error: %s (code %d)", e.Message, e.Code)
-	}
-	return fmt.Sprintf("openrouter body error: %s", e.Message)
-}
-
-// detectOpenRouterBodyError inspects a raw response body for a top-level "error"
-// field. Returns non-nil if the body reports an error despite HTTP 200 status.
-func detectOpenRouterBodyError(body []byte) *openRouterBodyError {
-	var probe struct {
-		Error *struct {
-			Message  string          `json:"message"`
-			Code     json.RawMessage `json:"code"`
-			Metadata *struct {
-				Raw          string            `json:"raw"`
-				ProviderName string            `json:"provider_name"`
-				Headers      map[string]string `json:"headers"`
-			} `json:"metadata"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(body, &probe); err != nil || probe.Error == nil {
-		return nil
-	}
-	bodyErr := &openRouterBodyError{Message: probe.Error.Message}
-	if len(probe.Error.Code) > 0 {
-		// Code can be number or string — try number first, then quoted string.
-		if err := json.Unmarshal(probe.Error.Code, &bodyErr.Code); err != nil {
-			var s string
-			if err := json.Unmarshal(probe.Error.Code, &s); err == nil {
-				_, _ = fmt.Sscanf(s, "%d", &bodyErr.Code)
-			}
-		}
-	}
-	if probe.Error.Metadata != nil {
-		bodyErr.MetadataPresent = true
-		bodyErr.ProviderName = probe.Error.Metadata.ProviderName
-		bodyErr.Raw = probe.Error.Metadata.Raw
-		bodyErr.RateLimitResetMs = parseInt64Header(probe.Error.Metadata.Headers, "X-RateLimit-Reset")
-		bodyErr.RateLimitRemaining = parseInt64Header(probe.Error.Metadata.Headers, "X-RateLimit-Remaining")
-		bodyErr.RetryAfterSeconds = parseInt64Header(probe.Error.Metadata.Headers, "Retry-After")
-	}
-	return bodyErr
-}
-
-// parseInt64Header pulls a string value from an OR error.metadata.headers map
-// and parses it as int64. Returns 0 when the key is absent or unparseable —
-// callers treat zero as "no signal" rather than a literal value.
-func parseInt64Header(h map[string]string, key string) int64 {
-	v, ok := h[key]
-	if !ok || v == "" {
-		return 0
-	}
-	var n int64
-	if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
-		return 0
-	}
-	return n
-}
-
-// classifyUpstreamError maps a parsed OR error envelope to a stable kind
-// attribute that TraceQL can filter on without grepping free-form messages.
-// The classification is intentionally coarse — fine-grained provider error
-// shapes change between deploys, but these buckets stay stable enough that
-// a query like {span.error.upstream_kind="invalid_argument"} still matches
-// next year. New shapes get "unknown" and surface in raw_message for triage.
-func classifyUpstreamError(bodyErr *openRouterBodyError) string {
-	if bodyErr == nil {
-		return ""
-	}
-	msg := strings.ToLower(bodyErr.Message + " " + bodyErr.Raw)
-	switch {
-	case strings.Contains(msg, "invalid_argument") || strings.Contains(msg, "invalid argument"):
-		return "invalid_argument"
-	case strings.Contains(msg, "safety") || strings.Contains(msg, "harm_category") || strings.Contains(msg, "blocked"):
-		return "safety"
-	case strings.Contains(msg, "rate_limit") || strings.Contains(msg, "rate limit") || bodyErr.Code == 429:
-		return "rate_limited"
-	case strings.Contains(msg, "context") && strings.Contains(msg, "length"):
-		return "context_length"
-	case strings.Contains(msg, "corrupted thought signature"):
-		return "thought_signature"
-	case bodyErr.Code >= 500:
-		return "upstream_5xx"
-	case bodyErr.Code >= 400:
-		return "upstream_4xx"
-	}
-	return "unknown"
-}
-
 // countFilenameCollisions returns the number of FilePart pairs across
 // req.Messages that share a FileName but carry different file_data. Zero is
 // the normal case — non-zero is a canary for the same-filename multi-FilePart
@@ -249,90 +132,15 @@ func countFilenameCollisions(messages []Message) int {
 	return collisions
 }
 
-// recordOpenRouterError attaches an OR error envelope to a span: the raw body
-// as an llm.response content event (subject to ContentEnabled gating) and the
-// parsed envelope fields as structured attributes (always set when present).
-// httpStatus, when non-zero, is recorded verbatim as http.response.status_code
-// for filterability and is also used to bucket non-JSON 5xx bodies into an
-// edge_<status> error.upstream_kind — non-JSON 5xx bodies (e.g. plain-text
-// "error code: 502") fall through every JSON-envelope classifier branch and
-// would otherwise leave the span without any structured error class.
-// No-op on empty body and zero status.
-func recordOpenRouterError(span trace.Span, body []byte, httpStatus int) {
-	if len(body) == 0 && httpStatus == 0 {
-		return
-	}
-	if httpStatus > 0 {
-		span.SetAttributes(attribute.Int("http.response.status_code", httpStatus))
-	}
-	if len(body) == 0 {
-		return
-	}
-	obs.RecordContent(span, "llm.response", obs.RedactBase64Payloads(string(body)))
-	bodyErr := detectOpenRouterBodyError(body)
-	if bodyErr == nil {
-		// Edge classification: a 4xx/5xx response with a non-JSON body almost
-		// always means OR's edge/CDN (Cloudflare-style) killed the request
-		// before OR's app server saw it. Distinguishing this from a real
-		// provider error matters because retrying is much less useful here
-		// (everything's broken upstream of OR's routing).
-		if httpStatus >= 400 && !json.Valid(body) {
-			span.SetAttributes(
-				attribute.String("error.upstream_kind", fmt.Sprintf("edge_%d", httpStatus)),
-				attribute.String("error.upstream_message", truncateForLog(strings.TrimSpace(string(body)), 256)),
-			)
-		}
-		return
-	}
-	attrs := make([]attribute.KeyValue, 0, 8)
-	if bodyErr.Message != "" {
-		attrs = append(attrs, attribute.String("error.upstream_message", bodyErr.Message))
-	}
-	if bodyErr.Code != 0 {
-		attrs = append(attrs, attribute.Int("error.upstream_code", bodyErr.Code))
-	}
-	// upstream_provider gets a sentinel "openrouter" when OR sent a metadata
-	// block but provider_name was null/empty — that's the OR-gateway throttle
-	// case (chat 429 against our API key). With this, a TraceQL query like
-	// {span.error.upstream_provider="openrouter" && span.error.upstream_kind="rate_limited"}
-	// isolates "OR throttled us" from "Vertex/AI Studio threw a 429 and OR
-	// passed it through" (provider non-empty) without parsing message strings.
-	switch {
-	case bodyErr.ProviderName != "":
-		attrs = append(attrs, attribute.String("error.upstream_provider", bodyErr.ProviderName))
-	case bodyErr.MetadataPresent:
-		attrs = append(attrs, attribute.String("error.upstream_provider", "openrouter"))
-	}
-	if kind := classifyUpstreamError(bodyErr); kind != "" {
-		attrs = append(attrs, attribute.String("error.upstream_kind", kind))
-	}
-	// Rate-limit signals correlate the 429 with the next reset window. We
-	// emit Remaining alongside Reset (even when Remaining=0) because "0
-	// remaining" is exactly the throttled-now signal — distinguishable in
-	// TraceQL from "field absent" (no signal available).
-	if bodyErr.RateLimitResetMs > 0 {
-		attrs = append(attrs,
-			attribute.Int64("error.rate_limit.reset_unix_ms", bodyErr.RateLimitResetMs),
-			attribute.Int64("error.rate_limit.remaining", bodyErr.RateLimitRemaining),
-		)
-	}
-	if bodyErr.RetryAfterSeconds > 0 {
-		attrs = append(attrs, attribute.Int64("error.retry_after_s", bodyErr.RetryAfterSeconds))
-	}
-	if len(attrs) > 0 {
-		span.SetAttributes(attrs...)
-	}
-}
-
 // attemptOutcome describes the result of one HTTP attempt inside a retry loop.
 // It exists so recordAttemptEvent can render a single structured event with
 // duration, status, body preview, and a classified error.class — without
 // scattering AddEvent calls across half a dozen retry-loop branches.
 type attemptOutcome struct {
-	httpStatus int                  // 0 if no response received (transport err)
-	err        error                // non-nil on transport/IO failure
-	bodyErr    *openRouterBodyError // OR-envelope error parsed from a 200 body
-	body       []byte               // raw response body (may be nil)
+	httpStatus int                // 0 if no response received (transport err)
+	err        error              // non-nil on transport/IO failure
+	bodyErr    *providerBodyError // provider-envelope error parsed from a 200 body
+	body       []byte             // raw response body (may be nil)
 }
 
 // classifyAttemptOutcome buckets an attempt into a stable error.class string.
@@ -546,25 +354,6 @@ type Message struct {
 	ReasoningDetails interface{} `json:"reasoning_details,omitempty"`
 }
 
-type PDFConfig struct {
-	Engine string `json:"engine"`
-}
-
-type Plugin struct {
-	ID  string    `json:"id"`
-	PDF PDFConfig `json:"pdf,omitempty"`
-}
-
-// ProviderRouting controls OpenRouter's provider selection for a request.
-// Order lists preferred providers (tried in sequence). AllowFallbacks is a
-// pointer so callers can distinguish "unset" (default true on OpenRouter's
-// side) from an explicit false (strict routing — fail instead of falling
-// back to providers outside the order list).
-type ProviderRouting struct {
-	Order          []string `json:"order,omitempty"`
-	AllowFallbacks *bool    `json:"allow_fallbacks,omitempty"`
-}
-
 // ReasoningConfig controls the model's internal reasoning behavior.
 // For Gemini 3: effort levels "minimal", "low", "medium", "high".
 // For other models: max_tokens (1024-128000) controls reasoning depth.
@@ -738,11 +527,11 @@ type ChatCompletionResponse struct {
 	Choices  []ResponseChoice `json:"choices"`
 	Usage    Usage            `json:"usage"`
 
-	// DebugRequestBody contains the raw JSON request body sent to OpenRouter.
+	// DebugRequestBody contains the raw JSON request body sent to the API.
 	// Not part of API response - populated by client for debugging purposes.
 	DebugRequestBody string `json:"-"`
 
-	// DebugResponseBody contains the raw JSON response body from OpenRouter.
+	// DebugResponseBody contains the raw JSON response body from the API.
 	// Not part of API response - populated by client for debugging purposes.
 	DebugResponseBody string `json:"-"`
 }
@@ -774,18 +563,11 @@ type EmbeddingResponse struct {
 	Usage  Usage             `json:"usage"`
 }
 
-// NewClient builds a client pointed at the public OpenRouter API. It is a
-// convenience wrapper kept for tests and callers that don't override the host;
-// production wiring uses NewClientWithBaseURL with the configured base_url.
-func NewClient(logger *slog.Logger, apiKey, proxyURL string, defaultProvider *ProviderRouting) (Client, error) {
-	return NewClientWithBaseURL(logger, apiKey, proxyURL, "https://openrouter.ai/api/v1", defaultProvider)
-}
-
-// NewClientWithBaseURL builds a client against any OpenAI-compatible chat/embeddings
+// NewClient builds a client against any OpenAI-compatible chat/embeddings
 // endpoint (OpenRouter, litellm, vLLM, …) given by baseURL. OpenRouter-specific
 // extensions (provider routing, plugins, usage-based cost) are sent regardless;
 // compatible backends simply ignore the fields they don't recognise.
-func NewClientWithBaseURL(logger *slog.Logger, apiKey, proxyURL, baseURL string, defaultProvider *ProviderRouting) (Client, error) {
+func NewClient(logger *slog.Logger, apiKey, proxyURL, baseURL string, defaultProvider *ProviderRouting) (Client, error) {
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
@@ -808,7 +590,7 @@ func NewClientWithBaseURL(logger *slog.Logger, apiKey, proxyURL, baseURL string,
 		transport.Proxy = http.ProxyURL(proxy)
 	}
 
-	clientLogger := logger.With("component", "openrouter_client")
+	clientLogger := logger.With("component", "llm_client")
 
 	if proxyURL != "" {
 		safeProxyURL := proxyURL
@@ -818,7 +600,7 @@ func NewClientWithBaseURL(logger *slog.Logger, apiKey, proxyURL, baseURL string,
 				safeProxyURL = u.String()
 			}
 		}
-		clientLogger.Info("Using proxy for OpenRouter", "proxy_url", safeProxyURL)
+		clientLogger.Info("Using proxy for LLM API", "proxy_url", safeProxyURL)
 	}
 
 	return &clientImpl{
@@ -848,31 +630,6 @@ func (c *clientImpl) newAPIRequest(ctx context.Context, endpoint string, body []
 	httpReq.Header.Set("User-Agent", "laplaced/1.0")
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(httpReq.Header))
 	return httpReq, nil
-}
-
-// withBroadcastFields returns trc and user enriched with OpenRouter
-// Broadcast linking metadata. When ctx carries a valid span context,
-// trace_id and parent_span_id are filled (callers' values win). When user
-// is empty and userID is non-zero, user becomes the stringified userID.
-// Safe to call when Broadcast is disabled on the OR side — OR ignores
-// unknown fields. Returning the values (instead of mutating pointers)
-// keeps the call-site one-liner at request assembly time.
-func withBroadcastFields(ctx context.Context, trc map[string]any, user string, userID string) (map[string]any, string) {
-	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
-		if trc == nil {
-			trc = map[string]any{}
-		}
-		if _, ok := trc["trace_id"]; !ok {
-			trc["trace_id"] = sc.TraceID().String()
-		}
-		if _, ok := trc["parent_span_id"]; !ok {
-			trc["parent_span_id"] = sc.SpanID().String()
-		}
-	}
-	if user == "" && userID != "" {
-		user = userID
-	}
-	return trc, user
 }
 
 func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletionRequest) (resp ChatCompletionResponse, err error) {
@@ -967,7 +724,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 	req.Trace, req.User = withBroadcastFields(ctx, req.Trace, req.User, req.UserID)
 
 	// Log request summary (full details available in Agent Debug UI)
-	c.logger.Info("Sending request to OpenRouter",
+	c.logger.Info("Sending LLM request",
 		"model", req.Model,
 		"message_count", len(req.Messages),
 		"tools_count", len(req.Tools),
@@ -987,7 +744,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		bodyStr := string(body)
 		hasFileData := strings.Contains(bodyStr, "file_data")
 
-		c.logger.Debug("OpenRouter request body analysis",
+		c.logger.Debug("LLM request body analysis",
 			"body_length", len(body),
 			"has_file_data", hasFileData,
 			"message_count", len(req.Messages),
@@ -998,7 +755,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		if len(preview) > 5000 {
 			preview = preview[:5000] + "... (truncated, total: " + fmt.Sprintf("%d", len(body)) + " bytes)"
 		}
-		c.logger.Debug("OpenRouter request body preview",
+		c.logger.Debug("LLM request body preview",
 			"body_preview", preview,
 		)
 	}
@@ -1017,7 +774,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 			RecordLLMRetry(req.Model)
 			delay := calculateBackoff(attempt - 1)
 			retryDelays = append(retryDelays, delay.Milliseconds())
-			c.logger.Warn("Retrying OpenRouter request",
+			c.logger.Warn("Retrying LLM request",
 				"attempt", attempt,
 				"max_retries", maxRetries,
 				"delay", delay,
@@ -1058,21 +815,21 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 			return ChatCompletionResponse{}, err
 		}
 
-		c.logger.Debug("OpenRouter response received", "status", resp.Status, "attempt", attempt)
+		c.logger.Debug("LLM response received", "status", resp.Status, "attempt", attempt)
 
 		if resp.StatusCode == http.StatusOK {
 			// OpenRouter sometimes returns 200 with an error payload in body when
 			// the upstream provider fails. Treat as retryable.
-			if bodyErr := detectOpenRouterBodyError(responseBody); bodyErr != nil {
+			if bodyErr := detectProviderBodyError(responseBody); bodyErr != nil {
 				recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode, bodyErr: bodyErr, body: responseBody})
-				c.logger.Warn("OpenRouter returned HTTP 200 with error body",
+				c.logger.Warn("LLM API returned HTTP 200 with error body",
 					"error", bodyErr, "body", string(responseBody), "attempt", attempt)
 				if attempt < maxRetries {
 					lastErr = bodyErr
 					continue
 				}
 				RecordLLMRequest(req.UserID, req.Model, time.Since(startTime).Seconds(), false, 0, 0, nil, jt)
-				recordOpenRouterError(span, responseBody, resp.StatusCode)
+				recordProviderError(span, responseBody, resp.StatusCode)
 				return ChatCompletionResponse{}, bodyErr
 			}
 			recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode, body: responseBody})
@@ -1083,22 +840,22 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 
 		// Check if we should retry
 		if isRetryableStatusCode(resp.StatusCode) && attempt < maxRetries {
-			lastErr = fmt.Errorf("openrouter API error: %s", resp.Status)
+			lastErr = fmt.Errorf("llm API error: %s", resp.Status)
 			continue
 		}
 
 		// Non-retryable error or max retries reached
-		c.logger.Error("OpenRouter returned non-OK status", "status", resp.Status, "body", string(responseBody))
+		c.logger.Error("LLM API returned non-OK status", "status", resp.Status, "body", string(responseBody))
 		RecordLLMRequest(req.UserID, req.Model, time.Since(startTime).Seconds(), false, 0, 0, nil, jt)
-		recordOpenRouterError(span, responseBody, resp.StatusCode)
-		return ChatCompletionResponse{}, fmt.Errorf("openrouter API error: %s", resp.Status)
+		recordProviderError(span, responseBody, resp.StatusCode)
+		return ChatCompletionResponse{}, fmt.Errorf("llm API error: %s", resp.Status)
 	}
 
 	var chatResp ChatCompletionResponse
 	if err := json.NewDecoder(bytes.NewBuffer(responseBody)).Decode(&chatResp); err != nil {
-		c.logger.Error("Failed to decode OpenRouter response", "error", err, "body_length", len(responseBody))
+		c.logger.Error("Failed to decode LLM response", "error", err, "body_length", len(responseBody))
 		RecordLLMRequest(req.UserID, req.Model, time.Since(startTime).Seconds(), false, 0, 0, nil, jt)
-		recordOpenRouterError(span, responseBody, http.StatusOK)
+		recordProviderError(span, responseBody, http.StatusOK)
 		return ChatCompletionResponse{}, err
 	}
 
@@ -1108,7 +865,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 
 	if len(chatResp.Choices) > 0 {
 		msg := chatResp.Choices[0].Message
-		c.logger.Debug("OpenRouter response content",
+		c.logger.Debug("LLM response content",
 			"content", msg.Content,
 			"tool_calls_count", len(msg.ToolCalls),
 			"reasoning_details", FilterReasoningForLog(msg.ReasoningDetails),
@@ -1140,7 +897,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 	if chatResp.Usage.Cost != nil {
 		logAttrs = append(logAttrs, "cost_usd", *chatResp.Usage.Cost)
 	}
-	c.logger.Info("OpenRouter response parsed successfully", logAttrs...)
+	c.logger.Info("LLM response parsed successfully", logAttrs...)
 
 	// Record success metrics
 	duration := time.Since(startTime).Seconds()
@@ -1196,7 +953,7 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 	// the OR-side span to our tracing.
 	req.Trace, req.User = withBroadcastFields(ctx, req.Trace, req.User, "")
 
-	c.logger.Debug("Sending embedding request to OpenRouter",
+	c.logger.Debug("Sending embedding request",
 		"model", req.Model,
 		"input_count", len(req.Input),
 		"meta", req.LogMeta,
@@ -1213,7 +970,7 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
 			delay := calculateBackoff(attempt - 1)
-			c.logger.Warn("Retrying OpenRouter embeddings request",
+			c.logger.Warn("Retrying embeddings request",
 				"attempt", attempt,
 				"max_retries", maxRetries,
 				"delay", delay,
@@ -1259,15 +1016,15 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 			// provider is unavailable (e.g. {"error":{"code":404}}). Treat as
 			// retryable so we don't silently return an empty Data array and
 			// cause callers to waste tokens on the next attempt.
-			if bodyErr := detectOpenRouterBodyError(responseBody); bodyErr != nil {
+			if bodyErr := detectProviderBodyError(responseBody); bodyErr != nil {
 				recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode, bodyErr: bodyErr, body: responseBody})
-				c.logger.Warn("OpenRouter embeddings returned HTTP 200 with error body",
+				c.logger.Warn("Embeddings returned HTTP 200 with error body",
 					"error", bodyErr, "body", string(responseBody), "attempt", attempt)
 				if attempt < maxRetries {
 					lastErr = bodyErr
 					continue
 				}
-				recordOpenRouterError(span, responseBody, resp.StatusCode)
+				recordProviderError(span, responseBody, resp.StatusCode)
 				return EmbeddingResponse{}, bodyErr
 			}
 			recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode, body: responseBody})
@@ -1278,25 +1035,25 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 
 		// Check if we should retry
 		if isRetryableStatusCode(resp.StatusCode) && attempt < maxRetries {
-			lastErr = fmt.Errorf("openrouter API error: %s", resp.Status)
+			lastErr = fmt.Errorf("llm API error: %s", resp.Status)
 			continue
 		}
 
 		// Non-retryable error or max retries reached
-		c.logger.Error("OpenRouter embeddings returned non-OK status", "status", resp.Status, "body", string(responseBody))
-		recordOpenRouterError(span, responseBody, resp.StatusCode)
-		return EmbeddingResponse{}, fmt.Errorf("openrouter API error: %s", resp.Status)
+		c.logger.Error("Embeddings returned non-OK status", "status", resp.Status, "body", string(responseBody))
+		recordProviderError(span, responseBody, resp.StatusCode)
+		return EmbeddingResponse{}, fmt.Errorf("llm API error: %s", resp.Status)
 	}
 
 	var embeddingResp EmbeddingResponse
 	if err := json.Unmarshal(responseBody, &embeddingResp); err != nil {
 		c.logger.Error("Failed to decode embedding response", "error", err, "body", string(responseBody))
-		recordOpenRouterError(span, responseBody, http.StatusOK)
+		recordProviderError(span, responseBody, http.StatusOK)
 		return EmbeddingResponse{}, err
 	}
 
 	if len(embeddingResp.Data) == 0 {
-		c.logger.Warn("OpenRouter embeddings received NO DATA", "body", string(responseBody))
+		c.logger.Warn("Embeddings received NO DATA", "body", string(responseBody))
 	} else {
 		attrs := []any{
 			"object", embeddingResp.Object,
@@ -1307,7 +1064,7 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 		if embeddingResp.Usage.Cost != nil {
 			attrs = append(attrs, "cost_usd", *embeddingResp.Usage.Cost)
 		}
-		c.logger.Debug("OpenRouter embeddings received", attrs...)
+		c.logger.Debug("Embeddings received", attrs...)
 	}
 
 	return embeddingResp, nil

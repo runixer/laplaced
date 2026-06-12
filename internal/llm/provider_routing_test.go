@@ -96,7 +96,7 @@ func TestChatCompletionRequestProviderInjection(t *testing.T) {
 			defer server.Close()
 
 			logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-			client, err := NewClientWithBaseURL(logger, "k", "", server.URL+"/api/v1", tt.defaultProvider)
+			client, err := NewClient(logger, "k", "", server.URL+"/api/v1", tt.defaultProvider)
 			assert.NoError(t, err)
 
 			_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
@@ -136,7 +136,7 @@ func TestChatCompletionResponseExposesProvider(t *testing.T) {
 	defer server.Close()
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	client, err := NewClientWithBaseURL(logger, "k", "", server.URL+"/api/v1", nil)
+	client, err := NewClient(logger, "k", "", server.URL+"/api/v1", nil)
 	assert.NoError(t, err)
 
 	resp, err := client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
@@ -160,7 +160,7 @@ func TestEmbeddingRequestProviderInjection(t *testing.T) {
 
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	def := &ProviderRouting{Order: []string{"Google"}}
-	client, err := NewClientWithBaseURL(logger, "k", "", server.URL+"/api/v1", def)
+	client, err := NewClient(logger, "k", "", server.URL+"/api/v1", def)
 	assert.NoError(t, err)
 
 	_, err = client.CreateEmbeddings(context.Background(), EmbeddingRequest{

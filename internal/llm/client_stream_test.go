@@ -50,7 +50,7 @@ func newStreamTestClient(t *testing.T, h http.Handler) (*httptest.Server, Client
 	server := httptest.NewServer(h)
 	t.Cleanup(server.Close)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	client, err := NewClientWithBaseURL(logger, "test_api_key", "", server.URL+"/api/v1", nil)
+	client, err := NewClient(logger, "test_api_key", "", server.URL+"/api/v1", nil)
 	require.NoError(t, err)
 	return server, client
 }
@@ -215,7 +215,7 @@ func TestStream_ContextCancellation(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	client, err := NewClientWithBaseURL(logger, "k", "", server.URL+"/api/v1", nil)
+	client, err := NewClient(logger, "k", "", server.URL+"/api/v1", nil)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -252,7 +252,7 @@ func TestStream_NonOKStatusReturnsError(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	client, err := NewClientWithBaseURL(logger, "k", "", server.URL+"/api/v1", nil)
+	client, err := NewClient(logger, "k", "", server.URL+"/api/v1", nil)
 	require.NoError(t, err)
 
 	_, err = client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}})
@@ -277,7 +277,7 @@ func TestStream_RetriesOn5xx(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	client, err := NewClientWithBaseURL(logger, "k", "", server.URL+"/api/v1", nil)
+	client, err := NewClient(logger, "k", "", server.URL+"/api/v1", nil)
 	require.NoError(t, err)
 
 	stream, err := client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}})

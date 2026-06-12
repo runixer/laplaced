@@ -317,9 +317,9 @@ func setupTestBot(cfg *config.Config, logger *slog.Logger, dbPath string, dbChan
 	}
 
 	// Create the LLM client against the configured OpenAI-compatible endpoint (openrouter.base_url)
-	client, err := llm.NewClientWithBaseURL(tb.logger, cfg.OpenRouter.APIKey, cfg.OpenRouter.ProxyURL, cfg.OpenRouter.BaseURL, cfg.OpenRouter.Provider.ToRouting())
+	client, err := llm.NewClient(tb.logger, cfg.OpenRouter.APIKey, cfg.OpenRouter.ProxyURL, cfg.OpenRouter.BaseURL, cfg.OpenRouter.Provider.ToRouting())
 	if err != nil {
-		return nil, fmt.Errorf("failed to create OpenRouter client: %w", err)
+		return nil, fmt.Errorf("failed to create LLM client: %w", err)
 	}
 
 	// Initialize all services using shared builder

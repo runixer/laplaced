@@ -27,7 +27,7 @@ import (
 )
 
 // withTracingCapture mirrors testutil.WithTracingCapture — inlined here to
-// avoid an import cycle (testutil depends on openrouter for mock fixtures).
+// avoid an import cycle (testutil depends on llm for mock fixtures).
 func withTracingCapture(t *testing.T) func() tracetest.SpanStubs {
 	t.Helper()
 	exporter := tracetest.NewInMemoryExporter()
@@ -60,7 +60,7 @@ func TestCreateChatCompletion_RecordsSpan(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
+	client, err := NewClient(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
 	require.NoError(t, err)
 
 	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
@@ -97,7 +97,7 @@ func TestCreateChatCompletion_ContentEventsGatedByToggle(t *testing.T) {
 		})
 	}))
 	defer server.Close()
-	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
+	client, err := NewClient(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
 	require.NoError(t, err)
 
 	run := func() []string {
@@ -151,7 +151,7 @@ func TestCreateChatCompletion_TerminalError_SetsErrorStatus(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
+	client, err := NewClient(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
 	require.NoError(t, err)
 
 	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
@@ -191,7 +191,7 @@ func TestCreateChatCompletion_UpstreamProviderError_AttachesEnvelope(t *testing.
 	}))
 	defer server.Close()
 
-	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
+	client, err := NewClient(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
 	require.NoError(t, err)
 
 	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
@@ -244,7 +244,7 @@ func TestCreateChatCompletion_PopulatesBroadcastFields(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
+	client, err := NewClient(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
 	require.NoError(t, err)
 
 	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
@@ -281,7 +281,7 @@ func TestCreateChatCompletion_BroadcastFields_CallerWins(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
+	client, err := NewClient(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
 	require.NoError(t, err)
 
 	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
@@ -313,7 +313,7 @@ func TestCreateEmbeddings_RecordsSpan(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
+	client, err := NewClient(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
 	require.NoError(t, err)
 
 	_, err = client.CreateEmbeddings(context.Background(), EmbeddingRequest{
@@ -384,7 +384,7 @@ func TestCreateChatCompletion_RedactsBase64InContentEvents(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
+	client, err := NewClient(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
 	require.NoError(t, err)
 
 	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
@@ -430,60 +430,60 @@ func TestCreateChatCompletion_RedactsBase64InContentEvents(t *testing.T) {
 }
 
 // TestClassifyUpstreamError pins the coarse error kind classification used by
-// recordOpenRouterError. The scenarios mirror real OR error envelopes seen
+// recordProviderError. The scenarios mirror real OR error envelopes seen
 // in prod (INVALID_ARGUMENT for image-size+input-image incompat, Corrupted
 // thought signature for the reranker-turn-2 case from 2026-04-28, plus
 // generic 5xx and 429s). New classes get "unknown" not error.
 func TestClassifyUpstreamError(t *testing.T) {
 	cases := []struct {
 		name string
-		in   *openRouterBodyError
+		in   *providerBodyError
 		want string
 	}{
 		{"nil", nil, ""},
 		{
 			"invalid_argument from Google",
-			&openRouterBodyError{Message: "Provider returned error", Code: 400, Raw: `{"error":{"code":400,"message":"Request contains an invalid argument.","status":"INVALID_ARGUMENT"}}`},
+			&providerBodyError{Message: "Provider returned error", Code: 400, Raw: `{"error":{"code":400,"message":"Request contains an invalid argument.","status":"INVALID_ARGUMENT"}}`},
 			"invalid_argument",
 		},
 		{
 			"thought signature corruption",
-			&openRouterBodyError{Message: "Provider returned error", Code: 400, Raw: `{"error":{"message":"Corrupted thought signature."}}`},
+			&providerBodyError{Message: "Provider returned error", Code: 400, Raw: `{"error":{"message":"Corrupted thought signature."}}`},
 			"thought_signature",
 		},
 		{
 			"safety blocked",
-			&openRouterBodyError{Message: "Content blocked due to safety policy", Code: 400},
+			&providerBodyError{Message: "Content blocked due to safety policy", Code: 400},
 			"safety",
 		},
 		{
 			"rate limit by code",
-			&openRouterBodyError{Message: "Too many requests", Code: 429},
+			&providerBodyError{Message: "Too many requests", Code: 429},
 			"rate_limited",
 		},
 		{
 			"rate limit by message",
-			&openRouterBodyError{Message: "rate_limit_exceeded", Code: 400},
+			&providerBodyError{Message: "rate_limit_exceeded", Code: 400},
 			"rate_limited",
 		},
 		{
 			"context length",
-			&openRouterBodyError{Message: "context length exceeded for model", Code: 400},
+			&providerBodyError{Message: "context length exceeded for model", Code: 400},
 			"context_length",
 		},
 		{
 			"upstream 5xx",
-			&openRouterBodyError{Message: "internal error", Code: 503},
+			&providerBodyError{Message: "internal error", Code: 503},
 			"upstream_5xx",
 		},
 		{
 			"plain 4xx falls through to upstream_4xx",
-			&openRouterBodyError{Message: "weird payload", Code: 422},
+			&providerBodyError{Message: "weird payload", Code: 422},
 			"upstream_4xx",
 		},
 		{
 			"unknown shape",
-			&openRouterBodyError{Message: "something weird"},
+			&providerBodyError{Message: "something weird"},
 			"unknown",
 		},
 	}
@@ -494,7 +494,7 @@ func TestClassifyUpstreamError(t *testing.T) {
 	}
 }
 
-// TestRecordOpenRouterError_RateLimitVariants pins the span attributes that
+// TestRecordProviderError_RateLimitVariants pins the span attributes that
 // distinguish 429 sub-cases. We test the recorder directly (not through a
 // 4-retry HTTP flow) — the parser is shared regardless of HTTP status, so a
 // synthetic span exercises the same emission path for a fraction of the cost.
@@ -509,7 +509,7 @@ func TestClassifyUpstreamError(t *testing.T) {
 //
 //	{span.error.upstream_kind="rate_limited" && span.error.upstream_provider="openrouter"}
 //	{span.error.upstream_kind="rate_limited" && !span.error.upstream_provider}
-func TestRecordOpenRouterError_RateLimitVariants(t *testing.T) {
+func TestRecordProviderError_RateLimitVariants(t *testing.T) {
 	cases := []struct {
 		name     string
 		body     string
@@ -568,7 +568,7 @@ func TestRecordOpenRouterError_RateLimitVariants(t *testing.T) {
 			getSpans := withTracingCapture(t)
 			tracer := otel.GetTracerProvider().Tracer("test")
 			_, span := tracer.Start(context.Background(), "test")
-			recordOpenRouterError(span, []byte(c.body), c.status)
+			recordProviderError(span, []byte(c.body), c.status)
 			span.End()
 
 			spans := getSpans()
@@ -612,7 +612,7 @@ func TestCreateChatCompletion_UpstreamError_PopulatesKindAttr(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
+	client, err := NewClient(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
 	require.NoError(t, err)
 
 	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
@@ -669,7 +669,7 @@ func TestCreateChatCompletion_EdgePlainText502_4xRetries(t *testing.T) {
 	// from outside, so this test accepts ~6s of real time across 3 backoffs
 	// (1s + 2s + 4s with ±20% jitter). Acceptable for a guard test that fires
 	// once per CI run; if it becomes painful, parameterize calculateBackoff.
-	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
+	client, err := NewClient(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
 	require.NoError(t, err)
 
 	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
@@ -721,7 +721,7 @@ func TestCreateChatCompletion_AttemptEvent_SuccessSingleAttempt(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
+	client, err := NewClient(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
 	require.NoError(t, err)
 
 	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
@@ -765,7 +765,7 @@ func TestCreateChatCompletion_AttemptEvent_RetryThenSucceed(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
+	client, err := NewClient(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
 	require.NoError(t, err)
 
 	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
@@ -899,7 +899,7 @@ func TestCreateChatCompletionStream_TerminalError_SetsErrorStatus(t *testing.T) 
 		_, _ = io.WriteString(w, `{"error":{"message":"bad key"}}`)
 	}))
 	defer server.Close()
-	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "k", "", server.URL+"/api/v1", nil)
+	client, err := NewClient(slog.New(slog.NewJSONHandler(io.Discard, nil)), "k", "", server.URL+"/api/v1", nil)
 	require.NoError(t, err)
 
 	_, err = client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{
@@ -961,7 +961,7 @@ func TestCreateChatCompletionStream_PopulatesBroadcastFields(t *testing.T) {
 		flusher.Flush()
 	}))
 	defer server.Close()
-	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "k", "", server.URL+"/api/v1", nil)
+	client, err := NewClient(slog.New(slog.NewJSONHandler(io.Discard, nil)), "k", "", server.URL+"/api/v1", nil)
 	require.NoError(t, err)
 
 	stream, err := client.CreateChatCompletionStream(context.Background(), ChatCompletionRequest{
@@ -994,7 +994,7 @@ func TestClassifyAttemptOutcome(t *testing.T) {
 		want string
 	}{
 		{"happy path 200", attemptOutcome{httpStatus: 200, body: []byte(`{"id":"x"}`)}, "none"},
-		{"200 with body envelope", attemptOutcome{httpStatus: 200, bodyErr: &openRouterBodyError{Message: "x"}, body: []byte(`{"error":{}}`)}, "body_error"},
+		{"200 with body envelope", attemptOutcome{httpStatus: 200, bodyErr: &providerBodyError{Message: "x"}, body: []byte(`{"error":{}}`)}, "body_error"},
 		{"edge plain-text 502", attemptOutcome{httpStatus: 502, body: []byte("error code: 502")}, "edge_502"},
 		{"edge empty body 504", attemptOutcome{httpStatus: 504, body: nil}, "edge_504"},
 		{"edge HTML 503", attemptOutcome{httpStatus: 503, body: []byte("<html>nope</html>")}, "edge_503"},

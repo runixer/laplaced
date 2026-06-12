@@ -101,7 +101,7 @@ func TestCreateChatCompletion_PropagatesTraceContext(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClientWithBaseURL(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test-key", "", server.URL+"/api/v1", nil)
+	client, err := NewClient(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test-key", "", server.URL+"/api/v1", nil)
 	require.NoError(t, err)
 
 	ctx, span := otel.Tracer("test").Start(context.Background(), "parent")

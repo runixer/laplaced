@@ -153,7 +153,7 @@ func (c *clientImpl) CreateChatCompletionStream(ctx context.Context, req ChatCom
 		return nil, err
 	}
 
-	c.logger.Info("Sending streaming request to OpenRouter",
+	c.logger.Info("Sending streaming LLM request",
 		"model", req.Model,
 		"message_count", len(req.Messages),
 		"tools_count", len(req.Tools),
@@ -187,7 +187,7 @@ func (c *clientImpl) CreateChatCompletionStream(ctx context.Context, req ChatCom
 // open HTTP response (caller takes ownership of Body) on success.
 //
 // Records one "attempt" span event per HTTP attempt and, on terminal failure,
-// lifts the OR error envelope onto the span via recordOpenRouterError — the
+// lifts the OR error envelope onto the span via recordProviderError — the
 // same instrumentation surface CreateChatCompletion uses for its retry loop.
 func (c *clientImpl) openStream(
 	ctx context.Context,
@@ -210,7 +210,7 @@ func (c *clientImpl) openStream(
 			RecordLLMRetry(model)
 			delay := calculateBackoff(attempt - 1)
 			retryDelays = append(retryDelays, delay.Milliseconds())
-			c.logger.Warn("Retrying OpenRouter stream open",
+			c.logger.Warn("Retrying LLM stream open",
 				"attempt", attempt,
 				"max_retries", maxRetries,
 				"delay", delay,
@@ -255,21 +255,21 @@ func (c *clientImpl) openStream(
 		// upstream sometimes returns retryable codes — match the non-stream
 		// retry policy.
 		if isRetryableStatusCode(resp.StatusCode) && attempt < maxRetries {
-			lastErr = fmt.Errorf("openrouter API error: %s: %s", resp.Status, truncateForLog(string(errBody), 500))
+			lastErr = fmt.Errorf("llm API error: %s: %s", resp.Status, truncateForLog(string(errBody), 500))
 			continue
 		}
 
-		c.logger.Error("OpenRouter stream returned non-OK status",
+		c.logger.Error("LLM stream returned non-OK status",
 			"status", resp.Status, "body", truncateForLog(string(errBody), 500))
 		RecordLLMRequest(userID, model, time.Since(startTime).Seconds(), false, 0, 0, nil, jt)
-		recordOpenRouterError(span, errBody, resp.StatusCode)
-		return nil, attempts, retryDelays, fmt.Errorf("openrouter API error: %s: %s", resp.Status, truncateForLog(string(errBody), 500))
+		recordProviderError(span, errBody, resp.StatusCode)
+		return nil, attempts, retryDelays, fmt.Errorf("llm API error: %s: %s", resp.Status, truncateForLog(string(errBody), 500))
 	}
 
 	if lastErr != nil {
 		return nil, attempts, retryDelays, lastErr
 	}
-	return nil, attempts, retryDelays, errors.New("openrouter stream open: exhausted retries")
+	return nil, attempts, retryDelays, errors.New("llm stream open: exhausted retries")
 }
 
 // pumpStream reads SSE frames from body and emits StreamEvents. Closes events
@@ -346,7 +346,7 @@ func (c *clientImpl) pumpStream(
 				line = "data:" + strings.TrimPrefix(line[len("data:"):], " ")
 			} else {
 				// Unknown frame line — log and skip.
-				c.logger.Debug("OpenRouter stream: skipping unknown frame line",
+				c.logger.Debug("LLM stream: skipping unknown frame line",
 					"line", truncateForLog(line, 200))
 				continue
 			}
@@ -396,7 +396,7 @@ func (c *clientImpl) pumpStream(
 	}
 	// Stream closed without [DONE] — surface as error so caller doesn't treat
 	// this as a clean finish and emit a half-baked response.
-	streamErr = errors.New("openrouter stream ended without [DONE] sentinel")
+	streamErr = errors.New("llm stream ended without [DONE] sentinel")
 	select {
 	case events <- StreamEvent{Err: streamErr}:
 	case <-ctx.Done():

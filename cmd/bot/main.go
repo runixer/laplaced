@@ -305,12 +305,12 @@ func run() int {
 
 	logger.Info("Database initialized successfully.")
 
-	openrouterClient, err := llm.NewClientWithBaseURL(logger, cfg.OpenRouter.APIKey, cfg.OpenRouter.ProxyURL, cfg.OpenRouter.BaseURL, cfg.OpenRouter.Provider.ToRouting())
+	llmClient, err := llm.NewClient(logger, cfg.OpenRouter.APIKey, cfg.OpenRouter.ProxyURL, cfg.OpenRouter.BaseURL, cfg.OpenRouter.Provider.ToRouting())
 	if err != nil {
-		logger.Error("failed to create openrouter client", "error", err)
+		logger.Error("failed to create llm client", "error", err)
 		return 1
 	}
-	logger.Info("OpenRouter client created successfully.")
+	logger.Info("LLM client created successfully.")
 
 	api, err := telegram.NewExtendedClient(cfg.Telegram.Token, cfg.Telegram.ProxyURL)
 	if err != nil {
@@ -327,7 +327,7 @@ func run() int {
 	logger.Info("Translator initialized", "default_lang", cfg.Bot.Language)
 
 	// Initialize all services and agents using shared builder
-	services, err := app.SetupServices(context.Background(), logger, cfg, store, openrouterClient, translator)
+	services, err := app.SetupServices(context.Background(), logger, cfg, store, llmClient, translator)
 	if err != nil {
 		logger.Error("failed to setup services", "error", err)
 		return 1
@@ -344,7 +344,7 @@ func run() int {
 		logger.Info("Artifacts system disabled")
 	}
 
-	b, err := bot.NewBot(logger, api, cfg, store, store, store, store, store, store, openrouterClient, services.RAGService, services.ContextService, translator)
+	b, err := bot.NewBot(logger, api, cfg, store, store, store, store, store, store, llmClient, services.RAGService, services.ContextService, translator)
 	if err != nil {
 		logger.Error("failed to create bot", "error", err)
 		return 1
@@ -365,7 +365,7 @@ func run() int {
 	// transport-neutral (Bot.transport.SendMedia). Gated only on artifacts + a
 	// configured model, so the overlay decides per contour.
 	if cfg.Artifacts.Enabled && cfg.Agents.ImageGenerator.Model != "" {
-		imgGen := imagegen.New(openrouterClient, &cfg.Agents.ImageGenerator, logger)
+		imgGen := imagegen.New(llmClient, &cfg.Agents.ImageGenerator, logger)
 		b.SetImageGenerator(&imageGenAdapter{agent: imgGen})
 		b.SetFileStorage(fileStorage)
 		logger.Info("Image generation enabled",
