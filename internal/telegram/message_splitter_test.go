@@ -3,6 +3,7 @@ package telegram
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -25,35 +26,35 @@ func TestSplitMessageSmart(t *testing.T) {
 			input: "Первый абзац.\n\nВторой абзац.\n\nТретий абзац.",
 			limit: 20,
 			expected: []string{
-				"Первый",
-				"абзац.",
-				"Второй",
-				"абзац.",
-				"Третий",
-				"абзац.",
+				"Первый абзац.",
+				"Второй абзац.",
+				"Третий абзац.",
 			},
 		},
 		{
-			name:  "Блок кода не разбивается",
+			name: "Блок кода не разбивается",
+			// The code block alone exceeds the limit, so the force-split
+			// fallback still has to cut it — but the surrounding prose splits
+			// at paragraph boundaries.
 			input: "Текст перед кодом.\n\n```python\ndef function():\n    print('hello')\n    return True\n```\n\nТекст после кода.",
 			limit: 50,
 			expected: []string{
 				"Текст перед кодом.",
 				"```python\ndef function():\n    print('hello')",
-				"return True\n```\n\nТекст после",
-				"кода.",
+				"return True\n```",
+				"Текст после кода.",
 			},
 		},
 		{
-			name:  "Инлайн код сохраняется",
+			name: "Инлайн код сохраняется",
+			// Degenerate limit: the first paragraph alone exceeds it, so the
+			// force-split fallback cuts inside the inline code.
 			input: "Используйте `console.log()` для отладки.\n\nЭто другой абзац с `другим кодом`.",
 			limit: 30,
 			expected: []string{
-				"Используйте",
-				"`console.log()` для",
-				"отладки.",
-				"Это другой",
-				"абзац с `другим",
+				"Используйте `console.",
+				"log()` для отладки.",
+				"Это другой абзац с `другим",
 				"кодом`.",
 			},
 		},
@@ -62,14 +63,10 @@ func TestSplitMessageSmart(t *testing.T) {
 			input: "Первое предложение. Второе предложение! Третье предложение? Четвертое предложение.",
 			limit: 25,
 			expected: []string{
-				"Первое",
-				"предложение.",
-				"Второе",
-				"предложение!",
-				"Третье",
-				"предложение?",
-				"Четвертое",
-				"предложение.",
+				"Первое предложение.",
+				"Второе предложение!",
+				"Третье предложение?",
+				"Четвертое предложение.",
 			},
 		},
 		{
@@ -93,7 +90,7 @@ func TestSplitMessageSmart(t *testing.T) {
 
 			// Verify that no part exceeds the limit (except force-split ones)
 			for i, chunk := range actual {
-				if len(chunk) > tc.limit {
+				if utf8.RuneCountInString(chunk) > tc.limit {
 					// Verify that this is really an unsplittable block (e.g., code)
 					hasCodeBlock := strings.Contains(chunk, "```")
 					assert.True(t, hasCodeBlock, "Chunk %d exceeds limit but doesn't contain code block: %s", i, chunk)
@@ -357,4 +354,97 @@ func TestIsSafeSplitPosition(t *testing.T) {
 			assert.Equal(t, tc.expected, actual)
 		})
 	}
+}
+
+func TestSplitMessageSmart_RuneBudget(t *testing.T) {
+	// Cyrillic text: every letter is 2 bytes but 1 rune. With a byte-based
+	// limit this text (2N bytes) used to be split in half; with the rune
+	// budget it must stay whole.
+	text := strings.Repeat("а", 100)
+	chunks := SplitMessageSmart(text, 100)
+	assert.Equal(t, []string{text}, chunks, "text of exactly limit runes must not be split")
+
+	// Mixed multi-paragraph Cyrillic text: all chunks within the rune budget
+	// and valid UTF-8 (no mid-rune cuts).
+	var b strings.Builder
+	for i := 0; i < 30; i++ {
+		b.WriteString(strings.Repeat("слово ", 20))
+		b.WriteString("конец.\n\n")
+	}
+	chunks = SplitMessageSmart(b.String(), 300)
+	assert.Greater(t, len(chunks), 1)
+	for i, chunk := range chunks {
+		assert.True(t, utf8.ValidString(chunk), "chunk %d is not valid UTF-8", i)
+		assert.LessOrEqual(t, utf8.RuneCountInString(chunk), 300, "chunk %d exceeds rune limit", i)
+	}
+}
+
+func TestSplitMessageSmart_ForceSplitKeepsRunesIntact(t *testing.T) {
+	// One unsplittable word of multibyte runes forces a hard cut; the cut
+	// must land on a rune boundary.
+	text := strings.Repeat("ё", 5000)
+	chunks := SplitMessageSmart(text, 3500)
+	assert.Greater(t, len(chunks), 1)
+	total := 0
+	for i, chunk := range chunks {
+		assert.True(t, utf8.ValidString(chunk), "chunk %d is not valid UTF-8", i)
+		assert.LessOrEqual(t, utf8.RuneCountInString(chunk), 3500)
+		total += utf8.RuneCountInString(chunk)
+	}
+	assert.Equal(t, 5000, total, "no runes lost")
+}
+
+// buildIncidentReply reproduces the production case: prose, then a markdown
+// table spanning past the split limit, then more prose.
+func buildIncidentReply() (text string, table string) {
+	table = "| Время | Действие | Комментарий |\n| :--- | :--- | :--- |\n"
+	for i := 0; i < 25; i++ {
+		table += "| 07:15 - 08:45 | Подъём, кормление и бодрствование | Стартуем как обычно, активно играем чтобы накопить усталость перед дорогой. |\n"
+	}
+	table = strings.TrimSuffix(table, "\n")
+	text = strings.Repeat("Вступительный абзац с пояснениями. ", 20) + "\n\n" + table + "\n\nЗаключительный абзац с выводами."
+	return text, table
+}
+
+func TestSplitMessageSmart_TableNotCut(t *testing.T) {
+	text, table := buildIncidentReply()
+	tableRunes := utf8.RuneCountInString(table)
+
+	chunks := SplitMessageSmart(text, tableRunes+100)
+
+	// The table must survive in exactly one chunk, uncut.
+	found := 0
+	for _, chunk := range chunks {
+		if strings.Contains(chunk, table) {
+			found++
+		}
+		// No chunk may contain a partial table: if it has table rows, it must
+		// have the header too.
+		if strings.Contains(chunk, "| 07:15") {
+			assert.Contains(t, chunk, "| Время |", "chunk with table rows lacks the header: %q", chunk[:80])
+		}
+	}
+	assert.Equal(t, 1, found, "table must appear whole in exactly one chunk")
+}
+
+func TestSplitMessageSmart_OversizedTableRepeatsHeader(t *testing.T) {
+	_, table := buildIncidentReply()
+	limit := utf8.RuneCountInString(table) / 2
+
+	chunks := SplitMessageSmart(table, limit)
+
+	assert.GreaterOrEqual(t, len(chunks), 2)
+	for i, chunk := range chunks {
+		assert.True(t, strings.HasPrefix(chunk, "| Время | Действие | Комментарий |\n| :--- | :--- | :--- |\n"),
+			"piece %d must start with the table header, got: %q", i, chunk[:60])
+		assert.LessOrEqual(t, utf8.RuneCountInString(chunk), limit, "piece %d exceeds limit", i)
+	}
+}
+
+func TestFindProtectedBlocks_TableInsideCodeFenceNotDoubleCounted(t *testing.T) {
+	text := "Текст.\n\n```\n| a | b |\n| - | - |\n| 1 | 2 |\n```\n\nЕщё текст."
+	blocks := FindProtectedBlocks(text)
+	// Only the code fence is protected; the pipe lines inside it must not
+	// produce a second overlapping table block.
+	assert.Len(t, blocks, 1)
 }

@@ -790,8 +790,9 @@ func appendWithNewline(b *strings.Builder, s string) {
 	b.WriteString(s)
 }
 
-// splitByDelimiter splits text by ###SPLIT### delimiter, respecting code blocks.
-// Delimiters inside code blocks are ignored. Empty parts are filtered out.
+// splitByDelimiter splits text by ###SPLIT### delimiter, respecting protected
+// blocks (code, tables). Delimiters inside them are ignored. Empty parts are
+// filtered out.
 func splitByDelimiter(text string) []string {
 	const delimiter = "###SPLIT###"
 
@@ -799,7 +800,7 @@ func splitByDelimiter(text string) []string {
 		return []string{text}
 	}
 
-	codeBlocks := telegram.FindCodeBlocks(text)
+	codeBlocks := telegram.FindProtectedBlocks(text)
 
 	var splitPositions []int
 	searchStart := 0

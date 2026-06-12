@@ -3,39 +3,45 @@ package telegram
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
-// CodeBlock represents a code block with its start and end positions
+// CodeBlock represents a protected byte range [Start, End) that must not be
+// split (code blocks, tables).
 type CodeBlock struct {
 	Start int
 	End   int
 }
 
-// SplitMessageSmart splits a long message into chunks that are safe for Telegram's message length limit.
-// It preserves markdown structure by avoiding splits inside code blocks and other markdown constructs.
+// splitPoint is a candidate split position tracked in both byte offset (for
+// slicing and protected-block checks) and rune offset (for length budgets),
+// with the priority of splitting there (higher = better).
+type splitPoint struct {
+	byteOff  int
+	runeOff  int
+	priority int
+}
+
+// SplitMessageSmart splits a long message into chunks of at most limit RUNES.
+// It preserves markdown structure: code blocks and tables are never cut at
+// safe-point selection; oversized tables are split between rows with the
+// header repeated in every piece.
 func SplitMessageSmart(text string, limit int) []string {
-	if len(text) <= limit {
+	if utf8.RuneCountInString(text) <= limit {
 		return []string{text}
 	}
 
-	// Find all code blocks (both ``` and single `)
-	codeBlocks := FindCodeBlocks(text)
-
-	// Find safe split points (paragraph breaks, after code blocks, etc.)
-	safeSplitPoints := findSafeSplitPoints(text, codeBlocks)
-
-	// Split the message using safe points
+	blocks := FindProtectedBlocks(text)
+	safeSplitPoints := findSafeSplitPoints(text, blocks)
 	chunks := splitBySafePoints(text, safeSplitPoints, limit)
 
-	// If any chunk is still too long, force split it (but log a warning)
+	// If any chunk is still too long, split it by table/prose segments.
 	finalChunks := make([]string, 0, len(chunks))
 	for _, chunk := range chunks {
-		if len(chunk) <= limit {
+		if utf8.RuneCountInString(chunk) <= limit {
 			finalChunks = append(finalChunks, chunk)
 		} else {
-			// Force split oversized chunks
-			forceSplitChunks := forceSplitChunk(chunk, limit)
-			finalChunks = append(finalChunks, forceSplitChunks...)
+			finalChunks = append(finalChunks, splitOversizedChunk(chunk, limit)...)
 		}
 	}
 
@@ -83,40 +89,106 @@ func FindCodeBlocks(text string) []CodeBlock {
 	return blocks
 }
 
-// findSafeSplitPoints finds positions where it's safe to split the message
-func findSafeSplitPoints(text string, codeBlocks []CodeBlock) []int {
-	var splitPoints []int
+// FindProtectedBlocks returns every byte range that must not be split: code
+// blocks plus markdown tables. Table ranges overlapping a code block are
+// dropped — pipe-prefixed lines inside a fence are already protected.
+func FindProtectedBlocks(text string) []CodeBlock {
+	blocks := FindCodeBlocks(text)
+	return append(blocks, findTableBlocksOutsideCode(text, blocks)...)
+}
+
+// findTableBlocks returns byte ranges of markdown tables: runs of two or more
+// consecutive lines whose trimmed form starts with "|".
+func findTableBlocks(text string) []CodeBlock {
+	var blocks []CodeBlock
 
 	lines := strings.Split(text, "\n")
-	currentPos := 0
+	bytePos := 0
+	runStart := -1
+	runEnd := 0
+	runLines := 0
+
+	flush := func() {
+		if runLines >= 2 {
+			blocks = append(blocks, CodeBlock{Start: runStart, End: runEnd})
+		}
+		runStart = -1
+		runLines = 0
+	}
+
+	for _, line := range lines {
+		lineEnd := bytePos + len(line)
+		if strings.HasPrefix(strings.TrimSpace(line), "|") {
+			if runStart == -1 {
+				runStart = bytePos
+			}
+			runLines++
+			runEnd = lineEnd
+		} else {
+			flush()
+		}
+		bytePos = lineEnd + 1
+	}
+	flush()
+
+	return blocks
+}
+
+// findTableBlocksOutsideCode returns table blocks that do not overlap any of
+// the given code blocks.
+func findTableBlocksOutsideCode(text string, codeBlocks []CodeBlock) []CodeBlock {
+	var out []CodeBlock
+	for _, tb := range findTableBlocks(text) {
+		overlaps := false
+		for _, cb := range codeBlocks {
+			if tb.Start < cb.End && cb.Start < tb.End {
+				overlaps = true
+				break
+			}
+		}
+		if !overlaps {
+			out = append(out, tb)
+		}
+	}
+	return out
+}
+
+// findSafeSplitPoints finds positions where it's safe to split the message
+func findSafeSplitPoints(text string, blocks []CodeBlock) []splitPoint {
+	var splitPoints []splitPoint
+
+	lines := strings.Split(text, "\n")
+	bytePos := 0
+	runePos := 0
 
 	for i, line := range lines {
-		lineEnd := currentPos + len(line)
+		lineEndByte := bytePos + len(line)
+		lineEndRune := runePos + utf8.RuneCountInString(line)
 
 		// Check if we're at the end of a line (potential split point)
 		if i < len(lines)-1 { // Not the last line
-			splitPos := lineEnd
-
-			// Check if this position is safe (not inside a code block)
-			if IsSafeSplitPosition(splitPos, codeBlocks) {
+			// Check if this position is safe (not inside a protected block)
+			if IsSafeSplitPosition(lineEndByte, blocks) {
 				// Prioritize certain types of splits
 				priority := getSplitPriority(line, i, lines)
 				if priority > 0 {
-					splitPoints = append(splitPoints, splitPos)
+					splitPoints = append(splitPoints, splitPoint{byteOff: lineEndByte, runeOff: lineEndRune, priority: priority})
 				}
 			}
 		}
 
 		// Move to next line (including the \n character)
-		currentPos = lineEnd + 1
+		bytePos = lineEndByte + 1
+		runePos = lineEndRune + 1
 	}
 
 	return splitPoints
 }
 
-// IsSafeSplitPosition checks if a position is safe for splitting (not inside code blocks)
-func IsSafeSplitPosition(pos int, codeBlocks []CodeBlock) bool {
-	for _, block := range codeBlocks {
+// IsSafeSplitPosition checks if a byte position is safe for splitting (not
+// inside a protected block)
+func IsSafeSplitPosition(pos int, blocks []CodeBlock) bool {
+	for _, block := range blocks {
 		if pos > block.Start && pos < block.End {
 			return false
 		}
@@ -160,52 +232,137 @@ func getSplitPriority(line string, lineIndex int, allLines []string) int {
 	return 10
 }
 
-// splitBySafePoints splits text using the provided safe split points
-func splitBySafePoints(text string, splitPoints []int, limit int) []string {
+// splitBySafePoints splits text using the provided safe split points; lengths
+// are budgeted in runes, slicing happens at byte offsets. Within each budget
+// window the highest-priority point wins (paragraph break beats an arbitrary
+// line end), with the farthest point winning among equals.
+func splitBySafePoints(text string, splitPoints []splitPoint, limit int) []string {
 	if len(splitPoints) == 0 {
 		return []string{text}
 	}
 
+	totalRunes := utf8.RuneCountInString(text)
+
 	var chunks []string
-	start := 0
-	currentChunkEnd := start
+	start := splitPoint{}
+	next := 0 // index of the first split point after start
 
-	for _, splitPoint := range splitPoints {
-		// Check if we can extend the current chunk to this split point
-		if splitPoint-start <= limit {
-			// Yes, we can extend to this split point
-			currentChunkEnd = splitPoint
-		} else {
-			// No, this would make the chunk too long
-			// Finalize the current chunk at the last good split point
-			if currentChunkEnd > start {
-				chunk := text[start:currentChunkEnd]
-				chunks = append(chunks, strings.TrimSpace(chunk))
-				start = currentChunkEnd + 1 // +1 to skip the newline
+	for start.byteOff < len(text) {
+		// Everything left fits — no further splitting needed.
+		if totalRunes-start.runeOff <= limit {
+			break
+		}
 
-				// Check if we can start a new chunk with this split point
-				if splitPoint-start <= limit {
-					currentChunkEnd = splitPoint
-				} else {
-					// This split point is still too far, we'll handle it in force split
-					currentChunkEnd = start
-				}
-			} else {
-				// No good split point found yet, this chunk will be force split later
-				currentChunkEnd = start
+		// Pick the best point within the budget: highest priority, then farthest.
+		best := -1
+		for j := next; j < len(splitPoints); j++ {
+			if splitPoints[j].runeOff-start.runeOff > limit {
+				break
+			}
+			if best == -1 || splitPoints[j].priority >= splitPoints[best].priority {
+				best = j
 			}
 		}
+		if best == -1 {
+			// No safe point fits the budget. Cut at the next available point
+			// (the oversized chunk is handled by the force-split pass), or
+			// give up and let the tail be force-split.
+			if next < len(splitPoints) {
+				best = next
+			} else {
+				break
+			}
+		}
+
+		if chunk := strings.TrimSpace(text[start.byteOff:splitPoints[best].byteOff]); chunk != "" {
+			chunks = append(chunks, chunk)
+		}
+		// +1 to skip the newline
+		start = splitPoint{byteOff: splitPoints[best].byteOff + 1, runeOff: splitPoints[best].runeOff + 1}
+		next = best + 1
 	}
 
 	// Add the final chunk
-	if start < len(text) {
-		remaining := text[start:]
-		if strings.TrimSpace(remaining) != "" {
-			chunks = append(chunks, strings.TrimSpace(remaining))
+	if start.byteOff < len(text) {
+		if remaining := strings.TrimSpace(text[start.byteOff:]); remaining != "" {
+			chunks = append(chunks, remaining)
 		}
 	}
 
 	return chunks
+}
+
+// splitOversizedChunk splits a chunk that exceeds the rune limit. Markdown
+// tables inside the chunk are split between rows (header repeated); prose
+// segments fall back to forceSplitChunk.
+func splitOversizedChunk(chunk string, limit int) []string {
+	tables := findTableBlocksOutsideCode(chunk, FindCodeBlocks(chunk))
+	if len(tables) == 0 {
+		return forceSplitChunk(chunk, limit)
+	}
+
+	var out []string
+	emit := func(segment string, isTable bool) {
+		segment = strings.TrimSpace(segment)
+		if segment == "" {
+			return
+		}
+		switch {
+		case utf8.RuneCountInString(segment) <= limit:
+			out = append(out, segment)
+		case isTable:
+			out = append(out, splitTableBlock(segment, limit)...)
+		default:
+			out = append(out, forceSplitChunk(segment, limit)...)
+		}
+	}
+
+	pos := 0
+	for _, tb := range tables {
+		emit(chunk[pos:tb.Start], false)
+		emit(chunk[tb.Start:tb.End], true)
+		pos = tb.End
+	}
+	emit(chunk[pos:], false)
+
+	return out
+}
+
+// splitTableBlock splits an oversized markdown table between rows, repeating
+// the header and separator lines in every piece so each piece still parses as
+// a table on its own.
+func splitTableBlock(table string, limit int) []string {
+	lines := strings.Split(table, "\n")
+	if len(lines) < 3 {
+		return forceSplitChunk(table, limit)
+	}
+
+	header := lines[0] + "\n" + lines[1]
+	headerRunes := utf8.RuneCountInString(header)
+
+	var out []string
+	var rows []string
+	curRunes := headerRunes
+
+	flush := func() {
+		if len(rows) > 0 {
+			out = append(out, header+"\n"+strings.Join(rows, "\n"))
+			rows = nil
+			curRunes = headerRunes
+		}
+	}
+
+	for _, row := range lines[2:] {
+		rowRunes := utf8.RuneCountInString(row) + 1 // +1 for the newline
+		if curRunes+rowRunes > limit && len(rows) > 0 {
+			flush()
+		}
+		rows = append(rows, row)
+		curRunes += rowRunes
+	}
+	flush()
+
+	return out
 }
 
 // forceSplitChunk splits a chunk that's too large, even if it breaks markdown
@@ -213,21 +370,21 @@ func forceSplitChunk(chunk string, limit int) []string {
 	// This is a fallback for when we can't split nicely
 	// We'll try to split by sentences first, then by words, then by characters
 
-	if len(chunk) <= limit {
+	runes := []rune(chunk)
+	if len(runes) <= limit {
 		return []string{chunk}
 	}
 
 	var chunks []string
-	remaining := chunk
 
-	for len(remaining) > limit {
+	for len(runes) > limit {
 		// Try to find a good break point within the limit
 		breakPoint := limit
 
 		// Look for sentence endings within the limit
-		for i := limit - 1; i >= limit/2 && i < len(remaining); i-- {
-			char := remaining[i]
-			if char == '.' || char == '!' || char == '?' || char == '\n' {
+		for i := limit - 1; i >= limit/2; i-- {
+			r := runes[i]
+			if r == '.' || r == '!' || r == '?' || r == '\n' {
 				breakPoint = i + 1
 				break
 			}
@@ -235,8 +392,8 @@ func forceSplitChunk(chunk string, limit int) []string {
 
 		// If no sentence ending found, look for word boundaries
 		if breakPoint == limit {
-			for i := limit - 1; i >= limit/2 && i < len(remaining); i-- {
-				if remaining[i] == ' ' {
+			for i := limit - 1; i >= limit/2; i-- {
+				if runes[i] == ' ' {
 					breakPoint = i
 					break
 				}
@@ -244,17 +401,20 @@ func forceSplitChunk(chunk string, limit int) []string {
 		}
 
 		// Extract the chunk
-		chunkText := remaining[:breakPoint]
-		chunks = append(chunks, strings.TrimSpace(chunkText))
+		if piece := strings.TrimSpace(string(runes[:breakPoint])); piece != "" {
+			chunks = append(chunks, piece)
+		}
 
 		// Move to the next part
-		remaining = remaining[breakPoint:]
-		remaining = strings.TrimPrefix(remaining, " ")
+		runes = runes[breakPoint:]
+		for len(runes) > 0 && runes[0] == ' ' {
+			runes = runes[1:]
+		}
 	}
 
 	// Add the remaining text
-	if strings.TrimSpace(remaining) != "" {
-		chunks = append(chunks, strings.TrimSpace(remaining))
+	if remaining := strings.TrimSpace(string(runes)); remaining != "" {
+		chunks = append(chunks, remaining)
 	}
 
 	return chunks
