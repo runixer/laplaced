@@ -165,6 +165,24 @@ flowchart LR
 
 **Retry:** Exponential backoff (500ms, 1s, 2s) при ошибках Telegram API.
 
+### 3.5. Эмодзи-реакция (Reactor agent)
+
+После скачивания файлов и загрузки SharedContext запускается **параллельно**
+основному потоку (fire-and-forget горутина, latency не добавляет):
+
+1. Reactor agent получает: профиль пользователя, последние 6 сообщений,
+   текст сообщения и медиа (голос/фото — multimodal), список разрешённых
+   реакций транспорта (`Capabilities.AvailableReactions`).
+2. Решает, реагировать ли вообще (по умолчанию — нет) и каким эмодзи.
+3. Ответ валидируется против списка транспорта (нормализация U+FE0F,
+   `:шорткодов:`); невалидный → реакция молча пропускается.
+4. `Transport.SetReaction()` ставит реакцию (Telegram: unicode из
+   фиксированного списка Bot API; Mattermost: shortcode).
+
+Конфиг: `agents.reactor` (`enabled`, `model` — наследует `agents.default`).
+Логи агента: `/ui/agents/reactor`; спан `reactor.Execute` с атрибутами
+`reactor.reacted` / `reactor.emoji` / `reactor.parse_error`.
+
 ### 4. Сборка контекста (RAG)
 
 #### Layer 0: Session History

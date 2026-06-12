@@ -724,7 +724,10 @@ reactor:
        achievement, a truly impressive photo or voice message.
     4. Match the tone. Never put a playful reaction on bad news; never react
        ironically to something sincere.
-    5. Pick exactly ONE token, copied VERBATIM from <allowed_reactions>. Any
+    5. If the user profile contains explicit preferences about reactions (which
+       emoji to use, when to react or not), those preferences override these
+       rules.
+    6. Pick exactly ONE token, copied VERBATIM from <allowed_reactions>. Any
        other token is invalid and will be dropped.
     </rules>
 

@@ -40,6 +40,7 @@ internal/
     extractor/           # File metadata extraction (artifacts system)
     laplace/             # Main chat agent with tool calls
     merger/              # Topic merge verification
+    reactor/             # Emoji reaction decisions for user messages
     reranker/            # Topic relevance reranking (with artifacts)
     splitter/            # Topic extraction from conversations
     prompts/             # Shared prompt parameter types
@@ -104,6 +105,7 @@ type Agent interface {
 - **Merger** (`agent/merger/`): Verifies if two topics should be merged
 - **Archivist** (`agent/archivist/`): Extracts and manages user facts from conversations
 - **Extractor** (`agent/extractor/`): Processes artifact files to extract metadata (summary, keywords, entities, rag_hints)
+- **Reactor** (`agent/reactor/`): Decides whether to add an emoji reaction to a user message and picks one from the transport's allowed set; runs in parallel with the main response
 
 **Agent Wiring (in `cmd/bot/main.go`):**
 ```go

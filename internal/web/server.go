@@ -251,6 +251,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 		// Agent log pages
 		mux.HandleFunc("/ui/agents/laplace", instrumentHandler("agent_laplace", s.agentLogHandler("laplace", "Laplace", "robot", "Main chat bot - processes user messages and generates responses")))
+		mux.HandleFunc("/ui/agents/reactor", instrumentHandler("agent_reactor", s.agentLogHandler("reactor", "Reactor", "emoji-smile", "Decides emoji reactions to user messages")))
 		mux.HandleFunc("/ui/agents/reranker", instrumentHandler("agent_reranker", s.agentLogHandler("reranker", "Reranker", "funnel", "Filters and ranks retrieved topics by relevance")))
 		mux.HandleFunc("/ui/agents/archivist", instrumentHandler("agent_archivist", s.agentLogHandler("archivist", "Archivist", "archive", "Extracts facts from conversations for long-term memory")))
 		mux.HandleFunc("/ui/agents/splitter", instrumentHandler("agent_splitter", s.agentLogHandler("splitter", "Splitter", "scissors", "Splits conversations into topics")))
