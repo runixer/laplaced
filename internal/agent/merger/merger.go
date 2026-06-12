@@ -4,9 +4,7 @@ package merger
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -16,7 +14,6 @@ import (
 	"github.com/runixer/laplaced/internal/agent/prompts"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
-	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -95,13 +92,17 @@ func (m *Merger) Execute(ctx context.Context, req *agent.Request) (response *age
 		),
 	)
 	var (
-		shouldMerge bool
-		parseError  bool
+		shouldMerge  bool
+		parseError   bool
+		jsonRepaired bool
+		emptyRetry   bool
 	)
 	defer func() {
 		span.SetAttributes(
 			attribute.Bool("merger.should_merge", shouldMerge),
 			attribute.Bool("merger.parse_error", parseError),
+			attribute.Bool("merger.json_repaired", jsonRepaired),
+			attribute.Bool("merger.empty_retry", emptyRetry),
 		)
 		_ = obs.ObserveErr(span, err)
 		span.End()
@@ -127,32 +128,27 @@ func (m *Merger) Execute(ctx context.Context, req *agent.Request) (response *age
 		return nil, fmt.Errorf("failed to build user prompt: %w", err)
 	}
 
-	// Make LLM call
-	start := time.Now()
-	resp, err := m.executor.Client().CreateChatCompletion(ctx, llm.ChatCompletionRequest{
-		Model: model,
-		Messages: []llm.Message{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: userPrompt},
-		},
-		ResponseFormat: map[string]interface{}{"type": "json_object"},
-		UserID:         string(userID),
+	// Make LLM call via the shared single-shot path (agentlog records,
+	// empty-content retry).
+	llmResp, err := m.executor.ExecuteSingleShot(ctx, agent.SingleShotRequest{
+		AgentType:    agent.TypeMerger,
+		UserID:       userID,
+		Model:        model,
+		SystemPrompt: systemPrompt,
+		UserPrompt:   userPrompt,
+		JSONMode:     true,
 	})
-	duration := time.Since(start)
-
 	if err != nil {
 		return nil, fmt.Errorf("llm call failed: %w", err)
 	}
+	emptyRetry, _ = llmResp.Metadata["empty_retry"].(bool)
 
-	if len(resp.Choices) == 0 {
-		return nil, fmt.Errorf("empty response from LLM")
-	}
+	content := llmResp.Content
 
-	content := resp.Choices[0].Message.Content
-
-	// Parse JSON response
+	// Parse JSON response (lenient: fences/preamble/trailing garbage stripped)
 	var result Result
-	if err = json.Unmarshal([]byte(content), &result); err != nil {
+	jsonRepaired, err = agent.UnmarshalLenient(content, &result)
+	if err != nil {
 		parseError = true
 		return nil, fmt.Errorf("json parse error: %w, content: %s", err, content)
 	}
@@ -161,13 +157,8 @@ func (m *Merger) Execute(ctx context.Context, req *agent.Request) (response *age
 	return &agent.Response{
 		Content:    content,
 		Structured: &result,
-		Duration:   duration,
-		Tokens: agent.TokenUsage{
-			Prompt:     resp.Usage.PromptTokens,
-			Completion: resp.Usage.CompletionTokens,
-			Total:      resp.Usage.TotalTokens,
-			Cost:       resp.Usage.Cost,
-		},
+		Duration:   llmResp.Duration,
+		Tokens:     llmResp.Tokens,
 		Metadata: map[string]any{
 			"should_merge": result.ShouldMerge,
 		},

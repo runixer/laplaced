@@ -6,7 +6,6 @@ package reactor
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -110,14 +109,16 @@ func (r *Reactor) Execute(ctx context.Context, req *agent.Request) (*agent.Respo
 		),
 	)
 	var (
-		emoji      string
-		parseError bool
+		emoji        string
+		parseError   bool
+		jsonRepaired bool
 	)
 	defer func() {
 		span.SetAttributes(
 			attribute.Bool("reactor.reacted", emoji != ""),
 			attribute.String("reactor.emoji", emoji),
 			attribute.Bool("reactor.parse_error", parseError),
+			attribute.Bool("reactor.json_repaired", jsonRepaired),
 		)
 		span.End()
 	}()
@@ -160,7 +161,9 @@ func (r *Reactor) Execute(ctx context.Context, req *agent.Request) (*agent.Respo
 	}
 
 	var result Result
-	if err := json.Unmarshal([]byte(stripJSONFences(resp.Content)), &result); err != nil {
+	repaired, uerr := agent.UnmarshalLenient(resp.Content, &result)
+	jsonRepaired = repaired
+	if uerr != nil {
 		// Malformed decision → skip the reaction, don't fail the turn.
 		parseError = true
 		resp.Structured = &Result{}
@@ -197,19 +200,6 @@ func ValidateEmoji(candidate string, allowed []string) string {
 
 func stripVariationSelectors(s string) string {
 	return strings.ReplaceAll(s, "\ufe0f", "")
-}
-
-// stripJSONFences removes a surrounding markdown code fence from a JSON-mode
-// response (some backends wrap json_object output in ```json ... ```).
-func stripJSONFences(s string) string {
-	s = strings.TrimSpace(s)
-	if !strings.HasPrefix(s, "```") {
-		return s
-	}
-	s = strings.TrimPrefix(s, "```json")
-	s = strings.TrimPrefix(s, "```")
-	s = strings.TrimSuffix(strings.TrimSpace(s), "```")
-	return strings.TrimSpace(s)
 }
 
 // getAllowedReactions extracts the transport's reaction tokens from request params.

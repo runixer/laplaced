@@ -395,3 +395,42 @@ func TestMerger_getContext_WithFallback(t *testing.T) {
 
 	mockStore.AssertExpectations(t)
 }
+
+// TestMerger_GarbagePrefixedJSON reproduces the 2026-06-10 production failure:
+// a single stray byte before the JSON object failed the merge verification.
+func TestMerger_GarbagePrefixedJSON(t *testing.T) {
+	llmResponse := `H{"should_merge": true, "new_summary": "Combined summary of both topics."}`
+
+	mockClient := &testutil.MockLLMClient{}
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(testutil.MockChatResponse(llmResponse), nil)
+
+	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
+	cfg := testutil.TestConfig()
+	cfg.Agents.Merger.Model = "test-model"
+	translator := testutil.TestTranslator(t)
+
+	merger := New(executor, translator, cfg, nil, nil)
+
+	req := &agent.Request{
+		Shared: &agent.SharedContext{
+			UserID:       "123",
+			Profile:      "<user_profile>\n</user_profile>",
+			RecentTopics: "<recent_topics>\n</recent_topics>",
+		},
+		Params: map[string]any{
+			ParamTopic1Summary: "Topic 1",
+			ParamTopic2Summary: "Topic 2",
+		},
+	}
+
+	resp, err := merger.Execute(context.Background(), req)
+	require.NoError(t, err)
+
+	result, ok := resp.Structured.(*Result)
+	require.True(t, ok)
+	assert.True(t, result.ShouldMerge)
+	assert.Equal(t, "Combined summary of both topics.", result.NewSummary)
+
+	mockClient.AssertExpectations(t)
+}

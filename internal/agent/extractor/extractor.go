@@ -134,11 +134,15 @@ func (ex *Extractor) Execute(ctx context.Context, req *agent.Request) (response 
 	var (
 		parseError      bool
 		embeddingFailed bool
+		jsonRepaired    bool
+		emptyRetry      bool
 	)
 	defer func() {
 		span.SetAttributes(
 			attribute.Bool("extractor.parse_error", parseError),
 			attribute.Bool("extractor.embedding_failed", embeddingFailed),
+			attribute.Bool("extractor.json_repaired", jsonRepaired),
+			attribute.Bool("extractor.empty_retry", emptyRetry),
 		)
 		_ = obs.ObserveErr(span, err)
 		span.End()
@@ -203,8 +207,10 @@ func (ex *Extractor) Execute(ctx context.Context, req *agent.Request) (response 
 	}
 
 	// Step 6: Parse extraction result (metadata only)
+	emptyRetry, _ = llmResp.Metadata["empty_retry"].(bool)
 	var extraction ExtractionResult
-	if err = json.Unmarshal([]byte(llmResp.Content), &extraction); err != nil {
+	jsonRepaired, err = agent.UnmarshalLenient(llmResp.Content, &extraction)
+	if err != nil {
 		parseError = true
 		err = fmt.Errorf("failed to parse extraction JSON: %w", err)
 		ex.markFailed(artifact, err.Error())

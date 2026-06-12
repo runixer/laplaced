@@ -391,3 +391,45 @@ func TestSplitter_getContext_WithFallback(t *testing.T) {
 
 	mockStore.AssertExpectations(t)
 }
+
+// TestSplitter_FencedJSON verifies the lenient parse path: a response wrapped
+// in a markdown code fence must still extract topics.
+func TestSplitter_FencedJSON(t *testing.T) {
+	messages := []storage.Message{
+		{ID: 100, Role: "user", Content: "Привет!", CreatedAt: time.Now()},
+		{ID: 101, Role: "assistant", Content: "Привет!", CreatedAt: time.Now()},
+	}
+
+	llmResponse := "```json\n" + `{"topics":[{"summary":"Приветствие","start_msg_id":100,"end_msg_id":101}]}` + "\n```"
+
+	mockClient := &testutil.MockLLMClient{}
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(testutil.MockChatResponse(llmResponse), nil)
+
+	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
+	cfg := testutil.TestConfig()
+	translator := testutil.TestTranslator(t)
+
+	splitter := New(executor, translator, cfg, nil, nil)
+
+	req := &agent.Request{
+		Shared: &agent.SharedContext{
+			UserID:       "123",
+			Profile:      "<user_profile>\n</user_profile>",
+			RecentTopics: "<recent_topics>\n</recent_topics>",
+		},
+		Params: map[string]any{
+			ParamMessages: messages,
+		},
+	}
+
+	resp, err := splitter.Execute(context.Background(), req)
+	require.NoError(t, err)
+
+	result, ok := resp.Structured.(*Result)
+	require.True(t, ok)
+	require.Len(t, result.Topics, 1)
+	assert.Equal(t, "Приветствие", result.Topics[0].Summary)
+
+	mockClient.AssertExpectations(t)
+}

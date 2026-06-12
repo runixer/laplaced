@@ -42,7 +42,8 @@ type SingleShotRequest struct {
 	Messages     []llm.Message // Alternative to SystemPrompt+UserPrompt
 	Temperature  *float64
 	JSONMode     bool
-	JSONSchema   *llm.JSONSchema // Optional: strict JSON schema validation
+	JSONSchema   *llm.JSONSchema      // Optional: strict JSON schema validation
+	Reasoning    *llm.ReasoningConfig // Optional: nil omits the field (provider default)
 }
 
 // ExecuteSingleShot runs a single LLM call with logging.
@@ -58,9 +59,10 @@ func (e *Executor) ExecuteSingleShot(ctx context.Context, req SingleShotRequest)
 	}
 
 	orReq := llm.ChatCompletionRequest{
-		Model:    req.Model,
-		Messages: messages,
-		UserID:   string(req.UserID),
+		Model:     req.Model,
+		Messages:  messages,
+		UserID:    string(req.UserID),
+		Reasoning: req.Reasoning,
 	}
 
 	if req.JSONMode {
@@ -75,6 +77,24 @@ func (e *Executor) ExecuteSingleShot(ctx context.Context, req SingleShotRequest)
 	}
 
 	resp, err := e.client.CreateChatCompletion(ctx, orReq)
+
+	// Gemini quirk: the model sometimes spends the whole budget on internal
+	// thinking and returns no content — with reasoning enabled, or with the
+	// field absent (which means dynamic thinking). Retry once with reasoning
+	// disabled (when it was set) or forced to minimal (when it was absent).
+	emptyRetry := false
+	if err == nil && (len(resp.Choices) == 0 || resp.Choices[0].Message.Content == "") {
+		emptyRetry = true
+		if orReq.Reasoning != nil {
+			orReq.Reasoning = nil
+		} else {
+			orReq.Reasoning = &llm.ReasoningConfig{Effort: "minimal"}
+		}
+		e.logger.Warn("single-shot: empty response, retrying once",
+			"agent_type", req.AgentType, "model", req.Model)
+		resp, err = e.client.CreateChatCompletion(ctx, orReq)
+	}
+
 	duration := time.Since(start)
 
 	if err != nil {
@@ -96,6 +116,9 @@ func (e *Executor) ExecuteSingleShot(ctx context.Context, req SingleShotRequest)
 			Total:      resp.Usage.TotalTokens,
 			Cost:       resp.Usage.Cost,
 		},
+	}
+	if emptyRetry {
+		result.Metadata = map[string]any{"empty_retry": true}
 	}
 
 	e.logSuccess(ctx, req, result, &resp)

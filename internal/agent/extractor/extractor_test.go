@@ -1097,3 +1097,114 @@ func TestExtractor_ProcessResult_Marshal(t *testing.T) {
 	assert.Equal(t, result.Entities, unmarshaled.Entities)
 	assert.Equal(t, result.RAGHints, unmarshaled.RAGHints)
 }
+
+// TestExtractor_Execute_TrailingGarbageJSON reproduces the production failure
+// "invalid character '}' after top-level value": a valid extraction object
+// followed by garbage must still parse.
+func TestExtractor_Execute_TrailingGarbageJSON(t *testing.T) {
+	llmResponse := `{
+		"summary": "A scanned document with a project plan",
+		"keywords": ["plan", "project"],
+		"entities": [],
+		"rag_hints": []
+	}}`
+
+	mockClient := &testutil.MockLLMClient{}
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(testutil.MockChatResponse(llmResponse), nil)
+	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).
+		Return(testutil.MockEmbeddingResponse(), nil)
+
+	mockStorage := &testutil.MockStorage{}
+	mockStorage.On("UpdateArtifact", mock.Anything).Return(nil)
+
+	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
+	cfg := testutil.TestConfig()
+	cfg.Agents.Extractor.MaxFileSizeMB = 10
+	translator := testutil.TestTranslator(t)
+
+	tmpDir := t.TempDir()
+	fileStorage := files.NewFileStorage(tmpDir, testutil.TestLogger())
+
+	testData := []byte("fake image data")
+	testPath := fileStorage.GetFullPath("test/file.jpg")
+	require.NoError(t, os.MkdirAll(fileStorage.GetFullPath("test"), 0755))
+	require.NoError(t, os.WriteFile(testPath, testData, 0644))
+
+	extractor := New(executor, translator, cfg, testutil.TestLogger(), fileStorage, mockClient, mockStorage)
+
+	artifact := testExtractorArtifact("image", int64(len(testData)))
+	req := &agent.Request{
+		Params: map[string]any{
+			ParamArtifact: artifact,
+		},
+	}
+
+	resp, err := extractor.Execute(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	result, ok := resp.Structured.(*ProcessResult)
+	require.True(t, ok)
+	assert.Contains(t, result.Summary, "project plan")
+
+	mockStorage.AssertExpectations(t)
+}
+
+// TestExtractor_Execute_EmptyContentRetried covers the Gemini reasoning quirk
+// that caused ~7% of artifact jobs to fail: an empty first completion must be
+// retried by the executor instead of marking the artifact failed.
+func TestExtractor_Execute_EmptyContentRetried(t *testing.T) {
+	llmResponse := `{
+		"summary": "Recovered on retry",
+		"keywords": ["retry"],
+		"entities": [],
+		"rag_hints": []
+	}`
+
+	mockClient := &testutil.MockLLMClient{}
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(testutil.MockChatResponse(""), nil).Once()
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(testutil.MockChatResponse(llmResponse), nil).Once()
+	mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).
+		Return(testutil.MockEmbeddingResponse(), nil)
+
+	mockStorage := &testutil.MockStorage{}
+	mockStorage.On("UpdateArtifact", mock.MatchedBy(func(a storage.Artifact) bool {
+		return a.State != "failed"
+	})).Return(nil)
+
+	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
+	cfg := testutil.TestConfig()
+	cfg.Agents.Extractor.MaxFileSizeMB = 10
+	translator := testutil.TestTranslator(t)
+
+	tmpDir := t.TempDir()
+	fileStorage := files.NewFileStorage(tmpDir, testutil.TestLogger())
+
+	testData := []byte("fake image data")
+	testPath := fileStorage.GetFullPath("test/file.jpg")
+	require.NoError(t, os.MkdirAll(fileStorage.GetFullPath("test"), 0755))
+	require.NoError(t, os.WriteFile(testPath, testData, 0644))
+
+	extractor := New(executor, translator, cfg, testutil.TestLogger(), fileStorage, mockClient, mockStorage)
+
+	artifact := testExtractorArtifact("image", int64(len(testData)))
+	req := &agent.Request{
+		Params: map[string]any{
+			ParamArtifact: artifact,
+		},
+	}
+
+	resp, err := extractor.Execute(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	result, ok := resp.Structured.(*ProcessResult)
+	require.True(t, ok)
+	assert.Equal(t, "Recovered on retry", result.Summary)
+
+	mockClient.AssertExpectations(t)
+	mockStorage.AssertExpectations(t)
+}

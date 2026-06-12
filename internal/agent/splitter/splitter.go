@@ -108,11 +108,13 @@ func (s *Splitter) Execute(ctx context.Context, req *agent.Request) (response *a
 	var (
 		topicsReturned int
 		parseError     bool
+		jsonRepaired   bool
 	)
 	defer func() {
 		span.SetAttributes(
 			attribute.Int("splitter.topics_returned", topicsReturned),
 			attribute.Bool("splitter.parse_error", parseError),
+			attribute.Bool("splitter.json_repaired", jsonRepaired),
 		)
 		_ = obs.ObserveErr(span, err)
 		span.End()
@@ -169,11 +171,12 @@ func (s *Splitter) Execute(ctx context.Context, req *agent.Request) (response *a
 
 	content := resp.Choices[0].Message.Content
 
-	// Parse JSON response
+	// Parse JSON response (lenient: fences/preamble/trailing garbage stripped)
 	var result struct {
 		Topics []ExtractedTopic `json:"topics"`
 	}
-	if err = json.Unmarshal([]byte(content), &result); err != nil {
+	jsonRepaired, err = agent.UnmarshalLenient(content, &result)
+	if err != nil {
 		parseError = true
 		return nil, fmt.Errorf("json parse error: %w, content: %s", err, content)
 	}

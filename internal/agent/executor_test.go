@@ -433,3 +433,92 @@ func TestExecutor_ExecuteAgentic_NoToolHandler(t *testing.T) {
 	assert.Equal(t, "final response", resp.Content)
 	mockClient.AssertExpectations(t)
 }
+
+// TestExecutor_ExecuteSingleShot_EmptyContentRetry covers the Gemini quirk
+// where the model spends its budget on internal thinking and returns no
+// content: the executor must retry once with reasoning adjusted.
+func TestExecutor_ExecuteSingleShot_EmptyContentRetry(t *testing.T) {
+	t.Run("retry succeeds, reasoning forced to minimal when absent", func(t *testing.T) {
+		mockClient := &testutil.MockLLMClient{}
+		mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
+			return req.Reasoning == nil
+		})).Return(testutil.MockChatResponse(""), nil).Once()
+		mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
+			return req.Reasoning != nil && req.Reasoning.Effort == "minimal"
+		})).Return(testutil.MockChatResponse(`{"ok": true}`), nil).Once()
+
+		executor := NewExecutor(mockClient, nil, testutil.TestLogger())
+		resp, err := executor.ExecuteSingleShot(context.Background(), SingleShotRequest{
+			AgentType:  TypeExtractor,
+			UserID:     "123",
+			Model:      "test-model",
+			UserPrompt: "extract",
+			JSONMode:   true,
+		})
+
+		assert.NoError(t, err)
+		assert.Equal(t, `{"ok": true}`, resp.Content)
+		assert.Equal(t, true, resp.Metadata["empty_retry"])
+		mockClient.AssertExpectations(t)
+	})
+
+	t.Run("retry drops reasoning when it was set", func(t *testing.T) {
+		mockClient := &testutil.MockLLMClient{}
+		mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
+			return req.Reasoning != nil && req.Reasoning.Effort == "high"
+		})).Return(testutil.MockChatResponse(""), nil).Once()
+		mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
+			return req.Reasoning == nil
+		})).Return(testutil.MockChatResponse("done"), nil).Once()
+
+		executor := NewExecutor(mockClient, nil, testutil.TestLogger())
+		resp, err := executor.ExecuteSingleShot(context.Background(), SingleShotRequest{
+			AgentType:  TypeMerger,
+			UserID:     "123",
+			Model:      "test-model",
+			UserPrompt: "merge",
+			Reasoning:  &llm.ReasoningConfig{Effort: "high"},
+		})
+
+		assert.NoError(t, err)
+		assert.Equal(t, "done", resp.Content)
+		assert.Equal(t, true, resp.Metadata["empty_retry"])
+		mockClient.AssertExpectations(t)
+	})
+
+	t.Run("both attempts empty still errors", func(t *testing.T) {
+		mockClient := &testutil.MockLLMClient{}
+		mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+			Return(testutil.MockChatResponse(""), nil).Twice()
+
+		executor := NewExecutor(mockClient, nil, testutil.TestLogger())
+		_, err := executor.ExecuteSingleShot(context.Background(), SingleShotRequest{
+			AgentType:  TypeExtractor,
+			UserID:     "123",
+			Model:      "test-model",
+			UserPrompt: "extract",
+		})
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "empty response")
+		mockClient.AssertExpectations(t)
+	})
+
+	t.Run("no retry on success, no metadata flag", func(t *testing.T) {
+		mockClient := &testutil.MockLLMClient{}
+		mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+			Return(testutil.MockChatResponse("fine"), nil).Once()
+
+		executor := NewExecutor(mockClient, nil, testutil.TestLogger())
+		resp, err := executor.ExecuteSingleShot(context.Background(), SingleShotRequest{
+			AgentType:  TypeEnricher,
+			UserID:     "123",
+			Model:      "test-model",
+			UserPrompt: "hi",
+		})
+
+		assert.NoError(t, err)
+		assert.Nil(t, resp.Metadata["empty_retry"])
+		mockClient.AssertExpectations(t)
+	})
+}
