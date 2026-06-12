@@ -190,7 +190,7 @@ input := fmt.Sprintf("Topic Summary: %s\n\nConversation Log:\n%s",
 )
 ```
 
-**API:** OpenRouter с `google/gemini-embedding-001`
+**API:** LLM API (OpenAI-compatible) с `google/gemini-embedding-001`
 - Размерность: 768
 - Нормализация: L2 normalized
 

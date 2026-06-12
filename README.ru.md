@@ -7,7 +7,7 @@
 
 [English](README.md) | Русский
 
-Умный Telegram-бот для семьи. Работает на Google Gemini через OpenRouter.
+Умный Telegram-бот для семьи. Работает на Google Gemini через любой OpenAI-совместимый LLM API (OpenRouter, litellm, vLLM).
 
 **Что умеет:**
 - Общается через LLM с долгосрочной памятью (RAG)
@@ -24,7 +24,7 @@
 mkdir -p data
 cat > .env << 'EOF'
 LAPLACED_TELEGRAM_TOKEN=токен_бота
-LAPLACED_OPENROUTER_API_KEY=ключ_api
+LAPLACED_LLM_API_KEY=ключ_api
 LAPLACED_ALLOWED_USER_IDS=123456789
 EOF
 
@@ -62,7 +62,7 @@ go run cmd/bot/main.go
 **Обязательные переменные:**
 ```bash
 LAPLACED_TELEGRAM_TOKEN=токен_бота
-LAPLACED_OPENROUTER_API_KEY=ключ_api
+LAPLACED_LLM_API_KEY=ключ_api
 LAPLACED_ALLOWED_USER_IDS=123456789,987654321  # ⚠️ Обязательно! Пустой = отклонять всех
 ```
 

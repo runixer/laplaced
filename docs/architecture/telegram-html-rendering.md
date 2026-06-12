@@ -257,7 +257,7 @@ func (r *TelegramHTMLRenderer) renderHTMLBlock(...) {
 
 ```mermaid
 sequenceDiagram
-    participant LLM as OpenRouter
+    participant LLM as LLM API
     participant Bot as Bot
     participant MD as markdown.ToHTML
     participant TG as Telegram API

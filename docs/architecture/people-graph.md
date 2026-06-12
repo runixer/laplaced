@@ -30,7 +30,7 @@ flowchart TB
 
     subgraph storage["Хранение"]
         PEOPLE["People Table<br/>(profiles + embeddings)"]
-        EMB["Embedding Creation<br/>(OpenRouter API)"]
+        EMB["Embedding Creation<br/>(LLM API)"]
     end
 
     subgraph retrieval["Поиск"]
@@ -60,7 +60,7 @@ sequenceDiagram
     participant Archivist as Archivist Agent
     participant Storage as People Storage
     participant RAG as RAG Service
-    participant LLM as OpenRouter
+    participant LLM as LLM API
 
     User->>Bot: Сообщение с упоминанием человека
     Bot->>Bot: Session archival (async)
@@ -188,7 +188,7 @@ input := fmt.Sprintf("%s %s %s %s",
 )
 ```
 
-**API:** OpenRouter с `google/gemini-embedding-001`
+**API:** LLM API (OpenAI-compatible) с `google/gemini-embedding-001`
 - Размерность: 768
 - Нормализация: L2 normalized
 

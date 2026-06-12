@@ -306,7 +306,7 @@ sequenceDiagram
 ```go
 func NewBot(
     api TelegramAPI,
-    orClient OpenRouterClient,
+    orClient llm.Client,
     messageRepo MessageRepository,
     ragService RAGService,
     // ...

@@ -23,7 +23,7 @@
 mockStore := new(testutil.MockStorage)
 
 // LLM client
-mockOR := new(testutil.MockOpenRouterClient)
+mockOR := new(testutil.MockLLMClient)
 
 // Telegram
 mockAPI := new(testutil.MockBotAPI)
@@ -99,7 +99,7 @@ func TestFunction(t *testing.T) {
 ```go
 func TestWithMocks(t *testing.T) {
     mockStore := new(testutil.MockStorage)
-    mockOR := new(testutil.MockOpenRouterClient)
+    mockOR := new(testutil.MockLLMClient)
 
     // Setup expectations
     mockStore.On("GetFacts", int64(123)).Return(testutil.TestFacts(), nil)

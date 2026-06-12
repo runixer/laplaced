@@ -47,7 +47,7 @@ go run ./cmd/testbot process-session
 
 Testbot uses the same environment variables as the main bot via config file:
 
-- `LAPLACED_OPENROUTER_API_KEY` - OpenRouter API key (required)
+- `LAPLACED_LLM_API_KEY` - LLM API key (required)
 - `LAPLACED_ALLOWED_USER_IDS` - Comma-separated user IDs (default user ID is first in list)
 - `LAPLACED_*` - Any other `LAPLACED_` prefixed variables from the main bot config
 
@@ -385,18 +385,18 @@ internal/app/
 
 ## Troubleshooting
 
-### "LAPLACED_OPENROUTER_API_KEY not set in config/env"
+### "LAPLACED_LLM_API_KEY not set in config/env"
 
 Set the environment variable:
 
 ```bash
-export LAPLACED_OPENROUTER_API_KEY=your-key-here
+export LAPLACED_LLM_API_KEY=your-key-here
 ```
 
 Or add it to your `.env` file:
 
 ```
-LAPLACED_OPENROUTER_API_KEY=your-key-here
+LAPLACED_LLM_API_KEY=your-key-here
 ```
 
 ### "invalid user ID"

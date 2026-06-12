@@ -92,7 +92,7 @@ sequenceDiagram
     participant MG as MessageGrouper
     participant RAG as RAG Service
     participant Reranker as Reranker (Flash)
-    participant LLM as OpenRouter
+    participant LLM as LLM API
 
     TG->>Bot: Update (сообщение)
     Bot->>MG: AddMessage()
