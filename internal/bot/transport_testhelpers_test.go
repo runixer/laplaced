@@ -25,11 +25,13 @@ func (s *stubTransport) SendText(_ context.Context, r OutgoingResponse) (string,
 }
 func (s *stubTransport) SendMedia(context.Context, OutgoingMedia) (string, error) { return "", nil }
 func (s *stubTransport) SendTyping(context.Context, string) error                 { return nil }
-func (s *stubTransport) SetReaction(context.Context, string, string) error        { return nil }
-func (s *stubTransport) Kind() string                                             { return s.kind }
-func (s *stubTransport) Capabilities() Capabilities                               { return Capabilities{} }
-func (s *stubTransport) IsAllowed(id string) bool                                 { return s.allowed[id] }
-func (s *stubTransport) AllowlistConfigured() bool                                { return s.allowlistConfigured }
+func (s *stubTransport) SetReaction(context.Context, string, string, string) error {
+	return nil
+}
+func (s *stubTransport) Kind() string               { return s.kind }
+func (s *stubTransport) Capabilities() Capabilities { return Capabilities{} }
+func (s *stubTransport) IsAllowed(id string) bool   { return s.allowed[id] }
+func (s *stubTransport) AllowlistConfigured() bool  { return s.allowlistConfigured }
 
 // grpIncoming maps a Telegram message to (scopeID, IncomingMessage) for the
 // bot-free message-grouper tests, carrying only the fields the grouper keys on.

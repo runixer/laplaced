@@ -71,7 +71,6 @@ func TestProcessMessageGroup_RecordsRootSpan(t *testing.T) {
 	}
 
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
-	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{
@@ -179,7 +178,6 @@ func runAnomalyTraceCase(t *testing.T, userText, llmContent string) map[attribut
 	}
 
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
-	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{

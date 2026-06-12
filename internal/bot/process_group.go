@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"html"
 	"log/slog"
-	"math/rand/v2"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -237,17 +236,6 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	// even when graceful shutdown is triggered.
 	shutdownSafeCtx := context.WithoutCancel(ctx)
 
-	// React to the message with a certain probability (transports that don't
-	// support reactions no-op).
-	// #nosec G404 -- emoji reactions are a UX flourish, not a security primitive
-	if b.transport.Capabilities().SupportsReactions && rand.Float32() < 0.1 { // 10% chance
-		reactionStart := time.Now()
-		if err := b.transport.SetReaction(shutdownSafeCtx, convID, lastMsg.MessageID); err != nil {
-			logger.Warn("failed to set message reaction", "error", err)
-		}
-		RecordMessageReaction(userID, time.Since(reactionStart).Seconds())
-	}
-
 	typingCtx, cancelTyping := context.WithCancel(shutdownSafeCtx)
 	defer cancelTyping()
 	go b.sendTypingActionLoop(typingCtx, convID)
@@ -317,6 +305,10 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		shared := b.contextService.Load(shutdownSafeCtx, userID)
 		shutdownSafeCtx = agent.WithContext(shutdownSafeCtx, shared)
 	}
+
+	// Emoji reaction, decided by the reactor agent — fire-and-forget in
+	// parallel with the main response flow.
+	b.maybeReact(shutdownSafeCtx, userID, convID, lastMsg.MessageID, rawQuery, currentUserMessageContent, logger)
 
 	// In a channel scope, attribute the message to its sender and record its
 	// thread so background extraction can tell participants apart and the bot's

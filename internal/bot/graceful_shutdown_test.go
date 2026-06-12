@@ -85,7 +85,6 @@ func TestProcessMessageGroup_CompletesOnContextCancel(t *testing.T) {
 
 	// Mock expectations
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
-	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		sendMessageMu.Lock()
 		sendMessageCalled = true
@@ -205,7 +204,6 @@ func TestProcessMessageGroup_LLMContextNotCancelled(t *testing.T) {
 	var llmContextMu sync.Mutex
 
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
-	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{MessageID: 2}, nil)
 
 	expectedHistoryContent := messages[0].BuildContent(translator, "en")
@@ -330,7 +328,6 @@ func TestProcessMessageGroup_VoiceCompletesOnContextCancel(t *testing.T) {
 
 	// Setup remaining mocks
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
-	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		sendMessageMu.Lock()
 		sendMessageCalled = true
@@ -454,7 +451,6 @@ func TestProcessMessageGroup_VoiceDownloadContextNotCancelled(t *testing.T) {
 		Return([]byte("fake_voice_data"), nil)
 
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
-	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{MessageID: 2}, nil)
 
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)

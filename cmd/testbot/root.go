@@ -353,6 +353,7 @@ func setupTestBot(cfg *config.Config, logger *slog.Logger, dbPath string, dbChan
 	}
 	tb.bot.SetAgentLogger(services.AgentLogger)
 	tb.bot.SetLaplaceAgent(services.LaplaceAgent)
+	tb.bot.SetReactorAgent(services.ReactorAgent)
 
 	// Wire image generation for testbot (mirrors cmd/bot/main.go behavior).
 	if tb.cfg.Artifacts.Enabled && tb.cfg.Agents.ImageGenerator.Model != "" {

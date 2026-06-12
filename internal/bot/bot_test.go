@@ -113,9 +113,7 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 	mockStore.On("AddStat", mock.Anything).Return(nil)
 
 	// Mock API calls
-	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
-	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
 	// Mock LLM call
@@ -243,7 +241,6 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 
 	// Mock API calls - FileProcessor uses DownloadFile for all files
 	mockDownloader.On("DownloadFile", mock.Anything, photoFileID).Return([]byte("fake_image_bytes"), nil)
-	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
@@ -377,7 +374,6 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 
 	// Mock API calls - FileProcessor uses DownloadFile for all files
 	mockDownloader.On("DownloadFile", mock.Anything, docFileID).Return([]byte("fake_doc_image_bytes"), nil)
-	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
@@ -512,7 +508,6 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 
 	// Mock API calls - FileProcessor uses DownloadFile for all files
 	mockDownloader.On("DownloadFile", mock.Anything, pdfFileID).Return([]byte("fake_pdf_bytes"), nil)
-	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
@@ -659,7 +654,6 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 
 	// Mock API calls
 	mockDownloader.On("DownloadFile", mock.Anything, docFileID).Return([]byte(docData), nil)
-	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
@@ -788,7 +782,6 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 	mockStore.On("AddStat", mock.Anything).Return(nil)
 
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
-	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
 	var capturedRequest llm.ChatCompletionRequest
@@ -1075,7 +1068,6 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 	// 4. Other mocks
 	mockStore.On("AddStat", mock.Anything).Return(nil)
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
-	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
 
 	// --- Capture the request to the LLM API ---

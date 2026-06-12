@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"math/rand/v2"
 	"slices"
 	"strings"
 	"time"
@@ -26,8 +25,17 @@ const mmMarkdownSafeMargin = 200
 const mmMaxFilesPerPost = 5
 
 // mmReactions are the emoji shortcodes the bot may react with (Mattermost takes
-// names, not unicode). MM analog of availableReactions.
-var mmReactions = []string{"eyes", "thinking_face", "white_check_mark", "+1", "fire", "raised_hands"}
+// names, not unicode). Curated subset of the standard emoji set; MM analog of
+// telegramReactionEmoji. Entries must render on the target server — prune any
+// that 400 there.
+var mmReactions = []string{
+	"+1", "-1", "heart", "fire", "joy", "rofl", "smile", "sweat_smile",
+	"thinking_face", "eyes", "tada", "clap", "scream", "cry", "sob",
+	"pray", "ok_hand", "100", "muscle", "rocket", "white_check_mark",
+	"raised_hands", "smirk", "grimacing", "exploding_head", "handshake",
+	"brain", "coffee", "wave", "point_up", "heart_eyes", "sleeping",
+	"face_palm", "shrug", "trophy", "zap",
+}
 
 // MMTransport adapts the Mattermost/Time client to the neutral Transport
 // interface. Output-only: ingestion runs via startMattermostIngestion.
@@ -60,6 +68,7 @@ func (t *MMTransport) Capabilities() Capabilities {
 		MaxMediaItemsPerGroup: mmMaxFilesPerPost,
 		MaxMediaCaptionLen:    captionLen,
 		EmojiStyle:            "shortcode",
+		AvailableReactions:    mmReactions,
 	}
 }
 
@@ -165,10 +174,9 @@ func (t *MMTransport) SendTyping(ctx context.Context, conversationID string) err
 	return t.client.SendTyping(ctx, conversationID)
 }
 
-// SetReaction adds a random allowed shortcode reaction to the post.
-func (t *MMTransport) SetReaction(ctx context.Context, _ /* conversationID */, messageID string) error {
-	// #nosec G404 -- emoji reactions are a UX flourish, not a security primitive
-	emoji := mmReactions[rand.IntN(len(mmReactions))]
+// SetReaction adds the given shortcode reaction to the post. The emoji must be
+// one of mmReactions.
+func (t *MMTransport) SetReaction(ctx context.Context, _ /* conversationID */, messageID, emoji string) error {
 	return t.client.SetReaction(ctx, messageID, emoji)
 }
 

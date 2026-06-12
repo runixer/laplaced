@@ -4,7 +4,6 @@ import (
 	"context"
 	"html"
 	"log/slog"
-	"math/rand/v2"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +19,21 @@ import (
 // telegramMarkdownSafeLimit is the per-chunk character budget before HTML
 // conversion (safety margin under the 4096 UTF-16 wire limit).
 const telegramMarkdownSafeLimit = 3500
+
+// telegramReactionEmoji is the complete fixed set a bot may use with
+// setMessageReaction (Bot API ReactionTypeEmoji). Forms are API-exact: no
+// U+FE0F variation selectors ("❤" not "❤️"), ZWJ sequences kept as listed.
+// See https://core.telegram.org/bots/api#reactiontypeemoji
+var telegramReactionEmoji = []string{
+	"👍", "👎", "❤", "🔥", "🥰", "👏", "😁", "🤔", "🤯", "😱",
+	"🤬", "😢", "🎉", "🤩", "🤮", "💩", "🙏", "👌", "🕊", "🤡",
+	"🥱", "🥴", "😍", "🐳", "❤‍🔥", "🌚", "🌭", "💯", "🤣", "⚡",
+	"🍌", "🏆", "💔", "🤨", "😐", "🍓", "🍾", "💋", "🖕", "😈",
+	"😴", "😭", "🤓", "👻", "👨‍💻", "👀", "🎃", "🙈", "😇", "😨",
+	"🤝", "✍", "🤗", "🫡", "🎅", "🎄", "☃", "💅", "🤪", "🗿",
+	"🆒", "💘", "🙉", "🦄", "😘", "💊", "🙊", "😎", "👾",
+	"🤷‍♂", "🤷", "🤷‍♀", "😡",
+}
 
 // TelegramTransport adapts the Telegram Bot API to the neutral Transport
 // interface. It wraps the same telegram.BotAPI the bot already holds, so the
@@ -49,6 +63,7 @@ func (t *TelegramTransport) Capabilities() Capabilities {
 		MaxMediaItemsPerGroup: 10, // Telegram album limit
 		MaxMediaCaptionLen:    telegramCaptionLimit,
 		EmojiStyle:            "unicode",
+		AvailableReactions:    telegramReactionEmoji,
 	}
 }
 
@@ -116,8 +131,9 @@ func (t *TelegramTransport) SendTyping(ctx context.Context, conversationID strin
 	})
 }
 
-// SetReaction adds a random allowed emoji reaction to the message.
-func (t *TelegramTransport) SetReaction(ctx context.Context, conversationID, messageID string) error {
+// SetReaction adds the given emoji reaction to the message. The emoji must be
+// one of telegramReactionEmoji (API-exact form).
+func (t *TelegramTransport) SetReaction(ctx context.Context, conversationID, messageID, emoji string) error {
 	chatID, err := strconv.ParseInt(conversationID, 10, 64)
 	if err != nil {
 		return err
@@ -126,8 +142,6 @@ func (t *TelegramTransport) SetReaction(ctx context.Context, conversationID, mes
 	if err != nil {
 		return err
 	}
-	// #nosec G404 -- emoji reactions are a UX flourish, not a security primitive
-	emoji := availableReactions[rand.IntN(len(availableReactions))]
 	return t.api.SetMessageReaction(ctx, telegram.SetMessageReactionRequest{
 		ChatID:    chatID,
 		MessageID: msgID,

@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
+
+	"github.com/runixer/laplaced/internal/agent/prompts"
 )
 
 //go:embed locales/*.yaml
@@ -167,6 +169,34 @@ func TestChannelPromptBranches(t *testing.T) {
 			assert.Contains(t, ch, marker, "%s/%s channel branch missing marker", lang, c.key)
 			assert.NotContains(t, dm, marker, "%s/%s DM branch must not contain channel marker", lang, c.key)
 		}
+	}
+}
+
+// TestReactorPrompts renders the real reactor prompts in both languages with
+// the typed params, asserting the placeholders resolve and nothing is left
+// unrendered.
+func TestReactorPrompts(t *testing.T) {
+	tr, err := NewTranslator("en")
+	require.NoError(t, err)
+
+	for _, lang := range []string{"en", "ru"} {
+		system, err := tr.GetTemplate(lang, "reactor.system_prompt", prompts.ReactorParams{
+			Date:      "2026-06-12",
+			Profile:   "<user_profile>\n</user_profile>",
+			Reactions: "👍 ❤ 🔥",
+		})
+		require.NoError(t, err, "%s: system prompt must render", lang)
+		assert.NotContains(t, system, "{{", "%s: unrendered template directive", lang)
+		assert.Contains(t, system, "👍 ❤ 🔥", "%s: allowed reactions must be injected", lang)
+		assert.Contains(t, system, "2026-06-12", "%s: date must be injected", lang)
+
+		user, err := tr.GetTemplate(lang, "reactor.user_prompt", prompts.ReactorUserParams{
+			History: "- [user]: hello",
+			Message: "great news!",
+		})
+		require.NoError(t, err, "%s: user prompt must render", lang)
+		assert.NotContains(t, user, "{{", "%s: unrendered template directive", lang)
+		assert.Contains(t, user, "great news!", "%s: message must be injected", lang)
 	}
 }
 

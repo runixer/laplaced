@@ -77,7 +77,6 @@ func setupBotForErrorTests(t *testing.T) (*Bot, *testutil.MockStorage, *testutil
 
 	// Setup flexible API mocks (called from background goroutines)
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil).Maybe()
-	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil).Maybe()
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil).Maybe()
 
 	return bot, mockStore, mockORClient, mockAPI
@@ -117,7 +116,6 @@ func TestProcessMessageGroup_UnsupportedFileType_SendsErrorMessage(t *testing.T)
 
 	mockStore.On("GetRecentSessionMessages", userID, mock.Anything, mock.Anything).Return([]storage.Message{}, nil).Maybe()
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil).Maybe()
-	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil).Maybe()
 	mockAPI.On("SendMessage", mock.Anything, mock.MatchedBy(func(req telegram.SendMessageRequest) bool {
 		return req.ChatID == chatID
 	})).Return(&telegram.Message{}, nil)
@@ -150,7 +148,6 @@ func TestProcessMessageGroup_FileTooLarge_SendsErrorMessage(t *testing.T) {
 
 	mockStore.On("GetRecentSessionMessages", userID, mock.Anything, mock.Anything).Return([]storage.Message{}, nil).Maybe()
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil).Maybe()
-	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil).Maybe()
 	mockAPI.On("SendMessage", mock.Anything, mock.MatchedBy(func(req telegram.SendMessageRequest) bool {
 		return req.ChatID == chatID
 	})).Return(&telegram.Message{}, nil)

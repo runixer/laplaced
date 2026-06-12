@@ -105,6 +105,9 @@ memory:
 extractor:
   system_prompt: "Extractor System {{.BotName}} {{.Profile}} {{.RecentTopics}} {{.InnerCircle}}"
   user_prompt: "File: {{.OriginalName}} Type: {{.FileType}} MimeType: {{.MimeType}} Size: {{.FileSize}}{{.UserContext}}"
+reactor:
+  system_prompt: "Reactor System {{.Date}} {{.Profile}} Reactions: {{.Reactions}}"
+  user_prompt: "History: {{.History}}\nMessage: {{.Message}}"
 `
 	err := os.WriteFile(filepath.Join(tmpDir, "en.yaml"), []byte(content), 0600)
 	if err != nil {

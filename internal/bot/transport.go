@@ -85,6 +85,10 @@ type Capabilities struct {
 	MaxMediaCaptionLen    int    // caption budget before overflow becomes follow-up text
 	EmojiStyle            string // "unicode" (Telegram) | "shortcode" (Mattermost)
 	MaxFileSize           int64  // 0 = unset/unlimited (files are Phase 4)
+	// AvailableReactions are the reaction tokens the bot may use on this
+	// transport: unicode emoji for Telegram (the fixed Bot API set), emoji
+	// shortcode names for Mattermost. Empty disables reactions.
+	AvailableReactions []string
 }
 
 // Transport is the output + identity surface a chat backend must implement.
@@ -99,8 +103,10 @@ type Transport interface {
 	SendMedia(ctx context.Context, m OutgoingMedia) (msgID string, err error)
 	// SendTyping shows a best-effort typing indicator in the conversation.
 	SendTyping(ctx context.Context, conversationID string) error
-	// SetReaction adds a reaction to a message (best-effort; no-op if unsupported).
-	SetReaction(ctx context.Context, conversationID, messageID string) error
+	// SetReaction adds an emoji reaction to a message (best-effort; no-op if
+	// unsupported). The emoji must come from Capabilities().AvailableReactions —
+	// transport-native form (unicode for Telegram, shortcode for Mattermost).
+	SetReaction(ctx context.Context, conversationID, messageID, emoji string) error
 	Kind() string
 	Capabilities() Capabilities
 	// IsAllowed reports whether the native sender id is in the static allowlist.

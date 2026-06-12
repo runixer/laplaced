@@ -19,6 +19,7 @@ const (
 	TypeDeduplicator AgentType = "deduplicator"
 	TypeScout        AgentType = "scout"
 	TypeExtractor    AgentType = "extractor"
+	TypeReactor      AgentType = "reactor"
 )
 
 // String implements fmt.Stringer.

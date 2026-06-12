@@ -283,6 +283,22 @@ func (c *ImageGeneratorConfig) GetTimeout() time.Duration {
 	return d
 }
 
+// ReactorAgentConfig configures the emoji-reaction agent. Standalone struct
+// (not inline AgentConfig) so the env tags stay agent-unique.
+type ReactorAgentConfig struct {
+	Name    string `yaml:"name"`
+	Model   string `yaml:"model" env:"LAPLACED_AGENTS_REACTOR_MODEL"`
+	Enabled bool   `yaml:"enabled" env:"LAPLACED_AGENTS_REACTOR_ENABLED"`
+}
+
+// GetModel returns the reactor's model, falling back to default if not set.
+func (r *ReactorAgentConfig) GetModel(defaultModel string) string {
+	if r.Model != "" {
+		return r.Model
+	}
+	return defaultModel
+}
+
 // AgentsConfig defines all agents in the system.
 type AgentsConfig struct {
 	Default        AgentConfig          `yaml:"default"`                            // Default model for all agents
@@ -290,6 +306,7 @@ type AgentsConfig struct {
 	ChatModel      string               `yaml:"-" env:"LAPLACED_AGENTS_CHAT_MODEL"` // Override for chat agent model
 	Archivist      ArchivistAgentConfig `yaml:"archivist"`                          // Extracts facts and people from conversations
 	Enricher       AgentConfig          `yaml:"enricher"`                           // Expands search queries
+	Reactor        ReactorAgentConfig   `yaml:"reactor"`                            // Decides emoji reactions to user messages
 	Reranker       RerankerAgentConfig  `yaml:"reranker"`                           // Filters and ranks RAG candidates
 	Splitter       AgentConfig          `yaml:"splitter"`                           // Splits large topics
 	Merger         AgentConfig          `yaml:"merger"`                             // Merges similar topics

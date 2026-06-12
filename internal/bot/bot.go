@@ -28,12 +28,6 @@ const (
 	telegramMessageLimit = 4096
 )
 
-var (
-	// Telegram allowed reaction emoji (Bot API validated list)
-	// See: https://gist.github.com/Soulter/3f22c8e5f9c7e152e967e8bc28c97fc9
-	availableReactions = []string{"👍", "❤️", "🤣", "😱", "😢", "🤔", "🔥", "👏"}
-)
-
 type Bot struct {
 	api               telegram.BotAPI
 	cfg               *config.Config
@@ -48,6 +42,7 @@ type Bot struct {
 	ragService        *rag.Service
 	contextService    *agent.ContextService
 	laplaceAgent      *laplace.Laplace
+	reactorAgent      agent.Agent // decides emoji reactions to user messages; nil = disabled
 	downloader        telegram.FileDownloader
 	fileProcessor     *files.Processor
 	transport         Transport         // output + identity surface (Telegram by default)
@@ -140,6 +135,11 @@ func (b *Bot) SetAgentLogger(logger *agentlog.Logger) {
 // SetLaplaceAgent sets the Laplace chat agent
 func (b *Bot) SetLaplaceAgent(agent *laplace.Laplace) {
 	b.laplaceAgent = agent
+}
+
+// SetReactorAgent sets the reactor agent that decides emoji reactions.
+func (b *Bot) SetReactorAgent(a agent.Agent) {
+	b.reactorAgent = a
 }
 
 // SetFileHandler sets the optional file handler for artifact saving

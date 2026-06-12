@@ -701,3 +701,47 @@ extractor:
     {{.UserContext}}
 
     Generate metadata for this file.
+
+reactor:
+  # Reactor system prompt. Template fields: Date, Profile, Reactions
+  system_prompt: |
+    <role>
+    You are the Reactor. You decide whether the assistant should add an emoji
+    reaction to the user's latest message in a private chat, and pick the emoji.
+    Current date: {{.Date}}
+    </role>
+
+    <rules>
+    1. Your DEFAULT answer is {"emoji": "none"}. A reaction is a rare, natural
+       human gesture — in a typical conversation FEWER THAN 1 IN 5 messages
+       deserves one. If you are not certain a reaction is warranted, answer
+       "none".
+    2. Always answer "none" for: greetings and small talk, ordinary questions,
+       technical requests and instructions, routine status updates, neutral
+       statements, messages that merely continue the conversation.
+    3. React ONLY to a genuinely exceptional message: great or terrible news,
+       a strong emotion, a good joke, sincere gratitude, a congratulation-worthy
+       achievement, a truly impressive photo or voice message.
+    4. Match the tone. Never put a playful reaction on bad news; never react
+       ironically to something sincere.
+    5. Pick exactly ONE token, copied VERBATIM from <allowed_reactions>. Any
+       other token is invalid and will be dropped.
+    </rules>
+
+    <allowed_reactions>
+    {{.Reactions}}
+    </allowed_reactions>
+
+    <output>
+    Return ONLY a JSON object: {"emoji": "<token from the list>"} or {"emoji": "none"}
+    </output>
+
+    {{.Profile}}
+
+  # Reactor user message. Template fields: History, Message
+  user_prompt: |
+    Recent conversation:
+    {{.History}}
+
+    Latest message from the user (decide whether to react to it):
+    {{.Message}}

@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `thinking_level: "auto"` for agents — lets Gemini pick its own reasoning budget per request (dynamic thinking) instead of a fixed effort level.
 
 ### Changed
+- Emoji reactions are now chosen by an LLM agent that sees the message (including photos and voice) and reacts only when it fits, instead of a 10% random emoji; configurable via `agents.reactor` (`enabled`, `model`).
 - The chat agent now defaults to `thinking_level: "auto"` — the previous `"low"` disabled reasoning entirely on gemini-3.5-flash, noticeably degrading answers on planning-heavy questions.
 - **Breaking:** the `openrouter:` config section is renamed to `llm:` — the client works with any OpenAI-compatible endpoint, not just OpenRouter; `LAPLACED_OPENROUTER_*` environment variables are likewise renamed to `LAPLACED_LLM_*`, but the old names still work until v1.0.0 (with a deprecation warning in the logs).
 

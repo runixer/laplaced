@@ -351,6 +351,7 @@ func run() int {
 	}
 	b.SetAgentLogger(services.AgentLogger)
 	b.SetLaplaceAgent(services.LaplaceAgent)
+	b.SetReactorAgent(services.ReactorAgent)
 
 	// Set file handler on bot's file processor if enabled
 	if fileHandler != nil {

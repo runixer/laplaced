@@ -11,6 +11,7 @@ import (
 	"github.com/runixer/laplaced/internal/agent/extractor"
 	"github.com/runixer/laplaced/internal/agent/laplace"
 	"github.com/runixer/laplaced/internal/agent/merger"
+	"github.com/runixer/laplaced/internal/agent/reactor"
 	"github.com/runixer/laplaced/internal/agent/reranker"
 	"github.com/runixer/laplaced/internal/agent/splitter"
 	"github.com/runixer/laplaced/internal/agentlog"
@@ -29,6 +30,7 @@ import (
 type Services struct {
 	// All agents
 	EnricherAgent  *enricher.Enricher
+	ReactorAgent   *reactor.Reactor
 	SplitterAgent  *splitter.Splitter
 	MergerAgent    *merger.Merger
 	ArchivistAgent *archivist.Archivist
@@ -128,6 +130,7 @@ func SetupServices(
 
 	// Create agents
 	services.EnricherAgent = enricher.New(services.AgentExecutor, translator, cfg)
+	services.ReactorAgent = reactor.New(services.AgentExecutor, translator, cfg)
 	services.SplitterAgent = splitter.New(services.AgentExecutor, translator, cfg, store, store)
 	services.MergerAgent = merger.New(services.AgentExecutor, translator, cfg, store, store)
 	services.ArchivistAgent = archivist.New(services.AgentExecutor, translator, cfg, logger, services.AgentLogger)
@@ -137,6 +140,7 @@ func SetupServices(
 	// Register agents in registry for discovery
 	agentRegistry := agent.NewRegistry()
 	agentRegistry.Register(services.EnricherAgent)
+	agentRegistry.Register(services.ReactorAgent)
 	agentRegistry.Register(services.SplitterAgent)
 	agentRegistry.Register(services.MergerAgent)
 	agentRegistry.Register(services.ArchivistAgent)

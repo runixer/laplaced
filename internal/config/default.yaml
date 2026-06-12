@@ -102,6 +102,12 @@ agents:
     name: "Enricher"
     # model: uses default
 
+  # Reactor - reacts to user messages with an emoji when natural
+  reactor:
+    name: "Reactor"
+    enabled: true
+    # model: uses default
+
   # Reranker - filters and ranks RAG candidates
   reranker:
     name: "Reranker"

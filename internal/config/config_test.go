@@ -83,6 +83,25 @@ func TestLoadDefault(t *testing.T) {
 	assert.Equal(t, "info", cfg.Log.Level)
 }
 
+func TestLoadDefault_ReactorAgent(t *testing.T) {
+	cfg, err := LoadDefault()
+	assert.NoError(t, err)
+	assert.True(t, cfg.Agents.Reactor.Enabled, "reactor should be enabled by default")
+	assert.Empty(t, cfg.Agents.Reactor.Model, "reactor model should inherit agents.default")
+	assert.Equal(t, "default-model", cfg.Agents.Reactor.GetModel("default-model"))
+}
+
+func TestLoad_ReactorEnvOverrides(t *testing.T) {
+	t.Setenv("LAPLACED_AGENTS_REACTOR_ENABLED", "false")
+	t.Setenv("LAPLACED_AGENTS_REACTOR_MODEL", "test/reactor-model")
+
+	cfg, err := LoadDefault()
+	assert.NoError(t, err)
+	assert.False(t, cfg.Agents.Reactor.Enabled)
+	assert.Equal(t, "test/reactor-model", cfg.Agents.Reactor.Model)
+	assert.Equal(t, "test/reactor-model", cfg.Agents.Reactor.GetModel("default-model"))
+}
+
 func TestLoad_WithEnvVars(t *testing.T) {
 	// Set environment variable for the test
 	t.Setenv("TEST_TOKEN", "secret-from-env")

@@ -33,6 +33,20 @@ type SplitterParams struct {
 	IsChannel    bool   // Channel scope: topics summarise multi-participant discussion (Phase 6)
 }
 
+// ReactorParams for reactor.system_prompt template.
+// The Reactor agent decides whether to add an emoji reaction to a user message.
+type ReactorParams struct {
+	Date      string // Current date
+	Profile   string // Formatted <user_profile> block
+	Reactions string // Allowed reaction tokens, space-joined
+}
+
+// ReactorUserParams for reactor.user_prompt template.
+type ReactorUserParams struct {
+	History string // Recent conversation history
+	Message string // The message group text the bot may react to
+}
+
 // MergerParams for rag.topic_consolidation_system_prompt template.
 // The Merger agent determines whether consecutive topics should be merged.
 type MergerParams struct {

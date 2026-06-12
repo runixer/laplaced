@@ -41,6 +41,7 @@ const (
 	AgentEnricher  AgentType = "enricher"
 	AgentArchivist AgentType = "archivist"
 	AgentScout     AgentType = "scout"
+	AgentReactor   AgentType = "reactor"
 )
 
 // Entry represents a log entry for an agent call.

@@ -99,7 +99,6 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 	mockStore.On("AddStat", mock.Anything).Return(nil)
 
 	// Mock API calls
-	mockAPI.On("SetMessageReaction", mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	// Track all messages sent to Telegram
 	var sentMessages []string
