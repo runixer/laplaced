@@ -128,6 +128,41 @@ database:
 	assert.Equal(t, "https://test.com/webhook", cfg.Telegram.WebhookURL) // Ensure other values are still correct
 }
 
+func TestLoad_DeprecatedOpenRouterEnvVars(t *testing.T) {
+	t.Run("legacy vars apply when current ones are unset", func(t *testing.T) {
+		t.Setenv("LAPLACED_OPENROUTER_API_KEY", "legacy-key")
+		t.Setenv("LAPLACED_OPENROUTER_BASE_URL", "https://gateway.example/v1")
+		t.Setenv("LAPLACED_OPENROUTER_PROXY_URL", "socks5://proxy.example:1080")
+		t.Setenv("LAPLACED_OPENROUTER_IMAGE_INPUT_FORMAT", "openai")
+		t.Setenv("LAPLACED_OPENROUTER_PROVIDER_ORDER", "Google, Google AI Studio")
+
+		cfg, err := Load("")
+		assert.NoError(t, err)
+		assert.Equal(t, "legacy-key", cfg.LLM.APIKey)
+		assert.Equal(t, "https://gateway.example/v1", cfg.LLM.BaseURL)
+		assert.Equal(t, "socks5://proxy.example:1080", cfg.LLM.ProxyURL)
+		assert.Equal(t, "openai", cfg.LLM.ImageInputFormat)
+		assert.Equal(t, []string{"Google", "Google AI Studio"}, cfg.LLM.Provider.Order)
+	})
+
+	t.Run("current vars win over legacy ones", func(t *testing.T) {
+		t.Setenv("LAPLACED_OPENROUTER_API_KEY", "legacy-key")
+		t.Setenv("LAPLACED_LLM_API_KEY", "current-key")
+
+		cfg, err := Load("")
+		assert.NoError(t, err)
+		assert.Equal(t, "current-key", cfg.LLM.APIKey)
+	})
+
+	t.Run("empty legacy var is ignored", func(t *testing.T) {
+		t.Setenv("LAPLACED_OPENROUTER_BASE_URL", "")
+
+		cfg, err := Load("")
+		assert.NoError(t, err)
+		assert.Equal(t, "https://openrouter.ai/api/v1", cfg.LLM.BaseURL)
+	})
+}
+
 func TestLoad_MergesWithDefaults(t *testing.T) {
 	// Create a minimal config that only overrides a few fields
 	content := `telegram:

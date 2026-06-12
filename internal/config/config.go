@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/ilyakaznacheev/cleanenv"
@@ -715,12 +716,47 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
+	// Apply deprecated LAPLACED_OPENROUTER_* env vars before cleanenv so the
+	// current LAPLACED_LLM_* names (applied next) take precedence when both
+	// are set.
+	applyDeprecatedLLMEnvVars(&cfg)
+
 	// Override with environment variables using cleanenv
 	if err := cleanenv.ReadEnv(&cfg); err != nil {
 		return nil, err
 	}
 
 	return &cfg, nil
+}
+
+// applyDeprecatedLLMEnvVars maps the pre-rename LAPLACED_OPENROUTER_* env vars
+// onto the LLM config so existing deployments keep working across the
+// openrouter->llm config rename. Each hit logs a deprecation warning; the
+// current LAPLACED_LLM_* names always win because cleanenv applies them after
+// this fallback. Scheduled for removal in v1.0.0.
+func applyDeprecatedLLMEnvVars(cfg *Config) {
+	apply := func(oldName, newName string, set func(string)) {
+		v, ok := os.LookupEnv(oldName)
+		if !ok || v == "" {
+			return
+		}
+		set(v)
+		slog.Warn("deprecated environment variable, support will be removed in v1.0.0", "deprecated", oldName, "use", newName)
+	}
+	apply("LAPLACED_OPENROUTER_API_KEY", "LAPLACED_LLM_API_KEY", func(v string) { cfg.LLM.APIKey = v })
+	apply("LAPLACED_OPENROUTER_BASE_URL", "LAPLACED_LLM_BASE_URL", func(v string) { cfg.LLM.BaseURL = v })
+	apply("LAPLACED_OPENROUTER_IMAGE_INPUT_FORMAT", "LAPLACED_LLM_IMAGE_INPUT_FORMAT", func(v string) { cfg.LLM.ImageInputFormat = v })
+	apply("LAPLACED_OPENROUTER_PROXY_URL", "LAPLACED_LLM_PROXY_URL", func(v string) { cfg.LLM.ProxyURL = v })
+	apply("LAPLACED_OPENROUTER_PROVIDER_ORDER", "LAPLACED_LLM_PROVIDER_ORDER", func(v string) {
+		parts := strings.Split(v, ",")
+		order := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if p = strings.TrimSpace(p); p != "" {
+				order = append(order, p)
+			}
+		}
+		cfg.LLM.Provider.Order = order
+	})
 }
 
 // LoadDefault loads the embedded default configuration.
