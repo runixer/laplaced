@@ -221,6 +221,22 @@ var (
 		},
 		[]string{"user_id"},
 	)
+
+	// responseFlagsTotal counts user-flagged bad replies (a reaction on a bot
+	// message), by emoji. Each increment corresponds to a stored response_flags
+	// row carrying the flagged reply's trace_id.
+	// Labels:
+	//   - user_id: user identifier
+	//   - emoji: the reaction emoji
+	responseFlagsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metricsNamespace,
+			Subsystem: "bot",
+			Name:      "response_flags_total",
+			Help:      "Total number of user-flagged bad replies, by emoji",
+		},
+		[]string{"user_id", "emoji"},
+	)
 )
 
 const (
@@ -257,6 +273,11 @@ func DecActiveSessions() {
 }
 
 // RecordMessageProcessing records message processing metrics.
+// RecordResponseFlag records one user-flagged bad reply.
+func RecordResponseFlag(userID storage.ScopeID, emoji string) {
+	responseFlagsTotal.WithLabelValues(formatUserID(userID), emoji).Inc()
+}
+
 func RecordMessageProcessing(userID storage.ScopeID, durationSeconds float64, success bool) {
 	uid := formatUserID(userID)
 	messageProcessingDuration.WithLabelValues(uid).Observe(durationSeconds)

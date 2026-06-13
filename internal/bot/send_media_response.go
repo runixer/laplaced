@@ -100,7 +100,8 @@ func (b *Bot) sendResponseWithGeneratedImages(
 	// 6. Send any remaining text as follow-up messages (no reply-to: the media
 	// already anchored to the user's message).
 	if strings.TrimSpace(followUp) != "" {
-		calls += b.sendRendered(ctx, convID, threadRoot, "", followUp, logger)
+		n, _ := b.sendRendered(ctx, convID, threadRoot, "", followUp, logger)
+		calls += n
 	}
 
 	return time.Since(tgStart), calls
@@ -119,7 +120,7 @@ func (b *Bot) sendTextOnlyFallback(
 		logger.Error("failed to add assistant message to history", "error", err)
 	}
 	tgStart := time.Now()
-	sent := b.sendRendered(ctx, convID, threadRoot, replyTo, responseText, logger)
+	sent, _ := b.sendRendered(ctx, convID, threadRoot, replyTo, responseText, logger)
 	return time.Since(tgStart), sent
 }
 

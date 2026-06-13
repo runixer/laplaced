@@ -574,6 +574,25 @@ func (b *Bot) incomingFromTelegram(msg *telegram.Message) IncomingMessage {
 	return im
 }
 
+// incomingReactionFromTelegram maps a Telegram message_reaction update into the
+// neutral reaction envelope. Telegram is DM-scoped (IsDirect=true), so the
+// reacting user's id resolves to the same scope as their messages.
+func incomingReactionFromTelegram(r *telegram.MessageReactionUpdated) IncomingReaction {
+	ir := IncomingReaction{
+		MessageID: strconv.Itoa(r.MessageID),
+		OldEmojis: reactionEmojis(r.OldReaction),
+		NewEmojis: reactionEmojis(r.NewReaction),
+		IsDirect:  true,
+	}
+	if r.Chat != nil {
+		ir.ConversationID = strconv.FormatInt(r.Chat.ID, 10)
+	}
+	if r.User != nil {
+		ir.SenderID = strconv.FormatInt(r.User.ID, 10)
+	}
+	return ir
+}
+
 // threadRootFromTelegram stringifies a forum MessageThreadID, mapping 0 to ""
 // (top-level) so the round-trip through OutgoingResponse.ThreadRoot is exact.
 func threadRootFromTelegram(threadID int) string {

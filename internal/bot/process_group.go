@@ -407,7 +407,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		UseStreaming:        sink != nil,
 		OnIntermediateMessage: func(text string) {
 			tgStart := time.Now()
-			sent := b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", text, logger)
+			sent, _ := b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", text, logger)
 			totalTelegramDuration += time.Since(tgStart)
 			telegramCallCount += sent
 		},
@@ -435,7 +435,8 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		if sink != nil {
 			sink.Finalize(finalizeArgs{UserID: userID, HadError: true, ErrorText: errText}, b.streamFinalizeCallback(shutdownSafeCtx, tgChatID, tgThreadID, logger))
 		} else {
-			telegramCallCount += b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", errText, logger)
+			n, _ := b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", errText, logger)
+			telegramCallCount += n
 		}
 		totalTelegramDuration += time.Since(tgStart)
 		return
@@ -457,7 +458,8 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		if sink != nil {
 			sink.Finalize(finalizeArgs{UserID: userID, HadError: true, ErrorText: errText}, b.streamFinalizeCallback(shutdownSafeCtx, tgChatID, tgThreadID, logger))
 		} else {
-			telegramCallCount += b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", errText, logger)
+			n, _ := b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", errText, logger)
+			telegramCallCount += n
 		}
 		totalTelegramDuration += time.Since(tgStart)
 
@@ -568,16 +570,21 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		return
 	}
 
-	// Save assistant response to history. ConversationID is attributed; the bot's
-	// own post id is not captured here (it requires the post-send id, unavailable
-	// before the send/streaming-finalize step), so MessageID stays NULL. In a
-	// channel, thread_root marks the thread the bot spoke in so a later reply
-	// there is recognised as addressed to it (thread-reply gating). DM: NULL.
+	// Save assistant response to history. trace_id links this reply to the trace
+	// that produced it, so an inbound reaction on the reply (matched by transport
+	// message id, back-filled below once the send returns it) resolves straight to
+	// its trace. ConversationID is attributed; in a channel, thread_root marks the
+	// thread the bot spoke in for thread-reply gating (DM: NULL).
+	var replyTraceID *string
+	if sc := span.SpanContext(); sc.HasTraceID() {
+		replyTraceID = strPtrOrNil(sc.TraceID().String())
+	}
 	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{
 		Role:           "assistant",
 		Content:        resp.Content,
 		ConversationID: strPtrOrNil(convID),
 		ThreadRoot:     chanThreadRoot,
+		TraceID:        replyTraceID,
 	}); err != nil {
 		logger.Error("failed to add assistant message to history", "error", err)
 	}
@@ -591,6 +598,10 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 			b.streamFinalizeCallback(shutdownSafeCtx, tgChatID, tgThreadID, logger),
 		)
 		RecordMessageTelegramEditCount(userID, edits)
+		// Link the streamed bubble (what the user reacts to) to the stored reply.
+		if mid := sink.MessageID(); mid != 0 {
+			b.linkReplyTrace(userID, strconv.Itoa(mid), logger)
+		}
 		// Capture the final reply on the root span (under content toggle).
 		// chunks=1+len(extra) — one bubble edit plus any follow-up messages.
 		obs.RecordContent(span, "bot.reply_sent", resp.Content,
@@ -608,9 +619,11 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	// Non-streaming path: render to wire format and send via the transport,
 	// replying to the triggering message on the first chunk.
 	tgStart := time.Now()
-	sent := b.sendRendered(shutdownSafeCtx, convID, threadRoot, lastMsg.MessageID, resp.Content, logger)
+	sent, firstMsgID := b.sendRendered(shutdownSafeCtx, convID, threadRoot, lastMsg.MessageID, resp.Content, logger)
 	totalTelegramDuration += time.Since(tgStart)
 	telegramCallCount += sent
+	// Link the first chunk (what the user reacts to) to the stored reply.
+	b.linkReplyTrace(userID, firstMsgID, logger)
 
 	// Capture the final reply on the root span — what the user actually saw
 	// after sanitize/markdown/chunking.
@@ -899,13 +912,16 @@ func fixListNumbering(parts []string) []string {
 // sendRendered renders canonical markdown to wire-format chunks and sends each
 // through the active transport, replying to replyTo on the first chunk and
 // keeping every chunk in threadRoot. On a send failure it emits a single
-// generic-error message and stops. Returns the count of chunks sent.
-func (b *Bot) sendRendered(ctx context.Context, convID, threadRoot, replyTo, text string, logger *slog.Logger) int {
+// generic-error message and stops. Returns the count of chunks sent and the
+// transport-native id of the first chunk (the message a user would react to;
+// "" if nothing was sent).
+func (b *Bot) sendRendered(ctx context.Context, convID, threadRoot, replyTo, text string, logger *slog.Logger) (int, string) {
 	chunks, err := b.renderer.Render(ctx, text)
 	if err != nil {
 		logger.Error("failed to render response", "error", err)
 	}
 	sent := 0
+	firstMsgID := ""
 	for i, chunk := range chunks {
 		if strings.TrimSpace(chunk) == "" {
 			logger.Warn("skipping empty response chunk", "chunk_index", i)
@@ -915,14 +931,31 @@ func (b *Bot) sendRendered(ctx context.Context, convID, threadRoot, replyTo, tex
 		if i == 0 {
 			resp.ReplyTo = replyTo
 		}
-		if _, serr := b.transport.SendText(ctx, resp); serr != nil {
+		msgID, serr := b.transport.SendText(ctx, resp)
+		if serr != nil {
 			logger.Error("failed to send message", "error", serr, "chunk_index", i)
 			b.sendGenericError(ctx, convID, threadRoot, logger)
-			return sent
+			return sent, firstMsgID
+		}
+		if sent == 0 {
+			firstMsgID = msgID
 		}
 		sent++
 	}
-	return sent
+	return sent, firstMsgID
+}
+
+// linkReplyTrace back-fills the transport-native message id on the just-stored
+// assistant reply, making it resolvable from an inbound reaction (which then
+// recovers the reply's trace_id, if tracing was on). Best-effort: a failure only
+// means that one reply can't be flagged, never blocks it.
+func (b *Bot) linkReplyTrace(userID storage.ScopeID, transportMsgID string, logger *slog.Logger) {
+	if transportMsgID == "" {
+		return
+	}
+	if err := b.msgRepo.SetReplyTransportID(userID, transportMsgID); err != nil {
+		logger.Warn("failed to link reply to transport message id", "error", err)
+	}
 }
 
 // sendGenericError sends the localized generic-error message, best-effort.

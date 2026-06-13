@@ -194,15 +194,59 @@ var checkMessagesCmd = &cobra.Command{
 	},
 }
 
+var checkFlagsCmd = &cobra.Command{
+	Use:   "check-flags",
+	Short: "Check user-flagged bad replies",
+	Long: `Display response flags for the user — replies a user marked bad by reacting.
+Each flag carries the trace_id of the reply, so an investigation can start
+straight from the trace (see the root-cause skill).`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		format := mustGetString(cmd, "format")
+		isJSON := format == "json"
+
+		tb := getTestBot(cmd)
+		if tb == nil {
+			return outputCheckError("testbot not initialized", isJSON)
+		}
+
+		flags, err := tb.store.GetFlags(getUserID(cmd), 100)
+		if err != nil {
+			return outputCheckError(fmt.Sprintf("failed to get flags: %v", err), isJSON)
+		}
+
+		if isJSON {
+			return outputCheckJSON(map[string]interface{}{
+				"type":  "flags",
+				"count": len(flags),
+				"data":  flags,
+			})
+		}
+
+		userID := getUserID(cmd)
+		fmt.Printf("Flags for user %s: %d\n", userID, len(flags))
+		for i, f := range flags {
+			trace := ""
+			if f.TraceID != nil {
+				trace = *f.TraceID
+			}
+			fmt.Printf("%2d. [%s] %s msg=%s trace=%s\n    %s\n",
+				i+1, f.CreatedAt.Format("2006-01-02 15:04"), f.Emoji, f.MessageID, trace, f.ReplyPreview)
+		}
+		return nil
+	},
+}
+
 func init() {
 	// Add shared format flag to all check commands
 	checkFactsCmd.Flags().StringP("format", "f", "text", "Output format: text, json")
 	checkTopicsCmd.Flags().StringP("format", "f", "text", "Output format: text, json")
 	checkPeopleCmd.Flags().StringP("format", "f", "text", "Output format: text, json")
 	checkMessagesCmd.Flags().StringP("format", "f", "text", "Output format: text, json")
+	checkFlagsCmd.Flags().StringP("format", "f", "text", "Output format: text, json")
 
 	rootCmd.AddCommand(checkFactsCmd)
 	rootCmd.AddCommand(checkTopicsCmd)
 	rootCmd.AddCommand(checkPeopleCmd)
 	rootCmd.AddCommand(checkMessagesCmd)
+	rootCmd.AddCommand(checkFlagsCmd)
 }

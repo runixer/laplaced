@@ -69,7 +69,10 @@ type streamSink struct {
 	logger       *slog.Logger
 	now          func() time.Time
 
-	mu          sync.Mutex
+	mu sync.Mutex
+	// msgID is the transport id of the placeholder bubble that gets edited in
+	// place — the message a user sees and reacts to. 0 until the placeholder
+	// is sent (or if that send failed). Read after Finalize via MessageID().
 	msgID       int
 	mode        streamSinkMode
 	buf         strings.Builder
@@ -395,6 +398,16 @@ func (s *streamSink) editLocked(text, parseMode string) {
 		// network). The next throttle window will retry with the latest buf.
 		s.logger.Warn("streamSink edit failed", "error", err, "chat_id", s.chatID, "message_id", s.msgID)
 	}
+}
+
+// MessageID returns the transport id of the streamed bubble (the placeholder
+// edited in place), or 0 if no placeholder was sent. Safe to call after
+// Finalize. This is the message a user reacts to, so it's the id we link to the
+// reply's trace for the bad-response-flag feature.
+func (s *streamSink) MessageID() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.msgID
 }
 
 // finalizeArgs carries the inputs to Finalize. Kept as a struct because the

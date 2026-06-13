@@ -28,6 +28,20 @@ type IncomingMessage struct {
 	Forward             *ForwardInfo // Telegram-only forwarded-sender info; nil otherwise
 }
 
+// IncomingReaction is the transport-neutral envelope for a reaction a user added
+// to (or removed from) a message. Only Telegram populates it today (ProcessUpdate
+// → incomingReactionFromTelegram); a future Mattermost WS loop can converge on
+// HandleReaction. OldEmojis/NewEmojis are the reaction sets before/after the
+// change, so a handler can tell additions from removals.
+type IncomingReaction struct {
+	ConversationID string   // transport-native chat/channel id
+	SenderID       string   // the reacting user's transport-native id
+	MessageID      string   // transport-native id of the reacted message
+	OldEmojis      []string // emoji set before the change
+	NewEmojis      []string // emoji set after the change
+	IsDirect       bool     // DM scope
+}
+
 // ForwardInfo carries the structured sender of a forwarded message for the
 // People social graph. Telegram-only in v0.10 (Mattermost has no forward
 // origin with user identity); nil for non-forwarded messages.

@@ -11,11 +11,55 @@ func (s *Store) AddMessageToHistory(userID ScopeID, message Message) error {
 	}
 	// author/message_id/conversation_id (migration 012) and thread_root (013) are
 	// nullable transport attribution; they stay NULL when the caller leaves them
-	// unset (DM/Telegram path).
-	query := "INSERT INTO history (user_id, role, content, topic_id, created_at, author, message_id, conversation_id, thread_root) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+	// unset (DM/Telegram path). trace_id (migration 016) is set on assistant
+	// replies so an inbound reaction can resolve the reply to its trace.
+	query := "INSERT INTO history (user_id, role, content, topic_id, created_at, author, message_id, conversation_id, thread_root, trace_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 	_, err := s.exec(query, userID, message.Role, message.Content, message.TopicID, s.dialect.BindTime(message.CreatedAt),
-		message.Author, message.MessageID, message.ConversationID, message.ThreadRoot)
+		message.Author, message.MessageID, message.ConversationID, message.ThreadRoot, message.TraceID)
 	return err
+}
+
+// SetReplyTransportID back-fills the transport-native message id on the assistant
+// reply just stored for a turn, after it has been sent (the id isn't known at
+// insert time). It targets the user's most recent assistant row that is still
+// unlinked (message_id IS NULL) — which, because message-group turns are
+// serialized per user, is exactly the reply we just inserted. Needs no row-id
+// read and no trace_id, so it works whether or not tracing is enabled.
+// user_id-scoped (Critical Data Invariant). No-op if there is no unlinked reply.
+func (s *Store) SetReplyTransportID(userID ScopeID, transportMsgID string) error {
+	query := `UPDATE history SET message_id = ?
+		WHERE user_id = ? AND id = (
+			SELECT MAX(id) FROM history
+			WHERE user_id = ? AND role = 'assistant' AND message_id IS NULL
+		)`
+	_, err := s.exec(query, transportMsgID, userID, userID)
+	return err
+}
+
+// GetReplyByTransportID returns the assistant reply for a given transport-native
+// message id, or (nil, nil) if there is no match for this user. Used by the
+// inbound-reaction handler to resolve a reacted message to its trace; a miss
+// means the reaction was on a non-bot / unindexed message and is ignored.
+func (s *Store) GetReplyByTransportID(userID ScopeID, transportMsgID string) (*Message, error) {
+	query := `SELECT id, content, trace_id FROM history
+		WHERE user_id = ? AND message_id = ? AND role = 'assistant'
+		ORDER BY id DESC LIMIT 1`
+	rows, err := s.query(query, userID, transportMsgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		return nil, rows.Err()
+	}
+	var msg Message
+	msg.UserID = userID
+	msg.Role = "assistant"
+	if err := rows.Scan(&msg.ID, &msg.Content, &msg.TraceID); err != nil {
+		return nil, err
+	}
+	return &msg, nil
 }
 
 func (s *Store) ImportMessage(userID ScopeID, message Message) error {

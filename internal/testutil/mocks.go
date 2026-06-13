@@ -191,6 +191,42 @@ func (m *MockStorage) GetRecentSessionMessages(ctx context.Context, userID stora
 	return args.Get(0).([]storage.Message), args.Error(1)
 }
 
+func (m *MockStorage) SetReplyTransportID(userID storage.ScopeID, transportMsgID string) error {
+	// Back-fill on the response-send path (bad-response-flag feature) — most tests
+	// don't care, so auto-install a permissive default. Tests that DO care can
+	// override; testify matches specific-args expectations first.
+	if _, loaded := setReplyTransportIDDefaultInstalled.LoadOrStore(m, struct{}{}); !loaded {
+		m.On("SetReplyTransportID", mock.Anything, mock.Anything).Return(nil).Maybe()
+	}
+	args := m.Called(userID, transportMsgID)
+	return args.Error(0)
+}
+
+var setReplyTransportIDDefaultInstalled sync.Map // *MockStorage -> struct{}
+
+func (m *MockStorage) GetReplyByTransportID(userID storage.ScopeID, transportMsgID string) (*storage.Message, error) {
+	args := m.Called(userID, transportMsgID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*storage.Message), args.Error(1)
+}
+
+// FlagRepository methods
+
+func (m *MockStorage) AddFlag(flag storage.Flag) error {
+	args := m.Called(flag)
+	return args.Error(0)
+}
+
+func (m *MockStorage) GetFlags(userID storage.ScopeID, limit int) ([]storage.Flag, error) {
+	args := m.Called(userID, limit)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.Flag), args.Error(1)
+}
+
 // UserRepository methods
 
 func (m *MockStorage) UpsertUser(user storage.User) error {
@@ -875,6 +911,8 @@ func SetupDefaultMocks(s *MockStorage) {
 	s.On("GetRecentHistory", mock.Anything, mock.Anything).Return([]storage.Message{}, nil).Maybe()
 	s.On("GetRecentSessionMessages", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]storage.Message{}, nil).Maybe()
 	s.On("GetSessionArtifacts", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]storage.Artifact{}, nil).Maybe()
+	// Reply back-fill on the response-send path (bad-response-flag feature).
+	s.On("SetReplyTransportID", mock.Anything, mock.Anything).Return(nil).Maybe()
 	// v0.7.0 re-embed defaults are auto-installed by MockStorage itself on first call.
 }
 

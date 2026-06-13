@@ -183,6 +183,54 @@ func TestMigration009_EmbeddingVersion(t *testing.T) {
 	}
 }
 
+// TestMigration016_ResponseFlags verifies the trace_id column on history and the
+// response_flags table exist after the full migration chain, and that the
+// column-guard makes a manual replay idempotent.
+func TestMigration016_ResponseFlags(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	runner := NewRunner(db, testLogger())
+	if err := runner.Run(); err != nil {
+		t.Fatalf("Run() failed: %v", err)
+	}
+
+	var col int
+	if err := db.QueryRow(
+		"SELECT COUNT(*) FROM pragma_table_info('history') WHERE name='trace_id'",
+	).Scan(&col); err != nil {
+		t.Fatalf("pragma_table_info(history): %v", err)
+	}
+	if col != 1 {
+		t.Errorf("history: expected trace_id column, got %d", col)
+	}
+
+	var tbl int
+	if err := db.QueryRow(
+		"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='response_flags'",
+	).Scan(&tbl); err != nil {
+		t.Fatalf("sqlite_master: %v", err)
+	}
+	if tbl != 1 {
+		t.Errorf("expected response_flags table, got %d", tbl)
+	}
+
+	// Idempotency: a manual replay must not fail (column/table guards).
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateResponseFlags(tx); err != nil {
+		t.Fatalf("second run of migrateResponseFlags: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestMigration010_Scopes verifies the transitional scopes table in isolation.
 // Migration 014 supersedes it (drops + normalizes), so we exercise migrateScopes
 // directly rather than via the full chain.

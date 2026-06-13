@@ -12,8 +12,21 @@ type APIResponse struct {
 
 // Update represents an incoming update.
 type Update struct {
-	UpdateID int      `json:"update_id"`
-	Message  *Message `json:"message,omitempty"`
+	UpdateID        int                     `json:"update_id"`
+	Message         *Message                `json:"message,omitempty"`
+	MessageReaction *MessageReactionUpdated `json:"message_reaction,omitempty"`
+}
+
+// MessageReactionUpdated represents a change of a reaction on a message
+// performed by a user. Delivered only when "message_reaction" is in the
+// getUpdates allowed_updates list; never for reactions set by bots.
+type MessageReactionUpdated struct {
+	Chat        *Chat          `json:"chat"`
+	MessageID   int            `json:"message_id"`
+	User        *User          `json:"user,omitempty"`
+	Date        int            `json:"date"`
+	OldReaction []ReactionType `json:"old_reaction"`
+	NewReaction []ReactionType `json:"new_reaction"`
 }
 
 // Message represents a message.

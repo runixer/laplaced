@@ -22,6 +22,8 @@ import (
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 const (
@@ -38,6 +40,7 @@ type Bot struct {
 	factHistoryRepo   storage.FactHistoryRepository
 	peopleRepo        storage.PeopleRepository   // v0.5.1: People management
 	artifactRepo      storage.ArtifactRepository // v0.6.0: Link artifacts to messages
+	flagRepo          storage.FlagRepository     // user-flagged bad replies; nil = disabled
 	orClient          llm.Client
 	ragService        *rag.Service
 	contextService    *agent.ContextService
@@ -140,6 +143,12 @@ func (b *Bot) SetLaplaceAgent(agent *laplace.Laplace) {
 // SetReactorAgent sets the reactor agent that decides emoji reactions.
 func (b *Bot) SetReactorAgent(a agent.Agent) {
 	b.reactorAgent = a
+}
+
+// SetFlagRepo wires the repository for user-flagged bad replies. When unset,
+// inbound reactions are still received but no flag is recorded.
+func (b *Bot) SetFlagRepo(repo storage.FlagRepository) {
+	b.flagRepo = repo
 }
 
 // SetFileHandler sets the optional file handler for artifact saving
@@ -279,6 +288,10 @@ func (b *Bot) ProcessUpdateAsync(ctx context.Context, update *telegram.Update, s
 }
 
 func (b *Bot) ProcessUpdate(ctx context.Context, update *telegram.Update, source string) {
+	if update.MessageReaction != nil {
+		b.HandleReaction(incomingReactionFromTelegram(update.MessageReaction))
+		return
+	}
 	if update.Message == nil {
 		return
 	}
@@ -320,6 +333,128 @@ func (b *Bot) ProcessUpdate(ctx context.Context, update *telegram.Update, source
 	if msg.Text != "" || msg.Caption != "" || msg.Photo != nil || msg.Document != nil || msg.Voice != nil || msg.Audio != nil || msg.VideoNote != nil {
 		b.HandleIncoming(b.incomingFromTelegram(msg))
 	}
+}
+
+// reactionFlagPreviewLen bounds the reply snippet stored on a flag.
+const reactionFlagPreviewLen = 200
+
+// HandleReaction records a flag when an authorized user reacts to one of the
+// bot's replies. Telegram delivers message_reaction for any message in a DM
+// (verified), so we filter to bot replies by resolving the reacted message id
+// to a stored assistant reply; a miss (the user's own / a pre-feature message)
+// is silently ignored. Only newly-added reactions flag — removals are ignored,
+// matching the "any reaction = flag, no un-flag" product decision.
+func (b *Bot) HandleReaction(ir IncomingReaction) {
+	b.ensureTransport()
+
+	if b.flagRepo == nil {
+		return // feature not wired
+	}
+	added := addedReactions(ir.OldEmojis, ir.NewEmojis)
+	if len(added) == 0 {
+		return // pure removal, or no emoji reactions — ignore
+	}
+	if !b.transport.IsAllowed(ir.SenderID) {
+		return
+	}
+
+	ctx := context.Background()
+	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/bot").Start(ctx, "bot.handleReaction")
+	defer span.End()
+
+	scopeID, err := resolveScopeID(ctx, b.scopeRepo, b.principalResolver, b.transport.Kind(), IncomingMessage{
+		ConversationID: ir.ConversationID,
+		SenderID:       ir.SenderID,
+		IsDirect:       ir.IsDirect,
+	})
+	if err != nil {
+		b.logger.Warn("reaction: failed to resolve scope", "error", err, "sender_id", ir.SenderID)
+		return
+	}
+
+	reply, err := b.msgRepo.GetReplyByTransportID(scopeID, ir.MessageID)
+	if err != nil {
+		b.logger.Warn("reaction: failed to look up reply", "error", err, "message_id", ir.MessageID)
+		return
+	}
+	if reply == nil {
+		// Reaction on a non-bot or un-indexed message (e.g. the user's own
+		// message, or a reply that predates this feature) — nothing to flag.
+		return
+	}
+
+	preview := reply.Content
+	if len(preview) > reactionFlagPreviewLen {
+		preview = preview[:reactionFlagPreviewLen]
+	}
+	historyID := reply.ID
+	span.SetAttributes(
+		attribute.String("reaction.message_id", ir.MessageID),
+		attribute.Int("reaction.added_count", len(added)),
+		attribute.StringSlice("reaction.emoji", added),
+	)
+	if reply.TraceID != nil {
+		span.SetAttributes(attribute.String("reaction.reply_trace_id", *reply.TraceID))
+	}
+
+	for _, emoji := range added {
+		if err := b.flagRepo.AddFlag(storage.Flag{
+			UserID:       scopeID,
+			HistoryID:    &historyID,
+			MessageID:    ir.MessageID,
+			TraceID:      reply.TraceID,
+			Emoji:        emoji,
+			ReplyPreview: preview,
+		}); err != nil {
+			b.logger.Warn("reaction: failed to store flag", "error", err, "emoji", emoji)
+			continue
+		}
+		RecordResponseFlag(scopeID, emoji)
+		b.logger.Info("response flagged",
+			"scope_id", scopeID,
+			"message_id", ir.MessageID,
+			"emoji", emoji,
+			"reply_trace_id", traceIDValue(reply.TraceID),
+		)
+	}
+}
+
+// addedReactions returns the emoji present in newEmojis but not in oldEmojis —
+// i.e. reactions the user just added. Removals are intentionally dropped.
+func addedReactions(oldEmojis, newEmojis []string) []string {
+	if len(newEmojis) == 0 {
+		return nil
+	}
+	prev := make(map[string]struct{}, len(oldEmojis))
+	for _, e := range oldEmojis {
+		prev[e] = struct{}{}
+	}
+	var added []string
+	for _, e := range newEmojis {
+		if _, seen := prev[e]; !seen {
+			added = append(added, e)
+		}
+	}
+	return added
+}
+
+func traceIDValue(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+// reactionEmojis extracts the emoji tokens from a list of reaction types,
+// skipping non-emoji (e.g. custom_emoji) entries.
+func reactionEmojis(rs []telegram.ReactionType) []string {
+	out := make([]string, 0, len(rs))
+	for _, r := range rs {
+		if r.Type == "emoji" && r.Emoji != "" {
+			out = append(out, r.Emoji)
+		}
+	}
+	return out
 }
 
 // ensureTransport lazily installs the default Telegram transport+renderer when

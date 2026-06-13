@@ -49,6 +49,20 @@ type MessageRepository interface {
 	UpdateMessagesTopicInRange(ctx context.Context, userID ScopeID, startMsgID, endMsgID, topicID int64) error
 	GetUnprocessedMessages(userID ScopeID) ([]Message, error)
 	GetRecentSessionMessages(ctx context.Context, userID ScopeID, limit int, excludeIDs []int64) ([]Message, error)
+	// SetReplyTransportID back-fills the transport-native message id on the user's
+	// most recent unlinked assistant reply, after that reply is sent.
+	SetReplyTransportID(userID ScopeID, transportMsgID string) error
+	// GetReplyByTransportID resolves an assistant reply by its transport-native
+	// message id (nil, nil on miss). Used by the inbound-reaction handler.
+	GetReplyByTransportID(userID ScopeID, transportMsgID string) (*Message, error)
+}
+
+// FlagRepository handles user-flagged bad replies (migration 016). A flag is
+// recorded when a user reacts to a bot reply; it carries the reply's trace_id so
+// the operator can investigate straight from the trace.
+type FlagRepository interface {
+	AddFlag(flag Flag) error
+	GetFlags(userID ScopeID, limit int) ([]Flag, error)
 }
 
 // UserRepository handles user data operations.

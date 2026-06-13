@@ -343,6 +343,103 @@ func TestGetRecentSessionMessages(t *testing.T) {
 	})
 }
 
+func strPtr(s string) *string { return &s }
+
+func TestReplyTransportIDLinkage(t *testing.T) {
+	store, cleanup := setupTestDB(t)
+	defer cleanup()
+	_ = store.Init()
+
+	userID := ScopeID("123")
+	traceID := "0102030405060708090a0b0c0d0e0f10"
+
+	// Store an assistant reply carrying its trace_id, then back-fill the
+	// transport-native message id (keyed by trace) once the reply has "been sent".
+	err := store.AddMessageToHistory(userID, Message{Role: "assistant", Content: "the reply", TraceID: &traceID})
+	assert.NoError(t, err)
+	recent, _ := store.GetRecentHistory(userID, 1)
+	historyID := recent[0].ID
+	assert.NoError(t, store.SetReplyTransportID(userID, "4473"))
+
+	t.Run("resolves reply by transport id with trace + content", func(t *testing.T) {
+		got, err := store.GetReplyByTransportID(userID, "4473")
+		assert.NoError(t, err)
+		if assert.NotNil(t, got) {
+			assert.Equal(t, historyID, got.ID)
+			assert.Equal(t, "the reply", got.Content)
+			if assert.NotNil(t, got.TraceID) {
+				assert.Equal(t, traceID, *got.TraceID)
+			}
+		}
+	})
+
+	t.Run("miss returns nil, nil", func(t *testing.T) {
+		got, err := store.GetReplyByTransportID(userID, "999999")
+		assert.NoError(t, err)
+		assert.Nil(t, got)
+	})
+
+	t.Run("only matches assistant rows", func(t *testing.T) {
+		// A user message sharing a transport id must not be resolved as a reply.
+		_ = store.AddMessageToHistory(userID, Message{Role: "user", Content: "user msg", MessageID: strPtr("5000")})
+		got, err := store.GetReplyByTransportID(userID, "5000")
+		assert.NoError(t, err)
+		assert.Nil(t, got, "user-role rows are not replies")
+	})
+
+	t.Run("user isolation - cannot resolve or back-fill another user's reply", func(t *testing.T) {
+		otherID := ScopeID("456")
+		// otherID cannot resolve user 123's reply.
+		got, err := store.GetReplyByTransportID(otherID, "4473")
+		assert.NoError(t, err)
+		assert.Nil(t, got)
+
+		// otherID has no assistant rows, so its back-fill is a no-op (user-scoped
+		// subquery finds nothing) — user 123's mapping stays intact.
+		assert.NoError(t, store.SetReplyTransportID(otherID, "hacked"))
+		reGot, _ := store.GetReplyByTransportID(userID, "4473")
+		assert.NotNil(t, reGot, "original mapping must be intact after spoofed update")
+	})
+}
+
+func TestSetReplyTransportID_LinksLatestUnlinked(t *testing.T) {
+	store, cleanup := setupTestDB(t)
+	defer cleanup()
+	_ = store.Init()
+
+	userID := ScopeID("123")
+
+	// Two replies sent in sequence (turns are serialized per user): each links to
+	// the reply just stored, and an already-linked reply is never clobbered.
+	_ = store.AddMessageToHistory(userID, Message{Role: "assistant", Content: "reply one"})
+	assert.NoError(t, store.SetReplyTransportID(userID, "100"))
+	_ = store.AddMessageToHistory(userID, Message{Role: "assistant", Content: "reply two"})
+	assert.NoError(t, store.SetReplyTransportID(userID, "200"))
+
+	one, _ := store.GetReplyByTransportID(userID, "100")
+	if assert.NotNil(t, one) {
+		assert.Equal(t, "reply one", one.Content)
+	}
+	two, _ := store.GetReplyByTransportID(userID, "200")
+	if assert.NotNil(t, two) {
+		assert.Equal(t, "reply two", two.Content)
+	}
+
+	// No unlinked assistant rows remain → a further call is a harmless no-op and
+	// does not overwrite an already-linked reply.
+	assert.NoError(t, store.SetReplyTransportID(userID, "999"))
+	assert.Nil(t, mustReply(t, store, userID, "999"))
+	stillTwo, _ := store.GetReplyByTransportID(userID, "200")
+	assert.NotNil(t, stillTwo, "already-linked reply must keep its message_id")
+}
+
+func mustReply(t *testing.T, store *Store, userID ScopeID, msgID string) *Message {
+	t.Helper()
+	m, err := store.GetReplyByTransportID(userID, msgID)
+	assert.NoError(t, err)
+	return m
+}
+
 // TestMessageUserIsolation tests that users cannot access or modify other users' messages.
 // This is CRITICAL because message IDs are GLOBAL auto-increment, not per-user.
 func TestMessageUserIsolation(t *testing.T) {

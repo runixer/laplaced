@@ -361,6 +361,9 @@ func run() int {
 	// Set artifact repository for linking artifacts to messages (v0.6.0)
 	b.SetArtifactRepo(store)
 
+	// Wire the flag repository so inbound reactions on bot replies are recorded.
+	b.SetFlagRepo(store)
+
 	// Wire image generation (v0.8.0) — requires artifacts subsystem. Enabled for
 	// every transport (Telegram and Mattermost/Time): the media-reply path is
 	// transport-neutral (Bot.transport.SendMedia). Gated only on artifacts + a
@@ -505,7 +508,7 @@ func run() int {
 					updates, err := b.API().GetUpdates(ctx, telegram.GetUpdatesRequest{
 						Offset:         offset,
 						Timeout:        25, // Use 25s to avoid http client timeout (30s)
-						AllowedUpdates: []string{"message", "edited_message", "callback_query"},
+						AllowedUpdates: []string{"message", "edited_message", "callback_query", "message_reaction"},
 					})
 					if err != nil {
 						// Only log and retry if context is not cancelled (shutdown)

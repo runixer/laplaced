@@ -37,6 +37,11 @@ type Message struct {
 	// column is kept as thread-membership metadata for thread-scoped context.
 	// NULL in DMs.
 	ThreadRoot *string
+
+	// TraceID is the trace that produced this row (migration 016). Set on
+	// assistant replies so an inbound reaction on the reply resolves to its
+	// trace. NULL on user rows and on replies stored before migration 016.
+	TraceID *string
 }
 
 type User struct {
@@ -304,6 +309,7 @@ type Storage interface {
 	AgentLogRepository
 	PeopleRepository
 	ArtifactRepository
+	FlagRepository
 }
 
 // Store is the dialect-aware storage backend. A single codebase serves both
