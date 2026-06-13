@@ -91,6 +91,16 @@ func (l *Laplace) BuildMessages(
 		}
 	}
 
+	// When memory artifacts ride alongside the live attachment, tag the current
+	// media with a 📷 marker so the model can't confuse a same-named "photo.jpg"
+	// pulled from memory (📄) with what the user just sent. Skipped when no
+	// artifacts are loaded — there is no ambiguity then, so the common
+	// single-attachment prompt is left byte-for-byte unchanged.
+	currentParts := currentMessageParts
+	if len(artifactParts) > 0 && len(currentMessageParts) > 0 {
+		currentParts = l.markCurrentMedia(currentMessageParts)
+	}
+
 	// Add Recent History (active session). The current (last user) message carries
 	// the multimodal current-message parts plus any loaded artifact parts.
 	currentMessageAdded := false
@@ -98,9 +108,9 @@ func (l *Laplace) BuildMessages(
 		var contentParts []interface{}
 
 		isLastMessage := i == len(contextData.RecentHistory)-1
-		if isLastMessage && hMsg.Role == "user" && (len(currentMessageParts) > 0 || len(artifactParts) > 0) {
-			if len(currentMessageParts) > 0 {
-				contentParts = append(contentParts, currentMessageParts...)
+		if isLastMessage && hMsg.Role == "user" && (len(currentParts) > 0 || len(artifactParts) > 0) {
+			if len(currentParts) > 0 {
+				contentParts = append(contentParts, currentParts...)
 			} else {
 				contentParts = append(contentParts, llm.TextPart{Type: "text", Text: hMsg.Content})
 			}
@@ -117,13 +127,33 @@ func (l *Laplace) BuildMessages(
 	// Fallback: if the current message wasn't added via history (edge case, e.g.
 	// empty/assistant-tailed history), add it — with artifacts — as a trailing
 	// user message so loaded files still sit adjacent to the turn.
-	if !currentMessageAdded && (len(currentMessageParts) > 0 || len(artifactParts) > 0) {
-		parts := append([]interface{}{}, currentMessageParts...)
+	if !currentMessageAdded && (len(currentParts) > 0 || len(artifactParts) > 0) {
+		parts := append([]interface{}{}, currentParts...)
 		parts = append(parts, artifactParts...)
 		orMessages = append(orMessages, llm.Message{Role: "user", Content: parts})
 	}
 
 	return orMessages
+}
+
+// markCurrentMedia prepends a positional 📷 marker before each media part of the
+// current message. Paired with the 📄 memory-artifact marker, it lets the model
+// tell a live attachment apart from a recalled one when both are present and may
+// share a generic name like "photo.jpg". Media-type agnostic (image/voice/pdf/
+// video). Caller only invokes this when memory artifacts are also loaded.
+func (l *Laplace) markCurrentMedia(parts []interface{}) []interface{} {
+	marker := l.translator.Get(l.cfg.Bot.Language, "bot.current_media_marker")
+	if marker == "" {
+		return parts
+	}
+	out := make([]interface{}, 0, len(parts)+1)
+	for _, p := range parts {
+		if _, ok := p.(llm.FilePart); ok {
+			out = append(out, llm.TextPart{Type: "text", Text: marker})
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // platformName maps the configured transport to the human-readable platform

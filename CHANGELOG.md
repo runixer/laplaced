@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- When you send a photo or file and the bot also recalls a similar one from memory, it no longer mixes the remembered file's details into its reply about the one you just sent.
+
 ## [0.10.1] - 2026-06-12
 
 ### Added

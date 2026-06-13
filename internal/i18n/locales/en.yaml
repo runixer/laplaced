@@ -11,6 +11,7 @@ bot:
     P.S. Sometimes I might not answer immediately (up to a minute). I'm not frozen, just thinking hard to give you the most useful answer! 🤔
   api_error: "Sorry, I can't answer right now. Please try asking something else a bit later."
   empty_response: "Seems I got lost in thought and couldn't come up with anything. Ask about something else?"
+  current_media_marker: "📷 Attachment from the CURRENT message (the user sent it just now — this is what to act on / analyze)."
   generic_error: "Oops, something went wrong. I couldn't send the answer. Please try repeating your request a bit later."
   access_denied: "Sorry, you don't have access to this bot."
   file_unsupported_format: "Sorry, I can't process .{ext} files. Supported formats: images (PNG, JPEG, WEBP, HEIC, HEIF), PDF, video, audio, and text files."
@@ -100,11 +101,11 @@ bot:
     </tools_protocol>
 
     <artifact_protocol>
-    FILES (<artifact_context>):
-    - If files from your memory are included in context — you MUST mention them in your response.
-    - Format: quote at the start as > 📄 **[filename]:** [what it contains / what you found]
-    - For multiple files — list each one separately.
-    - DON'T write "[filename]" if it's a technical ID — use the readable name from the type tag.
+    FILES:
+    - Attachments in the CURRENT message (marked 📷) are what the user is asking about right now. Edits, settings, descriptions, and analysis of "this photo/file" refer to THESE.
+    - Files from memory (marked 📄 memory artifact, and in <artifact_context>) are material from past conversations. If the user is ASKING about a past file and did NOT attach their own file now — that file IS the subject: analyze it fully and you MUST cite it at the start as > 📄 **[filename]:** [what it contains / what you found].
+    - But if the user DOES have their own 📷 attachment in the current message — memory files are only REFERENCE: lean on them only if they genuinely help, do NOT carry their details (objects, clothing, people, colors) over onto the current attachment, and do not build the answer around them.
+    - For multiple memory files — list each separately. DON'T write "[filename]" if it's a technical ID — use the readable name from the type tag.
     </artifact_protocol>
 
     <output_format>
