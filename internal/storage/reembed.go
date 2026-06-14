@@ -95,10 +95,13 @@ func (s *Store) UpdateFactEmbeddingVersion(id int64, emb []float32, version stri
 
 // --- People ---
 
-// GetPeopleNeedingReembed composes the search text inline, mirroring
-// `internal/bot/tools/people.go`: display name + aliases (JSON) + bio.
+// GetPeopleNeedingReembed composes the search text via the canonical
+// ComposePersonEmbeddingText, the SAME function the live write path uses, so a
+// re-embed reproduces existing vectors instead of drifting them. It MUST pull
+// every field that composer reads (display_name, username, aliases, bio) — a
+// missing column here silently produces a different text and a drifted vector.
 func (s *Store) GetPeopleNeedingReembed(expectedVersion string, limit int) ([]ReembedCandidate, error) {
-	q := `SELECT id, user_id, display_name, aliases, bio FROM people
+	q := `SELECT id, user_id, display_name, username, aliases, bio FROM people
 	      WHERE embedding IS NOT NULL
 	        AND (embedding_version IS NULL OR embedding_version != ?)
 	      ORDER BY id`
@@ -116,11 +119,22 @@ func (s *Store) GetPeopleNeedingReembed(expectedVersion string, limit int) ([]Re
 	var out []ReembedCandidate
 	for rows.Next() {
 		var c ReembedCandidate
-		var name, aliasesJSON, bio *string
-		if err := rows.Scan(&c.ID, &c.UserID, &name, &aliasesJSON, &bio); err != nil {
+		var name, username, aliasesJSON, bio *string
+		if err := rows.Scan(&c.ID, &c.UserID, &name, &username, &aliasesJSON, &bio); err != nil {
 			return nil, err
 		}
-		c.Content = composePersonEmbeddingText(name, aliasesJSON, bio)
+		var displayName, bioStr string
+		if name != nil {
+			displayName = *name
+		}
+		if bio != nil {
+			bioStr = *bio
+		}
+		var aliases []string
+		if aliasesJSON != nil && *aliasesJSON != "" && *aliasesJSON != "null" {
+			_ = json.Unmarshal([]byte(*aliasesJSON), &aliases)
+		}
+		c.Content = ComposePersonEmbeddingText(displayName, username, aliases, bioStr)
 		if c.Content == "" {
 			continue
 		}
@@ -129,25 +143,27 @@ func (s *Store) GetPeopleNeedingReembed(expectedVersion string, limit int) ([]Re
 	return out, rows.Err()
 }
 
-func composePersonEmbeddingText(name, aliasesJSON, bio *string) string {
-	var s string
-	if name != nil {
-		s = *name
+// ComposePersonEmbeddingText is the single source of truth for the text that
+// represents a person to the embedding model: display name + username +
+// aliases + bio. Every site that embeds a person — the live add/update/merge
+// paths and the startup re-embed — MUST go through this function. When two
+// sites composed it differently (the re-embed once dropped username), stored
+// and freshly-written vectors landed in subtly different spaces and people
+// RAG quality silently degraded for anyone with a username.
+func ComposePersonEmbeddingText(displayName string, username *string, aliases []string, bio string) string {
+	text := displayName
+	if username != nil && *username != "" {
+		text += " " + *username
 	}
-	if aliasesJSON != nil && *aliasesJSON != "" && *aliasesJSON != "null" {
-		var aliases []string
-		if err := json.Unmarshal([]byte(*aliasesJSON), &aliases); err == nil {
-			for _, a := range aliases {
-				if a != "" {
-					s += " " + a
-				}
-			}
+	for _, alias := range aliases {
+		if alias != "" {
+			text += " " + alias
 		}
 	}
-	if bio != nil && *bio != "" {
-		s += " " + *bio
+	if bio != "" {
+		text += " " + bio
 	}
-	return s
+	return text
 }
 
 func (s *Store) UpdatePersonEmbeddingVersion(id int64, emb []float32, version string) error {

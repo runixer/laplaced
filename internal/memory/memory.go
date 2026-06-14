@@ -602,18 +602,11 @@ type PeopleStats struct {
 
 // buildPersonEmbeddingText constructs text for person embedding from all searchable fields.
 // Includes display_name, username, aliases, and bio for comprehensive vector search.
+// buildPersonEmbeddingText delegates to storage.ComposePersonEmbeddingText so
+// the live write path and the startup re-embed compose person text identically.
+// Do NOT reimplement the composition here — see the canonical function's doc.
 func buildPersonEmbeddingText(displayName string, username *string, aliases []string, bio string) string {
-	text := displayName
-	if username != nil && *username != "" {
-		text += " " + *username
-	}
-	for _, alias := range aliases {
-		text += " " + alias
-	}
-	if bio != "" {
-		text += " " + bio
-	}
-	return text
+	return storage.ComposePersonEmbeddingText(displayName, username, aliases, bio)
 }
 
 // applyPeopleUpdates applies people changes from the archivist result.

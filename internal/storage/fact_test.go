@@ -96,6 +96,45 @@ func TestFactCRUD(t *testing.T) {
 	assert.Empty(t, facts)
 }
 
+// TestUpdateFact_PersistsEmbedding guards a real regression: UpdateFact once
+// omitted the embedding column, so a content edit left a vector that no longer
+// matched its text. Callers recompute the embedding on content change; the
+// storage layer must persist it.
+func TestUpdateFact_PersistsEmbedding(t *testing.T) {
+	store, cleanup := setupTestDB(t)
+	defer cleanup()
+	_ = store.Init()
+
+	userID := ScopeID("123")
+	id, err := store.AddFact(Fact{
+		UserID:     userID,
+		Relation:   "is",
+		Content:    "original content",
+		Type:       "fact",
+		Importance: 50,
+		Embedding:  []float32{0.1, 0.2, 0.3},
+	})
+	assert.NoError(t, err)
+
+	facts, err := store.GetFacts(userID)
+	assert.NoError(t, err)
+	assert.Len(t, facts, 1)
+
+	// Simulate the caller: new content => freshly computed embedding.
+	updated := facts[0]
+	updated.Content = "rewritten content"
+	updated.Embedding = []float32{0.9, 0.8, 0.7}
+	assert.NoError(t, store.UpdateFact(updated))
+
+	facts, err = store.GetFacts(userID)
+	assert.NoError(t, err)
+	assert.Len(t, facts, 1)
+	assert.Equal(t, "rewritten content", facts[0].Content)
+	assert.Equal(t, []float32{0.9, 0.8, 0.7}, facts[0].Embedding,
+		"UpdateFact must persist the new embedding, not the stale one")
+	_ = id
+}
+
 func TestGetFactsAfterID(t *testing.T) {
 	store, cleanup := setupTestDB(t)
 	defer cleanup()

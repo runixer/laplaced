@@ -116,14 +116,9 @@ func (e *ToolExecutor) performCreatePerson(ctx context.Context, userID storage.S
 		person.Username = &username
 	}
 
-	// Generate embedding for searchable fields (name, aliases, bio)
-	embText := name
-	if len(person.Aliases) > 0 {
-		embText += " " + strings.Join(person.Aliases, " ")
-	}
-	if person.Bio != "" {
-		embText += " " + person.Bio
-	}
+	// Generate embedding for searchable fields. Use the canonical composer so
+	// this matches the archivist write path and the startup re-embed.
+	embText := storage.ComposePersonEmbeddingText(name, person.Username, person.Aliases, person.Bio)
 	resp, err := e.orClient.CreateEmbeddings(ctx, llm.EmbeddingRequest{
 		Model:      e.cfg.Embedding.Model,
 		Dimensions: e.cfg.Embedding.Dimensions,
@@ -216,13 +211,7 @@ func (e *ToolExecutor) performUpdatePerson(ctx context.Context, userID storage.S
 
 	// Regenerate embedding if searchable fields changed
 	if needsReembed {
-		embText := person.DisplayName
-		if len(person.Aliases) > 0 {
-			embText += " " + strings.Join(person.Aliases, " ")
-		}
-		if person.Bio != "" {
-			embText += " " + person.Bio
-		}
+		embText := storage.ComposePersonEmbeddingText(person.DisplayName, person.Username, person.Aliases, person.Bio)
 		resp, err := e.orClient.CreateEmbeddings(ctx, llm.EmbeddingRequest{
 			Model:      e.cfg.Embedding.Model,
 			Dimensions: e.cfg.Embedding.Dimensions,

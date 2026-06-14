@@ -169,12 +169,20 @@ func (s *Store) UpdateFact(fact Fact) error {
 	if fact.LastUpdated.IsZero() {
 		fact.LastUpdated = time.Now()
 	}
+	// The embedding MUST be persisted here: callers recompute it whenever the
+	// content changes (see memory.applyUpdateWithStats). Omitting it leaves a
+	// vector that no longer matches the text — a silent RAG-quality regression
+	// invisible to tests and logs.
+	embBytes, err := json.Marshal(fact.Embedding)
+	if err != nil {
+		return err
+	}
 	query := `
-		UPDATE structured_facts 
-		SET content = ?, type = ?, importance = ?, last_updated = ? 
+		UPDATE structured_facts
+		SET content = ?, type = ?, importance = ?, embedding = ?, last_updated = ?
 		WHERE id = ? AND user_id = ?
 	`
-	_, err := s.exec(query, fact.Content, fact.Type, fact.Importance, s.dialect.BindTime(fact.LastUpdated), fact.ID, fact.UserID)
+	_, err = s.exec(query, fact.Content, fact.Type, fact.Importance, embBytes, s.dialect.BindTime(fact.LastUpdated), fact.ID, fact.UserID)
 	return err
 }
 
