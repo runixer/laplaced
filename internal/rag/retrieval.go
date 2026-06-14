@@ -225,7 +225,12 @@ func (s *Service) enrichQueryIfEnabled(ctx context.Context, userID storage.Scope
 	debugInfo.EnrichmentTokens = tokens
 
 	if err != nil {
-		s.logger.Error("failed to enrich query", "error", err)
+		// Non-fatal: retrieval proceeds on the raw query. Mark the span so the
+		// degradation is filterable in Tempo (the underlying cause — e.g. a
+		// safety block — carries error.upstream_kind on the child LLM span), and
+		// log with user_id for correlation since this line has no trace_id.
+		trace.SpanFromContext(ctx).SetAttributes(attribute.Bool("rag.enrich_failed", true))
+		s.logger.Error("failed to enrich query", "user_id", userID, "error", err)
 		debugInfo.EnrichedQuery = query
 		return query
 	}

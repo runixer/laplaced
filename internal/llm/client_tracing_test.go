@@ -458,6 +458,16 @@ func TestClassifyUpstreamError(t *testing.T) {
 			"safety",
 		},
 		{
+			"gemini prohibited_content",
+			&providerBodyError{Message: "PROHIBITED_CONTENT", Code: 403},
+			"safety",
+		},
+		{
+			"gemini recitation",
+			&providerBodyError{Message: "RECITATION", Code: 400},
+			"safety",
+		},
+		{
 			"rate limit by code",
 			&providerBodyError{Message: "Too many requests", Code: 429},
 			"rate_limited",

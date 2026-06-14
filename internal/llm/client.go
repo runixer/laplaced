@@ -894,7 +894,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 				recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode, bodyErr: bodyErr, body: responseBody})
 				c.logger.Warn("LLM API returned HTTP 200 with error body",
 					"error", bodyErr, "body", string(responseBody), "attempt", attempt)
-				if attempt < maxRetries {
+				if attempt < maxRetries && !isNonRetryableBodyError(bodyErr) {
 					lastErr = bodyErr
 					continue
 				}
@@ -1089,7 +1089,7 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 				recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode, bodyErr: bodyErr, body: responseBody})
 				c.logger.Warn("Embeddings returned HTTP 200 with error body",
 					"error", bodyErr, "body", string(responseBody), "attempt", attempt)
-				if attempt < maxRetries {
+				if attempt < maxRetries && !isNonRetryableBodyError(bodyErr) {
 					lastErr = bodyErr
 					continue
 				}

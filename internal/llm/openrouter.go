@@ -172,7 +172,9 @@ func classifyUpstreamError(bodyErr *providerBodyError) string {
 	switch {
 	case strings.Contains(msg, "invalid_argument") || strings.Contains(msg, "invalid argument"):
 		return "invalid_argument"
-	case strings.Contains(msg, "safety") || strings.Contains(msg, "harm_category") || strings.Contains(msg, "blocked"):
+	case strings.Contains(msg, "safety") || strings.Contains(msg, "harm_category") ||
+		strings.Contains(msg, "blocked") || strings.Contains(msg, "prohibited") ||
+		strings.Contains(msg, "recitation"):
 		return "safety"
 	case strings.Contains(msg, "rate_limit") || strings.Contains(msg, "rate limit") || bodyErr.Code == 429:
 		return "rate_limited"
@@ -186,6 +188,24 @@ func classifyUpstreamError(bodyErr *providerBodyError) string {
 		return "upstream_4xx"
 	}
 	return "unknown"
+}
+
+// nonRetryableBodyKinds are upstream error classes where an identical retry is
+// futile: the provider deterministically rejects this exact request (content
+// policy, malformed/oversized input), so a retry only burns latency and tokens.
+// Transient classes (rate_limited, upstream_5xx, thought_signature, unknown)
+// stay retryable. Motivated by an enricher PROHIBITED_CONTENT 403 that was
+// retried 3× over ~21s on the user's critical path before failing anyway.
+var nonRetryableBodyKinds = map[string]bool{
+	"invalid_argument": true,
+	"safety":           true,
+	"context_length":   true,
+}
+
+// isNonRetryableBodyError reports whether an HTTP-200 body error is a permanent
+// provider rejection that a retry cannot fix.
+func isNonRetryableBodyError(bodyErr *providerBodyError) bool {
+	return nonRetryableBodyKinds[classifyUpstreamError(bodyErr)]
 }
 
 // recordProviderError attaches a provider error envelope to a span: the raw

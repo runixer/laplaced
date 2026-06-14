@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - React to one of the bot's replies to flag it as a bad response — flagged replies are recorded for later review.
 
 ### Fixed
+- Replies are no longer delayed by pointless retries when the provider blocks a request on content policy (or rejects it as malformed/too long) — these permanent rejections now fail fast instead of retrying for ~20 seconds.
 - When you send a photo or file and the bot also recalls a similar one from memory, it no longer mixes the remembered file's details into its reply about the one you just sent.
 - Web search now cites real, clickable source links woven into the reply instead of URLs the model made up.
 

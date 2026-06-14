@@ -641,6 +641,32 @@ func TestCreateChatCompletionHTTP200WithBodyErrorRetries(t *testing.T) {
 	assert.Equal(t, "ok", resp.Choices[0].Message.Content)
 }
 
+// A safety/content-policy body error is a permanent rejection: an identical
+// retry can't change the verdict, so the client must give up after one attempt
+// instead of burning the full retry budget (the enricher PROHIBITED_CONTENT
+// incident wasted ~21s retrying 4× on the user's critical path).
+func TestCreateChatCompletionHTTP200SafetyErrorDoesNotRetry(t *testing.T) {
+	attempts := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"error":{"message":"PROHIBITED_CONTENT","code":403}}`))
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client, err := NewClient(logger, "test_api_key", "", server.URL+"/api/v1", nil)
+	assert.NoError(t, err)
+
+	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
+		Model:    "test_model",
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	assert.Error(t, err)
+	assert.Equal(t, 1, attempts, "safety body error must not be retried")
+}
+
 func TestDetectProviderBodyError(t *testing.T) {
 	tests := []struct {
 		name           string
