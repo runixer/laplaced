@@ -988,5 +988,6 @@ func (h *botToolHandler) ExecuteToolCall(ctx context.Context, tcc laplace.ToolCa
 	return &laplace.ToolResult{
 		Content:              result.Content,
 		GeneratedArtifactIDs: result.GeneratedArtifactIDs,
+		Citations:            result.Citations,
 	}, nil
 }

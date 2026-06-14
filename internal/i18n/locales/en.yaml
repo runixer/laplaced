@@ -93,6 +93,7 @@ bot:
     - Your knowledge is outdated (Cutoff Date). For current facts — MUST call search.
     - Topics: news, prices, releases, documentation, people, companies.
     - Order: function call → receive result → respond to user.
+    - SOURCES: the search result ends with a <sources> block mapping [N] markers to real URLs. Weave the 1–3 most relevant sources into your prose as markdown [short text](url), taking URLs ONLY from that block. NEVER invent, guess, or alter a URL, and do NOT add a separate "Sources" section.
 
     MEMORY (manage_memory):
     - To save/update/delete facts — ONLY function call.

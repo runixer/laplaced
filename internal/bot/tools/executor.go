@@ -42,6 +42,10 @@ type CallContext struct {
 type Result struct {
 	Content              string
 	GeneratedArtifactIDs []int64
+	// Citations are source URLs returned by web-search tools (perplexity/sonar).
+	// The orchestrator uses them to verify links in the final reply (strip any
+	// link whose URL isn't in this set). Nil for non-search tools.
+	Citations []llm.Citation
 }
 
 // ToolExecutor handles tool execution for the bot.
@@ -220,7 +224,14 @@ func (e *ToolExecutor) ExecuteToolCall(ctx context.Context, cc CallContext, tool
 	default:
 		// Model tool (custom LLM)
 		e.logger.Info("Executing model tool", "tool", matchedTool.Name, "model", matchedTool.Model, "query", args["query"])
-		return textResult(e.performModelTool(ctx, cc.UserID, matchedTool.Model, args))
+		content, citations, mErr := e.performModelTool(ctx, cc.UserID, matchedTool.Model, args)
+		if mErr != nil {
+			return nil, mErr
+		}
+		// Surface how many sources the search returned; a content-bearing
+		// result with zero citations means no links are possible this turn.
+		span.SetAttributes(attribute.Int("tool.citations_count", len(citations)))
+		return &Result{Content: content, Citations: citations}, nil
 	}
 }
 

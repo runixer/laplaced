@@ -125,6 +125,17 @@ func recordLaplaceAnomalies(span trace.Span, resp *laplace.Response, userText st
 			attribute.Int("bot.anomaly.echo_output_tokens", resp.CompletionTokens),
 		)
 	}
+
+	// fabricated_url — the model emitted source links whose URLs weren't
+	// returned by any search tool this turn; the citation guard unwrapped them.
+	// The stripped URLs go on a content-gated event for triage.
+	if n := len(resp.StrippedURLs); n > 0 {
+		span.SetAttributes(
+			attribute.Bool("bot.anomaly.fabricated_url", true),
+			attribute.Int("bot.anomaly.fabricated_url_count", n),
+		)
+		obs.RecordContent(span, "bot.anomaly.fabricated_urls", strings.Join(resp.StrippedURLs, " "))
+	}
 }
 
 // fileProcessingError wraps a file processing error for identification.

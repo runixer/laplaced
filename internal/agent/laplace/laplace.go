@@ -180,6 +180,9 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 	tracker := agentlog.NewTurnTracker()
 	var finalResponse string
 	var generatedArtifactIDs []int64
+	// seenURLs collects every source URL returned by search tools this turn,
+	// so the citation guard can strip links the model invented or altered.
+	seenURLs := make(map[string]bool)
 	emptyRetries := 0
 
 	var totalLLMDuration time.Duration
@@ -315,10 +318,13 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 			// {span.tool.iteration=2} in TraceQL.
 			tcc.Iteration = toolIterationsFinal
 			toolStart := time.Now()
-			toolMessages, toolArtifactIDs := l.executeToolCalls(ctx, toolHandler, tcc, outcome.toolCalls, req.OnToolStart, logger)
+			toolMessages, toolArtifactIDs, toolCitations := l.executeToolCalls(ctx, toolHandler, tcc, outcome.toolCalls, req.OnToolStart, logger)
 			totalToolDuration += time.Since(toolStart)
 
 			generatedArtifactIDs = append(generatedArtifactIDs, toolArtifactIDs...)
+			for _, c := range toolCitations {
+				seenURLs[c.URL] = true
+			}
 			orMessages = append(orMessages, toolMessages...)
 			continue
 		}
@@ -333,6 +339,13 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 	finalResponse, wasSanitized := SanitizeLLMResponse(finalResponse)
 	if wasSanitized {
 		logger.Warn("sanitized LLM response (removed hallucination artifacts)")
+	}
+
+	// Ground source links: unwrap any link whose URL wasn't returned by a
+	// search tool this turn (model invented or altered it). Keeps the text.
+	finalResponse, strippedURLs := stripUnverifiedLinks(finalResponse, seenURLs)
+	if len(strippedURLs) > 0 {
+		logger.Warn("stripped unverified source links", "count", len(strippedURLs))
 	}
 
 	// Handle empty final response
@@ -358,6 +371,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 		ConversationTurns:    tracker.Build(),
 		WasEmpty:             wasEmpty,
 		WasSanitized:         wasSanitized,
+		StrippedURLs:         strippedURLs,
 	}
 	if wasSanitized {
 		resp.OriginalContent = originalContent
@@ -443,10 +457,10 @@ func (l *Laplace) executeToolCalls(
 	toolCalls []llm.ToolCall,
 	onToolStart func(toolName, arguments string),
 	logger *slog.Logger,
-) ([]llm.Message, []int64) {
+) ([]llm.Message, []int64, []llm.Citation) {
 	n := len(toolCalls)
 	if n == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// Each tool call's outcome is stored by its declared index so the assembled
@@ -454,6 +468,7 @@ func (l *Laplace) executeToolCalls(
 	type execResult struct {
 		msg         llm.Message
 		artifactIDs []int64
+		citations   []llm.Citation
 	}
 	results := make([]execResult, n)
 
@@ -471,6 +486,7 @@ func (l *Laplace) executeToolCalls(
 		results[i] = execResult{
 			msg:         llm.Message{Role: "tool", Content: result.Content, ToolCallID: tc.ID},
 			artifactIDs: result.GeneratedArtifactIDs,
+			citations:   result.Citations,
 		}
 	}
 
@@ -506,11 +522,13 @@ func (l *Laplace) executeToolCalls(
 
 	toolMessages := make([]llm.Message, 0, n)
 	var artifactIDs []int64
+	var citations []llm.Citation
 	for i := range results {
 		toolMessages = append(toolMessages, results[i].msg)
 		artifactIDs = append(artifactIDs, results[i].artifactIDs...)
+		citations = append(citations, results[i].citations...)
 	}
-	return toolMessages, artifactIDs
+	return toolMessages, artifactIDs, citations
 }
 
 // recordMediaParts emits a laplace.media_parts span event listing every

@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - When you send a photo or file and the bot also recalls a similar one from memory, it no longer mixes the remembered file's details into its reply about the one you just sent.
+- Web search now cites real, clickable source links woven into the reply instead of URLs the model made up.
 
 ## [0.10.1] - 2026-06-12
 

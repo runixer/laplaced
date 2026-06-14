@@ -175,7 +175,7 @@ func TestExecuteToolCalls(t *testing.T) {
 				logger: testutil.TestLogger(),
 			}
 
-			messages, _ := agent.executeToolCalls(
+			messages, _, _ := agent.executeToolCalls(
 				context.Background(),
 				handler,
 				ToolCallContext{},
@@ -225,7 +225,7 @@ func TestExecuteToolCalls_ParallelImageGen(t *testing.T) {
 	}
 
 	start := time.Now()
-	msgs, artifactIDs := agent.executeToolCalls(
+	msgs, artifactIDs, _ := agent.executeToolCalls(
 		context.Background(), handler, ToolCallContext{}, toolCalls, nil, agent.logger,
 	)
 	elapsed := time.Since(start)
@@ -331,6 +331,60 @@ func TestExecute_WithToolCall(t *testing.T) {
 	mockStore.AssertExpectations(t)
 	handler.AssertExpectations(t)
 
+	_ = cfg
+	_ = translator
+}
+
+// TestExecute_CitationGuard verifies the final reply's source links are
+// grounded against the URLs a search tool actually returned: a verified link
+// survives, an invented one is unwrapped to plain text, and the stripped URL
+// is surfaced on resp.StrippedURLs for the bot.anomaly.fabricated_url signal.
+func TestExecute_CitationGuard(t *testing.T) {
+	cfg, translator, agent, mockStore, mockORClient, handler := setupExecuteTest(t)
+
+	userID := storage.ScopeID("123")
+	req := &Request{
+		UserID:              userID,
+		RawQuery:            "find a product",
+		HistoryContent:      "find a product",
+		CurrentMessageParts: []interface{}{llm.TextPart{Type: "text", Text: "find a product"}},
+	}
+
+	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
+	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
+
+	// First call: model searches.
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
+		makeToolCallResponse("search_web", `{"query": "product"}`, WithTokens(10, 5, 15)), nil,
+	).Once()
+
+	// Search tool returns one real source URL.
+	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "search_web", `{"query": "product"}`).
+		Return(&ToolResult{
+			Content:   "Found it [1].",
+			Citations: []llm.Citation{{URL: "https://real.example/item/42", Title: "Item 42"}},
+		}, nil)
+
+	// Final reply: one verified link + one invented link.
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
+		makeChatResponse(
+			"Вот [товар](https://real.example/item/42) и ещё [похожий](https://invented.example/fake).",
+			WithTokens(20, 10, 30),
+		), nil,
+	).Once()
+
+	resp, err := agent.Execute(context.Background(), req, handler)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Verified link kept, invented one unwrapped to its anchor text.
+	assert.Contains(t, resp.Content, "[товар](https://real.example/item/42)")
+	assert.NotContains(t, resp.Content, "invented.example")
+	assert.Contains(t, resp.Content, "похожий")
+	assert.Equal(t, []string{"https://invented.example/fake"}, resp.StrippedURLs)
+
+	mockStore.AssertExpectations(t)
+	handler.AssertExpectations(t)
 	_ = cfg
 	_ = translator
 }

@@ -84,6 +84,12 @@ type Response struct {
 	WasEmpty        bool
 	WasSanitized    bool
 	OriginalContent string
+
+	// StrippedURLs lists source links whose URL did not match any URL returned
+	// by a search tool this turn and were therefore unwrapped to plain text by
+	// the citation guard. Non-empty means the model tried to invent or alter a
+	// URL; surfaced as bot.anomaly.fabricated_url.
+	StrippedURLs []string
 }
 
 // ToolCallContext carries execution context for a tool call: the owning user
@@ -106,6 +112,9 @@ type ToolCallContext struct {
 type ToolResult struct {
 	Content              string
 	GeneratedArtifactIDs []int64
+	// Citations are source URLs returned by web-search tools, used by the
+	// citation guard to strip links the model invented. Nil for other tools.
+	Citations []llm.Citation
 }
 
 // ToolHandler defines the interface for executing tool calls.

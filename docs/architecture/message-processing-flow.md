@@ -314,6 +314,7 @@ sequenceDiagram
 | `bot.anomaly.sanitized` | `SanitizeLLMResponse` срезал артефакты галлюцинации. Сопровождается событием `bot.anomaly.sanitized_from` с оригинальным (грязным) текстом — гейтится `trace_content` toggle'ом. |
 | `bot.anomaly.false_disclaimer` | Модель сказала «не могу прочитать файл», но всё равно выдала >300 символов осмысленного ответа. Только при `hasCurrentMedia=true`. Сопровождается `bot.anomaly.disclaimer_phrase`. |
 | `bot.anomaly.echo_user_message` | Gemini-style degenerate echo: completion дословно совпадает с последним user-сообщением (≥30 символов, после strip'а voice-quote). Сопровождается `bot.anomaly.echo_output_tokens`. |
+| `bot.anomaly.fabricated_url` | Модель вставила ссылку, чей URL не вернул ни один поиск этого хода; citation guard развернул её в обычный текст. Сопровождается `bot.anomaly.fabricated_url_count` и событием `bot.anomaly.fabricated_urls` (список URL, гейтится `trace_content`). |
 
 ## Ключевые паттерны
 

@@ -492,6 +492,29 @@ type ResponseMessage struct {
 	Reasoning        string        `json:"reasoning,omitempty"`         // Gemini 3: raw reasoning text
 	ReasoningDetails interface{}   `json:"reasoning_details,omitempty"` // Structured reasoning details
 	Images           []ImageOutput `json:"images,omitempty"`            // Generated images (image-output models)
+	Annotations      []Annotation  `json:"annotations,omitempty"`       // Source citations (Perplexity/Sonar web search)
+}
+
+// Annotation is a single source citation returned by web-search models
+// (perplexity/sonar-*) on the assistant message. The content carries 1-based
+// [N] markers that index into this slice; url_citation holds the real source URL.
+type Annotation struct {
+	Type        string      `json:"type"` // "url_citation"
+	URLCitation URLCitation `json:"url_citation"`
+}
+
+// URLCitation is the payload of a url_citation annotation.
+type URLCitation struct {
+	URL   string `json:"url"`
+	Title string `json:"title"`
+}
+
+// Citation is the trimmed source (URL + title) passed up from a search tool to
+// the agent layer, so the orchestrator can ground/verify links without
+// re-parsing the raw API annotation shape.
+type Citation struct {
+	URL   string
+	Title string
 }
 
 // ResponseChoice is one choice on a ChatCompletionResponse. Named for the same
