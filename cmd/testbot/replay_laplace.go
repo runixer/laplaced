@@ -30,16 +30,23 @@ import (
 // gitignored --variants-file, never baked into this tracked source.
 var replayLaplaceCmd = &cobra.Command{
 	Use:   "replay-laplace",
-	Short: "Replay a captured laplace LLM generation from a trace, with optional prompt variants",
+	Short: "Replay a captured agent LLM generation from a trace, with optional prompt/model variants",
 	Long: `Reconstructs the exact OpenRouter request from a trace's gen span (the
-llm.CreateChatCompletion child of laplace.Execute), rehydrates redacted media by
+*.CreateChatCompletion child of <agent>.Execute), rehydrates redacted media by
 sha256 from --files-dir, applies a named variant transform, and POSTs it to the
 LLM endpoint --runs times per variant.
+
+--agent selects which agent's generation to replay (default "laplace"); e.g.
+"enricher" or "reranker". --list-agents prints the agent spans present in the
+trace and exits. --model overrides the request's model for every variant (handy
+for A/B-testing one prompt against two models); a per-variant "model" wins over
+it.
 
 Built-in variant "baseline" is a no-op (faithful replay). Other variants are
 defined in a gitignored JSON --variants-file:
 
   {
+    "ga":     { "model": "google/gemini-3.1-flash-lite" },
     "anchor": { "insert_before_current_media": "<marker text>" },
     "anchor-protocol": {
       "insert_before_current_media": "<marker text>",
@@ -47,13 +54,14 @@ defined in a gitignored JSON --variants-file:
     }
   }
 
-Example:
+Example (compare the captured preview model against GA on the enricher request):
   testbot replay-laplace \
-    --trace-file data/replay-lily/trace.json \
-    --files-dir data/replay-lily \
-    --variants-file data/replay-lily/variants.json \
-    --variant baseline --variant anchor --variant anchor-protocol \
-    --runs 5 --out data/replay-laplace/lily`,
+    --trace-file data/replay-enricher/trace.json \
+    --files-dir data/replay-enricher \
+    --agent enricher \
+    --variants-file data/replay-enricher/variants.json \
+    --variant baseline --variant ga \
+    --runs 5 --out data/replay-laplace/enricher`,
 	Annotations: map[string]string{"skip-bot-setup": "true"},
 	RunE:        runReplayLaplace,
 }
@@ -64,6 +72,9 @@ func init() {
 	f.String("files-dir", "data/replay-lily", "Directory with <sha256>.* files to rehydrate redacted media")
 	f.String("variants-file", "", "JSON file defining named variants (besides built-in 'baseline')")
 	f.StringSlice("variant", []string{"baseline"}, "Variant names to run (repeatable)")
+	f.String("agent", "laplace", "Agent whose generation to replay: the <agent>.Execute span (e.g. laplace, enricher, reranker)")
+	f.String("model", "", "Override the request model for all variants (per-variant 'model' takes precedence)")
+	f.Bool("list-agents", false, "List the <agent>.Execute spans present in the trace and exit")
 	f.Int("runs", 1, "Runs per variant")
 	f.String("out", "data/replay-laplace/out", "Output directory for replies (gitignored)")
 	rootCmd.AddCommand(replayLaplaceCmd)
@@ -77,7 +88,12 @@ const memoryMarkerPrefix = "📄"
 var redactedMediaRe = regexp.MustCompile(`^redacted:sha256:([0-9a-f]+):([^:]+):(\d+)$`)
 
 type variantSpec struct {
-	InsertBeforeCurrentMedia string `json:"insert_before_current_media"`
+	Model                    string   `json:"model"`
+	DropMedia                bool     `json:"drop_media"`
+	StripSystemTags          []string `json:"strip_system_tags"`
+	KeepFactIDs              []string `json:"keep_fact_ids"`
+	SetUserText              *string  `json:"set_user_text"`
+	InsertBeforeCurrentMedia string   `json:"insert_before_current_media"`
 	SystemReplace            []struct {
 		Find string `json:"find"`
 		With string `json:"with"`
@@ -98,6 +114,9 @@ func runReplayLaplace(cmd *cobra.Command, _ []string) error {
 	filesDir, _ := cmd.Flags().GetString("files-dir")
 	variantsFile, _ := cmd.Flags().GetString("variants-file")
 	variants, _ := cmd.Flags().GetStringSlice("variant")
+	agent, _ := cmd.Flags().GetString("agent")
+	modelOverride, _ := cmd.Flags().GetString("model")
+	listAgents, _ := cmd.Flags().GetBool("list-agents")
 	runs, _ := cmd.Flags().GetInt("runs")
 	outDir, _ := cmd.Flags().GetString("out")
 
@@ -109,7 +128,16 @@ func runReplayLaplace(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("read trace file: %w", err)
 	}
 
-	bodyStr, err := extractGenRequestBody(traceBytes)
+	if listAgents {
+		names, err := listAgentSpans(traceBytes)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Agent spans in trace: %s\n", strings.Join(names, ", "))
+		return nil
+	}
+
+	bodyStr, err := extractGenRequestBody(traceBytes, agent)
 	if err != nil {
 		return fmt.Errorf("locate gen span: %w", err)
 	}
@@ -135,7 +163,7 @@ func runReplayLaplace(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("variant %q not found in --variants-file (only 'baseline' is built-in)", v)
 		}
 		for run := 1; run <= runs; run++ {
-			body, err := prepareBody(bodyStr, spec, filesDir)
+			body, err := prepareBody(bodyStr, spec, filesDir, modelOverride)
 			if err != nil {
 				return fmt.Errorf("variant %s: %w", v, err)
 			}
@@ -185,14 +213,11 @@ type otlpTrace struct {
 	} `json:"batches"`
 }
 
-// extractGenRequestBody finds the laplace generation request: the
-// llm.CreateChatCompletion span that is a child of laplace.Execute and whose
-// llm.request body carries multimodal file parts. Returns the verbatim request
-// JSON string. If a tool loop produced several, the last is used.
-func extractGenRequestBody(traceBytes []byte) (string, error) {
+// flattenSpans collects every span in the trace into a single slice.
+func flattenSpans(traceBytes []byte) ([]otlpSpan, error) {
 	var tr otlpTrace
 	if err := json.Unmarshal(traceBytes, &tr); err != nil {
-		return "", fmt.Errorf("parse trace JSON: %w", err)
+		return nil, fmt.Errorf("parse trace JSON: %w", err)
 	}
 	var spans []otlpSpan
 	for _, b := range tr.Batches {
@@ -200,19 +225,56 @@ func extractGenRequestBody(traceBytes []byte) (string, error) {
 			spans = append(spans, ss.Spans...)
 		}
 	}
-	var laplaceID string
+	return spans, nil
+}
+
+// listAgentSpans returns the agent names ("laplace", "enricher", ...) for which
+// an "<agent>.Execute" span exists in the trace, so the operator can pick one.
+func listAgentSpans(traceBytes []byte) ([]string, error) {
+	spans, err := flattenSpans(traceBytes)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	seen := map[string]bool{}
 	for _, s := range spans {
-		if s.Name == "laplace.Execute" {
-			laplaceID = s.SpanID
+		name, ok := strings.CutSuffix(s.Name, ".Execute")
+		if ok && !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("no <agent>.Execute spans in trace")
+	}
+	return names, nil
+}
+
+// extractGenRequestBody finds the generation request for the given agent: a
+// *.CreateChatCompletion span that is a child of "<agent>.Execute", reading the
+// verbatim request JSON from its llm.request event body. A gen span carrying
+// multimodal file parts is preferred (the subject of most replays); otherwise
+// the last gen span under the agent is used (covers a tool loop, or text-only
+// agents like the enricher when no media was attached).
+func extractGenRequestBody(traceBytes []byte, agent string) (string, error) {
+	spans, err := flattenSpans(traceBytes)
+	if err != nil {
+		return "", err
+	}
+	agentSpanName := agent + ".Execute"
+	var agentID string
+	for _, s := range spans {
+		if s.Name == agentSpanName {
+			agentID = s.SpanID
 			break
 		}
 	}
-	if laplaceID == "" {
-		return "", fmt.Errorf("no laplace.Execute span in trace")
+	if agentID == "" {
+		return "", fmt.Errorf("no %s span in trace (use --list-agents to see options)", agentSpanName)
 	}
-	var best string
+	var withFiles, lastAny string
 	for _, s := range spans {
-		if s.Name != "llm.CreateChatCompletion" || s.ParentSpanID != laplaceID {
+		if !strings.HasSuffix(s.Name, ".CreateChatCompletion") || s.ParentSpanID != agentID {
 			continue
 		}
 		for _, ev := range s.Events {
@@ -220,16 +282,23 @@ func extractGenRequestBody(traceBytes []byte) (string, error) {
 				continue
 			}
 			for _, a := range ev.Attributes {
-				if a.Key == "body" && a.Value.StringValue != nil && strings.Contains(*a.Value.StringValue, `"type":"file"`) {
-					best = *a.Value.StringValue
+				if a.Key != "body" || a.Value.StringValue == nil {
+					continue
+				}
+				lastAny = *a.Value.StringValue
+				if strings.Contains(lastAny, `"type":"file"`) {
+					withFiles = lastAny
 				}
 			}
 		}
 	}
-	if best == "" {
-		return "", fmt.Errorf("no gen llm.request with file parts under laplace.Execute")
+	if withFiles != "" {
+		return withFiles, nil
 	}
-	return best, nil
+	if lastAny != "" {
+		return lastAny, nil
+	}
+	return "", fmt.Errorf("no gen llm.request under %s", agentSpanName)
 }
 
 // --- variant + rehydration ----------------------------------------------------
@@ -251,13 +320,33 @@ func loadVariantSpecs(path string) (map[string]variantSpec, error) {
 
 // prepareBody clones the captured request, applies the variant transform, then
 // rehydrates redacted media. Returns the marshaled request ready to POST.
-func prepareBody(bodyStr string, spec variantSpec, filesDir string) ([]byte, error) {
+// A per-variant model wins over modelOverride, which wins over the captured one.
+func prepareBody(bodyStr string, spec variantSpec, filesDir, modelOverride string) ([]byte, error) {
 	var body map[string]any
 	if err := json.Unmarshal([]byte(bodyStr), &body); err != nil {
 		return nil, fmt.Errorf("parse captured body: %w", err)
 	}
 	delete(body, "trace") // our outbound OTel link; irrelevant to replay
 
+	switch {
+	case spec.Model != "":
+		body["model"] = spec.Model
+	case modelOverride != "":
+		body["model"] = modelOverride
+	}
+
+	if spec.DropMedia {
+		dropMediaParts(body)
+	}
+	for _, tag := range spec.StripSystemTags {
+		stripSystemTag(body, tag)
+	}
+	if spec.KeepFactIDs != nil {
+		keepFactIDs(body, spec.KeepFactIDs)
+	}
+	if spec.SetUserText != nil {
+		setUserText(body, *spec.SetUserText)
+	}
 	if spec.InsertBeforeCurrentMedia != "" {
 		insertCurrentMediaMarker(body, spec.InsertBeforeCurrentMedia)
 	}
@@ -304,6 +393,26 @@ func insertCurrentMediaMarker(body map[string]any, marker string) {
 	}
 }
 
+// dropMediaParts removes every file part from all messages, leaving text only —
+// to isolate whether the media (vs the surrounding text) trips a safety filter.
+func dropMediaParts(body map[string]any) {
+	msgs, _ := body["messages"].([]any)
+	for _, m := range msgs {
+		mm, _ := m.(map[string]any)
+		content, ok := mm["content"].([]any)
+		if !ok {
+			continue
+		}
+		var kept []any
+		for _, p := range content {
+			if !isFilePart(p) {
+				kept = append(kept, p)
+			}
+		}
+		mm["content"] = kept
+	}
+}
+
 func isFilePart(p any) bool {
 	pm, ok := p.(map[string]any)
 	return ok && pm["type"] == "file"
@@ -319,6 +428,116 @@ func precededByMemoryMarker(content []any, i int) bool {
 	}
 	txt, _ := prev["text"].(string)
 	return strings.HasPrefix(txt, memoryMarkerPrefix)
+}
+
+// stripSystemTag removes a "<tag>...</tag>" block (including the tags) from the
+// system message — to isolate which injected section (e.g. user_profile, history)
+// trips a safety filter, without baking that PII-bearing text into a config file.
+func stripSystemTag(body map[string]any, tag string) {
+	if tag == "" {
+		return
+	}
+	re := regexp.MustCompile(`(?s)\s*<` + regexp.QuoteMeta(tag) + `>.*?</` + regexp.QuoteMeta(tag) + `>`)
+	msgs, _ := body["messages"].([]any)
+	for _, m := range msgs {
+		mm, _ := m.(map[string]any)
+		if mm["role"] != "system" {
+			continue
+		}
+		switch c := mm["content"].(type) {
+		case string:
+			mm["content"] = re.ReplaceAllString(c, "")
+		case []any:
+			for _, p := range c {
+				if pm, ok := p.(map[string]any); ok {
+					if txt, ok := pm["text"].(string); ok {
+						pm["text"] = re.ReplaceAllString(txt, "")
+					}
+				}
+			}
+		}
+	}
+}
+
+// setUserText replaces the text of the first text part in the user message with
+// s and drops any other text parts (file parts are kept) — to test how the
+// current query, holding the profile constant, affects a safety refusal.
+func setUserText(body map[string]any, s string) {
+	msgs, _ := body["messages"].([]any)
+	for _, m := range msgs {
+		mm, _ := m.(map[string]any)
+		if mm["role"] != "user" {
+			continue
+		}
+		content, ok := mm["content"].([]any)
+		if !ok {
+			if _, isStr := mm["content"].(string); isStr {
+				mm["content"] = s
+			}
+			continue
+		}
+		var out []any
+		replaced := false
+		for _, p := range content {
+			pm, _ := p.(map[string]any)
+			if pm["type"] == "text" {
+				if !replaced {
+					pm["text"] = s
+					out = append(out, pm)
+					replaced = true
+				}
+				continue
+			}
+			out = append(out, p)
+		}
+		if !replaced {
+			out = append([]any{map[string]any{"type": "text", "text": s}}, out...)
+		}
+		mm["content"] = out
+	}
+}
+
+var factLineRe = regexp.MustCompile(`\[Fact:(\d+)\]`)
+
+// keepFactIDs drops every "[Fact:N]" line from the system message whose N is not
+// in keep — to bisect which profile fact(s) trip a safety filter. Non-fact lines
+// are untouched. An empty keep list drops all facts. Fact IDs are not PII, so a
+// bisection config carries only numbers, never the fact text.
+func keepFactIDs(body map[string]any, keep []string) {
+	keepSet := map[string]bool{}
+	for _, id := range keep {
+		keepSet[id] = true
+	}
+	filter := func(s string) string {
+		lines := strings.Split(s, "\n")
+		out := lines[:0]
+		for _, ln := range lines {
+			if m := factLineRe.FindStringSubmatch(ln); len(m) == 2 && !keepSet[m[1]] {
+				continue
+			}
+			out = append(out, ln)
+		}
+		return strings.Join(out, "\n")
+	}
+	msgs, _ := body["messages"].([]any)
+	for _, m := range msgs {
+		mm, _ := m.(map[string]any)
+		if mm["role"] != "system" {
+			continue
+		}
+		switch c := mm["content"].(type) {
+		case string:
+			mm["content"] = filter(c)
+		case []any:
+			for _, p := range c {
+				if pm, ok := p.(map[string]any); ok {
+					if txt, ok := pm["text"].(string); ok {
+						pm["text"] = filter(txt)
+					}
+				}
+			}
+		}
+	}
 }
 
 func replaceInSystem(body map[string]any, find, with string) {
@@ -429,10 +648,13 @@ func postOnce(ctx context.Context, endpoint, apiKey string, body []byte, variant
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(resp.Body)
+	_ = os.WriteFile(filepath.Join(outDir, fmt.Sprintf("%s_run%d.raw.json", variant, run)), raw, 0o600)
 
 	var parsed struct {
 		Choices []struct {
-			FinishReason string `json:"finish_reason"`
+			FinishReason string          `json:"finish_reason"`
+			NativeFinish string          `json:"native_finish_reason"`
+			Error        json.RawMessage `json:"error"`
 			Message      struct {
 				Content string `json:"content"`
 			} `json:"message"`
@@ -445,6 +667,11 @@ func postOnce(ctx context.Context, endpoint, apiKey string, body []byte, variant
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		res.Err = fmt.Sprintf("decode response: %v", err)
 		return res
+	}
+	// Gemini safety refusals can surface as a choice-level error with
+	// finish_reason "error" and no top-level error object.
+	if parsed.Error == nil && len(parsed.Choices) > 0 && len(parsed.Choices[0].Error) > 0 {
+		res.Err = string(parsed.Choices[0].Error)
 	}
 	if parsed.Error != nil {
 		res.Err = fmt.Sprintf("%v", parsed.Error)
