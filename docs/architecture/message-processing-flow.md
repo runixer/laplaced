@@ -9,8 +9,13 @@
 2. Скачивает файлы (голос, фото, PDF)
 3. Собирает контекст: системный промпт + факты + RAG + история
 4. Генерирует ответ через LLM (с возможными tool calls)
-5. Отправляет ответ в Telegram
+5. Отправляет ответ в чат (Telegram или Mattermost/Time) — при поддержке транспортом потоково
 6. Асинхронно извлекает топики и факты для долгосрочной памяти
+
+> Этот документ описывает поток на примере Telegram. Получение сообщений
+> транспортно-специфично (Telegram polling/webhook vs Mattermost WebSocket), но
+> всё после нормализации в `IncomingMessage` — общее. См.
+> [transports.md](./transports.md).
 
 ## Архитектура
 
@@ -78,7 +83,7 @@ flowchart TB
 
         subgraph chunk["Topic Chunking"]
             UM["Unprocessed Messages<br/>(topic_id IS NULL)"]
-            CH["Chunk by time/size<br/>(5h gap или 400 msgs)"]
+            CH["Chunk by time/size<br/>(1h gap или 400 msgs)"]
             TE["Extract Topics<br/>(LLM)"]
             EMB["Create Embeddings"]
             SAVE["Save Topics"]
@@ -128,12 +133,16 @@ flowchart LR
 
 | Режим | Источник | Обработка |
 |-------|----------|-----------|
-| Long Polling | `getUpdates()` loop | Синхронный вызов `ProcessUpdate()` |
-| Webhook | HTTP POST `/webhook` | Асинхронный `HandleUpdateAsync()` |
+| Telegram Long Polling | `getUpdates()` loop | Синхронный вызов `ProcessUpdate()` |
+| Telegram Webhook | HTTP POST `/webhook` | Асинхронный `HandleUpdateAsync()` |
+| Mattermost/Time | WebSocket-событие `posted` | `incomingFromMattermost()` |
+
+Любой транспорт нормализует своё нативное обновление в `IncomingMessage` и
+передаёт его в общий `HandleIncoming()`.
 
 **Ключевые проверки:**
-- Авторизация: `isAllowed(userID)`
-- Upsert пользователя в БД (для `laplaced_user_info` метрики)
+- Авторизация: статический allowlist либо гейтинг по SSO (см. [transports.md](./transports.md))
+- Разрешение `ScopeID` — ключа раздела памяти (для Telegram — детерминированный passthrough)
 
 ### 2. Группировка сообщений
 
@@ -208,7 +217,7 @@ flowchart LR
 3. **Flash Reranker** (v0.4.1+)
    - Agentic фильтрация: Flash видит 50 summaries (~3K токенов)
    - Tool call `get_topics_content([ids])` для загрузки содержимого
-   - Финальный выбор: до 15 топиков, 10 людей, 10 артефактов (v0.6.0)
+   - Финальный выбор: до 5 топиков, 10 людей, 10 артефактов (v0.6.0)
    - **Multimodal (v0.4.5):** медиа передаётся в reranker
    - **Artifacts (v0.6.0):** артефакты с similarity scores, выбирает релевантные файлы
    - Fallback на vector top-5 при timeout/error
@@ -240,7 +249,7 @@ sequenceDiagram
     end
 ```
 
-**Доступные инструменты (v0.6.0):**
+**Доступные инструменты** (набор задаётся в секции `tools` конфига):
 
 | Tool | Назначение |
 |------|------------|
@@ -248,10 +257,26 @@ sequenceDiagram
 | `manage_memory` | Добавление/обновление/удаление фактов |
 | `search_people` | Поиск людей в социальном графе (v0.5.1) |
 | `manage_people` | Управление профилями людей (v0.5.1) |
-| `search_web` | Веб-поиск |
-| Custom (model-based) | Вызов другой LLM для специфичных задач |
+| `internet_search` | Веб-поиск (по умолчанию `perplexity/sonar-pro`) |
+| `generate_image` | Генерация/редактирование изображений (v0.8.0; см. [image-generation.md](./image-generation.md)) |
+
+Вызовы `generate_image` выполняются **параллельно** (с ограничением
+`max_concurrent`), остальные инструменты — последовательно, т.к. могут менять
+общее состояние (память, люди).
 
 ### 6. Отправка ответа
+
+**Стриминг (v0.9.0, по умолчанию вкл.):** если транспорт поддерживает
+(`Capabilities.SupportsStreaming` — Telegram да, Mattermost нет), бот сразу шлёт
+плейсхолдер «💭 Думаю…», дописывает в сворачиваемый blockquote строки статуса
+(запрос RAG-обогащения, статус каждого инструмента), а затем прогрессивно
+редактирует сообщение по мере прихода SSE-дельт. Незакрытый Markdown
+автозакрывается на лету. Дросселирование — `bot.streaming.edit_throttle_ms`;
+после `max_buffer_chars` первое сообщение финализируется, продолжение уходит
+отдельными сообщениями. Подробнее — [streaming.md](./streaming.md). Выключается
+`LAPLACED_BOT_STREAMING_ENABLED=false` (тогда — один ответ целиком).
+
+Финализация ответа (одинакова для стриминга и one-shot):
 
 1. **Sanitization**
    - Удаление артефактов (`</tool_code>`, `</s>`)
@@ -259,8 +284,8 @@ sequenceDiagram
    - Span attribute: `bot.anomaly.sanitized` (см. секцию Аномалии)
 
 2. **Конвертация**
-   - Markdown → HTML (Telegram формат)
-   - Разбивка на чанки (лимит 4096 UTF-16 символов)
+   - Markdown → HTML (Telegram) или Markdown как есть (Mattermost) — через `Renderer` транспорта
+   - Разбивка на чанки (Telegram: 4096 UTF-16; tables/captions переразбиваются при переполнении)
    - Fallback на plain text при ошибках
 
 3. **Отправка**
@@ -359,6 +384,12 @@ if err != nil {
 
 ## Связанные документы
 
+- [transports.md](./transports.md) — абстракция транспорта (Telegram / Mattermost), ScopeID, доступ
+- [streaming.md](./streaming.md) — потоковые ответы с лентой размышлений
+- [image-generation.md](./image-generation.md) — генерация и редактирование изображений
+- [reactor.md](./reactor.md) — эмодзи-реакции
+- [observability.md](./observability.md) — трассировка OpenTelemetry и аномалии
+- [flash-reranker.md](./flash-reranker.md) — agentic-реранкинг RAG-кандидатов
 - [graceful-shutdown.md](./graceful-shutdown.md) — корректное завершение при shutdown
 - [embedding-storage.md](./embedding-storage.md) — хранение и поиск embeddings
 - [telegram-html-rendering.md](./telegram-html-rendering.md) — конвертация Markdown → HTML

@@ -30,10 +30,16 @@ normalization: L2 normalized (от провайдера, только для dim
 С v0.7.0 — см. [Миграция на Embedding 2 Preview (v0.7.0)](#миграция-на-embedding-2-preview-v070):
 
 ```yaml
-model: google/gemini-embedding-2-preview
+model: google/gemini-embedding-2
 dimensions: 1536
 normalization: L2 normalized (провайдер нормализует все размерности)
 ```
+
+> **GA-апдейт:** позже дефолт переведён с алиаса `-preview` на GA-модель
+> `google/gemini-embedding-2`. Векторное пространство байт-в-байт идентично
+> (cosine 1.0 на неизменённом контенте), поэтому повторного re-embed смена не
+> требует. Ниже по тексту в исторических разделах модель ещё называется
+> `gemini-embedding-2-preview` — это тот же бэкенд.
 
 > **Note:** Некоторые прогнозные таблицы ниже использовали dim=768 как допущение при принятии ранних решений по масштабированию. В актуальных расчётах памяти используется `embeddingMemoryBytes` из `internal/rag/metrics.go`, которое считается от текущей размерности.
 

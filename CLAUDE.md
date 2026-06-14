@@ -38,6 +38,7 @@ internal/
     archivist/           # Fact extraction from conversations
     enricher/            # Query enrichment for RAG
     extractor/           # File metadata extraction (artifacts system)
+    imagegen/            # Image generation/editing (generate_image tool)
     laplace/             # Main chat agent with tool calls
     merger/              # Topic merge verification
     reactor/             # Emoji reaction decisions for user messages
@@ -98,7 +99,7 @@ type Agent interface {
 ```
 
 **Agent Types:**
-- **Laplace** (`agent/laplace/`): Main chat agent with tool calls (search_history, search_web, manage_memory)
+- **Laplace** (`agent/laplace/`): Main chat agent with tool calls (search_history, internet_search, manage_memory, search_people, manage_people, generate_image)
 - **Reranker** (`agent/reranker/`): Selects most relevant topics, people, and artifacts from vector search candidates using tool calls
 - **Enricher** (`agent/enricher/`): Expands user queries with context for better RAG retrieval
 - **Splitter** (`agent/splitter/`): Extracts topic summaries from conversation chunks
@@ -106,6 +107,7 @@ type Agent interface {
 - **Archivist** (`agent/archivist/`): Extracts and manages user facts from conversations
 - **Extractor** (`agent/extractor/`): Processes artifact files to extract metadata (summary, keywords, entities, rag_hints)
 - **Reactor** (`agent/reactor/`): Decides whether to add an emoji reaction to a user message and picks one from the transport's allowed set; runs in parallel with the main response
+- **ImageGenerator** (`agent/imagegen/`): Backs the `generate_image` tool — text-to-image, editing attached/remembered photos, with typed failure classification
 
 **Agent Wiring (in `cmd/bot/main.go`):**
 ```go
@@ -457,7 +459,7 @@ artifacts:
 
 agents:
   extractor:
-    model: "google/gemini-3-flash-preview"
+    model: "google/gemini-3.1-flash-lite"
     max_file_size_mb: 20
     polling_interval: "30s"
     max_concurrent: 3
@@ -677,3 +679,10 @@ gh run watch <run_id> --exit-status
 - @docs/architecture/artifacts-system.md — Artifacts system architecture (files storage and RAG integration)
 - @docs/architecture/flash-reranker.md — Flash reranker for intelligent RAG filtering
 - @docs/architecture/message-processing-flow.md — Message processing pipeline
+
+Further architecture docs in `docs/architecture/` (not auto-loaded — read on demand):
+`transports.md` (Telegram/Mattermost abstraction, ScopeID, SSO), `database-backends.md`
+(SQLite/Postgres dialect layer), `observability.md` (OpenTelemetry + Prometheus),
+`streaming.md` (progressive replies), `image-generation.md` (`generate_image`),
+`reactor.md` (emoji reactions), `topics.md`, `people-graph.md`, `embedding-storage.md`,
+`graceful-shutdown.md`, `telegram-html-rendering.md`, `vault-secrets.md`.

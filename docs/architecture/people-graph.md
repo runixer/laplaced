@@ -188,8 +188,8 @@ input := fmt.Sprintf("%s %s %s %s",
 )
 ```
 
-**API:** LLM API (OpenAI-compatible) с `google/gemini-embedding-001`
-- Размерность: 768
+**API:** LLM API (OpenAI-compatible) с `google/gemini-embedding-2`
+- Размерность: 1536 (см. [embedding-storage.md](./embedding-storage.md))
 - Нормализация: L2 normalized
 
 ### Дедупликация
@@ -267,15 +267,14 @@ func (s *Service) SearchPeople(
 agents:
   archivist:
     name: "Archivist"
-    model: "google/gemini-3-flash-preview"
+    # model: uses agents.default.model (google/gemini-3.1-flash-lite)
     thinking_level: "high"      # High reasoning for better fact/people extraction
     timeout: "120s"             # Longer timeout for multi-turn
     max_tool_calls: 2           # Usually 0-1, max 2 for complex sessions
 
   reranker:
     enabled: true
-    model: "google/gemini-3-flash-preview"
-    max_people: 10
+    model: "google/gemini-3.1-flash-lite"
     timeout: "60s"
     thinking_level: "minimal"
 
@@ -387,7 +386,7 @@ func (r *SQLitePersonRepository) MergePeople(ctx context.Context, sourceID, targ
 
 ## История изменений
 
-- **v0.6.0** — обновление модели на gemini-3-flash-preview, размерность embeddings 768
+- **v0.7.0** — переход на `google/gemini-embedding-2` (размерность 1536); агенты по умолчанию на `google/gemini-3.1-flash-lite`
 - **v0.5.1** — начальная реализация People Graph
   - Архитектура social graph
   - Категоризация по кругам

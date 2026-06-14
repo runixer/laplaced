@@ -190,8 +190,8 @@ input := fmt.Sprintf("Topic Summary: %s\n\nConversation Log:\n%s",
 )
 ```
 
-**API:** LLM API (OpenAI-compatible) с `google/gemini-embedding-001`
-- Размерность: 768
+**API:** LLM API (OpenAI-compatible) с `google/gemini-embedding-2`
+- Размерность: 1536 (см. [embedding-storage.md](./embedding-storage.md))
 - Нормализация: L2 normalized
 
 ### Сохранение топиков

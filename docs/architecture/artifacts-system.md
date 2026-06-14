@@ -98,7 +98,7 @@ sequenceDiagram
         Ext->>LLM: Multimodal request (file + prompt)
         LLM-->>Ext: JSON {summary, keywords, entities, rag_hints}
         Ext->>LLM: Create embedding for summary
-        LLM-->>Ext: Vector [768]float32
+        LLM-->>Ext: Vector [1536]float32
         Ext->>DB: Update artifact (state=ready)
     end
 
@@ -259,7 +259,7 @@ artifacts:
 agents:
   extractor:
     name: "Extractor"
-    model: "google/gemini-3-flash-preview"
+    model: "google/gemini-3.1-flash-lite"
     max_file_size_mb: 20
     timeout: "2m"
     max_retries: 3
@@ -494,7 +494,7 @@ artifacts:
 agents:
   extractor:
     name: "Extractor"
-    model: "google/gemini-3-flash-preview"
+    model: "google/gemini-3.1-flash-lite"
     max_file_size_mb: 20        # Макс размер файла для обработки
     timeout: "2m"               # Макс время на один артефакт
     max_retries: 3              # Попыток retry
@@ -550,6 +550,43 @@ Vector search также изолирован:
 ```go
 artifactVectors map[int64][]ArtifactVectorItem  // Key = UserID
 ```
+
+## Хранилище файлов: диск или S3 (v0.10.0)
+
+Байты файлов лежат за интерфейсом `files.Storage` (`internal/files/storage.go`):
+
+```go
+type Storage interface {
+    SaveFile(ctx, userID storage.ScopeID, reader io.Reader, filename string) (*SavedFile, error)
+    ReadFile(ctx, key string) ([]byte, error)
+    DeleteFile(ctx, key string) error
+}
+```
+
+В БД хранится только относительный путь (`SavedFile.Path`) — один и тот же ключ
+работает и на диске, и в S3. Бэкенд выбирается по наличию блока `artifacts.s3`
+(`internal/app/builder.go`):
+
+| Условие | Бэкенд | Где лежат файлы |
+|---------|--------|-----------------|
+| `artifacts.s3` отсутствует (default) | `FileStorage` | локальный диск, `data/artifacts/user_<scope>/YYYY-MM/` |
+| `artifacts.s3` задан | `S3Storage` | S3-совместимый бакет (ключ `user_<scope>/YYYY-MM/<uuid><ext>`) |
+
+**S3-бэкенд** (`internal/files/s3_storage.go`) использует AWS SDK v2 со статическими
+ключами и SigV4; работает с S3-совместимыми сервисами вроде Yandex Object Storage.
+`region` обязателен для подписи даже там, где провайдер его игнорирует. Конфиг:
+
+```yaml
+artifacts:
+  s3:
+    endpoint: "https://storage.yandexcloud.net"
+    region: "ru-central1"
+    bucket: "laplaced-artifacts"
+    access_key: "vault:secret/laplaced#s3_access_key"  # допустима vault:-ссылка
+    secret_key: "vault:secret/laplaced#s3_secret_key"
+```
+
+SHA256 (для дедупликации) считается в обоих бэкендах при сохранении.
 
 ## Deduplication
 

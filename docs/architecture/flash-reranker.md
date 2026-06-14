@@ -314,13 +314,15 @@ Flash обычно ставит более релевантные первыми
 | `laplaced_reranker_cost_usd_total` | counter | user_id | Стоимость reranker |
 | `laplaced_reranker_fallback_total` | counter | user_id, reason | Fallback срабатывания |
 
-## Конфигурация (v0.6.0)
+## Конфигурация
+
+Reranker настраивается в секции `agents.reranker` (см. `internal/config/default.yaml`):
 
 ```yaml
-rag:
+agents:
   reranker:
     enabled: true
-    model: "google/gemini-3-flash-preview"
+    model: "google/gemini-3.1-flash-lite"
     timeout: "60s"              # timeout на весь reranker flow
     turn_timeout: "30s"         # timeout на каждый LLM вызов
     max_tool_calls: 3           # максимум tool calls
@@ -337,10 +339,31 @@ rag:
       candidates_limit: 20      # сколько артефактов показать
       max: 10                   # лимит артефактов
       max_context_bytes: 52428800  # 50MB cumulative limit
+      # Session-aware injection (v0.9.0)
+      session:
+        max: 5                  # 0 = выключить
+        max_age: "24h"
 ```
 
 **Legacy migration (v0.6.0):**
 Старые поля `candidates`, `max_topics`, `max_people` автоматически мапятся в новую структуру для обратной совместимости.
+
+## Session-aware injection (v0.9.0)
+
+Vector search ранжирует артефакты по тому, насколько авто-саммари файла совпадает
+с предстоящим вопросом. Это ломается для файлов из **текущей сессии**: follow-up
+вроде «а на картинке что?» или «как вышло изображение?» лексически не совпадает с
+описанием содержимого — особенно болезненно для только что сгенерированных ботом
+картинок, о которых пользователь чаще всего и спрашивает сразу.
+
+Решение: артефакты, привязанные к сообщениям ещё в активной сессии
+(`topic_id IS NULL`), добавляются в пул кандидатов reranker'а напрямую — **в обход
+vector search** — с маркером приоритета `(session)`. Reranker по-прежнему сам
+решает, загружать ли такой файл в контекст, так что не относящиеся к делу файлы не
+раздувают промпт, когда разговор уходит в сторону.
+
+Настраивается через `agents.reranker.artifacts.session`: `max` (по умолчанию 5;
+`0` отключает) и `max_age` (по умолчанию `24h`).
 
 ## Ожидаемый эффект
 
