@@ -18,9 +18,10 @@ const (
 	reembedBatchSize = 32
 
 	// reembedParallelism is the number of concurrent embedding requests
-	// during migration. Validated by the benchmark: at 8 concurrent requests
-	// the full prod DB (~6500 vectors) re-embeds in ~45 seconds.
-	reembedParallelism = 8
+	// during migration. Measured on the full prod DB (~9400 vectors): 16
+	// workers re-embed in ~28s (~1.9x faster than 8). Throughput plateaus
+	// past 16 — the upstream embedding endpoint, not the client, is the limit.
+	reembedParallelism = 16
 )
 
 // currentEmbeddingVersion produces the version tag written into

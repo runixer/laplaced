@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - React to one of the bot's replies to flag it as a bad response — flagged replies are recorded for later review.
 
+### Changed
+- Default embedding model moved off the `-preview` alias to `google/gemini-embedding-2` (same vector space; stored vectors are re-embedded automatically on first start).
+
 ### Fixed
 - Replies are no longer delayed by pointless retries when the provider blocks a request on content policy (or rejects it as malformed/too long) — these permanent rejections now fail fast instead of retrying for ~20 seconds.
 - When you send a photo or file and the bot also recalls a similar one from memory, it no longer mixes the remembered file's details into its reply about the one you just sent.

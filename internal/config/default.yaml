@@ -69,7 +69,7 @@ agents:
   # Default model for all agents (used when agent's model is not specified)
   default:
     name: "Agent"
-    model: "google/gemini-3.1-flash-lite-preview"
+    model: "google/gemini-3.1-flash-lite"
 
   # Main bot - talks to users.
   # thinking_level: "minimal".."high" set an explicit reasoning effort;
@@ -111,7 +111,7 @@ agents:
   # Reranker - filters and ranks RAG candidates
   reranker:
     name: "Reranker"
-    model: "google/gemini-3.1-flash-lite-preview"
+    model: "google/gemini-3.1-flash-lite"
     enabled: true
     timeout: "60s"
     turn_timeout: "30s"
@@ -154,7 +154,7 @@ agents:
   # Extractor - extracts content from artifacts (images, audio, PDF, etc.)
   extractor:
     name: "Extractor"
-    model: "google/gemini-3.1-flash-lite-preview"
+    model: "google/gemini-3.1-flash-lite"
     # Processing settings (v0.6.0)
     max_file_size_mb: 20        # Max file size for extraction
     timeout: "2m"               # Max time for single artifact extraction
@@ -219,11 +219,13 @@ agents:
     max_concurrent: 4              # Parallel generate_image calls per turn ("draw three pictures"); other tools stay sequential
 
 # Embedding Configuration
-# v0.7.0: migrated to gemini-embedding-2-preview at 1536 dim.
-# On startup, vectors produced under a different model/dim are re-embedded in place
-# (see internal/rag/reembed.go + docs/architecture/embedding-storage.md).
+# v0.7.0: migrated to gemini-embedding-2 at 1536 dim (graduated from the
+# -preview alias; verified byte-identical vector space — cosine 1.0 on
+# unchanged content). On startup, vectors produced under a different model/dim
+# are re-embedded in place (see internal/rag/reembed.go +
+# docs/architecture/embedding-storage.md).
 embedding:
-  model: "google/gemini-embedding-2-preview"
+  model: "google/gemini-embedding-2"
   dimensions: 1536
 
 # RAG Configuration
