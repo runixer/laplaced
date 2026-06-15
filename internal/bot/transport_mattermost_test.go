@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/mattermost"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
@@ -349,5 +350,29 @@ func TestMMIdempotencyKey_StableAndDistinct(t *testing.T) {
 	}
 	if a == mmIdempotencyKey("chan", "root", "different") {
 		t.Error("idempotency key must differ for different text")
+	}
+}
+
+func TestMMFileKind(t *testing.T) {
+	cases := []struct {
+		mime string
+		want files.FileType
+		ok   bool
+	}{
+		{"image/png", files.FileTypeImage, true},
+		{"video/mp4", files.FileTypeVideo, true},
+		{"audio/ogg", "", false},
+		{"application/pdf", "", false},
+		{"text/plain", files.FileTypeDocument, true},
+		{"text/markdown; charset=utf-8", files.FileTypeDocument, true},
+		{"application/json", files.FileTypeDocument, true},
+		{"application/x-yaml", files.FileTypeDocument, true},
+		{"application/octet-stream", files.FileTypeDocument, true},
+	}
+	for _, c := range cases {
+		got, ok := mmFileKind(c.mime)
+		if got != c.want || ok != c.ok {
+			t.Errorf("mmFileKind(%q) = (%q, %v), want (%q, %v)", c.mime, got, ok, c.want, c.ok)
+		}
 	}
 }

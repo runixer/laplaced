@@ -433,6 +433,11 @@ func TestProcessor_ProcessMessage_UnsupportedFormat(t *testing.T) {
 		},
 	}
 
+	// A .docx is a binary (zip) blob. Capability-based document handling decides
+	// by content after download: the bytes aren't valid UTF-8 text, so it's
+	// rejected as unsupported rather than inlined as garbage.
+	mockDownloader.On("DownloadFile", mock.Anything, "doc-word").Return([]byte{0x50, 0x4b, 0x03, 0x04, 0x00, 0xff}, nil)
+
 	files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 
 	// Should return UnsupportedFormatError
@@ -442,9 +447,7 @@ func TestProcessor_ProcessMessage_UnsupportedFormat(t *testing.T) {
 	assert.ErrorAs(t, err, &unsupportedErr)
 	assert.Equal(t, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", unsupportedErr.MimeType)
 	assert.Equal(t, "document.docx", unsupportedErr.FileName)
-
-	// Verify no download was attempted
-	mockDownloader.AssertNotCalled(t, "DownloadFile", mock.Anything, mock.Anything)
+	mockDownloader.AssertExpectations(t)
 }
 
 func TestProcessor_ProcessMessage_FileTooLarge(t *testing.T) {
@@ -895,5 +898,50 @@ func TestProcessor_ProcessMessage_VoiceDefaultMimeType(t *testing.T) {
 	require.Len(t, files, 1)
 	assert.Equal(t, FileTypeVoice, files[0].FileType)
 	assert.Equal(t, "audio/ogg", files[0].MimeType, "should default to audio/ogg")
+	mockDownloader.AssertExpectations(t)
+}
+
+func TestIsProbablyText(t *testing.T) {
+	cases := []struct {
+		name string
+		data []byte
+		want bool
+	}{
+		{"plain ascii", []byte("hello world"), true},
+		{"utf8 typography", []byte("ёлка — «кавычки» … json"), true},
+		{"empty", []byte(""), true},
+		{"invalid utf8", []byte{0xff, 0xfe, 0x41}, false},
+		{"truncated multibyte", []byte{0xe2, 0x80}, false},
+		{"contains NUL", []byte("ok\x00mid"), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, isProbablyText(c.data))
+		})
+	}
+}
+
+func TestProcessor_ProcessMessage_DocumentBinary_Rejected(t *testing.T) {
+	ctx := context.Background()
+	mockDownloader := new(testutil.MockFileDownloader)
+	translator := createTestTranslator(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	processor := NewProcessor(mockDownloader, translator, "en", logger)
+
+	binData := []byte{0x00, 0x01, 0x02, 0xff, 0xfe}
+	mockDownloader.On("DownloadFile", mock.Anything, "bin-1").Return(binData, nil)
+
+	msg := &telegram.Message{
+		Document: &telegram.Document{
+			FileID:   "bin-1",
+			FileName: "blob.bin",
+			MimeType: "application/octet-stream",
+		},
+	}
+
+	_, err := processor.ProcessMessage(ctx, msg, "12345", "")
+	require.Error(t, err)
+	var unsupported *UnsupportedFormatError
+	require.True(t, errors.As(err, &unsupported), "want UnsupportedFormatError, got %T", err)
 	mockDownloader.AssertExpectations(t)
 }

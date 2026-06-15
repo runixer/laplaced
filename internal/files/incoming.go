@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
@@ -62,8 +63,8 @@ func (p *Processor) ProcessFiles(ctx context.Context, incoming []IncomingFile, u
 func (p *Processor) processOne(ctx context.Context, f IncomingFile, userID storage.ScopeID, groupText string) (*ProcessedFile, error) {
 	// Pre-fetch validation, matching the legacy per-type methods.
 	switch f.Kind {
-	case FileTypeImage, FileTypePDF, FileTypeVideo, FileTypeDocument:
-		// Document-derived kinds: Gemini support + size, validated before download.
+	case FileTypeImage, FileTypePDF, FileTypeVideo:
+		// Sent to Gemini as a file part: validate Gemini support + size before download.
 		if !IsGeminiSupported(f.MIME) {
 			p.logger.Info("unsupported file format",
 				"user_id", userID, "file_id", f.SourceID, "file_name", f.FileName, "mime_type", f.MIME,
@@ -77,8 +78,10 @@ func (p *Processor) processOne(ctx context.Context, f IncomingFile, userID stora
 			)
 			return nil, &FileTooLargeError{Size: f.Size, FileName: f.FileName}
 		}
-	case FileTypeVoice, FileTypeAudio, FileTypeVideoNote:
-		// Media kinds: size only.
+	case FileTypeVoice, FileTypeAudio, FileTypeVideoNote, FileTypeDocument:
+		// Media kinds and text documents: size only. A document is inlined as
+		// text rather than sent to Gemini as a file, so its "is it readable
+		// text" check runs after download (needs the bytes), not on the MIME.
 		if f.Size > 0 && !IsFileSizeAllowed(f.Size) {
 			p.logger.Info("file too large",
 				"user_id", userID, "file_id", f.SourceID, "size", f.Size, "max_size", MaxFileSize(),
@@ -172,6 +175,12 @@ func (p *Processor) processOne(ctx context.Context, f IncomingFile, userID stora
 		}, nil
 
 	default: // FileTypeDocument — text file inlined as a text part
+		if !isProbablyText(data) {
+			p.logger.Info("unsupported file format (not UTF-8 text)",
+				"user_id", userID, "file_id", f.SourceID, "file_name", f.FileName, "mime_type", f.MIME,
+			)
+			return nil, &UnsupportedFormatError{MimeType: f.MIME, FileName: f.FileName}
+		}
 		textContent := fmt.Sprintf("%s:\n\n%s", f.FileName, string(data))
 		artifactID := p.saveArtifact(ctx, userID, "document", f.FileName, f.MIME, data, groupText, f.SourceID)
 		return &ProcessedFile{
@@ -180,6 +189,13 @@ func (p *Processor) processOne(ctx context.Context, f IncomingFile, userID stora
 			Size: int64(len(data)), Duration: duration, ArtifactID: artifactID,
 		}, nil
 	}
+}
+
+// isProbablyText reports whether data is readable UTF-8 text. It rejects binaries
+// (and NUL bytes) so they don't get inlined as garbage text or break the Postgres
+// TEXT columns / artifact store, which reject invalid UTF-8 and 0x00.
+func isProbablyText(data []byte) bool {
+	return utf8.Valid(data) && !bytes.Contains(data, []byte{0})
 }
 
 // mediaPart builds the LLM content part for an inbound file in the configured

@@ -333,11 +333,12 @@ func (b *Bot) StartMattermostIngestion(client *mattermost.Client) {
 	}
 }
 
-// extractMattermostFiles maps a post's image/video attachments to neutral
-// IncomingFiles whose Fetch lazily downloads the bytes via the MM client. It
-// prefers the FileInfo embedded in the post metadata (no extra round-trip) and
-// falls back to GET /files/{id}/info when metadata is absent. Non-image/-video
-// attachments are skipped (voice/PDF are off on this contour).
+// extractMattermostFiles maps a post's attachments to neutral IncomingFiles
+// whose Fetch lazily downloads the bytes via the MM client. It prefers the
+// FileInfo embedded in the post metadata (no extra round-trip) and falls back to
+// GET /files/{id}/info when metadata is absent. Images/video go through as media;
+// text files (md/txt/yaml/json, config, code, logs) ride the document path;
+// audio is skipped on this contour.
 func (b *Bot) extractMattermostFiles(client *mattermost.Client, post mattermost.Post) []files.IncomingFile {
 	infos := post.Metadata.Files
 	if len(infos) == 0 {
@@ -372,15 +373,23 @@ func (b *Bot) extractMattermostFiles(client *mattermost.Client, post mattermost.
 }
 
 // mmFileKind maps a MIME type to the neutral FileType the pipeline understands.
-// v0.10 inbound scope is visual media (image/video); other kinds are skipped.
+// Images and video go to Gemini as file parts. Audio and PDF are off on this
+// contour (the local model doesn't parse PDF natively — that's separate work),
+// so they are skipped rather than mis-routed. Everything else is treated as a
+// candidate text document — the file processor inlines it only if the downloaded
+// bytes are valid UTF-8 text and rejects binaries. This covers md/txt/yaml/json
+// plus config/code/logs without chasing the unreliable MIME types Mattermost
+// assigns to such files.
 func mmFileKind(mime string) (files.FileType, bool) {
 	switch {
 	case strings.HasPrefix(mime, "image/"):
 		return files.FileTypeImage, true
 	case strings.HasPrefix(mime, "video/"):
 		return files.FileTypeVideo, true
-	default:
+	case strings.HasPrefix(mime, "audio/"), strings.HasPrefix(mime, "application/pdf"):
 		return "", false
+	default:
+		return files.FileTypeDocument, true
 	}
 }
 

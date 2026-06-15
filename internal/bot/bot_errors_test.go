@@ -19,7 +19,7 @@ import (
 )
 
 // setupBotForErrorTests creates a fully configured Bot for error testing.
-func setupBotForErrorTests(t *testing.T) (*Bot, *testutil.MockStorage, *testutil.MockLLMClient, *testutil.MockBotAPI) {
+func setupBotForErrorTests(t *testing.T) (*Bot, *testutil.MockStorage, *testutil.MockLLMClient, *testutil.MockBotAPI, *testutil.MockFileDownloader) {
 	t.Helper()
 
 	logger := testutil.TestLogger()
@@ -79,12 +79,12 @@ func setupBotForErrorTests(t *testing.T) (*Bot, *testutil.MockStorage, *testutil
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil).Maybe()
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil).Maybe()
 
-	return bot, mockStore, mockORClient, mockAPI
+	return bot, mockStore, mockORClient, mockAPI, mockDownloader
 }
 
 // TestProcessMessageGroup_EmptyMessageGroup_ReturnsEarly verifies empty groups don't process.
 func TestProcessMessageGroup_EmptyMessageGroup_ReturnsEarly(t *testing.T) {
-	bot, _, _, _ := setupBotForErrorTests(t)
+	bot, _, _, _, _ := setupBotForErrorTests(t)
 
 	group := tgGroup(bot, "123")
 
@@ -96,7 +96,7 @@ func TestProcessMessageGroup_EmptyMessageGroup_ReturnsEarly(t *testing.T) {
 
 // TestProcessMessageGroup_UnsupportedFileType_SendsErrorMessage verifies unsupported file error is handled.
 func TestProcessMessageGroup_UnsupportedFileType_SendsErrorMessage(t *testing.T) {
-	bot, mockStore, _, mockAPI := setupBotForErrorTests(t)
+	bot, mockStore, _, mockAPI, mockDownloader := setupBotForErrorTests(t)
 
 	userID := storage.ScopeID("123")
 	chatID := int64(456)
@@ -114,6 +114,9 @@ func TestProcessMessageGroup_UnsupportedFileType_SendsErrorMessage(t *testing.T)
 		},
 	})
 
+	// A .docx is a binary blob: capability-based document handling downloads it,
+	// finds it isn't valid UTF-8 text, and reports it as unsupported.
+	mockDownloader.On("DownloadFile", mock.Anything, "doc123").Return([]byte{0x50, 0x4b, 0x03, 0x04, 0xff}, nil)
 	mockStore.On("GetRecentSessionMessages", userID, mock.Anything, mock.Anything).Return([]storage.Message{}, nil).Maybe()
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil).Maybe()
 	mockAPI.On("SendMessage", mock.Anything, mock.MatchedBy(func(req telegram.SendMessageRequest) bool {
@@ -128,7 +131,7 @@ func TestProcessMessageGroup_UnsupportedFileType_SendsErrorMessage(t *testing.T)
 
 // TestProcessMessageGroup_FileTooLarge_SendsErrorMessage verifies file size error is handled.
 func TestProcessMessageGroup_FileTooLarge_SendsErrorMessage(t *testing.T) {
-	bot, mockStore, _, mockAPI := setupBotForErrorTests(t)
+	bot, mockStore, _, mockAPI, _ := setupBotForErrorTests(t)
 
 	userID := storage.ScopeID("123")
 	chatID := int64(456)
@@ -160,7 +163,7 @@ func TestProcessMessageGroup_FileTooLarge_SendsErrorMessage(t *testing.T) {
 
 // TestProcessMessageGroup_AddMessageToHistoryError_ReturnsEarly verifies DB errors stop processing.
 func TestProcessMessageGroup_AddMessageToHistoryError_ReturnsEarly(t *testing.T) {
-	bot, mockStore, _, _ := setupBotForErrorTests(t)
+	bot, mockStore, _, _, _ := setupBotForErrorTests(t)
 
 	userID := storage.ScopeID("123")
 	chatID := int64(456)
@@ -190,7 +193,7 @@ func TestProcessMessageGroup_AddMessageToHistoryError_ReturnsEarly(t *testing.T)
 
 // TestProcessMessageGroup_LaplaceAgentNil_SendsGenericError verifies nil agent is handled.
 func TestProcessMessageGroup_LaplaceAgentNil_SendsGenericError(t *testing.T) {
-	bot, mockStore, _, mockAPI := setupBotForErrorTests(t)
+	bot, mockStore, _, mockAPI, _ := setupBotForErrorTests(t)
 
 	// Set laplaceAgent to nil
 	bot.laplaceAgent = nil
@@ -222,7 +225,7 @@ func TestProcessMessageGroup_LaplaceAgentNil_SendsGenericError(t *testing.T) {
 
 // TestProcessMessageGroup_LLMExecutionError_SendsErrorMessage verifies LLM errors are handled.
 func TestProcessMessageGroup_LLMExecutionError_SendsErrorMessage(t *testing.T) {
-	bot, mockStore, mockORClient, _ := setupBotForErrorTests(t)
+	bot, mockStore, mockORClient, _, _ := setupBotForErrorTests(t)
 
 	userID := storage.ScopeID("123")
 	chatID := int64(456)
@@ -258,7 +261,7 @@ func TestProcessMessageGroup_LLMExecutionError_SendsErrorMessage(t *testing.T) {
 
 // TestProcessMessageGroup_AddStatFailure_Continues verifies stat errors don't block processing.
 func TestProcessMessageGroup_AddStatFailure_Continues(t *testing.T) {
-	bot, mockStore, mockORClient, _ := setupBotForErrorTests(t)
+	bot, mockStore, mockORClient, _, _ := setupBotForErrorTests(t)
 
 	userID := storage.ScopeID("123")
 	chatID := int64(456)
@@ -300,7 +303,7 @@ func TestProcessMessageGroup_AddStatFailure_Continues(t *testing.T) {
 
 // TestProcessMessageGroup_ContextCancellation_CompletesProcessing verifies cancelled context doesn't stop processing.
 func TestProcessMessageGroup_ContextCancellation_CompletesProcessing(t *testing.T) {
-	bot, mockStore, mockORClient, _ := setupBotForErrorTests(t)
+	bot, mockStore, mockORClient, _, _ := setupBotForErrorTests(t)
 
 	userID := storage.ScopeID("123")
 	chatID := int64(456)

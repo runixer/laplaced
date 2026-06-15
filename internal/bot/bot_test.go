@@ -1613,6 +1613,9 @@ func TestPrepareUserMessage_UnsupportedFormat(t *testing.T) {
 
 	// Mock storage calls
 	mockStore.On("GetRecentSessionMessages", userID, mock.Anything, mock.Anything).Return([]storage.Message{}, nil)
+	// .docx is a binary blob: it downloads, fails the UTF-8 text check, and is
+	// reported as unsupported (capability-based document handling).
+	mockDownloader.On("DownloadFile", mock.Anything, "doc-123").Return([]byte{0x50, 0x4b, 0x03, 0x04, 0xff}, nil)
 
 	_, _, _, _, err := bot.prepareUserMessage(context.Background(), group, logger)
 
