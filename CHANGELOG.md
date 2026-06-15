@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Default embedding model moved off the `-preview` alias to `google/gemini-embedding-2` (same vector space; stored vectors are re-embedded automatically on first start).
 
 ### Fixed
+- A conversation no longer fails to turn into long-term memory when the topic splitter leaves a few messages uncovered — those messages are folded into the nearest topic instead of dropping the whole session (it still retries when coverage is very low).
 - Postgres deployments now get the `history.trace_id` column and `response_flags` table that were added in 0.10.1 for SQLite only — without them the bot failed to store any messages on Postgres (`column "trace_id" ... does not exist`). The consolidated schema now creates them and retrofits existing databases on startup.
 - Edited facts and people no longer keep an out-of-date search vector, so updating a memory no longer drops it out of recall.
 - Replies are no longer delayed by pointless retries when the provider blocks a request on content policy (or rejects it as malformed/too long) — these permanent rejections now fail fast instead of retrying for ~20 seconds.

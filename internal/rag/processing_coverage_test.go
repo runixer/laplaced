@@ -173,3 +173,37 @@ func TestRecordCoverage_ContentEventGated(t *testing.T) {
 		assert.Contains(t, decoded[0]["preview"], "lost")
 	})
 }
+
+// TestSalvageStragglers reproduces the trace b2cb9090 case: the splitter
+// returned topics [661-670] and [674-679], leaving 671-673 in the gap. Salvage
+// must fold each orphan into its nearest topic so the whole 661-679 range is
+// covered and the session can archive.
+func TestSalvageStragglers(t *testing.T) {
+	topics := []ExtractedTopic{
+		{Summary: "infra brief", StartMsgID: 661, EndMsgID: 670},
+		{Summary: "doc maintenance", StartMsgID: 674, EndMsgID: 679},
+	}
+	got := salvageStragglers(topics, []int64{671, 672, 673})
+
+	// Every message in the chunk range is now covered by some topic.
+	for id := int64(661); id <= 679; id++ {
+		covered := false
+		for _, tp := range got {
+			if id >= tp.StartMsgID && id <= tp.EndMsgID {
+				covered = true
+				break
+			}
+		}
+		assert.Truef(t, covered, "message %d still uncovered after salvage", id)
+	}
+	// 671,672 are nearer the first topic (gap from 670), 673 nearer the second
+	// (gap from 674); ties go to the earlier topic. Ranges stay non-overlapping.
+	assert.Equal(t, int64(672), got[0].EndMsgID)
+	assert.Equal(t, int64(673), got[1].StartMsgID)
+}
+
+// TestSalvageStragglers_NoTopics is a no-op guard: with nothing to attach to,
+// salvage returns the (empty) topics untouched and the caller fails the chunk.
+func TestSalvageStragglers_NoTopics(t *testing.T) {
+	assert.Empty(t, salvageStragglers(nil, []int64{1, 2}))
+}
