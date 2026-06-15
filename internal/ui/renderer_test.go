@@ -13,9 +13,7 @@ func TestNewRenderer(t *testing.T) {
 
 	if r == nil {
 		t.Fatal("NewRenderer() returned nil")
-	}
-
-	if r.layout == nil {
+	} else if r.layout == nil {
 		t.Error("NewRenderer() layout is nil")
 	}
 }

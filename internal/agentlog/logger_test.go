@@ -1004,9 +1004,7 @@ func TestSanitizeConversationTurns_OriginalPreservesOriginalBehavior(t *testing.
 	// Sanitize
 	sanitized := agentlog.SanitizeConversationTurns(turns)
 
-	if sanitized == nil {
-		t.Fatal("Sanitized turns should not be nil")
-	}
+	require.NotNil(t, sanitized, "Sanitized turns should not be nil")
 
 	// The Request should be a string (JSON) after sanitization
 	sanitizedRequest, ok := sanitized.Turns[0].Request.(string)
