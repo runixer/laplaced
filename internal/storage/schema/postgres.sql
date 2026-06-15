@@ -36,10 +36,15 @@ CREATE TABLE IF NOT EXISTS history (
     author          text,
     message_id      text,
     conversation_id text,
-    thread_root     text
+    thread_root     text,
+    trace_id        text
 );
 CREATE INDEX IF NOT EXISTS idx_history_user_id ON history(user_id);
 CREATE INDEX IF NOT EXISTS idx_history_topic_id ON history(topic_id);
+-- Retrofit columns added after a DB was first created. The consolidated schema
+-- above is pure CREATE IF NOT EXISTS, so it never alters an existing table; these
+-- idempotent ALTERs bring older Postgres DBs up to the current shape on startup.
+ALTER TABLE history ADD COLUMN IF NOT EXISTS trace_id text;
 
 CREATE TABLE IF NOT EXISTS stats (
     id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -271,3 +276,16 @@ CREATE TABLE IF NOT EXISTS channels (
     last_seen    timestamptz DEFAULT now(),
     UNIQUE(transport, native_id)
 );
+
+CREATE TABLE IF NOT EXISTS response_flags (
+    id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id       uuid NOT NULL,
+    history_id    bigint,
+    message_id    text,
+    trace_id      text,
+    emoji         text,
+    reply_preview text,
+    created_at    timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_response_flags_user_id ON response_flags(user_id);
+CREATE INDEX IF NOT EXISTS idx_response_flags_created_at ON response_flags(created_at DESC);
