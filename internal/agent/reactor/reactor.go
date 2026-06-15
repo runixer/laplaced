@@ -237,8 +237,8 @@ func (r *Reactor) formatHistory(req *agent.Request) string {
 	var sb strings.Builder
 	for _, msg := range history {
 		content := msg.Content
-		if len(content) > 500 {
-			content = content[:500] + "..."
+		if r := []rune(content); len(r) > 500 {
+			content = string(r[:500]) + "..."
 		}
 		content = strings.ReplaceAll(content, "\n", " ")
 		fmt.Fprintf(&sb, "- [%s]: %s\n", msg.Role, content)

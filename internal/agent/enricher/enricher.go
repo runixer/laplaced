@@ -105,8 +105,8 @@ func (e *Enricher) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 	var historyStr strings.Builder
 	for _, msg := range history {
 		content := msg.Content
-		if len(content) > 500 {
-			content = content[:500] + "..."
+		if r := []rune(content); len(r) > 500 {
+			content = string(r[:500]) + "..."
 		}
 		content = strings.ReplaceAll(content, "\n", " ")
 		fmt.Fprintf(&historyStr, "- [%s]: %s\n", msg.Role, content)

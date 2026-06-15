@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/storage"
@@ -1059,4 +1060,31 @@ func TestLogger_Log_ErrorFromRepo(t *testing.T) {
 	// capturedLog will be nil because AddAgentLog returns error before setting it
 	// This is expected - the error is caught and logged by the logger
 	assert.Nil(t, repo.capturedLog)
+}
+
+// TestLog_SanitizesInvalidUTF8 ensures raw string fields are stored as valid
+// UTF-8 even when upstream byte-boundary truncation split a multibyte rune,
+// so a corrupted preview never fails the whole agent_logs insert (SQLSTATE 22021).
+func TestLog_SanitizesInvalidUTF8(t *testing.T) {
+	repo := &mockAgentLogRepository{}
+	logger := agentlog.NewLogger(repo, slog.New(slog.NewTextHandler(os.Stderr, nil)), true)
+
+	// "…" (U+2026 = e2 80 a6) truncated after 2 bytes, then a literal '.'.
+	broken := "preview ends in \xe2\x80."
+	logger.Log(context.Background(), agentlog.Entry{
+		AgentType:      "archivist",
+		InputPrompt:    broken,
+		OutputResponse: broken,
+		ErrorMessage:   broken,
+		Success:        true,
+	})
+
+	require.NotNil(t, repo.capturedLog)
+	for name, got := range map[string]string{
+		"InputPrompt":    repo.capturedLog.InputPrompt,
+		"OutputResponse": repo.capturedLog.OutputResponse,
+		"ErrorMessage":   repo.capturedLog.ErrorMessage,
+	} {
+		assert.True(t, utf8.ValidString(got), "%s must be valid UTF-8, got %q", name, got)
+	}
 }

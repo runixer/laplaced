@@ -393,8 +393,8 @@ func (b *Bot) HandleReaction(ir IncomingReaction) {
 	}
 
 	preview := reply.Content
-	if len(preview) > reactionFlagPreviewLen {
-		preview = preview[:reactionFlagPreviewLen]
+	if r := []rune(preview); len(r) > reactionFlagPreviewLen {
+		preview = string(r[:reactionFlagPreviewLen])
 	}
 	historyID := reply.ID
 	span.SetAttributes(
@@ -1027,8 +1027,8 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID storage.ScopeID, text 
 	if len(resp.Messages) > 0 {
 		contextBytes, _ := json.Marshal(resp.Messages)
 		preview := string(contextBytes)
-		if len(preview) > 500 {
-			preview = preview[:500] + "..."
+		if r := []rune(preview); len(r) > 500 {
+			preview = string(r[:500]) + "..."
 		}
 		result.ContextPreview = preview
 	}

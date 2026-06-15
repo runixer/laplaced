@@ -104,12 +104,17 @@ func (l *Logger) Log(ctx context.Context, entry Entry) {
 	metadata := serializeJSON(entry.Metadata)
 	conversationTurns := serializeJSON(sanitizedConversationTurns)
 
+	// Raw string fields are stored as-is (Postgres TEXT rejects invalid UTF-8 with
+	// SQLSTATE 22021). Upstream byte-boundary truncation can split a multibyte rune;
+	// drop any stray bytes so a corrupted preview never loses the whole agent log.
+	// The JSON-serialized fields above are already valid (encoding/json replaces
+	// invalid bytes with U+FFFD).
 	log := storage.AgentLog{
 		UserID:            entry.UserID,
 		AgentType:         string(entry.AgentType),
-		InputPrompt:       entry.InputPrompt,
+		InputPrompt:       strings.ToValidUTF8(entry.InputPrompt, ""),
 		InputContext:      inputContext,
-		OutputResponse:    entry.OutputResponse,
+		OutputResponse:    strings.ToValidUTF8(entry.OutputResponse, ""),
 		OutputParsed:      outputParsed,
 		OutputContext:     outputContext,
 		Model:             entry.Model,
@@ -119,7 +124,7 @@ func (l *Logger) Log(ctx context.Context, entry Entry) {
 		DurationMs:        entry.DurationMs,
 		Metadata:          metadata,
 		Success:           entry.Success,
-		ErrorMessage:      entry.ErrorMessage,
+		ErrorMessage:      strings.ToValidUTF8(entry.ErrorMessage, ""),
 		ConversationTurns: conversationTurns,
 		CreatedAt:         time.Now(),
 	}
