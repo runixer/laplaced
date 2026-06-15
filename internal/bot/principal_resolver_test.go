@@ -85,7 +85,7 @@ func TestMattermostPrincipalResolver_TrustGate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := NewMattermostPrincipalResolver(&fakeMMUser{user: tt.user}, tt.trusted, testutil.TestLogger())
+			r := NewMattermostPrincipalResolver(&fakeMMUser{user: tt.user}, tt.trusted, nil, testutil.TestLogger())
 			got, err := r.Resolve(context.Background(), "uid")
 			require.NoError(t, err)
 			if tt.wantNil {
@@ -103,7 +103,7 @@ func TestMattermostPrincipalResolver_TrustGate(t *testing.T) {
 }
 
 func TestMattermostPrincipalResolver_GetUserErrorPropagates(t *testing.T) {
-	r := NewMattermostPrincipalResolver(&fakeMMUser{err: errors.New("503")}, nil, testutil.TestLogger())
+	r := NewMattermostPrincipalResolver(&fakeMMUser{err: errors.New("503")}, nil, nil, testutil.TestLogger())
 	_, err := r.Resolve(context.Background(), "uid")
 	require.Error(t, err)
 }
@@ -129,7 +129,7 @@ func TestMattermostPrincipalResolver_IsTrusted(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := NewMattermostPrincipalResolver(&fakeMMUser{user: tt.user}, tt.trusted, testutil.TestLogger())
+			r := NewMattermostPrincipalResolver(&fakeMMUser{user: tt.user}, tt.trusted, nil, testutil.TestLogger())
 			got, err := r.IsTrusted(context.Background(), "uid")
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
@@ -138,7 +138,7 @@ func TestMattermostPrincipalResolver_IsTrusted(t *testing.T) {
 }
 
 func TestMattermostPrincipalResolver_IsTrusted_GetUserErrorPropagates(t *testing.T) {
-	r := NewMattermostPrincipalResolver(&fakeMMUser{err: errors.New("503")}, nil, testutil.TestLogger())
+	r := NewMattermostPrincipalResolver(&fakeMMUser{err: errors.New("503")}, nil, nil, testutil.TestLogger())
 	_, err := r.IsTrusted(context.Background(), "uid")
 	require.Error(t, err)
 }
@@ -146,9 +146,44 @@ func TestMattermostPrincipalResolver_IsTrusted_GetUserErrorPropagates(t *testing
 // Invalidate must forward to the client so a denied (pre-migration) profile can
 // be dropped — the wiring that lets an SSO-migrated account recover without a
 // process restart. Regression guard for the stale-GetUser-cache bug.
+// ClassifyBot gates trusted automation: only bot accounts whose username is on
+// the allowlist are admitted; the match is case-insensitive and an empty
+// allowlist trusts no bots (fail-closed).
+func TestMattermostPrincipalResolver_ClassifyBot(t *testing.T) {
+	tests := []struct {
+		name            string
+		user            *mattermost.User
+		trustedBots     []string
+		wantIsBot       bool
+		wantAllowlisted bool
+	}{
+		{"allowlisted bot", &mattermost.User{IsBot: true, Username: "alertbot"}, []string{"alertbot"}, true, true},
+		{"username match is case-insensitive", &mattermost.User{IsBot: true, Username: "AlertBot"}, []string{"alertbot"}, true, true},
+		{"leading @ in config tolerated", &mattermost.User{IsBot: true, Username: "alertbot"}, []string{"@alertbot"}, true, true},
+		{"bot not on allowlist", &mattermost.User{IsBot: true, Username: "rogue"}, []string{"alertbot"}, true, false},
+		{"empty allowlist trusts no bots", &mattermost.User{IsBot: true, Username: "alertbot"}, nil, true, false},
+		{"human is not a bot", &mattermost.User{IsBot: false, Username: "j.doe"}, []string{"j.doe"}, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := NewMattermostPrincipalResolver(&fakeMMUser{user: tt.user}, nil, tt.trustedBots, testutil.TestLogger())
+			isBot, allowlisted, err := r.ClassifyBot(context.Background(), "uid")
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantIsBot, isBot)
+			assert.Equal(t, tt.wantAllowlisted, allowlisted)
+		})
+	}
+}
+
+func TestMattermostPrincipalResolver_ClassifyBot_GetUserErrorPropagates(t *testing.T) {
+	r := NewMattermostPrincipalResolver(&fakeMMUser{err: errors.New("503")}, nil, []string{"x"}, testutil.TestLogger())
+	_, _, err := r.ClassifyBot(context.Background(), "uid")
+	require.Error(t, err)
+}
+
 func TestMattermostPrincipalResolver_InvalidateForwardsToClient(t *testing.T) {
 	f := &fakeMMUser{user: &mattermost.User{AuthService: ""}}
-	r := NewMattermostPrincipalResolver(f, nil, testutil.TestLogger())
+	r := NewMattermostPrincipalResolver(f, nil, nil, testutil.TestLogger())
 	r.Invalidate("uid")
 	assert.Equal(t, 1, f.invalidated, "Invalidate must drop the client's cached profile")
 }

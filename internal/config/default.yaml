@@ -37,6 +37,13 @@ mattermost:
   #   # Restrict which auth_service values are trusted. Empty = any non-empty
   #   # auth_service. Local accounts (auth_service == "") are never linked.
   #   trusted_auth_services: ["saml"]
+  #   # Bot accounts (matched by Mattermost username, case-insensitive) allowed to
+  #   # interact despite being local accounts that fail the SSO gate. Empty = no
+  #   # bots trusted. Real names belong in a gitignored overlay, not here.
+  #   trusted_bots: ["alertbot", "incidentbot"]
+  #   # Max consecutive bot replies per thread before the bot stops replying
+  #   # (breaks LLM-bot loops). Omit or <= 0 for the built-in default.
+  #   max_bot_chain_depth: 3
 
 # LLM API configuration (any OpenAI-compatible endpoint: OpenRouter, litellm, vLLM)
 llm:

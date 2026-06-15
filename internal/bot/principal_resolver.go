@@ -39,6 +39,17 @@ type principalCacheInvalidator interface {
 	Invalidate(nativeID string)
 }
 
+// botClassifier is an optional upgrade of PrincipalResolver: it reports whether a
+// sender is a transport-level bot account and whether that bot is on the
+// configured trusted-bots allowlist. The bot type-asserts for it on the
+// not-trusted-by-SSO path so trusted automation (e.g. an alerting bot asking for
+// an incident summary) can be admitted even though bot accounts are local
+// (auth_service == "") and so fail the SSO trust gate. A non-allowlisted bot is
+// ignored silently rather than sent an access-denied notice.
+type botClassifier interface {
+	ClassifyBot(ctx context.Context, nativeID string) (isBot, allowlisted bool, err error)
+}
+
 // mmUserLookup is the slice of the Mattermost client the resolver needs (the
 // cached profile read plus its invalidation); narrowed for testability.
 type mmUserLookup interface {
@@ -62,23 +73,37 @@ type mmUserLookup interface {
 type MattermostPrincipalResolver struct {
 	client          mmUserLookup
 	trustedServices []string // empty = trust any non-empty auth_service
+	trustedBots     []string // bot usernames admitted despite being local accounts; empty = no bots
 	logger          *slog.Logger
 }
 
 // NewMattermostPrincipalResolver builds the resolver. trustedServices restricts
-// which auth_service values are trusted (empty = any non-empty). Values are
-// lowercased so the comparison against Mattermost's auth_service is
-// case-insensitive (config "SAML" matches the wire value "saml").
-func NewMattermostPrincipalResolver(client mmUserLookup, trustedServices []string, logger *slog.Logger) *MattermostPrincipalResolver {
-	normalized := make([]string, len(trustedServices))
-	for i, s := range trustedServices {
-		normalized[i] = strings.ToLower(strings.TrimSpace(s))
-	}
+// which auth_service values are trusted (empty = any non-empty). trustedBots
+// lists bot-account usernames admitted despite failing the SSO gate (empty = no
+// bots trusted — fail-closed). Both lists are lowercased/trimmed so the
+// comparison against Mattermost's auth_service / username is case-insensitive
+// (config "SAML" matches the wire value "saml"; "@AlertBot" matches "alertbot").
+func NewMattermostPrincipalResolver(client mmUserLookup, trustedServices, trustedBots []string, logger *slog.Logger) *MattermostPrincipalResolver {
 	return &MattermostPrincipalResolver{
 		client:          client,
-		trustedServices: normalized,
+		trustedServices: normalizeList(trustedServices),
+		trustedBots:     normalizeList(trustedBots),
 		logger:          logger.With("component", "mm-principal-resolver"),
 	}
+}
+
+// normalizeList lowercases and trims each entry and drops empties, so allowlist
+// comparisons against wire values are case-insensitive and tolerant of stray
+// whitespace or a leading "@".
+func normalizeList(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		v := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(s), "@")))
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // Resolve returns the principal attributes for nativeID, or nil if the sender is
@@ -141,6 +166,23 @@ func (r *MattermostPrincipalResolver) IsTrusted(ctx context.Context, nativeID st
 // message gives instant recovery instead of waiting out the profile-cache TTL.
 func (r *MattermostPrincipalResolver) Invalidate(nativeID string) {
 	r.client.InvalidateUser(nativeID)
+}
+
+// ClassifyBot reports whether nativeID is a bot account and, if so, whether its
+// username is on the trusted-bots allowlist. It is consulted only after the SSO
+// trust gate (IsTrusted) has already rejected the sender, so the GetUser here is
+// a cache hit. An empty allowlist trusts no bots (fail-closed): slices.Contains
+// over an empty slice is false, by design — there is deliberately no "empty =
+// trust all bots" branch.
+func (r *MattermostPrincipalResolver) ClassifyBot(ctx context.Context, nativeID string) (bool, bool, error) {
+	u, err := r.client.GetUser(ctx, nativeID)
+	if err != nil {
+		return false, false, fmt.Errorf("failed to fetch mm user %s for bot classification: %w", nativeID, err)
+	}
+	if !u.IsBot {
+		return false, false, nil
+	}
+	return true, slices.Contains(r.trustedBots, strings.ToLower(strings.TrimSpace(u.Username))), nil
 }
 
 // authServiceTrusted is the shared auth_service trust predicate behind both

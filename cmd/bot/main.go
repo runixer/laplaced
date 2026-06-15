@@ -456,8 +456,9 @@ func run() int {
 		// their own isolated scope, today's behavior). Present → federated-passive
 		// linkage (trust gate = auth_service, never email).
 		if pr := cfg.Mattermost.PrincipalResolver; pr != nil {
-			b.SetPrincipalResolver(bot.NewMattermostPrincipalResolver(mmClient, pr.TrustedAuthServices, logger))
-			logger.Info("principal resolution enabled", "trusted_auth_services", pr.TrustedAuthServices)
+			b.SetPrincipalResolver(bot.NewMattermostPrincipalResolver(mmClient, pr.TrustedAuthServices, pr.TrustedBots, logger))
+			logger.Info("principal resolution enabled",
+				"trusted_auth_services", pr.TrustedAuthServices, "trusted_bots", pr.TrustedBots)
 		}
 		logger.Info("Mattermost/Time transport active", "server", cfg.Mattermost.ServerURL)
 

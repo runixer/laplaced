@@ -451,6 +451,16 @@ type PrincipalResolverConfig struct {
 	// wording (e.g. "sign in via your corporate SSO first") belongs here, in a
 	// gitignored overlay — never in tracked locale files.
 	AccessDeniedMessage string `yaml:"access_denied_message" env:"LAPLACED_MATTERMOST_ACCESS_DENIED_MESSAGE"`
+	// TrustedBots lists bot-account usernames (case-insensitive, leading "@"
+	// tolerated) allowed to interact with the bot despite being local accounts
+	// that fail the SSO trust gate. Empty = no bots trusted (fail-closed). Use for
+	// trusted automation such as an alerting bot requesting an incident summary. A
+	// bot not on this list is ignored silently — not sent an access-denied notice.
+	TrustedBots []string `yaml:"trusted_bots" env:"LAPLACED_MATTERMOST_TRUSTED_BOTS" env-separator:","`
+	// MaxBotChainDepth caps consecutive bot replies within a single thread before
+	// the bot stops replying, breaking LLM-bot ping-pong loops. <= 0 uses a
+	// built-in default. An authorized human posting in the thread resets the count.
+	MaxBotChainDepth int `yaml:"max_bot_chain_depth" env:"LAPLACED_MATTERMOST_MAX_BOT_CHAIN_DEPTH"`
 }
 
 type LLMConfig struct {

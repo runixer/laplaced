@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - React to one of the bot's replies to flag it as a bad response — flagged replies are recorded for later review.
+- Trusted bot accounts can now talk to the bot — set `mattermost.principal_resolver.trusted_bots` to a list of bot usernames (e.g. an alerting bot asking for an incident summary); other bots are ignored silently rather than told "access denied". A per-thread loop guard (`max_bot_chain_depth`) stops two bots from replying to each other forever.
 
 ### Changed
 - Default embedding model moved off the `-preview` alias to `google/gemini-embedding-2` (same vector space; stored vectors are re-embedded automatically on first start).

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/runixer/laplaced/internal/agent"
@@ -56,14 +57,22 @@ type Bot struct {
 	// sender is told once per process, not on every message. Keyed by native
 	// sender id; values are unused (presence = already notified).
 	accessDeniedNotified sync.Map
-	transportOnce        sync.Once // guards lazy Telegram default for struct-literal test bots
-	messageGrouper       *MessageGrouper
-	toolExecutor         *tools.ToolExecutor // v0.6.1: Tool execution
-	fileStorage          files.Storage       // v0.8.0: For media-reply path
-	logger               *slog.Logger
-	translator           *i18n.Translator
-	agentLogger          *agentlog.Logger
-	wg                   sync.WaitGroup
+	// botChainDepth counts consecutive bot replies per thread to break LLM-bot
+	// ping-pong loops. Keyed by threadKey (conversation + thread root); value is a
+	// *int64 bumped atomically. Reset (key deleted) when an authorized human speaks
+	// in the thread. Process-local — a restart resets all counters, which is fine
+	// for a safety guard (a restart breaks any loop anyway). Like
+	// accessDeniedNotified, keys are not otherwise GC'd; only bot-active threads
+	// ever get an entry, and a human reply prunes it.
+	botChainDepth  sync.Map
+	transportOnce  sync.Once // guards lazy Telegram default for struct-literal test bots
+	messageGrouper *MessageGrouper
+	toolExecutor   *tools.ToolExecutor // v0.6.1: Tool execution
+	fileStorage    files.Storage       // v0.8.0: For media-reply path
+	logger         *slog.Logger
+	translator     *i18n.Translator
+	agentLogger    *agentlog.Logger
+	wg             sync.WaitGroup
 }
 
 func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRepo storage.UserRepository, msgRepo storage.MessageRepository, statsRepo storage.StatsRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, peopleRepo storage.PeopleRepository, orClient llm.Client, ragService *rag.Service, contextService *agent.ContextService, translator *i18n.Translator) (*Bot, error) {
@@ -487,8 +496,9 @@ func (b *Bot) HandleIncoming(im IncomingMessage) {
 	// resolve every participant.
 	replyPossible := im.IsDirect || im.Mention || im.ReplyToBot
 	authorized := false
+	senderIsBot := false
 	if replyPossible {
-		ok, err := b.authorizeSender(ctx, im)
+		dec, err := b.authorizeSender(ctx, im)
 		if err != nil {
 			// Fail closed, but stay silent on a transient lookup error — the sender
 			// may well be allowed, and a wrong denial notice is worse than a retry.
@@ -496,18 +506,50 @@ func (b *Bot) HandleIncoming(im IncomingMessage) {
 				"transport", b.transport.Kind(), "sender_id", im.SenderID, "error", err)
 			return
 		}
-		authorized = ok
-		if !authorized {
+		senderIsBot = dec.isBot
+		switch dec.verdict {
+		case verdictDeny:
 			b.notifyAccessDenied(ctx, im)
 			if im.IsDirect {
 				return // DM from a denied sender: nothing is stored or resolved
 			}
 			// Channel mention from a denied sender: no reply, but fall through so
 			// the post is still stored as channel context below.
-		} else if b.principalResolver != nil {
-			// Authorized now: clear any prior denial dedup so a later denial (e.g.
-			// the account gets disabled) notifies again instead of staying silent.
-			b.accessDeniedNotified.Delete(im.SenderID)
+		case verdictIgnore:
+			// A bot that is not on the trusted-bots allowlist: no notice, no reply.
+			if im.IsDirect {
+				return // bot DM we don't serve: drop entirely
+			}
+			// Channel: fall through to passive-store the post for context.
+		case verdictAllow:
+			authorized = true
+			if b.principalResolver != nil {
+				// Clear any prior denial dedup so a later denial (e.g. the account
+				// gets disabled) notifies again instead of staying silent.
+				b.accessDeniedNotified.Delete(im.SenderID)
+			}
+		}
+	}
+
+	// Loop guard: bound consecutive bot replies in a thread so two LLM bots can't
+	// ping-pong forever. Evaluated only when this message would otherwise reply.
+	suppressed := false
+	if authorized && shouldReply(im, authorized) {
+		key := threadKey(im)
+		if senderIsBot {
+			if depth := b.incrBotChain(key); depth > int64(b.maxBotChainDepth()) {
+				b.logger.Warn("bot reply chain depth exceeded; suppressing reply",
+					"transport", b.transport.Kind(), "conversation_id", im.ConversationID,
+					"thread_root", im.ThreadRoot, "sender_id", im.SenderID,
+					"depth", depth, "limit", b.maxBotChainDepth())
+				if im.IsDirect {
+					return // bot↔bot DM runaway: drop, nothing to store
+				}
+				suppressed = true // channel: fall through to passive-store, no reply
+			}
+		} else {
+			// An authorized human spoke — reset the thread's bot reply budget.
+			b.resetBotChain(key)
 		}
 	}
 
@@ -530,11 +572,33 @@ func (b *Bot) HandleIncoming(im IncomingMessage) {
 	// stored so the conversation is available as context, but the bot only
 	// generates a reply when addressed by an authorized sender. DMs — and
 	// Telegram, which is always IsDirect — always reply (never passive-store).
-	if shouldReply(im, authorized) {
+	if shouldReply(im, authorized) && !suppressed {
 		b.messageGrouper.AddMessage(scopeID, im)
 		return
 	}
 	b.storePassiveChannelMessage(scopeID, im)
+}
+
+// defaultMaxBotChainDepth bounds consecutive bot replies in a thread when the
+// deployment configures trusted bots but leaves max_bot_chain_depth unset (<= 0).
+// A legitimate bot↔bot exchange (alert → summary, plus a short follow-up) sits
+// well under this; the cap only catches runaways.
+const defaultMaxBotChainDepth = 3
+
+// senderVerdict is authorizeSender's decision for a reply-possible message.
+type senderVerdict int
+
+const (
+	verdictDeny   senderVerdict = iota // untrusted human → send the access-denied notice
+	verdictAllow                       // trusted SSO human or allowlisted bot → proceed
+	verdictIgnore                      // a bot that is NOT allowlisted → silently ignore (no notice, no reply)
+)
+
+// senderDecision pairs the access verdict with whether the sender is a bot
+// account, which the loop guard needs to count bot reply chains.
+type senderDecision struct {
+	verdict senderVerdict
+	isBot   bool // true for any bot account (allowlisted or not)
 }
 
 // authorizeSender decides whether the bot may act on a sender's message. In
@@ -546,27 +610,79 @@ func (b *Bot) HandleIncoming(im IncomingMessage) {
 // SSO trust check (IsTrusted) is deliberately looser than principal linkage, so
 // a trusted sender with an unlinkable auth_data still gets access (on an
 // isolated scope).
-func (b *Bot) authorizeSender(ctx context.Context, im IncomingMessage) (bool, error) {
+//
+// Bot accounts are local (auth_service == "") and so fail IsTrusted. When the
+// resolver implements botClassifier, a sender rejected by the SSO gate is then
+// checked against the trusted-bots allowlist: an allowlisted bot is admitted, a
+// non-allowlisted bot is ignored silently (verdictIgnore) rather than sent an
+// access-denied notice. Only a non-bot untrusted sender is denied — and only
+// there do we invalidate the cached profile (SSO-migration recovery).
+func (b *Bot) authorizeSender(ctx context.Context, im IncomingMessage) (senderDecision, error) {
 	if b.principalResolver == nil {
-		return b.transport.IsAllowed(im.SenderID), nil
+		if b.transport.IsAllowed(im.SenderID) {
+			return senderDecision{verdict: verdictAllow}, nil
+		}
+		return senderDecision{verdict: verdictDeny}, nil
 	}
 	trusted, err := b.principalResolver.IsTrusted(ctx, im.SenderID)
 	if err != nil {
-		return false, err
+		return senderDecision{}, err
 	}
-	if !trusted {
-		// The denial may be off a pre-migration profile (auth_service still ""):
-		// drop the cached view so the sender's next message re-reads a fresh
-		// profile rather than being denied off a stale cache until the TTL lapses.
-		if inv, ok := b.principalResolver.(principalCacheInvalidator); ok {
-			inv.Invalidate(im.SenderID)
+	if trusted {
+		if b.transport.AllowlistConfigured() && !b.transport.IsAllowed(im.SenderID) {
+			return senderDecision{verdict: verdictDeny}, nil
 		}
-		return false, nil
+		return senderDecision{verdict: verdictAllow}, nil
 	}
-	if b.transport.AllowlistConfigured() {
-		return b.transport.IsAllowed(im.SenderID), nil
+
+	// Not SSO-trusted. Before treating this as a denied human, see whether it is a
+	// bot — a cache hit, since IsTrusted just fetched the same profile.
+	if bc, ok := b.principalResolver.(botClassifier); ok {
+		isBot, allowlisted, err := bc.ClassifyBot(ctx, im.SenderID)
+		if err != nil {
+			return senderDecision{}, err
+		}
+		if isBot {
+			if allowlisted {
+				return senderDecision{verdict: verdictAllow, isBot: true}, nil
+			}
+			return senderDecision{verdict: verdictIgnore, isBot: true}, nil
+		}
 	}
-	return true, nil
+
+	// Untrusted human. The denial may be off a pre-migration profile (auth_service
+	// still ""): drop the cached view so the sender's next message re-reads a fresh
+	// profile rather than being denied off a stale cache until the TTL lapses.
+	if inv, ok := b.principalResolver.(principalCacheInvalidator); ok {
+		inv.Invalidate(im.SenderID)
+	}
+	return senderDecision{verdict: verdictDeny}, nil
+}
+
+// threadKey identifies a thread for the bot reply-chain loop guard. ThreadRoot is
+// the Mattermost root_id, or the post's own id for a top-level post — so a fresh
+// top-level bot mention starts a new chain and a runaway only accumulates within
+// one reply thread. The NUL separator avoids id-concatenation collisions.
+func threadKey(im IncomingMessage) string {
+	return im.ConversationID + "\x00" + im.ThreadRoot
+}
+
+// incrBotChain bumps and returns the bot reply-chain depth for a thread.
+func (b *Bot) incrBotChain(key string) int64 {
+	v, _ := b.botChainDepth.LoadOrStore(key, new(int64))
+	return atomic.AddInt64(v.(*int64), 1)
+}
+
+// resetBotChain clears the bot reply-chain counter for a thread (an authorized
+// human spoke, so the safety budget starts fresh).
+func (b *Bot) resetBotChain(key string) { b.botChainDepth.Delete(key) }
+
+// maxBotChainDepth is the configured cap, or the built-in default when unset.
+func (b *Bot) maxBotChainDepth() int {
+	if pr := b.cfg.Mattermost.PrincipalResolver; pr != nil && pr.MaxBotChainDepth > 0 {
+		return pr.MaxBotChainDepth
+	}
+	return defaultMaxBotChainDepth
 }
 
 // notifyAccessDenied tells a denied sender, once per process, that they have no

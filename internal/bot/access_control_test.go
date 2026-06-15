@@ -21,48 +21,48 @@ func TestAuthorizeSender(t *testing.T) {
 		resolver  PrincipalResolver
 		transport *stubTransport
 		senderID  string
-		want      bool
+		want      senderVerdict
 		wantErr   bool
 	}{
 		{
 			name:      "simple mode allows allowlisted sender",
 			transport: &stubTransport{kind: transportTelegram, allowed: map[string]bool{"42": true}},
 			senderID:  "42",
-			want:      true,
+			want:      verdictAllow,
 		},
 		{
 			name:      "simple mode denies non-allowlisted sender",
 			transport: &stubTransport{kind: transportTelegram, allowed: map[string]bool{"42": true}},
 			senderID:  "99",
-			want:      false,
+			want:      verdictDeny,
 		},
 		{
 			name:      "SSO mode allows trusted sender with empty allowlist",
 			resolver:  &fakeResolver{trusted: true},
 			transport: &stubTransport{kind: transportMattermost, allowlistConfigured: false},
 			senderID:  "u1",
-			want:      true,
+			want:      verdictAllow,
 		},
 		{
 			name:      "SSO mode denies untrusted sender",
 			resolver:  &fakeResolver{trusted: false},
 			transport: &stubTransport{kind: transportMattermost},
 			senderID:  "u1",
-			want:      false,
+			want:      verdictDeny,
 		},
 		{
 			name:      "SSO mode subset filter admits listed trusted sender",
 			resolver:  &fakeResolver{trusted: true},
 			transport: &stubTransport{kind: transportMattermost, allowlistConfigured: true, allowed: map[string]bool{"u1": true}},
 			senderID:  "u1",
-			want:      true,
+			want:      verdictAllow,
 		},
 		{
 			name:      "SSO mode subset filter rejects unlisted trusted sender",
 			resolver:  &fakeResolver{trusted: true},
 			transport: &stubTransport{kind: transportMattermost, allowlistConfigured: true, allowed: map[string]bool{"other": true}},
 			senderID:  "u1",
-			want:      false,
+			want:      verdictDeny,
 		},
 		{
 			name:      "SSO mode propagates resolver error (fail closed)",
@@ -81,7 +81,91 @@ func TestAuthorizeSender(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.want, got.verdict)
+		})
+	}
+}
+
+// fakeBotResolver is a PrincipalResolver that also implements botClassifier, so
+// authorizeSender's bot-allowlist branch is exercised. classifyCalls records
+// whether ClassifyBot was consulted (it must not be for an SSO-trusted sender).
+type fakeBotResolver struct {
+	trusted      bool
+	isBot        bool
+	allowlisted  bool
+	err          error
+	classifyErr  error
+	invalidated  int
+	classifyCall int
+}
+
+func (f *fakeBotResolver) Resolve(context.Context, string) (*storage.PrincipalInput, error) {
+	return nil, f.err
+}
+func (f *fakeBotResolver) IsTrusted(context.Context, string) (bool, error) { return f.trusted, f.err }
+func (f *fakeBotResolver) Invalidate(string)                               { f.invalidated++ }
+func (f *fakeBotResolver) ClassifyBot(context.Context, string) (bool, bool, error) {
+	f.classifyCall++
+	return f.isBot, f.allowlisted, f.classifyErr
+}
+
+func TestAuthorizeSender_BotClassification(t *testing.T) {
+	tr := func() *stubTransport { return &stubTransport{kind: transportMattermost} }
+	tests := []struct {
+		name            string
+		resolver        *fakeBotResolver
+		wantVerdict     senderVerdict
+		wantIsBot       bool
+		wantErr         bool
+		wantInvalidated int
+		wantClassified  int
+	}{
+		{
+			name:           "allowlisted bot is admitted, not invalidated",
+			resolver:       &fakeBotResolver{trusted: false, isBot: true, allowlisted: true},
+			wantVerdict:    verdictAllow,
+			wantIsBot:      true,
+			wantClassified: 1,
+		},
+		{
+			name:           "non-allowlisted bot is ignored silently, not invalidated",
+			resolver:       &fakeBotResolver{trusted: false, isBot: true, allowlisted: false},
+			wantVerdict:    verdictIgnore,
+			wantIsBot:      true,
+			wantClassified: 1,
+		},
+		{
+			name:            "untrusted human is denied and invalidated",
+			resolver:        &fakeBotResolver{trusted: false, isBot: false},
+			wantVerdict:     verdictDeny,
+			wantInvalidated: 1,
+			wantClassified:  1,
+		},
+		{
+			name:           "trusted SSO human is allowed without consulting ClassifyBot",
+			resolver:       &fakeBotResolver{trusted: true},
+			wantVerdict:    verdictAllow,
+			wantClassified: 0,
+		},
+		{
+			name:     "ClassifyBot error is propagated",
+			resolver: &fakeBotResolver{trusted: false, classifyErr: errors.New("mm down")},
+			wantErr:  true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := &Bot{transport: tr(), principalResolver: tt.resolver}
+			got, err := b.authorizeSender(context.Background(), IncomingMessage{SenderID: "x"})
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantVerdict, got.verdict)
+			assert.Equal(t, tt.wantIsBot, got.isBot)
+			assert.Equal(t, tt.wantInvalidated, tt.resolver.invalidated)
+			assert.Equal(t, tt.wantClassified, tt.resolver.classifyCall)
 		})
 	}
 }
@@ -96,7 +180,7 @@ func TestAuthorizeSender_InvalidatesCacheOnDenialOnly(t *testing.T) {
 		b := &Bot{transport: &stubTransport{kind: transportMattermost}, principalResolver: r}
 		got, err := b.authorizeSender(context.Background(), IncomingMessage{SenderID: "u1"})
 		require.NoError(t, err)
-		assert.False(t, got)
+		assert.Equal(t, verdictDeny, got.verdict)
 		assert.Equal(t, 1, r.invalidated, "denied sender's stale profile must be dropped")
 	})
 
@@ -207,6 +291,124 @@ func TestHandleIncoming_DMAccessGate(t *testing.T) {
 		b.HandleIncoming(IncomingMessage{IsDirect: true, ConversationID: "dm1", SenderID: "saml1", Text: "hi"})
 
 		assert.Empty(t, tr.sent, "trusted DM sender gets no denial")
+		mockStore.AssertNotCalled(t, "AddMessageToHistory", mock.Anything, mock.Anything)
+	})
+}
+
+// routedResolver answers per sender id so one channel can carry both a bot and a
+// human. A sender in botAllow is a bot (value = allowlisted); a sender in
+// trustedHumans is a trusted SSO human. Anyone else is an untrusted human.
+type routedResolver struct {
+	botAllow      map[string]bool
+	trustedHumans map[string]bool
+}
+
+func (r *routedResolver) Resolve(context.Context, string) (*storage.PrincipalInput, error) {
+	return nil, nil // bots/untrusted → isolated passthrough scope
+}
+func (r *routedResolver) IsTrusted(_ context.Context, id string) (bool, error) {
+	return r.trustedHumans[id], nil
+}
+func (r *routedResolver) Invalidate(string) {}
+func (r *routedResolver) ClassifyBot(_ context.Context, id string) (bool, bool, error) {
+	allow, isBot := r.botAllow[id]
+	return isBot, allow, nil
+}
+
+func TestHandleIncoming_BotAccessGate(t *testing.T) {
+	t.Run("allowlisted bot mention replies, no denial", func(t *testing.T) {
+		tr := &stubTransport{kind: transportMattermost}
+		b, mockStore := handleIncomingTestBot(t, &routedResolver{botAllow: map[string]bool{"bot1": true}}, tr)
+		mockStore.On("GetOrCreateChannel", transportMattermost, "chan1", mock.Anything).Return(storage.ScopeID("chan-scope"), nil)
+		mockStore.On("UpsertUser", mock.Anything).Return(nil)
+
+		b.HandleIncoming(IncomingMessage{
+			IsDirect: false, Mention: true, ConversationID: "chan1", ThreadRoot: "t1",
+			SenderID: "bot1", SenderDisplay: "@bot1", Text: "@laplaced summary?",
+		})
+
+		assert.Empty(t, tr.sent, "allowlisted bot gets no denial")
+		mockStore.AssertNotCalled(t, "AddMessageToHistory", mock.Anything, mock.Anything)
+	})
+
+	t.Run("non-allowlisted bot mention is ignored silently, stored passively", func(t *testing.T) {
+		tr := &stubTransport{kind: transportMattermost}
+		b, mockStore := handleIncomingTestBot(t, &routedResolver{botAllow: map[string]bool{"bot2": false}}, tr)
+		mockStore.On("GetOrCreateChannel", transportMattermost, "chan1", mock.Anything).Return(storage.ScopeID("chan-scope"), nil)
+		mockStore.On("UpsertUser", mock.Anything).Return(nil)
+		mockStore.On("AddMessageToHistory", storage.ScopeID("chan-scope"), mock.Anything).Return(nil)
+		mockStore.On("FindPersonByExternalID", storage.ScopeID("chan-scope"), transportMattermost, "bot2").Return((*storage.Person)(nil), nil)
+		mockStore.On("AddPerson", mock.Anything).Return(int64(1), nil)
+
+		b.HandleIncoming(IncomingMessage{
+			IsDirect: false, Mention: true, ConversationID: "chan1", ThreadRoot: "t1",
+			SenderID: "bot2", SenderDisplay: "@bot2", Text: "@laplaced hi",
+		})
+
+		assert.Empty(t, tr.sent, "non-allowlisted bot gets NO access-denied notice")
+		mockStore.AssertCalled(t, "AddMessageToHistory", storage.ScopeID("chan-scope"), mock.Anything)
+	})
+
+	t.Run("allowlisted bot DM is admitted on an isolated passthrough scope", func(t *testing.T) {
+		tr := &stubTransport{kind: transportMattermost}
+		b, mockStore := handleIncomingTestBot(t, &routedResolver{botAllow: map[string]bool{"bot1": true}}, tr)
+		mockStore.On("GetIdentity", transportMattermost, "bot1").Return((*storage.Identity)(nil), nil)
+		mockStore.On("PutIdentity", transportMattermost, "bot1", mock.Anything).Return(nil)
+		mockStore.On("UpsertUser", mock.Anything).Return(nil)
+
+		b.HandleIncoming(IncomingMessage{IsDirect: true, ConversationID: "dm1", SenderID: "bot1", Text: "hi"})
+
+		assert.Empty(t, tr.sent, "allowlisted bot DM gets no denial")
+		mockStore.AssertNotCalled(t, "AddMessageToHistory", mock.Anything, mock.Anything)
+	})
+}
+
+func TestHandleIncoming_BotLoopGuard(t *testing.T) {
+	channelMsg := func(sender string) IncomingMessage {
+		return IncomingMessage{
+			IsDirect: false, Mention: true, ConversationID: "chan1", ThreadRoot: "t1",
+			SenderID: sender, SenderDisplay: "@" + sender, Text: "@laplaced ping",
+		}
+	}
+
+	t.Run("suppresses bot reply past max chain depth", func(t *testing.T) {
+		tr := &stubTransport{kind: transportMattermost}
+		b, mockStore := handleIncomingTestBot(t, &routedResolver{botAllow: map[string]bool{"bot1": true}}, tr)
+		b.cfg.Mattermost.PrincipalResolver.MaxBotChainDepth = 2
+		mockStore.On("GetOrCreateChannel", transportMattermost, "chan1", mock.Anything).Return(storage.ScopeID("chan-scope"), nil)
+		mockStore.On("UpsertUser", mock.Anything).Return(nil)
+		// Only the suppressed (3rd) message is passive-stored.
+		mockStore.On("AddMessageToHistory", storage.ScopeID("chan-scope"), mock.Anything).Return(nil)
+		mockStore.On("FindPersonByExternalID", storage.ScopeID("chan-scope"), transportMattermost, "bot1").Return((*storage.Person)(nil), nil)
+		mockStore.On("AddPerson", mock.Anything).Return(int64(1), nil)
+
+		b.HandleIncoming(channelMsg("bot1")) // depth 1 → reply
+		b.HandleIncoming(channelMsg("bot1")) // depth 2 → reply
+		b.HandleIncoming(channelMsg("bot1")) // depth 3 > 2 → suppressed, passive-stored
+
+		assert.Empty(t, tr.sent, "loop guard suppresses silently — no denial notice")
+		mockStore.AssertNumberOfCalls(t, "AddMessageToHistory", 1)
+	})
+
+	t.Run("authorized human resets the chain", func(t *testing.T) {
+		tr := &stubTransport{kind: transportMattermost}
+		resolver := &routedResolver{
+			botAllow:      map[string]bool{"bot1": true},
+			trustedHumans: map[string]bool{"human1": true},
+		}
+		b, mockStore := handleIncomingTestBot(t, resolver, tr)
+		b.cfg.Mattermost.PrincipalResolver.MaxBotChainDepth = 2
+		mockStore.On("GetOrCreateChannel", transportMattermost, "chan1", mock.Anything).Return(storage.ScopeID("chan-scope"), nil)
+		mockStore.On("UpsertUser", mock.Anything).Return(nil)
+		// No message should be passive-stored: every one replies (human resets the budget).
+		mockStore.On("AddMessageToHistory", storage.ScopeID("chan-scope"), mock.Anything).Return(nil)
+
+		b.HandleIncoming(channelMsg("bot1"))   // depth 1 → reply
+		b.HandleIncoming(channelMsg("bot1"))   // depth 2 → reply
+		b.HandleIncoming(channelMsg("human1")) // human → reset
+		b.HandleIncoming(channelMsg("bot1"))   // depth 1 again → reply (would be 3/suppressed without reset)
+
+		assert.Empty(t, tr.sent)
 		mockStore.AssertNotCalled(t, "AddMessageToHistory", mock.Anything, mock.Anything)
 	})
 }
