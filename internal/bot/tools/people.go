@@ -90,7 +90,7 @@ func (e *ToolExecutor) performCreatePerson(ctx context.Context, userID storage.S
 	person := storage.Person{
 		UserID:       userID,
 		DisplayName:  name,
-		Circle:       "Other", // default
+		Circle:       storage.CircleOther, // default
 		MentionCount: 1,
 		FirstSeen:    time.Now(),
 		LastSeen:     time.Now(),
@@ -98,7 +98,7 @@ func (e *ToolExecutor) performCreatePerson(ctx context.Context, userID storage.S
 
 	// Apply optional fields
 	if circle, ok := params["circle"].(string); ok && circle != "" {
-		person.Circle = circle
+		person.Circle = storage.NormalizeCircle(circle)
 	}
 	if bio, ok := params["bio"].(string); ok {
 		person.Bio = bio
@@ -189,8 +189,8 @@ func (e *ToolExecutor) performUpdatePerson(ctx context.Context, userID storage.S
 	needsReembed := false
 
 	// Apply updates
-	if circle, ok := updates["circle"].(string); ok {
-		person.Circle = circle
+	if circle, ok := updates["circle"].(string); ok && circle != "" {
+		person.Circle = storage.NormalizeCircle(circle)
 	}
 	if bioAppend, ok := updates["bio_append"].(string); ok && bioAppend != "" {
 		if person.Bio != "" {

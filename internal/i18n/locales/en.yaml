@@ -479,16 +479,21 @@ memory:
 
     <people_extraction>
     WHEN TO EXTRACT PEOPLE:
-    - User mentions a person by name (not public figures or celebrities)
+    {{if .IsChannel}}- The channel participants themselves — the authors of messages (prefixed [Name ...])
+    - People the participants mention by name (not public figures or celebrities)
+    - Messages that reveal a participant's role, expertise, or connections{{else}}- User mentions a person by name (not public figures or celebrities)
     - User describes relationship ("my colleague John", "friend Mary")
-    - User provides info about someone ("John works at Google")
+    - User provides info about someone ("John works at Google"){{end}}
 
     CIRCLE CLASSIFICATION:
-    - Family: relatives, spouse, children
+    {{if .IsChannel}}In a channel the circle marks membership relative to the channel participants:
+    - Work_Inner: a channel participant — someone who posts in this channel (a member of the channel's team)
+    - Other: external to the participants — a person from another team or an outsider that participants mention but who does not post in the channel themselves
+    - Family/Friends/Work_Outer: use only when the channel is personal and it clearly follows from the conversation{{else}}- Family: relatives, spouse, children
     - Friends: personal friends, close acquaintances
     - Work_Inner: close colleagues, team members, direct reports
     - Work_Outer: other colleagues, clients, business contacts
-    - Other: acquaintances, neighbors, service providers
+    - Other: acquaintances, neighbors, service providers{{end}}
 
     PERSON BIO:
     - Write a DETAILED biography (4-8 sentences is appropriate for complex profiles)
@@ -498,8 +503,8 @@ memory:
       * Notable projects or achievements
       * Personality traits and patterns of behavior
     - NO DUPLICATION: Each piece of information should appear ONLY ONCE in bio
-    - Structure: start with relationship + core identity, then add chronological/contextual details
-    - Example: "User's colleague at TechCorp (8 years). DevOps engineer specializing in Kubernetes, Docker, CI/CD. Moved from New York to Austin, founded local meetup. Close friends (met for dinner 2025-12-02). Early adopter of infrastructure monitoring tools (Prometheus, Grafana). Maintains home lab for testing new technologies."
+    - Structure: {{if .IsChannel}}start with the participant's role in the channel + core identity, then add expertise and connections to other named participants{{else}}start with relationship + core identity, then add chronological/contextual details{{end}}
+    - Example: {{if .IsChannel}}"Channel participant. DevOps engineer specializing in Kubernetes, Docker, CI/CD. Helps other participants with infrastructure and monitoring (Prometheus, Grafana). Early adopter of new tools."{{else}}"User's colleague at TechCorp (8 years). DevOps engineer specializing in Kubernetes, Docker, CI/CD. Moved from New York to Austin, founded local meetup. Close friends (met for dinner 2025-12-02). Early adopter of infrastructure monitoring tools (Prometheus, Grafana). Maintains home lab for testing new technologies."{{end}}
 
     WHEN UPDATING AN EXISTING PROFILE:
     - You see the old bio in <people> section — DO NOT repeat its content!

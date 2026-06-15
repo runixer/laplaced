@@ -781,10 +781,13 @@ func (b *Bot) upsertChannelParticipant(scopeID storage.ScopeID, im IncomingMessa
 		name = im.SenderID
 	}
 	transport, externalID := kind, im.SenderID
+	// A recorded channel participant is, by definition, someone who posts in the
+	// channel — an insider. Default them to Work_Inner; Other is reserved for
+	// external people the archivist adds when participants merely mention them.
 	if _, err := b.peopleRepo.AddPerson(storage.Person{
 		UserID:            scopeID,
 		DisplayName:       name,
-		Circle:            "Other",
+		Circle:            storage.CircleWorkInner,
 		ExternalTransport: &transport,
 		ExternalID:        &externalID,
 		FirstSeen:         now,

@@ -88,7 +88,7 @@ func (s *Service) applyPeopleAdded(ctx context.Context, userID storage.ScopeID, 
 			UserID:       userID,
 			DisplayName:  added.DisplayName,
 			Aliases:      added.Aliases,
-			Circle:       added.Circle,
+			Circle:       storage.NormalizeCircle(added.Circle),
 			Bio:          added.Bio,
 			Embedding:    emb,
 			FirstSeen:    referenceDate,
@@ -96,9 +96,6 @@ func (s *Service) applyPeopleAdded(ctx context.Context, userID storage.ScopeID, 
 			MentionCount: 1,
 		}
 
-		if person.Circle == "" {
-			person.Circle = "Other"
-		}
 		if person.Aliases == nil {
 			person.Aliases = []string{}
 		}
@@ -126,8 +123,8 @@ func (s *Service) applyPeopleAdded(ctx context.Context, userID storage.ScopeID, 
 
 				// Update the existing person
 				existing.Bio = mergedBio
-				if added.Circle != "" && added.Circle != "Other" {
-					existing.Circle = added.Circle
+				if c := storage.NormalizeCircle(added.Circle); c != storage.CircleOther {
+					existing.Circle = c
 				}
 				existing.LastSeen = referenceDate
 				existing.MentionCount++
@@ -526,7 +523,7 @@ func preparePersonUpdate(existing storage.Person, upd archivist.UpdatedPerson, r
 		needsReembed = true
 	}
 	if upd.Circle != "" {
-		person.Circle = upd.Circle
+		person.Circle = storage.NormalizeCircle(upd.Circle)
 	}
 	// Add new aliases from Archivist
 	if len(upd.Aliases) > 0 {

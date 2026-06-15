@@ -141,7 +141,7 @@ func FormatPeople(people []Person, tag string) string {
 func FilterInnerCircle(people []Person) []Person {
 	var inner []Person
 	for _, p := range people {
-		if p.Circle == "Work_Inner" || p.Circle == "Family" {
+		if p.Circle == CircleWorkInner || p.Circle == CircleFamily {
 			inner = append(inner, p)
 		}
 	}

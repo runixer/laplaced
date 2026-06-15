@@ -115,7 +115,7 @@ func TestPerformManagePeople_CreateWithAllFields(t *testing.T) {
 			p.Bio == "Software engineer" &&
 			p.Username != nil && *p.Username == "alice" &&
 			len(p.Aliases) == 2 &&
-			p.Circle == "Work"
+			p.Circle == "Work_Inner"
 	})).Return(int64(42), nil)
 
 	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
@@ -123,7 +123,7 @@ func TestPerformManagePeople_CreateWithAllFields(t *testing.T) {
 
 	ctx := context.Background()
 	result, err := exec.performManagePeople(ctx, "123", map[string]interface{}{
-		"query": `{"operation":"create","name":"Bob","bio":"Software engineer","username":"@alice","circle":"Work","aliases":["bobby","robert"]}`,
+		"query": `{"operation":"create","name":"Bob","bio":"Software engineer","username":"@alice","circle":"Work_Inner","aliases":["bobby","robert"]}`,
 	})
 
 	assert.NoError(t, err)

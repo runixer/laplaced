@@ -201,7 +201,7 @@ func (c *ContextService) getInnerCirclePeople(userID storage.ScopeID) ([]storage
 	// Filter to inner circles only
 	var innerCircle []storage.Person
 	for _, p := range people {
-		if p.Circle == "Work_Inner" || p.Circle == "Family" {
+		if p.Circle == storage.CircleWorkInner || p.Circle == storage.CircleFamily {
 			innerCircle = append(innerCircle, p)
 		}
 	}

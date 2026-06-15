@@ -1125,7 +1125,7 @@ func (b *Bot) extractForwardedPeople(ctx context.Context, userID storage.ScopeID
 					UserID:       userID,
 					DisplayName:  displayName,
 					TelegramID:   &senderID,
-					Circle:       "Other",
+					Circle:       storage.CircleOther,
 					FirstSeen:    now,
 					LastSeen:     now,
 					MentionCount: 1,

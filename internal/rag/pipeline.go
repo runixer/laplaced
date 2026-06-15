@@ -324,7 +324,7 @@ func filterMatchesByReranker(matches []topicCandidate, selectedIDs []int64, reas
 // Returns person candidates and artifact candidates.
 func (s *Service) searchPeopleAndArtifacts(ctx context.Context, userID storage.ScopeID, embedding []float32, threshold float32) ([]reranker.PersonCandidate, []reranker.ArtifactCandidate) {
 	var personCandidates []reranker.PersonCandidate
-	innerCircles := []string{"Work_Inner", "Family"}
+	innerCircles := []string{storage.CircleWorkInner, storage.CircleFamily}
 	if s.peopleRepo != nil && s.cfg.Agents.Reranker.Enabled {
 		peopleLimit := s.cfg.Agents.Reranker.People.CandidatesLimit
 		if peopleLimit <= 0 {

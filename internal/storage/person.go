@@ -39,7 +39,7 @@ func (s *Store) AddPerson(person Person) (int64, error) {
 		person.LastSeen = time.Now()
 	}
 	if person.Circle == "" {
-		person.Circle = "Other"
+		person.Circle = CircleOther
 	}
 	if person.MentionCount == 0 {
 		person.MentionCount = 1

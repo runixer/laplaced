@@ -84,7 +84,7 @@ func TestUpsertChannelParticipant(t *testing.T) {
 		im := IncomingMessage{IsDirect: false, SenderID: "u1", ConversationID: "chanA", SenderDisplay: "Alice (@alice)"}
 		mockStore.On("FindPersonByExternalID", storage.ScopeID("2"), "mattermost", "u1").Return(nil, nil)
 		mockStore.On("AddPerson", mock.MatchedBy(func(p storage.Person) bool {
-			return p.UserID == "2" && p.DisplayName == "Alice (@alice)" && p.Circle == "Other" &&
+			return p.UserID == "2" && p.DisplayName == "Alice (@alice)" && p.Circle == "Work_Inner" &&
 				p.ExternalTransport != nil && *p.ExternalTransport == "mattermost" &&
 				p.ExternalID != nil && *p.ExternalID == "u1"
 		})).Return(int64(5), nil)
