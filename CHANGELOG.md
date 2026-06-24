@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When you send a photo or file and the bot also recalls a similar one from memory, it no longer mixes the remembered file's details into its reply about the one you just sent.
 - Web search now cites real, clickable source links woven into the reply instead of URLs the model made up.
 - In a multi-participant channel the bot no longer files channel members as outside contacts with a nonsensical "works with User" bio — participants are now described on their own terms and treated as channel members.
+- Math formulas no longer leak raw LaTeX (stray `$`, `\cdot`, `\circ`) on Telegram — numeric `$…$` expressions now render as plain Unicode instead of mangling the rest of the message.
 
 ## [0.10.1] - 2026-06-12
 

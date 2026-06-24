@@ -693,29 +693,6 @@ func TestToHTMLWithLatex(t *testing.T) {
 	}
 }
 
-func TestLooksLikeCurrency(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected bool
-	}{
-		{"simple dollar", "3.50", true},
-		{"integer dollar", "100", true},
-		{"zero", "0", true},
-		{"with leading space", " 3.50", true},
-		{"not currency - letters", "a3.50", false},
-		{"not currency - starts with letter", "price", false},
-		{"not currency - starts with symbol", "@price", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := looksLikeCurrency(tt.input)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 func TestDisplayMathMultiline(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1747,6 +1724,42 @@ func TestMatchDisplayMathFormats(t *testing.T) {
 			assert.Equal(t, tt.wantContent, content)
 			assert.Equal(t, tt.wantRaw, raw)
 			assert.Equal(t, tt.wantEnd, end)
+		})
+	}
+}
+
+// TestInlineMathNumericPairs guards the regression where a closed numeric
+// $N$ pair was misread as currency, leaving a stray '$' that cascaded raw
+// LaTeX through the rest of a math-heavy reply.
+// Tight pairs must become math; genuine unpaired currency must stay literal.
+func TestInlineMathNumericPairs(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		// Tight numeric pairs → math (delimiters stripped).
+		{"tight decimal pair before unit", "$1737,1$ км", "1737,1 км"},
+		{"tight decimal pair before word", "в $1,32$ раза", "в 1,32 раза"},
+		{"tight integer pair before unit", "около $400$ км", "около 400 км"},
+		{"tight integer pair after word", "высотой $1200$ км", "высотой 1200 км"},
+		{"tight pair with degree", "угол в $15^\\circ$ тут", "угол в 15° тут"},
+		{"tight percent pair", "минимум $75\\%$ высоты", "минимум 75% высоты"},
+		// Genuine currency stays literal.
+		{"unpaired currency decimal", "Price: $3.50", "Price: $3.50"},
+		{"unpaired currency integer", "Cost: $100.00", "Cost: $100.00"},
+		{"currency conjunction", "It costs $3.50 and $2.00", "It costs $3.50 and $2.00"},
+		// Cascade containment: a stray '$' on one line must not eat the next.
+		{
+			name:     "stray dollar does not cross newline",
+			input:    "цена $5 за кг\nформула $x^2$ верна",
+			expected: "цена $5 за кг\nформула x² верна",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, convertLatexToUnicode(tt.input))
 		})
 	}
 }

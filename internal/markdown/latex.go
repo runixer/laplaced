@@ -130,11 +130,10 @@ func tokenize(text string) []token {
 		}
 
 		if content, raw, end := matchInlineMath(runes, i); end > i {
-			if looksLikeCurrency(content) {
-				tokens = append(tokens, token{tokenText, raw, raw})
-			} else {
-				tokens = append(tokens, token{tokenMathInline, content, raw})
-			}
+			// matchInlineMath only returns a match for a real closed pair on
+			// one line; unpaired currency ($3.50, $100 and $200) returns
+			// no-match, so anything we get here is math.
+			tokens = append(tokens, token{tokenMathInline, content, raw})
 			i = end
 			continue
 		}
@@ -316,16 +315,10 @@ func matchInlineMath(runes []rune, start int) (content, raw string, end int) {
 						return "", "", start
 					}
 				}
-				if nextChar == '$' {
-					// $100$ - check what's after
-					if j+1 < len(runes) {
-						afterClose := runes[j+1]
-						if afterClose == '?' || afterClose == '!' || afterClose == ' ' {
-							// Likely currency
-							return "", "", start
-						}
-					}
-				}
+				// A tight $N$ pair (number closed immediately by '$') is math,
+				// not currency — fall through to normal parsing so the
+				// delimiters are stripped. Unpaired currency is caught above
+				// (punctuation / conjunction) or by the no-closer bail below.
 			}
 		}
 	}
@@ -354,14 +347,16 @@ func matchInlineMath(runes []rune, start int) (content, raw string, end int) {
 		}
 
 		if runes[i] == '$' {
+			// Closed pair on one line → math. A tight numeric pair like
+			// $1737,1$ is intentionally math (delimiters stripped); unpaired
+			// currency never reaches here (no closing '$' before the newline).
 			content := string(runes[contentStart:i])
-			if looksLikeCurrency(content) {
-				return "", "", start
-			}
 			return content, string(runes[start : i+1]), i + 1
 		}
 
-		if runes[i] == '\n' && i+1 < len(runes) && runes[i+1] == '\n' {
+		// Inline math must not cross a line break: a stray '$' must not swallow
+		// the next line and cascade mis-pairing through a whole paragraph.
+		if runes[i] == '\n' {
 			return "", "", start
 		}
 
@@ -741,25 +736,4 @@ func convertToSubscript(s string) string {
 		}
 	}
 	return result.String()
-}
-
-func looksLikeCurrency(s string) bool {
-	s = strings.TrimSpace(s)
-	if len(s) == 0 {
-		return false
-	}
-
-	r := []rune(s)
-	if !unicode.IsDigit(r[0]) {
-		return false
-	}
-
-	for _, c := range r {
-		if unicode.IsDigit(c) || c == '.' || c == ',' {
-			continue
-		}
-		return false
-	}
-
-	return true
 }

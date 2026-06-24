@@ -68,6 +68,13 @@ bot:
     - Any prose text INSIDE a formula must go through \text{…} (otherwise KaTeX collapses spaces).
     - Keep explanations OUTSIDE $…$.
     </math_format>
+    {{else}}
+    <math_format>
+    This platform does NOT render LaTeX/KaTeX. When writing math:
+    - Do NOT use $…$, $$…$$, or commands like \cdot, \frac, \alpha, \text{…} — the user sees them as raw text.
+    - Write formulas with plain Unicode symbols inline: × · ÷ ± ≈ ≤ ≥ ° √ ² ³, Greek letters (α, β, π), fractions as a/b.
+    - Example: instead of $$\alpha = 2 \cdot R \cdot \sin(15^\circ)$$ write "α = 2 · R · sin(15°)".
+    </math_format>
     {{end}}
 
     <file_validation>
