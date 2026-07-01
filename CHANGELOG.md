@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-02
+
 ### Security
 - Dashboard basic auth now covers every route by default (notably the `/api/agent-log/` detail endpoint, which was reachable without credentials when debug mode was on); only health, metrics, webhook, and static assets stay public, and credentials are compared in constant time.
 
@@ -617,7 +619,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-language support (en, ru)
 - Docker deployment
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/runixer/laplaced/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/runixer/laplaced/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/runixer/laplaced/compare/v0.9.2...v0.10.0
 [0.9.2]: https://github.com/runixer/laplaced/compare/v0.9.1...v0.9.2
