@@ -220,6 +220,10 @@ type trace struct {
 	// session feature is enabled (zeros when no session candidates were merged).
 	candidatesInArtifactsSession int
 	modelKeptArtifactsSession    int
+	// sessionIDRecovered counts session-flavored malformed IDs ("Artifact:session")
+	// that were mapped back onto real session candidates. Nonzero means the
+	// prompt/rendering fix didn't fully stop the behavior — recovery is the net.
+	sessionIDRecovered int
 }
 
 // response is the expected JSON response from Flash.

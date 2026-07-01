@@ -91,8 +91,8 @@ func TestLoadArtifactFullContent_EarlyReturn(t *testing.T) {
 	}
 }
 
-// TestLoadArtifactFullContent_ArtifactNotReady skips artifacts that aren't ready.
-func TestLoadArtifactFullContent_ArtifactNotReady(t *testing.T) {
+// TestLoadArtifactFullContent_FailedArtifactSkipped keeps failed artifacts out of context.
+func TestLoadArtifactFullContent_FailedArtifactSkipped(t *testing.T) {
 	_, _, agent, mockStore, tempDir := setupArtifactTest(t)
 
 	userID := storage.ScopeID("123")
@@ -103,10 +103,10 @@ func TestLoadArtifactFullContent_ArtifactNotReady(t *testing.T) {
 	err := os.WriteFile(testFile, []byte("test content"), 0600)
 	require.NoError(t, err)
 
-	// Mock artifact that's not ready
+	// A failed artifact (e.g. safety-blocked extraction) must never be loaded.
 	mockStore.On("GetArtifact", userID, artifactID).Return(&storage.Artifact{
 		ID:        artifactID,
-		State:     "pending", // Not ready
+		State:     "failed",
 		FilePath:  "test.txt",
 		FileSize:  12,
 		CreatedAt: time.Now(),
@@ -114,7 +114,37 @@ func TestLoadArtifactFullContent_ArtifactNotReady(t *testing.T) {
 
 	parts, err := agent.loadArtifactFullContent(context.Background(), userID, []int64{artifactID})
 	require.NoError(t, err)
-	assert.Nil(t, parts, "should return nil when no artifacts are ready")
+	assert.Nil(t, parts, "failed artifacts must not be loaded into context")
+
+	mockStore.AssertExpectations(t)
+}
+
+// TestLoadArtifactFullContent_PendingArtifactLoads loads session-fresh artifacts
+// whose extraction hasn't finished yet — the file exists, only metadata is missing.
+func TestLoadArtifactFullContent_PendingArtifactLoads(t *testing.T) {
+	_, _, agent, mockStore, tempDir := setupArtifactTest(t)
+
+	userID := storage.ScopeID("123")
+	artifactID := int64(1)
+
+	testFile := filepath.Join(tempDir, "test.png")
+	err := os.WriteFile(testFile, []byte("test content"), 0600)
+	require.NoError(t, err)
+
+	mockStore.On("GetArtifact", userID, artifactID).Return(&storage.Artifact{
+		ID:           artifactID,
+		State:        "pending",
+		FilePath:     "test.png",
+		FileSize:     12,
+		MimeType:     "image/png",
+		OriginalName: "test.png",
+		CreatedAt:    time.Now(),
+	}, nil)
+	mockStore.On("IncrementContextLoadCount", userID, []int64{artifactID}).Return(nil)
+
+	parts, err := agent.loadArtifactFullContent(context.Background(), userID, []int64{artifactID})
+	require.NoError(t, err)
+	assert.NotEmpty(t, parts, "pending artifacts must load into context")
 
 	mockStore.AssertExpectations(t)
 }

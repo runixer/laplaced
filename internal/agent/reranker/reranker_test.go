@@ -1095,7 +1095,7 @@ func TestFormatArtifactCandidates_LongSummaryTruncation(t *testing.T) {
 }
 
 // TestFormatArtifactCandidates_SessionMarker verifies session candidates render with
-// the (session) tag instead of cosine similarity.
+// a trailing SESSION cell and no score — nothing ID-like next to "[Artifact:N]".
 func TestFormatArtifactCandidates_SessionMarker(t *testing.T) {
 	candidates := []ArtifactCandidate{
 		{ArtifactID: 1197, IsSession: true, FileType: "image", OriginalName: "fresh.png", Summary: "freshly generated"},
@@ -1104,9 +1104,116 @@ func TestFormatArtifactCandidates_SessionMarker(t *testing.T) {
 
 	result := formatArtifactCandidates(candidates)
 
-	assert.Contains(t, result, "[Artifact:1197] (session) image: \"fresh.png\"")
-	assert.NotContains(t, result, "[Artifact:1197] (0.00)", "session marker must replace numeric score")
+	assert.Contains(t, result, "[Artifact:1197] image: \"fresh.png\" | freshly generated | SESSION\n")
+	assert.NotContains(t, result, "(session)", "the parenthesized tag taught the model to emit Artifact:session IDs")
+	assert.NotContains(t, result, "[Artifact:1197] (0.00)", "session candidates carry no numeric score")
 	assert.Contains(t, result, "[Artifact:846] (0.66) image: \"old.jpg\"")
+}
+
+// TestFormatArtifactCandidates_EmptySummaryPlaceholder keeps the summary cell
+// non-empty for pending session candidates so the line shape stays parseable.
+func TestFormatArtifactCandidates_EmptySummaryPlaceholder(t *testing.T) {
+	candidates := []ArtifactCandidate{
+		{ArtifactID: 7, IsSession: true, FileType: "image", OriginalName: "just_sent.jpg"},
+	}
+
+	result := formatArtifactCandidates(candidates)
+
+	assert.Contains(t, result, "[Artifact:7] image: \"just_sent.jpg\" | (not analyzed yet) | SESSION\n")
+}
+
+// TestRecoverSessionArtifactIDs covers the narrow mapping of session-flavored
+// malformed IDs onto real session candidates.
+func TestRecoverSessionArtifactIDs(t *testing.T) {
+	sessionOne := []ArtifactCandidate{
+		{ArtifactID: 500, IsSession: true},
+		{ArtifactID: 42, Score: 0.7},
+	}
+	sessionTwo := []ArtifactCandidate{
+		{ArtifactID: 500, IsSession: true},
+		{ArtifactID: 501, IsSession: true},
+		{ArtifactID: 42, Score: 0.7},
+	}
+
+	t.Run("single session candidate recovers bare and indexed forms", func(t *testing.T) {
+		for _, raw := range []string{"Artifact:session", "session", "Artifact:Session:1", "Artifact:session_1"} {
+			result := &Result{Artifacts: []ArtifactSelection{{ID: raw, Reason: "the fresh file"}}}
+			got, recovered := recoverSessionArtifactIDs("u1", result, sessionOne, slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+			assert.Equal(t, 1, recovered, "raw=%s", raw)
+			if assert.Len(t, got.Artifacts, 1, "raw=%s", raw) {
+				assert.Equal(t, "Artifact:500", got.Artifacts[0].ID, "raw=%s", raw)
+				assert.Equal(t, "the fresh file", got.Artifacts[0].Reason)
+			}
+		}
+	})
+
+	t.Run("explicit index maps to Nth session candidate", func(t *testing.T) {
+		result := &Result{Artifacts: []ArtifactSelection{{ID: "Artifact:session_2", Reason: "second file"}}}
+		got, recovered := recoverSessionArtifactIDs("u1", result, sessionTwo, slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+		assert.Equal(t, 1, recovered)
+		if assert.Len(t, got.Artifacts, 1) {
+			assert.Equal(t, "Artifact:501", got.Artifacts[0].ID)
+		}
+	})
+
+	t.Run("bare session with multiple candidates stays ambiguous", func(t *testing.T) {
+		result := &Result{Artifacts: []ArtifactSelection{{ID: "Artifact:session", Reason: "?"}}}
+		got, recovered := recoverSessionArtifactIDs("u1", result, sessionTwo, slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+		assert.Equal(t, 0, recovered)
+		if assert.Len(t, got.Artifacts, 1) {
+			assert.Equal(t, "Artifact:session", got.Artifacts[0].ID, "left untouched for the normal filter to drop")
+		}
+	})
+
+	t.Run("index out of range is not recovered", func(t *testing.T) {
+		result := &Result{Artifacts: []ArtifactSelection{{ID: "Artifact:session_5", Reason: "?"}}}
+		got, recovered := recoverSessionArtifactIDs("u1", result, sessionTwo, slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+		assert.Equal(t, 0, recovered)
+		assert.Len(t, got.Artifacts, 1)
+	})
+
+	t.Run("duplicate of an already-selected artifact is dropped", func(t *testing.T) {
+		result := &Result{Artifacts: []ArtifactSelection{
+			{ID: "Artifact:500", Reason: "picked by number"},
+			{ID: "Artifact:session", Reason: "same file again"},
+		}}
+		got, recovered := recoverSessionArtifactIDs("u1", result, sessionOne, slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+		assert.Equal(t, 0, recovered)
+		if assert.Len(t, got.Artifacts, 1) {
+			assert.Equal(t, "Artifact:500", got.Artifacts[0].ID)
+		}
+	})
+
+	t.Run("no session candidates is a no-op", func(t *testing.T) {
+		result := &Result{Artifacts: []ArtifactSelection{{ID: "Artifact:session", Reason: "?"}}}
+		got, recovered := recoverSessionArtifactIDs("u1", result, []ArtifactCandidate{{ArtifactID: 42, Score: 0.7}}, slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+		assert.Equal(t, 0, recovered)
+		assert.Len(t, got.Artifacts, 1)
+	})
+
+	t.Run("non-session garbage is left for the normal filter", func(t *testing.T) {
+		result := &Result{Artifacts: []ArtifactSelection{{ID: "Artifact:bogus", Reason: "?"}}}
+		got, recovered := recoverSessionArtifactIDs("u1", result, sessionOne, slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+		assert.Equal(t, 0, recovered)
+		if assert.Len(t, got.Artifacts, 1) {
+			assert.Equal(t, "Artifact:bogus", got.Artifacts[0].ID)
+		}
+	})
+}
+
+// TestCountSessionKept verifies session-kept telemetry counts parseable session
+// selections and skips unparseable IDs.
+func TestCountSessionKept(t *testing.T) {
+	artifactsMap := map[int64]ArtifactCandidate{
+		500: {ArtifactID: 500, IsSession: true},
+		42:  {ArtifactID: 42},
+	}
+	selections := []ArtifactSelection{
+		{ID: "Artifact:500"},
+		{ID: "Artifact:42"},
+		{ID: "Artifact:session"}, // unparseable — skipped
+	}
+	assert.Equal(t, 1, countSessionKept(selections, artifactsMap))
 }
 
 // Result Helper Methods Tests

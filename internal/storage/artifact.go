@@ -516,7 +516,10 @@ func (s *Store) IncrementContextLoadCount(userID ScopeID, artifactIDs []int64) e
 // to the reranker even when their summary embedding doesn't match the next user query.
 //
 // Filters:
-//   - state = 'ready' (only artifacts with summary/embedding/file are useful as candidates)
+//   - state IN ('ready', 'pending', 'processing') — a just-sent file is 'pending' until the
+//     Extractor picks it up, and that window is exactly when the user asks about it; the
+//     file itself is loadable regardless, only the summary is missing. 'failed' stays
+//     excluded so poisoned artifacts (e.g. safety-blocked ones) are never re-surfaced.
 //   - message_id > 0 (skip in-flight rows where assistant-side message_id assignment hasn't completed)
 //   - created_at within maxAge window (safety cap for stalled sessions)
 //
@@ -546,7 +549,7 @@ func (s *Store) GetSessionArtifacts(ctx context.Context, userID ScopeID, limit i
 		  AND h.user_id = ?
 		  AND h.topic_id IS NULL
 		  AND a.message_id > 0
-		  AND a.state = 'ready'
+		  AND a.state IN ('ready', 'pending', 'processing')
 		  AND a.created_at > ?
 		ORDER BY a.created_at DESC
 		LIMIT ?

@@ -24,8 +24,11 @@ func formatCandidatesForReranker(candidates []Candidate) string {
 
 // formatArtifactCandidates formats artifact candidates for the LLM prompt (v0.6.0).
 // Format: [Artifact:ID] (score) type: "name" | keywords | Entities: entities | summary
-// Session candidates render "(session)" instead of cosine similarity to signal that the
-// file is part of the active conversation and should be prioritized.
+// Session candidates carry no similarity score; they end with a "| SESSION" cell
+// instead, signalling that the file is part of the active conversation and should
+// be prioritized. The marker is deliberately kept away from the ID slot: a
+// parenthesized "(session)" right after "[Artifact:N]" trained the model to emit
+// "Artifact:session" as an ID (observed in production).
 func formatArtifactCandidates(candidates []ArtifactCandidate) string {
 	if len(candidates) == 0 {
 		return ""
@@ -49,13 +52,20 @@ func formatArtifactCandidates(candidates []ArtifactCandidate) string {
 			extrasStr = " | " + strings.Join(parts, " | ")
 		}
 
-		scoreTag := fmt.Sprintf("(%.2f)", c.Score)
-		if c.IsSession {
-			scoreTag = "(session)"
+		summary := c.Summary
+		if summary == "" {
+			// Session candidates in 'pending' state have no extracted summary yet;
+			// keep the cell non-empty so the line shape stays parseable.
+			summary = "(not analyzed yet)"
 		}
 
-		fmt.Fprintf(&sb, "[Artifact:%d] %s %s: \"%s\"%s | %s\n",
-			c.ArtifactID, scoreTag, c.FileType, c.OriginalName, extrasStr, c.Summary)
+		if c.IsSession {
+			fmt.Fprintf(&sb, "[Artifact:%d] %s: \"%s\"%s | %s | SESSION\n",
+				c.ArtifactID, c.FileType, c.OriginalName, extrasStr, summary)
+			continue
+		}
+		fmt.Fprintf(&sb, "[Artifact:%d] (%.2f) %s: \"%s\"%s | %s\n",
+			c.ArtifactID, c.Score, c.FileType, c.OriginalName, extrasStr, summary)
 	}
 	return sb.String()
 }

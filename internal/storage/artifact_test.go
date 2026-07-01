@@ -803,22 +803,39 @@ func TestGetSessionArtifacts(t *testing.T) {
 		assert.Empty(t, got, "archived artifact must not be returned as session")
 	})
 
-	t.Run("excludes pending and processing artifacts (state != ready)", func(t *testing.T) {
+	t.Run("includes pending and processing artifacts, excludes failed", func(t *testing.T) {
 		store, cleanup := setupTestDB(t)
 		defer cleanup()
 		require.NoError(t, store.Init())
 
 		msg := addSessionMessage(t, store, user1ID, nil)
-		_, err := store.AddArtifact(Artifact{
+		pendingID, err := store.AddArtifact(Artifact{
 			UserID: user1ID, MessageID: msg, FileType: "image",
 			FilePath: "/u1/pending.png", FileSize: 100, MimeType: "image/png",
 			OriginalName: "pending.png", ContentHash: "h_pending", State: "pending",
 		})
 		require.NoError(t, err)
+		processingID, err := store.AddArtifact(Artifact{
+			UserID: user1ID, MessageID: msg, FileType: "image",
+			FilePath: "/u1/processing.png", FileSize: 100, MimeType: "image/png",
+			OriginalName: "processing.png", ContentHash: "h_processing", State: "processing",
+		})
+		require.NoError(t, err)
+		_, err = store.AddArtifact(Artifact{
+			UserID: user1ID, MessageID: msg, FileType: "image",
+			FilePath: "/u1/failed.png", FileSize: 100, MimeType: "image/png",
+			OriginalName: "failed.png", ContentHash: "h_failed", State: "failed",
+		})
+		require.NoError(t, err)
 
 		got, err := store.GetSessionArtifacts(ctx, user1ID, 10, 24*time.Hour)
 		require.NoError(t, err)
-		assert.Empty(t, got, "pending artifact must not be returned")
+		gotIDs := make([]int64, 0, len(got))
+		for _, a := range got {
+			gotIDs = append(gotIDs, a.ID)
+		}
+		assert.ElementsMatch(t, []int64{pendingID, processingID}, gotIDs,
+			"pending/processing must be returned; failed must not")
 	})
 
 	t.Run("respects maxAge cutoff", func(t *testing.T) {

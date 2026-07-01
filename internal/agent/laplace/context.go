@@ -378,8 +378,16 @@ func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID storage.Sc
 			l.logger.Warn("failed to load artifact", "artifact_id", artifactID, "error", err)
 			continue
 		}
-		if artifact == nil || artifact.State != "ready" {
-			l.logger.Debug("artifact not ready", "artifact_id", artifactID, "state", artifact.State)
+		// 'pending'/'processing' artifacts are loadable — the file exists, only the
+		// extracted metadata is missing (session-injected candidates arrive in this
+		// state). 'failed' stays excluded: a file that broke extraction (e.g. a
+		// safety-blocked one) must never be re-injected into context.
+		if artifact == nil || artifact.State == "failed" {
+			state := "<nil>"
+			if artifact != nil {
+				state = artifact.State
+			}
+			l.logger.Debug("artifact not loadable", "artifact_id", artifactID, "state", state)
 			continue
 		}
 

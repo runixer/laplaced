@@ -165,6 +165,7 @@ func (r *Reranker) rerank(
 			rawTopics, rawPeople, rawArtifacts    int
 			keptTopics, keptPeople, keptArtifacts int
 			keptArtifactsSession                  int
+			sessionIDRecovered                    int
 		)
 		if tr != nil {
 			reason = tr.fallbackReason
@@ -175,6 +176,7 @@ func (r *Reranker) rerank(
 			keptPeople = tr.modelKeptPeople
 			keptArtifacts = tr.modelKeptArtifacts
 			keptArtifactsSession = tr.modelKeptArtifactsSession
+			sessionIDRecovered = tr.sessionIDRecovered
 			if tr.tracker != nil {
 				llmCalls = tr.tracker.TurnCount()
 				costUSD = tr.tracker.TotalCostValue()
@@ -196,6 +198,7 @@ func (r *Reranker) rerank(
 			attribute.Int("reranker.model_kept.people", keptPeople),
 			attribute.Int("reranker.model_kept.artifacts", keptArtifacts),
 			attribute.Int("reranker.model_kept.artifacts.session", keptArtifactsSession),
+			attribute.Int("reranker.session_id_recovered", sessionIDRecovered),
 			attribute.Float64("reranker.cost_usd", costUSD),
 		)
 		if obs.ContentEnabled() {
@@ -585,6 +588,9 @@ func (r *Reranker) rerank(
 		// Validate topics and people
 		result = filterValidTopics(userID, result, candidateMap, logger)
 		result = filterValidPeople(userID, result, peopleMap, logger)
+		// Safety net for the prompt/rendering fix: map session-flavored
+		// malformed IDs onto real session candidates before validation drops them.
+		result, tr.sessionIDRecovered = recoverSessionArtifactIDs(userID, result, artifactCandidates, logger)
 		result = filterValidArtifacts(userID, result, artifactsMap, logger)
 
 		tr.modelKeptTopics = len(result.Topics)
