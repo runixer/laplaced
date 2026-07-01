@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Dashboard basic auth now covers every route by default (notably the `/api/agent-log/` detail endpoint, which was reachable without credentials when debug mode was on); only health, metrics, webhook, and static assets stay public, and credentials are compared in constant time.
+
 ### Added
 - Mattermost/Time now reads text-file attachments — Markdown, txt, YAML, JSON, plus configs, code and logs. Any UTF-8 text file is pulled into the conversation and saved as an artifact; binaries are declined with a clear message.
 - React to one of the bot's replies to flag it as a bad response — flagged replies are recorded for later review.

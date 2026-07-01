@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -811,17 +812,26 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// isPublicPath lists the routes reachable without dashboard credentials:
+// infra probes, Prometheus scraping, transport webhooks (authenticated by
+// their secret path), and static assets the browser loads before logging in.
+// Everything else — including /ui/ pages and /api/ endpoints — requires
+// basic auth, so newly added routes are protected by default.
+func isPublicPath(path string) bool {
+	switch path {
+	case "/healthz", "/metrics", "/favicon.ico":
+		return true
+	}
+	return strings.HasPrefix(path, "/static/") || strings.HasPrefix(path, "/telegram/")
+}
+
 func (s *Server) basicAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Only protect /ui/ routes
-		if strings.HasPrefix(r.URL.Path, "/ui/") {
-			if !s.cfg.Server.Auth.Enabled {
-				next.ServeHTTP(w, r)
-				return
-			}
-
+		if !isPublicPath(r.URL.Path) && s.cfg.Server.Auth.Enabled {
 			user, pass, ok := r.BasicAuth()
-			if !ok || user != s.cfg.Server.Auth.Username || pass != s.cfg.Server.Auth.Password {
+			userOK := subtle.ConstantTimeCompare([]byte(user), []byte(s.cfg.Server.Auth.Username)) == 1
+			passOK := subtle.ConstantTimeCompare([]byte(pass), []byte(s.cfg.Server.Auth.Password)) == 1
+			if !ok || !userOK || !passOK {
 				w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
