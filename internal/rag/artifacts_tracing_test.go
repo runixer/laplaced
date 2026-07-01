@@ -2,9 +2,12 @@ package rag
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/runixer/laplaced/internal/llm"
 )
 
 // TestClassifyExtractionErr keeps the TraceQL filter labels stable. Adding a
@@ -24,6 +27,10 @@ func TestClassifyExtractionErr(t *testing.T) {
 		{"empty file", errors.New("empty file: cannot process zero-size artifact"), "empty_file"},
 		{"timeout", errors.New("context deadline exceeded"), "timeout"},
 		{"llm call failed", errors.New("LLM call failed: stream ended"), "llm"},
+		// Real poisoned-artifact shape: extractor wraps the safety block as
+		// "LLM call failed: %w". Must win over the generic "llm" case so the
+		// landmine is queryable via error_kind="safety".
+		{"safety block beats llm wrapper", fmt.Errorf("LLM call failed: %w", llm.NewSafetyBlockErrorForTest("Gemini blocked the request: PROHIBITED_CONTENT", 400)), "safety"},
 		{"unknown shape", errors.New("disk full"), "other"},
 	}
 	for _, tt := range tests {

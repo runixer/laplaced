@@ -13,6 +13,7 @@ import (
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/extractor"
 	"github.com/runixer/laplaced/internal/jobtype"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -23,6 +24,15 @@ import (
 func classifyExtractionErr(err error) string {
 	if err == nil {
 		return ""
+	}
+	// Safety first: a provider content-policy block on *extraction* means the
+	// file is so toxic even benign captioning is rejected, so it will break any
+	// future turn that loads it into context — a latent landmine, not a transient
+	// hiccup. Classify it before the generic "llm" case (whose "LLM call failed"
+	// wrapper would otherwise swallow it), so `{span.extractor.error_kind="safety"}`
+	// surfaces poisoned artifacts the moment they're uploaded.
+	if llm.IsSafetyBlock(err) {
+		return "safety"
 	}
 	msg := strings.ToLower(err.Error())
 	switch {
