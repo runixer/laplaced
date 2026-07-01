@@ -13,6 +13,10 @@ bot:
   safety_blocked: "🛡 The response was blocked by the safety filter. Try rephrasing the request or removing the attachment."
   empty_response: "Seems I got lost in thought and couldn't come up with anything. Ask about something else?"
   current_media_marker: "📷 Attachment from the CURRENT message (the user sent it just now — this is what to act on / analyze)."
+  current_media_marker_image: "📷 Image from the CURRENT message (sent just now — act on / analyze THIS one)."
+  current_media_marker_voice: "🎤 Voice/audio from the CURRENT message (sent just now — transcribe and respond to THIS one)."
+  current_media_marker_video: "🎥 Video from the CURRENT message (sent just now — act on THIS one)."
+  current_media_marker_file: "📎 File from the CURRENT message (sent just now — work with THIS one)."
   generic_error: "Oops, something went wrong. I couldn't send the answer. Please try repeating your request a bit later."
   access_denied: "Sorry, you don't have access to this bot."
   file_unsupported_format: "Sorry, I can't process .{ext} files. Supported formats: images (PNG, JPEG, WEBP, HEIC, HEIF), PDF, video, audio, and text files."
@@ -41,12 +45,13 @@ bot:
     tool_generate_image_arg: "🎨 Drawing: <i>%s</i>"
     tool_generic: "⚙️ Running tool…"
   voice_instruction: |
-    This is a voice message. MANDATORY:
+    This is a voice message the user sent JUST NOW. MANDATORY:
     1. Quote the FULL text (cleaned of filler words, pauses) in this format:
        - If it's the user's message: > 🎤 [text]
        - If FORWARDED from someone: > 🎤 **From [sender name]:** [text]
     2. Then respond to the content in English.
-    For multiple voice messages — quote each separately.
+    Transcribe ONLY the voice message(s) in the current message (if several — quote each separately).
+    Voice/audio from memory (tagged 📄 memory artifact) are recordings from past conversations: do NOT transcribe them or present their content as the words of the current message; use them only as reference if relevant.
   system_prompt: |
     <role>
     You are {{.BotName}} — a friendly AI assistant.
@@ -111,9 +116,9 @@ bot:
 
     <artifact_protocol>
     FILES:
-    - Attachments in the CURRENT message (marked 📷) are what the user is asking about right now. Edits, settings, descriptions, and analysis of "this photo/file" refer to THESE.
+    - Attachments in the CURRENT message (marked 📷/🎤/🎥/📎) are what the user is asking about right now. Edits, settings, descriptions, transcription, and analysis of "this photo/file/voice" refer to THESE.
     - Files from memory (marked 📄 memory artifact, and in <artifact_context>) are material from past conversations. If the user is ASKING about a past file and did NOT attach their own file now — that file IS the subject: analyze it fully and you MUST cite it at the start as > 📄 **[filename]:** [what it contains / what you found].
-    - But if the user DOES have their own 📷 attachment in the current message — memory files are only REFERENCE: lean on them only if they genuinely help, do NOT carry their details (objects, clothing, people, colors) over onto the current attachment, and do not build the answer around them.
+    - But if the user DOES have their own attachment in the current message (marked 📷/🎤/🎥/📎) — memory files are only REFERENCE: lean on them only if they genuinely help, do NOT carry their details (objects, clothing, people, colors, and also words, facts, quotes, stories) over onto the current attachment, do not build the answer around them, and do not present their content as a transcript/paraphrase of the current message.
     - For multiple memory files — list each separately. DON'T write "[filename]" if it's a technical ID — use the readable name from the type tag.
     </artifact_protocol>
 

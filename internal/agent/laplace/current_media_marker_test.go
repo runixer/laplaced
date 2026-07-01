@@ -19,60 +19,101 @@ func imageFilePart() llm.FilePart {
 	return llm.FilePart{Type: "file", File: llm.File{FileName: "photo.jpg", FileData: "data:image/jpeg;base64,AAAA"}}
 }
 
-// TestCurrentMediaMarker_LocalesDefined guards the i18n key the fix depends on:
-// removing it silently disables the anti-confusion marker.
+// TestCurrentMediaMarker_LocalesDefined guards the i18n keys the fix depends on:
+// removing one silently disables the anti-confusion marker for that media kind.
 func TestCurrentMediaMarker_LocalesDefined(t *testing.T) {
+	// key -> required leading emoji
+	keys := map[string]string{
+		"bot.current_media_marker":       "📷", // generic fallback
+		"bot.current_media_marker_image": "📷",
+		"bot.current_media_marker_voice": "🎤",
+		"bot.current_media_marker_video": "🎥",
+		"bot.current_media_marker_file":  "📎",
+	}
 	for _, lang := range []string{"en", "ru"} {
 		tr, err := i18n.NewTranslator(lang)
 		require.NoError(t, err)
-		marker := tr.Get(lang, "bot.current_media_marker")
-		assert.NotEmpty(t, marker, "current_media_marker missing for %s", lang)
-		assert.True(t, strings.HasPrefix(marker, "📷"), "%s marker must start with 📷, got %q", lang, marker)
+		for key, emoji := range keys {
+			marker := tr.Get(lang, key)
+			assert.NotEmpty(t, marker, "%s missing for %s", key, lang)
+			assert.True(t, strings.HasPrefix(marker, emoji),
+				"%s (%s) must start with %s, got %q", key, lang, emoji, marker)
+		}
 	}
 }
 
-// TestMarkCurrentMedia covers the helper in isolation: a 📷 marker is inserted
-// before every media part (any type), never before text, order is preserved.
+// TestMarkCurrentMedia covers the helper in isolation: a kind-matched marker is
+// inserted before every media part (🎤 voice, 📎 file, 📷 image), never before
+// text, order is preserved.
 func TestMarkCurrentMedia(t *testing.T) {
 	cfg, _, lap, _, _ := setupArtifactTest(t)
 	cfg.Bot.Language = "en"
-	marker := lap.translator.Get("en", "bot.current_media_marker")
-	require.NotEmpty(t, marker)
+	mImage := lap.translator.Get("en", "bot.current_media_marker_image")
+	mVoice := lap.translator.Get("en", "bot.current_media_marker_voice")
+	mFile := lap.translator.Get("en", "bot.current_media_marker_file")
+	require.NotEmpty(t, mImage)
+	require.NotEmpty(t, mVoice)
+	require.NotEmpty(t, mFile)
 
 	voice := llm.FilePart{Type: "file", File: llm.File{FileName: "v.ogg", FileData: "data:audio/ogg;base64,AAAA"}}
 	pdf := llm.FilePart{Type: "file", File: llm.File{FileName: "d.pdf", FileData: "data:application/pdf;base64,AAAA"}}
 	text := llm.TextPart{Type: "text", Text: "edit this"}
 
 	tests := []struct {
-		name      string
-		in        []interface{}
-		wantLen   int
-		markerIdx []int // indices in the OUTPUT where the marker text part must sit
+		name    string
+		in      []interface{}
+		wantLen int
+		// markers maps an OUTPUT index (where a marker TextPart must sit) to the
+		// exact marker text expected there — proving kind-matching.
+		markers map[int]string
 	}{
-		{"text + image", []interface{}{text, imageFilePart()}, 3, []int{1}},
-		{"image only", []interface{}{imageFilePart()}, 2, []int{0}},
-		{"voice + pdf (media-agnostic, each marked)", []interface{}{voice, pdf}, 4, []int{0, 2}},
+		{"text + image", []interface{}{text, imageFilePart()}, 3, map[int]string{1: mImage}},
+		{"image only", []interface{}{imageFilePart()}, 2, map[int]string{0: mImage}},
+		{"voice + pdf — kind-matched markers", []interface{}{voice, pdf}, 4, map[int]string{0: mVoice, 2: mFile}},
 		{"text only — untouched", []interface{}{text}, 1, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			out := lap.markCurrentMedia(tt.in)
 			require.Len(t, out, tt.wantLen)
-			for _, idx := range tt.markerIdx {
+			for idx, want := range tt.markers {
 				tp, ok := out[idx].(llm.TextPart)
 				require.True(t, ok, "expected TextPart marker at %d", idx)
-				assert.Equal(t, marker, tp.Text)
+				assert.Equal(t, want, tp.Text)
 				// the part right after a marker must be the media it labels
 				_, isFile := out[idx+1].(llm.FilePart)
 				assert.True(t, isFile, "marker at %d must immediately precede a media part", idx)
 			}
-			if tt.markerIdx == nil {
+			if tt.markers == nil {
 				for _, p := range out {
-					if tp, ok := p.(llm.TextPart); ok {
-						assert.NotEqual(t, marker, tp.Text, "no marker expected for text-only input")
+					_, ok := p.(llm.TextPart)
+					if ok && len(out) == 1 {
+						assert.Equal(t, text, p, "text-only input must be untouched")
 					}
 				}
 			}
+		})
+	}
+}
+
+// TestCurrentMediaMarkerKey pins the pure MIME→marker-kind mapping — the crux of
+// the type-aware marker. Anything unrecognized falls through to the file marker.
+func TestCurrentMediaMarkerKey(t *testing.T) {
+	tests := []struct {
+		dataURL string
+		want    string
+	}{
+		{"data:audio/ogg;base64,AA", "bot.current_media_marker_voice"},
+		{"data:audio/mpeg;base64,AA", "bot.current_media_marker_voice"},
+		{"data:video/mp4;base64,AA", "bot.current_media_marker_video"},
+		{"data:image/jpeg;base64,AA", "bot.current_media_marker_image"},
+		{"data:application/pdf;base64,AA", "bot.current_media_marker_file"},
+		{"data:text/plain;base64,AA", "bot.current_media_marker_file"},
+		{"", "bot.current_media_marker_file"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.dataURL, func(t *testing.T) {
+			assert.Equal(t, tt.want, currentMediaMarkerKey(tt.dataURL))
 		})
 	}
 }
@@ -107,7 +148,8 @@ func TestBuildMessages_CurrentMediaMarker_Gate(t *testing.T) {
 	userID := storage.ScopeID("123")
 	marker, err := i18n.NewTranslator("en")
 	require.NoError(t, err)
-	markerText := marker.Get("en", "bot.current_media_marker")
+	// current media is an image → the image-kind marker is expected.
+	markerText := marker.Get("en", "bot.current_media_marker_image")
 	require.NotEmpty(t, markerText)
 
 	base := func() *ContextData {

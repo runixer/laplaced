@@ -136,24 +136,59 @@ func (l *Laplace) BuildMessages(
 	return orMessages
 }
 
-// markCurrentMedia prepends a positional 📷 marker before each media part of the
+// markCurrentMedia prepends a positional marker before each media part of the
 // current message. Paired with the 📄 memory-artifact marker, it lets the model
 // tell a live attachment apart from a recalled one when both are present and may
-// share a generic name like "photo.jpg". Media-type agnostic (image/voice/pdf/
-// video). Caller only invokes this when memory artifacts are also loaded.
+// share a generic name like "photo.jpg". The marker is chosen to match the media
+// kind (🎤 voice, 🎥 video, 📎 file, 📷 image) so it reads coherently and — for
+// voice — pairs with voice_instruction to stop the model transcribing a recalled
+// 📄 audio as the current one. Caller only invokes this when memory artifacts are
+// also loaded.
 func (l *Laplace) markCurrentMedia(parts []interface{}) []interface{} {
-	marker := l.translator.Get(l.cfg.Bot.Language, "bot.current_media_marker")
-	if marker == "" {
-		return parts
-	}
 	out := make([]interface{}, 0, len(parts)+1)
 	for _, p := range parts {
-		if _, ok := p.(llm.FilePart); ok {
+		if marker := l.currentMediaMarker(p); marker != "" {
 			out = append(out, llm.TextPart{Type: "text", Text: marker})
 		}
 		out = append(out, p)
 	}
 	return out
+}
+
+// currentMediaMarker returns the localized "from the CURRENT message" marker for
+// a media part, keyed to its media kind. Returns "" for non-media parts (text)
+// and unknown shapes. Falls back to the generic bot.current_media_marker if a
+// per-kind key is missing.
+func (l *Laplace) currentMediaMarker(p interface{}) string {
+	var key string
+	switch part := p.(type) {
+	case llm.FilePart:
+		key = currentMediaMarkerKey(part.File.FileData)
+	case llm.ImageURLPart:
+		key = "bot.current_media_marker_image"
+	case llm.VideoURLPart:
+		key = "bot.current_media_marker_video"
+	default:
+		return ""
+	}
+	if marker := l.translator.Get(l.cfg.Bot.Language, key); marker != "" {
+		return marker
+	}
+	return l.translator.Get(l.cfg.Bot.Language, "bot.current_media_marker")
+}
+
+// currentMediaMarkerKey maps a data-URL MIME prefix to its per-kind marker key.
+func currentMediaMarkerKey(dataURL string) string {
+	switch {
+	case strings.HasPrefix(dataURL, "data:audio/"):
+		return "bot.current_media_marker_voice"
+	case strings.HasPrefix(dataURL, "data:video/"):
+		return "bot.current_media_marker_video"
+	case strings.HasPrefix(dataURL, "data:image/"):
+		return "bot.current_media_marker_image"
+	default:
+		return "bot.current_media_marker_file"
+	}
 }
 
 // platformName maps the configured transport to the human-readable platform
