@@ -27,8 +27,7 @@ import (
 )
 
 const (
-	maxToolIterations = 10
-	maxEmptyRetries   = 2
+	maxEmptyRetries = 2
 )
 
 // Laplace is the main chat agent that handles user conversations.
@@ -189,13 +188,26 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 	var totalToolDuration time.Duration
 	var firstContentDelay time.Duration
 
+	maxToolIterations := l.cfg.Agents.GetChatMaxToolIterations()
+	// synthesisTurn flips once the tool budget is spent: the model gets one
+	// final turn with no tools and an explicit instruction to answer from what
+	// it has gathered. Before this existed the loop broke on a tool-call turn
+	// and the user got the localized empty-response placeholder — all the
+	// tool-result tokens were paid for and then thrown away.
+	synthesisTurn := false
+
 	for {
 		// toolIterationsFinal is the span-captured counter declared at the
 		// top of Execute — using it directly means the final value already
 		// lives where the deferred closure can read it.
-		if toolIterationsFinal >= maxToolIterations {
-			logger.Warn("max tool iterations reached", "iterations", toolIterationsFinal)
-			break
+		if toolIterationsFinal >= maxToolIterations && !synthesisTurn {
+			synthesisTurn = true
+			logger.Warn("max tool iterations reached, forcing synthesis turn", "iterations", toolIterationsFinal)
+			span.SetAttributes(attribute.Bool("laplace.synthesis_turn", true))
+			orMessages = append(orMessages, llm.Message{
+				Role:    "system",
+				Content: l.translator.Get(l.cfg.Bot.Language, "bot.tool_budget_synthesis"),
+			})
 		}
 		toolIterationsFinal++
 
@@ -206,6 +218,9 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 			Tools:     l.tools,
 			Reasoning: reasoning,
 			UserID:    string(req.UserID),
+		}
+		if synthesisTurn {
+			orReq.Tools = nil
 		}
 
 		tracker.StartTurn()
@@ -286,8 +301,10 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 			emptyRetries = 0
 		}
 
-		// Handle tool calls
-		if len(outcome.toolCalls) > 0 {
+		// Handle tool calls. On the synthesis turn no tools were offered, so
+		// any tool call in the outcome is a hallucination — fall through and
+		// take whatever content came with it as the final answer.
+		if len(outcome.toolCalls) > 0 && !synthesisTurn {
 			logger.Info("Model requested tool calls", "count", len(outcome.toolCalls))
 
 			// Send intermediate message if present.

@@ -614,9 +614,13 @@ func TestExecute_IntermediateMessageWithToolCall(t *testing.T) {
 	_ = translator
 }
 
-// TestExecute_MaxIterations tests the max tool iterations limit.
-func TestExecute_MaxIterations(t *testing.T) {
+// TestExecute_MaxIterations_ForcesSynthesis tests that when the model keeps
+// requesting tools until the iteration cap, the loop grants one final turn
+// without tools (plus an explicit synthesis instruction) instead of returning
+// the empty-response placeholder.
+func TestExecute_MaxIterations_ForcesSynthesis(t *testing.T) {
 	cfg, translator, agent, mockStore, mockORClient, handler := setupExecuteTest(t)
+	cfg.Agents.Chat.MaxToolIterations = 3
 
 	userID := storage.ScopeID("123")
 	req := &Request{
@@ -629,25 +633,42 @@ func TestExecute_MaxIterations(t *testing.T) {
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
 
-	// Always return a tool call (infinite loop scenario)
-	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
+	// Every turn that offers tools comes back as yet another tool call
+	// (infinite search spiral scenario).
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(r llm.ChatCompletionRequest) bool {
+		return len(r.Tools) > 0
+	})).Return(
 		makeToolCallWithContentResponse("Searching again...", "search_web", `{"query":"more"}`, "call_1",
 			WithTokens(10, 0, 10),
 		), nil,
-	)
+	).Times(3)
 
-	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "search_web", mock.Anything).Return(&ToolResult{Content: "results"}, nil)
+	// The synthesis turn must carry no tools and end with the synthesis
+	// instruction as a system message.
+	synthesisInstruction := translator.Get("en", "bot.tool_budget_synthesis")
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(r llm.ChatCompletionRequest) bool {
+		if len(r.Tools) != 0 || len(r.Messages) == 0 {
+			return false
+		}
+		last := r.Messages[len(r.Messages)-1]
+		content, _ := last.Content.(string)
+		return last.Role == "system" && content == synthesisInstruction
+	})).Return(
+		makeChatResponse("Here is what I found so far.", WithTokens(30, 5, 35)), nil,
+	).Once()
+
+	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "search_web", mock.Anything).
+		Return(&ToolResult{Content: "results"}, nil).Times(3)
 
 	resp, err := agent.Execute(context.Background(), req, handler)
 	require.NoError(t, err)
-	// Should stop after max iterations (10)
-	assert.LessOrEqual(t, resp.TotalTurns, 11) // maxToolIterations + 1 for final attempt
+	assert.Equal(t, "Here is what I found so far.", resp.Content)
+	assert.False(t, resp.WasEmpty)
+	assert.Equal(t, 4, resp.TotalTurns) // 3 tool turns + 1 synthesis turn
 
 	mockStore.AssertExpectations(t)
+	mockORClient.AssertExpectations(t)
 	handler.AssertExpectations(t)
-
-	_ = cfg
-	_ = translator
 }
 
 // TestLogExecution tests the LogExecution method.

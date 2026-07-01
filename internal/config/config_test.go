@@ -773,6 +773,30 @@ func TestAgentsConfig_GetChatThinkingLevel(t *testing.T) {
 	}
 }
 
+func TestAgentsConfig_GetChatMaxToolIterations(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    int
+		expected int
+	}{
+		{"falls back to 5 when unset", 0, 5},
+		{"falls back to 5 on negative", -1, 5},
+		{"passes through explicit value", 8, 8},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := AgentsConfig{
+				Chat: ChatAgentConfig{
+					AgentConfig:       AgentConfig{Name: "Test", Model: "test-model"},
+					MaxToolIterations: tt.value,
+				},
+			}
+			assert.Equal(t, tt.expected, cfg.GetChatMaxToolIterations())
+		})
+	}
+}
+
 func TestDefaultConfigBytes(t *testing.T) {
 	bytes := DefaultConfigBytes()
 	assert.NotNil(t, bytes)

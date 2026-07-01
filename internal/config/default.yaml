@@ -95,6 +95,10 @@ agents:
     thinking_level: "auto"
     # Alternative: "google/gemini-3.1-pro-preview" — stronger on complex
     # multi-tool reasoning, but slower and noticeably more expensive per turn.
+    # Tool-loop turns per reply before the model is forced to answer with what
+    # it has gathered (one extra LLM turn without tools). Each turn re-sends
+    # the whole context, so this cap bounds the worst-case cost of a reply.
+    max_tool_iterations: 5
 
   # Archivist - extracts facts and people from conversations
   archivist:

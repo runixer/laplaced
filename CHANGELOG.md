@@ -14,8 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Default embedding model moved off the `-preview` alias to `google/gemini-embedding-2` (same vector space; stored vectors are re-embedded automatically on first start).
+- The per-reply tool-call limit is now configurable (`agents.chat.max_tool_iterations`) and defaults to 5 instead of a hardcoded 10.
 
 ### Fixed
+- When a reply hits the tool-call limit mid-search, the bot now answers with what it has found so far instead of replying "couldn't come up with anything".
 - A conversation no longer fails to turn into long-term memory when the topic splitter leaves a few messages uncovered — those messages are folded into the nearest topic instead of dropping the whole session (it still retries when coverage is very low).
 - Postgres deployments now get the `history.trace_id` column and `response_flags` table that were added in 0.10.1 for SQLite only — without them the bot failed to store any messages on Postgres (`column "trace_id" ... does not exist`). The consolidated schema now creates them and retrofits existing databases on startup.
 - Edited facts and people no longer keep an out-of-date search vector, so updating a memory no longer drops it out of recall.

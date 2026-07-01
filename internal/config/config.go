@@ -78,8 +78,9 @@ type AgentConfig struct {
 // Setting ThinkingLevel explicitly prevents Gemini 3.1 Pro from leaking internal
 // reasoning into the user-visible content field (see docs/bugs/2026-04-22-laplace-thought-leak/).
 type ChatAgentConfig struct {
-	AgentConfig   `yaml:",inline"`
-	ThinkingLevel string `yaml:"thinking_level" env:"LAPLACED_AGENTS_CHAT_THINKING_LEVEL"`
+	AgentConfig       `yaml:",inline"`
+	ThinkingLevel     string `yaml:"thinking_level" env:"LAPLACED_AGENTS_CHAT_THINKING_LEVEL"`
+	MaxToolIterations int    `yaml:"max_tool_iterations" env:"LAPLACED_AGENTS_CHAT_MAX_TOOL_ITERATIONS"`
 }
 
 // validThinkingLevels are the accepted thinking_level values for all agents.
@@ -336,6 +337,18 @@ func (a *AgentsConfig) GetChatModel() string {
 		return a.ChatModel
 	}
 	return a.Chat.GetModel(a.Default.Model)
+}
+
+// GetChatMaxToolIterations returns how many tool-loop turns the chat agent may
+// spend per reply before it is forced into a final synthesis turn without
+// tools. Falls back to 5 when unset — traces show the model rarely gains new
+// information after the 4th search; further turns are usually reformulations
+// of the same query.
+func (a *AgentsConfig) GetChatMaxToolIterations() int {
+	if a.Chat.MaxToolIterations > 0 {
+		return a.Chat.MaxToolIterations
+	}
+	return 5
 }
 
 // GetChatThinkingLevel returns the chat agent's reasoning effort level.
