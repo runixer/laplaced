@@ -41,6 +41,7 @@ func init() {
 	replayRerankCmd.Flags().String("snapshot", "", "Snapshot directory (must contain traces/*.json)")
 	replayRerankCmd.Flags().String("variant", "baseline", "Variant label (baseline, no_match_patch, ...)")
 	replayRerankCmd.Flags().Int("concurrency", 3, "Number of traces to replay in parallel")
+	replayRerankCmd.Flags().String("files-dir", "", "Directory with <sha256>.* files to rehydrate media parts (default: <snapshot>/files)")
 	_ = replayRerankCmd.MarkFlagRequired("snapshot")
 	rootCmd.AddCommand(replayRerankCmd)
 }
@@ -57,6 +58,10 @@ func runReplayRerank(cmd *cobra.Command, _ []string) error {
 	snapDir := mustGetString(cmd, "snapshot")
 	variant := mustGetString(cmd, "variant")
 	concurrency, _ := cmd.Flags().GetInt("concurrency")
+	filesDir, _ := cmd.Flags().GetString("files-dir")
+	if filesDir == "" {
+		filesDir = filepath.Join(snapDir, "files")
+	}
 
 	if info, err := os.Stat(snapDir); err != nil || !info.IsDir() {
 		return fmt.Errorf("snapshot directory does not exist: %s", snapDir)
@@ -72,7 +77,7 @@ func runReplayRerank(cmd *cobra.Command, _ []string) error {
 
 	build := replay.NewRerankerBuilder(tb.store, func(ctx context.Context, userID storage.ScopeID) *agent.SharedContext {
 		return tb.services.ContextService.Load(ctx, userID)
-	})
+	}, filesDir)
 
 	summary, err := replay.Run(
 		cmd.Context(),

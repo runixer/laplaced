@@ -25,16 +25,19 @@ import (
 // type doesn't have that concept; reasons may be nil if the path didn't
 // emit them (typical of fallback paths).
 type AgentOutput struct {
-	SelectedTopics    []int             `json:"selected_topics,omitempty"`
-	SelectedPeople    []int             `json:"selected_people,omitempty"`
-	SelectedArtifacts []int             `json:"selected_artifacts,omitempty"`
-	TopicReasons      map[int]string    `json:"topic_reasons,omitempty"`
-	PersonReasons     map[int]string    `json:"person_reasons,omitempty"`
-	ArtifactReasons   map[int]string    `json:"artifact_reasons,omitempty"`
-	FallbackReason    string            `json:"fallback_reason,omitempty"`
-	CostUSD           float64           `json:"cost_usd,omitempty"`
-	LatencyMs         int64             `json:"latency_ms,omitempty"`
-	Extra             map[string]string `json:"extra,omitempty"`
+	SelectedTopics    []int          `json:"selected_topics,omitempty"`
+	SelectedPeople    []int          `json:"selected_people,omitempty"`
+	SelectedArtifacts []int          `json:"selected_artifacts,omitempty"`
+	TopicReasons      map[int]string `json:"topic_reasons,omitempty"`
+	PersonReasons     map[int]string `json:"person_reasons,omitempty"`
+	ArtifactReasons   map[int]string `json:"artifact_reasons,omitempty"`
+	// InvalidIDs collects selection IDs the reranker returned that failed
+	// numeric parsing (e.g. "Artifact:session") and were therefore dropped.
+	InvalidIDs     []string          `json:"invalid_ids,omitempty"`
+	FallbackReason string            `json:"fallback_reason,omitempty"`
+	CostUSD        float64           `json:"cost_usd,omitempty"`
+	LatencyMs      int64             `json:"latency_ms,omitempty"`
+	Extra          map[string]string `json:"extra,omitempty"`
 }
 
 // SkippedLookup logs a candidate that the reconstructor failed to fetch from

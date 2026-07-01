@@ -2,12 +2,16 @@ package replay
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/runixer/laplaced/cmd/testbot/snapshot"
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/reranker"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -34,13 +38,13 @@ type SharedContextLoader func(ctx context.Context, userID storage.ScopeID) *agen
 //
 // Split this way so tests can drive BuildRerankerRequest directly with a
 // hand-built RerankerSpanData and skip the JSON synthesis.
-func NewRerankerBuilder(store RerankerStore, loadShared SharedContextLoader) BuildRequestFunc {
+func NewRerankerBuilder(store RerankerStore, loadShared SharedContextLoader, filesDir string) BuildRequestFunc {
 	return func(ctx context.Context, traceID string, traceJSON []byte) (BuildResult, error) {
 		span, err := snapshot.ExtractRerankerSpan(traceID, traceJSON)
 		if err != nil {
 			return BuildResult{}, fmt.Errorf("extract span: %w", err)
 		}
-		return BuildRerankerRequest(ctx, span, store, loadShared)
+		return BuildRerankerRequest(ctx, span, store, loadShared, filesDir)
 	}
 }
 
@@ -51,6 +55,7 @@ func BuildRerankerRequest(
 	span *snapshot.RerankerSpanData,
 	store RerankerStore,
 	loadShared SharedContextLoader,
+	filesDir string,
 ) (BuildResult, error) {
 	if span.UserID == "" {
 		return BuildResult{}, fmt.Errorf("trace has no user.id attribute")
@@ -105,6 +110,15 @@ func BuildRerankerRequest(
 		shared = &agent.SharedContext{UserID: span.UserID}
 	}
 
+	// Rehydrate media parts from local files matched by SHA256. The trace only
+	// carries metadata (agent.FormatMediaParts redacts bytes), so a missing
+	// file downgrades the replay to text-only for that part — recorded as a
+	// skipped lookup, not an error.
+	mediaParts, missingMedia := rehydrateMediaParts(span.MediaParts, filesDir)
+	for _, sha := range missingMedia {
+		skipped = append(skipped, SkippedLookup{Type: "media", Reason: "no file for sha256 " + sha})
+	}
+
 	req := &agent.Request{
 		Shared: shared,
 		Query:  span.RawQuery,
@@ -117,6 +131,9 @@ func BuildRerankerRequest(
 			reranker.ParamCurrentMessages:     "", // not captured in trace events
 		},
 	}
+	if len(mediaParts) > 0 {
+		req.Params[reranker.ParamMediaParts] = mediaParts
+	}
 
 	return BuildResult{
 		UserID:   span.UserID,
@@ -125,6 +142,38 @@ func BuildRerankerRequest(
 		Original: rerankerOriginal(span),
 		Skipped:  skipped,
 	}, nil
+}
+
+// rehydrateMediaParts turns MediaPartRefs back into llm.FilePart values using
+// files stored as <filesDir>/<sha256> (any extension). Returns the parts as
+// []interface{} (the shape reranker.ParamMediaParts expects) plus the hashes
+// it could not find.
+func rehydrateMediaParts(refs []snapshot.MediaPartRef, filesDir string) ([]interface{}, []string) {
+	if len(refs) == 0 || filesDir == "" {
+		return nil, nil
+	}
+	var parts []interface{}
+	var missing []string
+	for _, ref := range refs {
+		matches, _ := filepath.Glob(filepath.Join(filesDir, ref.SHA256+"*"))
+		if len(matches) == 0 {
+			missing = append(missing, ref.SHA256)
+			continue
+		}
+		data, err := os.ReadFile(matches[0]) // #nosec G304 -- operator-supplied replay dir
+		if err != nil {
+			missing = append(missing, ref.SHA256)
+			continue
+		}
+		parts = append(parts, llm.FilePart{
+			Type: "file",
+			File: llm.File{
+				FileName: ref.Filename,
+				FileData: fmt.Sprintf("data:%s;base64,%s", ref.Mime, base64.StdEncoding.EncodeToString(data)),
+			},
+		})
+	}
+	return parts, missing
 }
 
 // ExtractRerankerOutput pulls the comparable AgentOutput out of an
@@ -151,6 +200,7 @@ func ExtractRerankerOutput(resp *agent.Response) AgentOutput {
 	for _, ts := range r.Topics {
 		id, err := ts.GetNumericID()
 		if err != nil {
+			out.InvalidIDs = append(out.InvalidIDs, ts.ID)
 			continue
 		}
 		out.SelectedTopics = append(out.SelectedTopics, int(id))
@@ -161,6 +211,7 @@ func ExtractRerankerOutput(resp *agent.Response) AgentOutput {
 	for _, ps := range r.People {
 		id, err := ps.GetNumericID()
 		if err != nil {
+			out.InvalidIDs = append(out.InvalidIDs, ps.ID)
 			continue
 		}
 		out.SelectedPeople = append(out.SelectedPeople, int(id))
@@ -171,6 +222,7 @@ func ExtractRerankerOutput(resp *agent.Response) AgentOutput {
 	for _, as := range r.Artifacts {
 		id, err := as.GetNumericID()
 		if err != nil {
+			out.InvalidIDs = append(out.InvalidIDs, as.ID)
 			continue
 		}
 		out.SelectedArtifacts = append(out.SelectedArtifacts, int(id))
@@ -329,6 +381,7 @@ func loadArtifacts(store RerankerStore, userID storage.ScopeID, lines []snapshot
 		out = append(out, reranker.ArtifactCandidate{
 			ArtifactID:   int64(l.ID),
 			Score:        float32(l.Similarity),
+			IsSession:    l.IsSession,
 			FileType:     a.FileType,
 			OriginalName: a.OriginalName,
 			Summary:      summary,

@@ -44,11 +44,12 @@ type RerankerSpanData struct {
 
 	RawQuery                string
 	EnrichedQuery           string
-	CandidatesInput         string // raw multi-line body, see ParseCandidates
-	PeopleCandidatesInput   string // raw body, see ParsePersonCandidates
-	ArtifactCandidatesInput string // raw body, see ParseArtifactCandidates
-	UserProfile             string // raw <user_profile> XML at trace time
-	RecentTopics            string // raw <recent_topics> XML at trace time
+	CandidatesInput         string         // raw multi-line body, see ParseCandidates
+	PeopleCandidatesInput   string         // raw body, see ParsePersonCandidates
+	ArtifactCandidatesInput string         // raw body, see ParseArtifactCandidates
+	UserProfile             string         // raw <user_profile> XML at trace time
+	RecentTopics            string         // raw <recent_topics> XML at trace time
+	MediaParts              []MediaPartRef // parsed reranker.media_parts event
 
 	// ToolCallRequests is one slice per `reranker.tool_call` event, each
 	// holding the requested topic IDs for that iteration.
@@ -218,6 +219,8 @@ func buildRerankerSpan(traceID string, sp rawSpan) *RerankerSpanData {
 			out.UserProfile = eventBody(ev)
 		case "reranker.recent_topics":
 			out.RecentTopics = eventBody(ev)
+		case "reranker.media_parts":
+			out.MediaParts = ParseMediaParts(eventBody(ev))
 		case "reranker.tool_call":
 			out.ToolCallRequests = append(out.ToolCallRequests, parseRequestedIDs(ev))
 		case "reranker.selection_reasons":
@@ -231,6 +234,29 @@ func buildRerankerSpan(traceID string, sp rawSpan) *RerankerSpanData {
 		}
 	}
 
+	return out
+}
+
+// MediaPartRef is one entry of a `reranker.media_parts` content event. The
+// producer (agent.FormatMediaParts) redacts file bytes down to metadata, so a
+// replay can only rehydrate the part from a local file matched by SHA256.
+type MediaPartRef struct {
+	Filename  string `json:"filename"`
+	Mime      string `json:"mime"`
+	SizeBytes int64  `json:"size_bytes"`
+	SHA256    string `json:"sha256"`
+}
+
+// ParseMediaParts decodes a media_parts event body. Returns nil on blank or
+// malformed input — media is optional and a bad event must not fail the trace.
+func ParseMediaParts(body string) []MediaPartRef {
+	if strings.TrimSpace(body) == "" {
+		return nil
+	}
+	var out []MediaPartRef
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		return nil
+	}
 	return out
 }
 
@@ -424,12 +450,16 @@ type ArtifactCandidateLine struct {
 	Keywords   string // empty if absent
 	Entities   string // empty if absent
 	Summary    string
+	IsSession  bool // session-injected candidate (no cosine similarity)
 }
 
 // artifactHeadRE matches the leading `[Artifact:N] (sim) type: "filename"` segment.
 // FileType is `\S+` to absorb hyphenated forms like `voice_note`. FileName is
-// captured between literal quotes.
-var artifactHeadRE = regexp.MustCompile(`^\[Artifact:(\d+)\]\s+\(([\d.]+)\)\s+(\S+):\s+"([^"]*)"$`)
+// captured between literal quotes. The parenthesized tag is either a cosine
+// similarity or the legacy `(session)` marker; current session lines carry no
+// tag at all (the marker moved to a trailing `| SESSION` cell), so the group
+// is optional.
+var artifactHeadRE = regexp.MustCompile(`^\[Artifact:(\d+)\]\s+(?:\((session|[\d.]+)\)\s+)?(\S+):\s+"([^"]*)"$`)
 
 // ParseArtifactCandidates splits an artifacts_candidates_input body into rows.
 // Splits on ` | ` and identifies parts by position (head first, summary last)
@@ -450,14 +480,24 @@ func ParseArtifactCandidates(body string) []ArtifactCandidateLine {
 			continue
 		}
 		id, _ := strconv.Atoi(m[1])
-		sim, _ := strconv.ParseFloat(m[2], 64)
 		row := ArtifactCandidateLine{
-			ID:         id,
-			Similarity: sim,
-			FileType:   m[3],
-			FileName:   m[4],
-			Summary:    parts[len(parts)-1],
+			ID:       id,
+			FileType: m[3],
+			FileName: m[4],
 		}
+		if m[2] == "session" {
+			row.IsSession = true
+		} else {
+			row.Similarity, _ = strconv.ParseFloat(m[2], 64)
+		}
+		if parts[len(parts)-1] == "SESSION" {
+			row.IsSession = true
+			parts = parts[:len(parts)-1]
+			if len(parts) < 2 {
+				continue
+			}
+		}
+		row.Summary = parts[len(parts)-1]
 		// Middle parts (between head and summary) are keywords / entities.
 		for _, p := range parts[1 : len(parts)-1] {
 			switch {

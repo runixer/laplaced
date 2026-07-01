@@ -230,6 +230,33 @@ func TestParseArtifactCandidates_HappyPath(t *testing.T) {
 	assert.Empty(t, got[3].Entities)
 }
 
+func TestParseArtifactCandidates_SessionLines(t *testing.T) {
+	// Legacy "(session)" score-slot marker, the current trailing "| SESSION"
+	// cell, and a plain scored line must all parse; only the session ones set
+	// IsSession.
+	body := `[Artifact:1197] (session) image: "fresh.png" | kw | freshly generated
+[Artifact:846] image: "new.png" | kw2 | new-format summary | SESSION
+[Artifact:35] (0.62) document: "doc.txt" | scored summary
+`
+	got := ParseArtifactCandidates(body)
+	require.Len(t, got, 3)
+
+	assert.Equal(t, 1197, got[0].ID)
+	assert.True(t, got[0].IsSession)
+	assert.Zero(t, got[0].Similarity)
+	assert.Equal(t, "freshly generated", got[0].Summary)
+
+	assert.Equal(t, 846, got[1].ID)
+	assert.True(t, got[1].IsSession)
+	assert.Zero(t, got[1].Similarity)
+	assert.Equal(t, "new-format summary", got[1].Summary)
+	assert.Equal(t, "kw2", got[1].Keywords)
+
+	assert.Equal(t, 35, got[2].ID)
+	assert.False(t, got[2].IsSession)
+	assert.InDelta(t, 0.62, got[2].Similarity, 1e-9)
+}
+
 func TestParseArtifactCandidates_BadLineSkipped(t *testing.T) {
 	body := `[Artifact:1] (0.5) image: "ok.jpg" | summary
 this is not a candidate line at all

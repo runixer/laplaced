@@ -87,7 +87,7 @@ func TestBuildRerankerRequest_HappyPath(t *testing.T) {
 		},
 	}
 
-	br, err := BuildRerankerRequest(context.Background(), span, store, nil)
+	br, err := BuildRerankerRequest(context.Background(), span, store, nil, "")
 	require.NoError(t, err)
 	assert.Equal(t, storage.ScopeID("42"), br.UserID)
 
@@ -148,7 +148,7 @@ func TestBuildRerankerRequest_MissingFromDB(t *testing.T) {
 		},
 	}
 
-	br, err := BuildRerankerRequest(context.Background(), span, store, nil)
+	br, err := BuildRerankerRequest(context.Background(), span, store, nil, "")
 	require.NoError(t, err)
 
 	cands := br.Request.Params[reranker.ParamCandidates].([]reranker.Candidate)
@@ -177,7 +177,7 @@ func TestBuildRerankerRequest_PrefersSpanSharedContext(t *testing.T) {
 		return &agent.SharedContext{Profile: "today's drift", RecentTopics: "today's drift"}
 	}
 
-	br, err := BuildRerankerRequest(context.Background(), span, &stubStore{}, loader)
+	br, err := BuildRerankerRequest(context.Background(), span, &stubStore{}, loader, "")
 	require.NoError(t, err)
 	assert.False(t, loaderCalled, "loader must NOT be called when span has shared-context events")
 	assert.Equal(t, span.UserProfile, br.Request.Shared.Profile)
@@ -192,7 +192,7 @@ func TestBuildRerankerRequest_FallsBackToLoaderForOldTraces(t *testing.T) {
 		return &agent.SharedContext{Profile: "from loader", RecentTopics: "from loader"}
 	}
 
-	br, err := BuildRerankerRequest(context.Background(), span, &stubStore{}, loader)
+	br, err := BuildRerankerRequest(context.Background(), span, &stubStore{}, loader, "")
 	require.NoError(t, err)
 	assert.Equal(t, "from loader", br.Request.Shared.Profile)
 }
@@ -201,7 +201,7 @@ func TestBuildRerankerRequest_RejectsZeroUserID(t *testing.T) {
 	// Defensive: a trace with no user.id attribute is corrupt and we don't
 	// want to ship it to a real DB / agent — fail fast.
 	span := &snapshot.RerankerSpanData{TraceID: "x", UserID: ""}
-	_, err := BuildRerankerRequest(context.Background(), span, &stubStore{}, nil)
+	_, err := BuildRerankerRequest(context.Background(), span, &stubStore{}, nil, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "user.id")
 }
@@ -233,6 +233,22 @@ func TestExtractRerankerOutput_HappyPath(t *testing.T) {
 	assert.Equal(t, []int{99}, out.SelectedPeople)
 	assert.Equal(t, []int{7}, out.SelectedArtifacts)
 	assert.Equal(t, 0.05, out.CostUSD)
+}
+
+func TestExtractRerankerOutput_InvalidIDsCollected(t *testing.T) {
+	resp := &agent.Response{
+		Structured: &reranker.Result{
+			Artifacts: []reranker.ArtifactSelection{
+				{ID: "Artifact:7"},
+				{ID: "Artifact:session", Reason: "invented"},
+			},
+			Topics: []reranker.TopicSelection{{ID: "Topic:oops"}},
+		},
+	}
+
+	out := ExtractRerankerOutput(resp)
+	assert.Equal(t, []int{7}, out.SelectedArtifacts)
+	assert.ElementsMatch(t, []string{"Artifact:session", "Topic:oops"}, out.InvalidIDs)
 }
 
 func TestExtractRerankerOutput_NilOrWrongStructured(t *testing.T) {
