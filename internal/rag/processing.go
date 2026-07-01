@@ -180,6 +180,33 @@ func salvageStragglers(topics []ExtractedTopic, stragglerIDs []int64) []Extracte
 	return topics
 }
 
+// resolveStragglers applies the coverage gate shared by both chunk-processing
+// paths: it records coverage telemetry, fails the chunk for retry when the
+// splitter covered too little of it to trust the segmentation, and otherwise
+// folds the leftover messages into their nearest topics (see salvageStragglers).
+func (s *Service) resolveStragglers(ctx context.Context, chunk []storage.Message, validTopics []ExtractedTopic) ([]ExtractedTopic, error) {
+	stragglerIDs := findStragglers(chunk, validTopics)
+	recordCoverage(ctx, chunk, stragglerIDs)
+	if len(stragglerIDs) == 0 {
+		return validTopics, nil
+	}
+	coverage := float64(len(chunk)-len(stragglerIDs)) / float64(len(chunk))
+	// Too few messages landed in a topic to trust the segmentation. Salvaging
+	// would bury a badly-wrong extraction under topics whose summaries cover
+	// almost nothing, so fail and let the session be retried instead.
+	if len(validTopics) == 0 || coverage < minCoverageForSalvage {
+		s.logger.Warn("Topic extraction coverage too low to salvage; failing for retry",
+			"covered_pct", coverage, "stragglers", len(stragglerIDs), "topics", len(validTopics), "ids", stragglerIDs)
+		return nil, fmt.Errorf("topic extraction incomplete: %d of %d messages not covered", len(stragglerIDs), len(chunk))
+	}
+	// Fold the orphaned messages into their nearest topic so the session still
+	// archives and nothing is lost from long-term memory (see salvageStragglers).
+	validTopics = salvageStragglers(validTopics, stragglerIDs)
+	s.logger.Info("Salvaged uncovered messages into nearest topics",
+		"salvaged", len(stragglerIDs), "ids", stragglerIDs, "covered_pct_before", coverage)
+	return validTopics, nil
+}
+
 func (s *Service) processChunk(ctx context.Context, userID storage.ScopeID, chunk []storage.Message) error {
 	if len(chunk) == 0 {
 		return nil
@@ -233,23 +260,9 @@ func (s *Service) processChunk(ctx context.Context, userID storage.ScopeID, chun
 	}
 
 	// Check for stragglers — messages the splitter left out of every topic.
-	stragglerIDs := findStragglers(chunk, validTopics)
-	recordCoverage(ctx, chunk, stragglerIDs)
-	if len(stragglerIDs) > 0 {
-		coverage := float64(len(chunk)-len(stragglerIDs)) / float64(len(chunk))
-		// Too few messages landed in a topic to trust the segmentation. Salvaging
-		// would bury a badly-wrong extraction under topics whose summaries cover
-		// almost nothing, so fail and let the session be retried instead.
-		if len(validTopics) == 0 || coverage < minCoverageForSalvage {
-			s.logger.Warn("Topic extraction coverage too low to salvage; failing for retry",
-				"covered_pct", coverage, "stragglers", len(stragglerIDs), "topics", len(validTopics), "ids", stragglerIDs)
-			return fmt.Errorf("topic extraction incomplete: %d of %d messages not covered", len(stragglerIDs), len(chunk))
-		}
-		// Fold the orphaned messages into their nearest topic so the session still
-		// archives and nothing is lost from long-term memory (see salvageStragglers).
-		validTopics = salvageStragglers(validTopics, stragglerIDs)
-		s.logger.Info("Salvaged uncovered messages into nearest topics",
-			"salvaged", len(stragglerIDs), "ids", stragglerIDs, "covered_pct_before", coverage)
+	validTopics, err = s.resolveStragglers(ctx, chunk, validTopics)
+	if err != nil {
+		return err
 	}
 
 	// 3. Vectorize and Save Topics
@@ -382,10 +395,9 @@ func (s *Service) processChunkWithStats(ctx context.Context, userID storage.Scop
 		validTopics = append(validTopics, t)
 	}
 
-	stragglerIDs := findStragglers(chunk, validTopics)
-	recordCoverage(ctx, chunk, stragglerIDs)
-	if len(stragglerIDs) > 0 {
-		return nil, fmt.Errorf("topic extraction incomplete: %d messages not covered", len(stragglerIDs))
+	validTopics, err = s.resolveStragglers(ctx, chunk, validTopics)
+	if err != nil {
+		return nil, err
 	}
 
 	// 3. Vectorize and Save Topics

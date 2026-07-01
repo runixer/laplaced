@@ -314,6 +314,149 @@ func TestProcessChunkWithStats(t *testing.T) {
 		mockStore.AssertExpectations(t)
 	})
 
+	t.Run("salvages stragglers when coverage sufficient", func(t *testing.T) {
+		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+		cfg := &config.Config{
+			RAG:       config.RAGConfig{Enabled: true},
+			Embedding: config.EmbeddingConfig{Model: "test-embed"},
+		}
+
+		mockStore := new(testutil.MockStorage)
+		mockClient := new(testutil.MockLLMClient)
+		translator := testutil.TestTranslator(t)
+
+		now := time.Now()
+		chunk := []storage.Message{
+			{ID: 1, Role: "user", Content: "Hello", CreatedAt: now},
+			{ID: 2, Role: "assistant", Content: "Hi there", CreatedAt: now},
+			{ID: 3, Role: "user", Content: "By the way", CreatedAt: now},
+			{ID: 4, Role: "assistant", Content: "Yes?", CreatedAt: now},
+			{ID: 5, Role: "user", Content: "Tell me more", CreatedAt: now},
+			{ID: 6, Role: "assistant", Content: "Sure", CreatedAt: now},
+		}
+
+		// Splitter leaves messages 3-4 uncovered: coverage 4/6 ≈ 0.67 is above
+		// minCoverageForSalvage, so the gate must salvage instead of failing.
+		mockSplitter := new(agenttesting.MockAgent)
+		mockSplitter.On("Type").Return(string(agent.TypeSplitter)).Maybe()
+		mockSplitter.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
+			Structured: &splitter.Result{
+				Topics: []splitter.ExtractedTopic{
+					{Summary: "Greeting", StartMsgID: 1, EndMsgID: 2},
+					{Summary: "Details", StartMsgID: 5, EndMsgID: 6},
+				},
+			},
+			Tokens: agent.TokenUsage{Prompt: 10, Completion: 5, Total: 15},
+		}, nil)
+
+		mockClient.On("CreateEmbeddings", mock.Anything, mock.Anything).Return(llm.EmbeddingResponse{
+			Data: []llm.EmbeddingObject{
+				{Embedding: []float32{0.1, 0.2, 0.3}, Index: 0},
+				{Embedding: []float32{0.4, 0.5, 0.6}, Index: 1},
+			},
+			Usage: llm.Usage{TotalTokens: 10},
+		}, nil)
+
+		var savedTopics []storage.Topic
+		mockStore.On("AddTopic", mock.Anything).Return(int64(1), nil).Run(func(args mock.Arguments) {
+			savedTopics = append(savedTopics, args.Get(0).(storage.Topic))
+		})
+		mockStore.On("GetTopicsAfterID", mock.Anything).Return([]storage.Topic{}, nil).Maybe()
+		mockStore.On("GetFactsAfterID", mock.Anything).Return([]storage.Fact{}, nil).Maybe()
+
+		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithLLMClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
+		svc.SetSplitterAgent(mockSplitter)
+
+		stats := &ProcessingStats{}
+		topicIDs, err := svc.processChunkWithStats(context.Background(), "123", chunk, stats)
+
+		assert.NoError(t, err)
+		assert.Len(t, topicIDs, 2)
+		// Stragglers folded into nearest topics: 3 → first (dist 1 vs 2), 4 → second.
+		if assert.Len(t, savedTopics, 2) {
+			assert.Equal(t, int64(1), savedTopics[0].StartMsgID)
+			assert.Equal(t, int64(3), savedTopics[0].EndMsgID)
+			assert.Equal(t, int64(4), savedTopics[1].StartMsgID)
+			assert.Equal(t, int64(6), savedTopics[1].EndMsgID)
+		}
+		mockClient.AssertExpectations(t)
+		mockStore.AssertExpectations(t)
+	})
+
+	t.Run("fails when coverage below salvage threshold", func(t *testing.T) {
+		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+		cfg := &config.Config{
+			RAG:       config.RAGConfig{Enabled: true},
+			Embedding: config.EmbeddingConfig{Model: "test-embed"},
+		}
+
+		mockStore := new(testutil.MockStorage)
+		mockClient := new(testutil.MockLLMClient)
+		translator := testutil.TestTranslator(t)
+
+		now := time.Now()
+		chunk := []storage.Message{
+			{ID: 1, Role: "user", Content: "Hello", CreatedAt: now},
+			{ID: 2, Role: "assistant", Content: "Hi there", CreatedAt: now},
+			{ID: 3, Role: "user", Content: "By the way", CreatedAt: now},
+			{ID: 4, Role: "assistant", Content: "Yes?", CreatedAt: now},
+			{ID: 5, Role: "user", Content: "Tell me more", CreatedAt: now},
+			{ID: 6, Role: "assistant", Content: "Sure", CreatedAt: now},
+		}
+
+		// Splitter covers only 2 of 6 messages: coverage 0.33 is below the
+		// salvage threshold, so the extraction must fail for retry.
+		mockSplitter := new(agenttesting.MockAgent)
+		mockSplitter.On("Type").Return(string(agent.TypeSplitter)).Maybe()
+		mockSplitter.On("Execute", mock.Anything, mock.Anything).Return(&agent.Response{
+			Structured: &splitter.Result{
+				Topics: []splitter.ExtractedTopic{
+					{Summary: "Greeting", StartMsgID: 1, EndMsgID: 2},
+				},
+			},
+			Tokens: agent.TokenUsage{Prompt: 10, Completion: 5, Total: 15},
+		}, nil)
+
+		memSvc := memory.NewService(logger, cfg, mockStore, mockStore, mockStore, mockClient, translator)
+		svc, err := NewServiceBuilder().
+			WithLogger(logger).
+			WithConfig(cfg).
+			WithLLMClient(mockClient).
+			WithTopicRepository(mockStore).
+			WithFactRepository(mockStore).
+			WithFactHistoryRepository(mockStore).
+			WithMessageRepository(mockStore).
+			WithMaintenanceRepository(mockStore).
+			WithMemoryService(memSvc).
+			WithTranslator(translator).
+			Build()
+		if err != nil {
+			t.Fatalf("failed to build RAG service: %v", err)
+		}
+		svc.SetSplitterAgent(mockSplitter)
+
+		stats := &ProcessingStats{}
+		_, err = svc.processChunkWithStats(context.Background(), "123", chunk, stats)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not covered")
+	})
+
 	t.Run("embedding error", func(t *testing.T) {
 		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 		cfg := &config.Config{
