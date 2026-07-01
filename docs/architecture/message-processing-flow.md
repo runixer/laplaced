@@ -340,6 +340,7 @@ sequenceDiagram
 | `bot.anomaly.false_disclaimer` | Модель сказала «не могу прочитать файл», но всё равно выдала >300 символов осмысленного ответа. Только при `hasCurrentMedia=true`. Сопровождается `bot.anomaly.disclaimer_phrase`. |
 | `bot.anomaly.echo_user_message` | Gemini-style degenerate echo: completion дословно совпадает с последним user-сообщением (≥30 символов, после strip'а voice-quote). Сопровождается `bot.anomaly.echo_output_tokens`. |
 | `bot.anomaly.fabricated_url` | Модель вставила ссылку, чей URL не вернул ни один поиск этого хода; citation guard развернул её в обычный текст. Сопровождается `bot.anomaly.fabricated_url_count` и событием `bot.anomaly.fabricated_urls` (список URL, гейтится `trace_content`). |
+| `bot.anomaly.safety_blocked` | Провайдер отклонил запрос по контент-политике (Gemini `PROHIBITED_CONTENT`/`RECITATION` и т.п. — класс `safety`). Юзеру отправлен `bot.safety_blocked` вместо молчания. Ставится на корневом спане (низкоуровневый `error.upstream_kind="safety"` уже есть на `llm.CreateChatCompletion`); приложенные файлы видно в событии `laplace.media_parts`. |
 
 ## Ключевые паттерны
 

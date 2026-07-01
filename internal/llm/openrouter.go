@@ -13,6 +13,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -206,6 +207,29 @@ var nonRetryableBodyKinds = map[string]bool{
 // provider rejection that a retry cannot fix.
 func isNonRetryableBodyError(bodyErr *providerBodyError) bool {
 	return nonRetryableBodyKinds[classifyUpstreamError(bodyErr)]
+}
+
+// IsSafetyBlock reports whether err (or anything it wraps) is a provider
+// content-policy rejection — Gemini PROHIBITED_CONTENT / RECITATION, an OpenAI
+// content_filter, etc. — i.e. the permanent "safety" class from
+// classifyUpstreamError. Callers outside this package can't inspect the
+// unexported providerBodyError directly, so this is the public seam. The bot
+// uses it to show a "blocked by the safety filter" message instead of the
+// generic API-error fallback, and to tag the turn's span.
+func IsSafetyBlock(err error) bool {
+	var bodyErr *providerBodyError
+	if errors.As(err, &bodyErr) {
+		return classifyUpstreamError(bodyErr) == "safety"
+	}
+	return false
+}
+
+// NewSafetyBlockErrorForTest builds a synthetic provider body error so tests in
+// other packages (e.g. the bot's errorReplyText) can drive the IsSafetyBlock
+// branch without standing up an HTTP server. providerBodyError is intentionally
+// unexported; this is the sanctioned construction seam. Not used in production.
+func NewSafetyBlockErrorForTest(message string, code int) error {
+	return &providerBodyError{Message: message, Code: code}
 }
 
 // recordProviderError attaches a provider error envelope to a span: the raw

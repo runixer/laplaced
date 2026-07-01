@@ -10,6 +10,7 @@ bot:
 
     P.S. Sometimes I might not answer immediately (up to a minute). I'm not frozen, just thinking hard to give you the most useful answer! 🤔
   api_error: "Sorry, I can't answer right now. Please try asking something else a bit later."
+  safety_blocked: "🛡 The response was blocked by the safety filter. Try rephrasing the request or removing the attachment."
   empty_response: "Seems I got lost in thought and couldn't come up with anything. Ask about something else?"
   current_media_marker: "📷 Attachment from the CURRENT message (the user sent it just now — this is what to act on / analyze)."
   generic_error: "Oops, something went wrong. I couldn't send the answer. Please try repeating your request a bit later."

@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Postgres deployments now get the `history.trace_id` column and `response_flags` table that were added in 0.10.1 for SQLite only — without them the bot failed to store any messages on Postgres (`column "trace_id" ... does not exist`). The consolidated schema now creates them and retrofits existing databases on startup.
 - Edited facts and people no longer keep an out-of-date search vector, so updating a memory no longer drops it out of recall.
 - Replies are no longer delayed by pointless retries when the provider blocks a request on content policy (or rejects it as malformed/too long) — these permanent rejections now fail fast instead of retrying for ~20 seconds.
+- When the provider's safety filter blocks a request (e.g. an attached photo of a person), the bot now says so and suggests dropping the reference image or rephrasing — instead of silently sending nothing.
 - When you send a photo or file and the bot also recalls a similar one from memory, it no longer mixes the remembered file's details into its reply about the one you just sent.
 - Web search now cites real, clickable source links woven into the reply instead of URLs the model made up.
 - In a multi-participant channel the bot no longer files channel members as outside contacts with a nonsensical "works with User" bio — participants are now described on their own terms and treated as channel members.

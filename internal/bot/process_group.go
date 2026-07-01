@@ -138,6 +138,22 @@ func recordLaplaceAnomalies(span trace.Span, resp *laplace.Response, userText st
 	}
 }
 
+// errorReplyText picks the user-facing message for a laplace failure. A
+// provider safety block (Gemini PROHIBITED_CONTENT, etc.) gets a specific
+// message so the user knows the content filter — not a transient outage —
+// rejected the request, and can act (drop the reference photo / rephrase)
+// instead of blindly retrying into the same permanent block. It also tags the
+// root span so the turn is queryable in Tempo via
+// {span.bot.anomaly.safety_blocked=true}. Any other error falls back to the
+// generic api_error.
+func (b *Bot) errorReplyText(span trace.Span, err error) string {
+	if llm.IsSafetyBlock(err) {
+		span.SetAttributes(attribute.Bool("bot.anomaly.safety_blocked", true))
+		return b.translator.Get(b.cfg.Bot.Language, "bot.safety_blocked")
+	}
+	return b.translator.Get(b.cfg.Bot.Language, "bot.api_error")
+}
+
 // fileProcessingError wraps a file processing error for identification.
 type fileProcessingError struct {
 	err          error
@@ -441,7 +457,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		logger.Error("laplace execution fatal error", "error", err)
 		botHadErrors = true
 		botErrorKinds = append(botErrorKinds, "laplace_fatal")
-		errText := b.translator.Get(b.cfg.Bot.Language, "bot.api_error")
+		errText := b.errorReplyText(span, err)
 		tgStart := time.Now()
 		if sink != nil {
 			sink.Finalize(finalizeArgs{UserID: userID, HadError: true, ErrorText: errText}, b.streamFinalizeCallback(shutdownSafeCtx, tgChatID, tgThreadID, logger))
@@ -464,7 +480,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		logger.Error("laplace execution failed", "error", resp.Error, "total_turns", resp.TotalTurns)
 		botHadErrors = true
 		botErrorKinds = append(botErrorKinds, "laplace_partial")
-		errText := b.translator.Get(b.cfg.Bot.Language, "bot.api_error")
+		errText := b.errorReplyText(span, resp.Error)
 		tgStart := time.Now()
 		if sink != nil {
 			sink.Finalize(finalizeArgs{UserID: userID, HadError: true, ErrorText: errText}, b.streamFinalizeCallback(shutdownSafeCtx, tgChatID, tgThreadID, logger))
