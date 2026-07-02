@@ -115,6 +115,7 @@ func (c *Config) secretFields() []struct {
 		{"mattermost.bot_token", &c.Mattermost.BotToken},
 		{"database.postgres.password", &c.Database.Postgres.Password},
 		{"server.auth.password", &c.Server.Auth.Password},
+		{"fetcher.firecrawl.api_key", &c.Fetcher.Firecrawl.APIKey},
 	}
 	// S3 credentials live behind an optional capability block; only register
 	// them when the block is present (else the pointers would be into nil).

@@ -927,6 +927,19 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf("database.driver %q is not supported (use \"sqlite\" or \"postgres\")", c.Database.Driver))
 	}
 
+	// The fetcher only matters when the read_url tool is exposed; catch a
+	// typo'd backend at load time instead of at first tool call. The API key
+	// is deliberately NOT required here — it may be an unresolved vault: ref
+	// (S3 precedent), and a missing key just leaves the tool unwired.
+	for _, tool := range c.Tools {
+		if tool.Name == "read_url" {
+			if c.Fetcher.Backend != "firecrawl" && c.Fetcher.Backend != "raw" {
+				errs = append(errs, fmt.Errorf("fetcher.backend %q is not supported (use \"firecrawl\" or \"raw\")", c.Fetcher.Backend))
+			}
+			break
+		}
+	}
+
 	// Server auth requires username if enabled (password is auto-generated if not set)
 	if c.Server.Auth.Enabled {
 		if c.Server.Auth.Username == "" {

@@ -1482,3 +1482,92 @@ func TestLoad_ReadFileError(t *testing.T) {
 	assert.NoError(t, err) // Falls back to defaults
 	assert.NotNil(t, cfg)
 }
+
+func TestLoadDefault_Fetcher(t *testing.T) {
+	cfg, err := LoadDefault()
+	assert.NoError(t, err)
+	assert.Equal(t, "firecrawl", cfg.Fetcher.Backend)
+	assert.Equal(t, 60*time.Second, cfg.Fetcher.GetTimeout())
+	assert.Equal(t, 15000, cfg.Fetcher.GetMaxContentChars())
+	assert.Equal(t, "https://api.firecrawl.dev", cfg.Fetcher.Firecrawl.GetBaseURL())
+	assert.Empty(t, cfg.Fetcher.Firecrawl.APIKey, "no API key in the public default config")
+}
+
+func TestLoad_FetcherEnvOverrides(t *testing.T) {
+	t.Setenv("LAPLACED_FETCHER_BACKEND", "raw")
+	t.Setenv("LAPLACED_FETCHER_TIMEOUT", "10s")
+	t.Setenv("LAPLACED_FETCHER_MAX_CONTENT_CHARS", "5000")
+	t.Setenv("LAPLACED_FIRECRAWL_API_KEY", "fc-env-key")
+	t.Setenv("LAPLACED_FIRECRAWL_BASE_URL", "https://fc.example.com")
+
+	cfg, err := LoadDefault()
+	assert.NoError(t, err)
+	assert.Equal(t, "raw", cfg.Fetcher.Backend)
+	assert.Equal(t, 10*time.Second, cfg.Fetcher.GetTimeout())
+	assert.Equal(t, 5000, cfg.Fetcher.GetMaxContentChars())
+	assert.Equal(t, "fc-env-key", cfg.Fetcher.Firecrawl.APIKey)
+	assert.Equal(t, "https://fc.example.com", cfg.Fetcher.Firecrawl.GetBaseURL())
+}
+
+func TestFetcherConfig_Getters(t *testing.T) {
+	tests := []struct {
+		name      string
+		cfg       FetcherConfig
+		wantDur   time.Duration
+		wantChars int
+	}{
+		{"defaults on zero values", FetcherConfig{}, 60 * time.Second, 15000},
+		{"invalid timeout falls back", FetcherConfig{Timeout: "bogus"}, 60 * time.Second, 15000},
+		{"explicit values", FetcherConfig{Timeout: "30s", MaxContentChars: 8000}, 30 * time.Second, 8000},
+		{"negative chars falls back", FetcherConfig{MaxContentChars: -1}, 60 * time.Second, 15000},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.wantDur, tt.cfg.GetTimeout())
+			assert.Equal(t, tt.wantChars, tt.cfg.GetMaxContentChars())
+		})
+	}
+}
+
+func TestValidate_FetcherBackend(t *testing.T) {
+	base := func() *Config {
+		cfg, _ := LoadDefault()
+		cfg.Telegram.Token = "test_token"
+		cfg.LLM.APIKey = "test_api_key"
+		cfg.Database.Path = "test.db"
+		cfg.Server.Auth.Password = "test_password"
+		return cfg
+	}
+
+	t.Run("bad backend without read_url tool passes", func(t *testing.T) {
+		cfg := base()
+		cfg.Fetcher.Backend = "bogus"
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("bad backend with read_url tool fails", func(t *testing.T) {
+		cfg := base()
+		cfg.Tools = append(cfg.Tools, ToolConfig{Name: "read_url"})
+		cfg.Fetcher.Backend = "bogus"
+		err := cfg.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "fetcher.backend")
+	})
+
+	t.Run("raw backend with read_url tool passes", func(t *testing.T) {
+		cfg := base()
+		cfg.Tools = append(cfg.Tools, ToolConfig{Name: "read_url"})
+		cfg.Fetcher.Backend = "raw"
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("firecrawl without key still passes validation", func(t *testing.T) {
+		// Missing key leaves the tool unwired at startup (imagegen precedent);
+		// it must not fail Validate — the key may be an unresolved vault: ref.
+		cfg := base()
+		cfg.Tools = append(cfg.Tools, ToolConfig{Name: "read_url"})
+		cfg.Fetcher.Backend = "firecrawl"
+		cfg.Fetcher.Firecrawl.APIKey = ""
+		assert.NoError(t, cfg.Validate())
+	})
+}

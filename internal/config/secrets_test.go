@@ -185,3 +185,12 @@ func TestValidateWiresVault(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "vault.auth.role"))
 }
+
+func TestResolveSecrets_FirecrawlAPIKey(t *testing.T) {
+	cfg := &Config{}
+	cfg.Fetcher.Firecrawl.APIKey = "vault:secret/laplaced#firecrawl_api_key"
+	p := &fakeProvider{vals: map[string]string{"secret/laplaced#firecrawl_api_key": "fc-resolved"}}
+
+	require.NoError(t, cfg.ResolveSecrets(context.Background(), p))
+	assert.Equal(t, "fc-resolved", cfg.Fetcher.Firecrawl.APIKey)
+}
