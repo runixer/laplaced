@@ -434,6 +434,58 @@ type ToolConfig struct {
 	ParameterDescription string `yaml:"parameter_description"`
 }
 
+// FetcherConfig configures the web-page fetcher backing the read_url tool.
+// Backend selects the implementation; there is deliberately no automatic
+// fallback between backends — a silent downgrade would mask credit exhaustion
+// and produce mysteriously degraded extractions.
+type FetcherConfig struct {
+	// Backend: "firecrawl" (api.firecrawl.dev REST scrape, JS rendering,
+	// 1 credit/page) or "raw" (plain HTTP + text extraction, no external
+	// service). "mcp" is reserved for a future backend.
+	Backend string `yaml:"backend" env:"LAPLACED_FETCHER_BACKEND"`
+	Timeout string `yaml:"timeout" env:"LAPLACED_FETCHER_TIMEOUT"`
+	// MaxContentChars caps the tool result size in runes; longer pages are
+	// truncated with a marker. Guards the main model's context from page dumps.
+	MaxContentChars int             `yaml:"max_content_chars" env:"LAPLACED_FETCHER_MAX_CONTENT_CHARS"`
+	Firecrawl       FirecrawlConfig `yaml:"firecrawl"`
+}
+
+// FirecrawlConfig holds the Firecrawl REST API settings. APIKey may be a
+// "vault:" reference (registered in secretFields).
+type FirecrawlConfig struct {
+	BaseURL string `yaml:"base_url" env:"LAPLACED_FIRECRAWL_BASE_URL"`
+	APIKey  string `yaml:"api_key" env:"LAPLACED_FIRECRAWL_API_KEY"`
+}
+
+// GetTimeout returns the per-fetch timeout. Defaults to 60s — Firecrawl
+// JS rendering routinely takes 15-30s.
+func (c *FetcherConfig) GetTimeout() time.Duration {
+	if c.Timeout == "" {
+		return 60 * time.Second
+	}
+	d, err := time.ParseDuration(c.Timeout)
+	if err != nil || d == 0 {
+		return 60 * time.Second
+	}
+	return d
+}
+
+// GetMaxContentChars returns the result size cap in runes, defaulting to 15000.
+func (c *FetcherConfig) GetMaxContentChars() int {
+	if c.MaxContentChars <= 0 {
+		return 15000
+	}
+	return c.MaxContentChars
+}
+
+// GetBaseURL returns the Firecrawl API base URL, defaulting to the public API.
+func (c *FirecrawlConfig) GetBaseURL() string {
+	if c.BaseURL == "" {
+		return "https://api.firecrawl.dev"
+	}
+	return c.BaseURL
+}
+
 // MattermostConfig configures the Mattermost/Time transport (used when
 // transport == "mattermost"). The proxy is per-client (HTTP proxy); never set a
 // process-wide HTTP_PROXY, which would also route the LLM client.
@@ -708,6 +760,7 @@ type Config struct {
 	Embedding  EmbeddingConfig  `yaml:"embedding"`
 	RAG        RAGConfig        `yaml:"rag"`
 	Tools      []ToolConfig     `yaml:"tools"`
+	Fetcher    FetcherConfig    `yaml:"fetcher"`
 	Bot        BotConfig        `yaml:"bot"`
 	Database   struct {
 		// Driver selects the storage backend: "sqlite" (default) or "postgres".
