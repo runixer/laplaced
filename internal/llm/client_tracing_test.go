@@ -439,68 +439,95 @@ func TestClassifyUpstreamError(t *testing.T) {
 	cases := []struct {
 		name string
 		in   *providerBodyError
-		want string
+		want ErrorKind
 	}{
-		{"nil", nil, ""},
+		{"nil", nil, KindNone},
 		{
 			"invalid_argument from Google",
 			&providerBodyError{Message: "Provider returned error", Code: 400, Raw: `{"error":{"code":400,"message":"Request contains an invalid argument.","status":"INVALID_ARGUMENT"}}`},
-			"invalid_argument",
+			KindInvalidArgument,
 		},
 		{
 			"thought signature corruption",
 			&providerBodyError{Message: "Provider returned error", Code: 400, Raw: `{"error":{"message":"Corrupted thought signature."}}`},
-			"thought_signature",
+			KindThoughtSignature,
 		},
 		{
 			"safety blocked",
 			&providerBodyError{Message: "Content blocked due to safety policy", Code: 400},
-			"safety",
+			KindSafety,
 		},
 		{
 			"gemini prohibited_content",
 			&providerBodyError{Message: "PROHIBITED_CONTENT", Code: 403},
-			"safety",
+			KindSafety,
 		},
 		{
 			"gemini recitation",
 			&providerBodyError{Message: "RECITATION", Code: 400},
-			"safety",
+			KindSafety,
 		},
 		{
 			"rate limit by code",
 			&providerBodyError{Message: "Too many requests", Code: 429},
-			"rate_limited",
+			KindRateLimited,
 		},
 		{
 			"rate limit by message",
 			&providerBodyError{Message: "rate_limit_exceeded", Code: 400},
-			"rate_limited",
+			KindRateLimited,
 		},
 		{
 			"context length",
 			&providerBodyError{Message: "context length exceeded for model", Code: 400},
-			"context_length",
+			KindContextLength,
 		},
 		{
 			"upstream 5xx",
 			&providerBodyError{Message: "internal error", Code: 503},
-			"upstream_5xx",
+			KindUpstream5xx,
 		},
 		{
 			"plain 4xx falls through to upstream_4xx",
 			&providerBodyError{Message: "weird payload", Code: 422},
-			"upstream_4xx",
+			KindUpstream4xx,
 		},
 		{
 			"unknown shape",
 			&providerBodyError{Message: "something weird"},
-			"unknown",
+			KindUnknown,
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			assert.Equal(t, c.want, classifyUpstreamError(c.in))
+		})
+	}
+}
+
+// TestErrorKind_WireContract pins the String() wire values recorded as the
+// error.upstream_kind span attribute — TraceQL queries depend on them — and
+// the retryability of each kind (the retry-gate contract).
+func TestErrorKind_WireContract(t *testing.T) {
+	cases := []struct {
+		kind      ErrorKind
+		wire      string
+		retryable bool
+	}{
+		{KindNone, "", true},
+		{KindUnknown, "unknown", true},
+		{KindInvalidArgument, "invalid_argument", false},
+		{KindSafety, "safety", false},
+		{KindRateLimited, "rate_limited", true},
+		{KindContextLength, "context_length", false},
+		{KindThoughtSignature, "thought_signature", true},
+		{KindUpstream5xx, "upstream_5xx", true},
+		{KindUpstream4xx, "upstream_4xx", true},
+	}
+	for _, c := range cases {
+		t.Run(c.wire, func(t *testing.T) {
+			assert.Equal(t, c.wire, c.kind.String())
+			assert.Equal(t, c.retryable, c.kind.IsRetryable())
 		})
 	}
 }

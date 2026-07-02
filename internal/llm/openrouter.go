@@ -159,59 +159,48 @@ func parseInt64Header(h map[string]string, key string) int64 {
 	return n
 }
 
-// classifyUpstreamError maps a parsed OR error envelope to a stable kind
-// attribute that TraceQL can filter on without grepping free-form messages.
-// The classification is intentionally coarse — fine-grained provider error
-// shapes change between deploys, but these buckets stay stable enough that
-// a query like {span.error.upstream_kind="invalid_argument"} still matches
-// next year. New shapes get "unknown" and surface in raw_message for triage.
-func classifyUpstreamError(bodyErr *providerBodyError) string {
+// classifyUpstreamError maps a parsed OR error envelope to a stable ErrorKind
+// recorded as a span attribute that TraceQL can filter on without grepping
+// free-form messages. The classification is intentionally coarse —
+// fine-grained provider error shapes change between deploys, but these
+// buckets stay stable enough that a query like
+// {span.error.upstream_kind="invalid_argument"} still matches next year.
+// New shapes get KindUnknown and surface in raw_message for triage.
+func classifyUpstreamError(bodyErr *providerBodyError) ErrorKind {
 	if bodyErr == nil {
-		return ""
+		return KindNone
 	}
 	msg := strings.ToLower(bodyErr.Message + " " + bodyErr.Raw)
 	switch {
 	case strings.Contains(msg, "invalid_argument") || strings.Contains(msg, "invalid argument"):
-		return "invalid_argument"
+		return KindInvalidArgument
 	case strings.Contains(msg, "safety") || strings.Contains(msg, "harm_category") ||
 		strings.Contains(msg, "blocked") || strings.Contains(msg, "prohibited") ||
 		strings.Contains(msg, "recitation"):
-		return "safety"
+		return KindSafety
 	case strings.Contains(msg, "rate_limit") || strings.Contains(msg, "rate limit") || bodyErr.Code == 429:
-		return "rate_limited"
+		return KindRateLimited
 	case strings.Contains(msg, "context") && strings.Contains(msg, "length"):
-		return "context_length"
+		return KindContextLength
 	case strings.Contains(msg, "corrupted thought signature"):
-		return "thought_signature"
+		return KindThoughtSignature
 	case bodyErr.Code >= 500:
-		return "upstream_5xx"
+		return KindUpstream5xx
 	case bodyErr.Code >= 400:
-		return "upstream_4xx"
+		return KindUpstream4xx
 	}
-	return "unknown"
-}
-
-// nonRetryableBodyKinds are upstream error classes where an identical retry is
-// futile: the provider deterministically rejects this exact request (content
-// policy, malformed/oversized input), so a retry only burns latency and tokens.
-// Transient classes (rate_limited, upstream_5xx, thought_signature, unknown)
-// stay retryable. Motivated by an enricher PROHIBITED_CONTENT 403 that was
-// retried 3× over ~21s on the user's critical path before failing anyway.
-var nonRetryableBodyKinds = map[string]bool{
-	"invalid_argument": true,
-	"safety":           true,
-	"context_length":   true,
+	return KindUnknown
 }
 
 // isNonRetryableBodyError reports whether an HTTP-200 body error is a permanent
-// provider rejection that a retry cannot fix.
+// provider rejection that a retry cannot fix. See ErrorKind.IsRetryable.
 func isNonRetryableBodyError(bodyErr *providerBodyError) bool {
-	return nonRetryableBodyKinds[classifyUpstreamError(bodyErr)]
+	return !classifyUpstreamError(bodyErr).IsRetryable()
 }
 
 // IsSafetyBlock reports whether err (or anything it wraps) is a provider
 // content-policy rejection — Gemini PROHIBITED_CONTENT / RECITATION, an OpenAI
-// content_filter, etc. — i.e. the permanent "safety" class from
+// content_filter, etc. — i.e. the permanent KindSafety class from
 // classifyUpstreamError. Callers outside this package can't inspect the
 // unexported providerBodyError directly, so this is the public seam. The bot
 // uses it to show a "blocked by the safety filter" message instead of the
@@ -219,7 +208,7 @@ func isNonRetryableBodyError(bodyErr *providerBodyError) bool {
 func IsSafetyBlock(err error) bool {
 	var bodyErr *providerBodyError
 	if errors.As(err, &bodyErr) {
-		return classifyUpstreamError(bodyErr) == "safety"
+		return classifyUpstreamError(bodyErr) == KindSafety
 	}
 	return false
 }
@@ -286,8 +275,8 @@ func recordProviderError(span trace.Span, body []byte, httpStatus int) {
 	case bodyErr.MetadataPresent:
 		attrs = append(attrs, attribute.String("error.upstream_provider", "openrouter"))
 	}
-	if kind := classifyUpstreamError(bodyErr); kind != "" {
-		attrs = append(attrs, attribute.String("error.upstream_kind", kind))
+	if kind := classifyUpstreamError(bodyErr); kind != KindNone {
+		attrs = append(attrs, attribute.String("error.upstream_kind", kind.String()))
 	}
 	// Rate-limit signals correlate the 429 with the next reset window. We
 	// emit Remaining alongside Reset (even when Remaining=0) because "0
