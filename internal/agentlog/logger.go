@@ -42,6 +42,9 @@ const (
 	AgentArchivist AgentType = "archivist"
 	AgentScout     AgentType = "scout"
 	AgentReactor   AgentType = "reactor"
+	// AgentFetcher logs read_url page fetches. Not an LLM call — token and
+	// cost fields stay empty; Model holds the fetch backend name.
+	AgentFetcher AgentType = "fetcher"
 )
 
 // Entry represents a log entry for an agent call.

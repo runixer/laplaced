@@ -226,3 +226,24 @@ func TestImageGenerationSchemaEnums(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildTools_ReadURLSchema(t *testing.T) {
+	translator, err := i18n.NewTranslator("en")
+	require.NoError(t, err)
+
+	cfg := &config.Config{Tools: []config.ToolConfig{{Name: "read_url"}}}
+	tools := BuildTools(cfg, translator)
+	require.Len(t, tools, 1)
+
+	params, ok := tools[0].Function.Parameters.(map[string]interface{})
+	require.True(t, ok, "parameters is not a schema map")
+	props, ok := params["properties"].(map[string]interface{})
+	require.True(t, ok, "properties missing from schema")
+
+	// read_url takes a URL, not the default query parameter.
+	urlProp, ok := props["url"].(map[string]interface{})
+	require.True(t, ok, "url property missing from read_url schema")
+	assert.NotEmpty(t, urlProp["description"])
+	assert.NotContains(t, props, "query")
+	assert.Equal(t, []string{"url"}, params["required"])
+}

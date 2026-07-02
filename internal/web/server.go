@@ -259,6 +259,7 @@ func (s *Server) Start(ctx context.Context) error {
 		mux.HandleFunc("/ui/agents/merger", instrumentHandler("agent_merger", s.agentLogHandler("merger", "Merger", "intersect", "Verifies if topics should be merged")))
 		mux.HandleFunc("/ui/agents/enricher", instrumentHandler("agent_enricher", s.agentLogHandler("enricher", "Enricher", "magic", "Expands user queries for better retrieval")))
 		mux.HandleFunc("/ui/agents/scout", instrumentHandler("agent_scout", s.agentLogHandler("scout", "Scout", "search", "Web search tool execution logs")))
+		mux.HandleFunc("/ui/agents/fetcher", instrumentHandler("agent_fetcher", s.agentLogHandler("fetcher", "Fetcher", "globe", "read_url page-fetch logs")))
 		mux.HandleFunc("/ui/agents/extractor", instrumentHandler("agent_extractor", s.agentLogHandler("extractor", "Extractor", "file-earmark-text", "Processes uploaded files into searchable chunks")))
 
 		// Agent log API endpoints

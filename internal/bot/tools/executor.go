@@ -13,6 +13,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/fetch"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/obs"
@@ -67,6 +68,10 @@ type ToolExecutor struct {
 	imageGen     ImageGenerator
 	artifactRepo storage.ArtifactRepository
 	fileStorage  files.Storage
+
+	// fetcher backs the read_url tool (wired via SetFetcher when configured;
+	// nil → read_url returns a configuration message instead of erroring).
+	fetcher fetch.Fetcher
 }
 
 // ImageGenerator is the narrow interface performImageGeneration needs from
@@ -149,6 +154,12 @@ func (e *ToolExecutor) SetFileStorage(fs files.Storage) {
 	e.fileStorage = fs
 }
 
+// SetFetcher wires the web-page fetcher. Required for the read_url tool;
+// without it the tool returns a configuration message.
+func (e *ToolExecutor) SetFetcher(f fetch.Fetcher) {
+	e.fetcher = f
+}
+
 // ExecuteToolCall dispatches tool execution by name.
 // Returns a Result with Content (fed back to the LLM) and any generated
 // artifact IDs (for media-producing tools like generate_image).
@@ -220,6 +231,10 @@ func (e *ToolExecutor) ExecuteToolCall(ctx context.Context, cc CallContext, tool
 	case "generate_image":
 		e.logger.Info("Executing image generation tool", "tool", matchedTool.Name, "prompt", args["prompt"])
 		return e.performImageGeneration(ctx, cc, args)
+
+	case "read_url":
+		e.logger.Info("Executing read_url tool", "tool", matchedTool.Name, "url", args["url"])
+		return e.performReadURL(ctx, cc, args)
 
 	default:
 		// Model tool (custom LLM)

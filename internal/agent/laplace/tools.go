@@ -21,6 +21,26 @@ func BuildTools(cfg *config.Config, translator *i18n.Translator) []llm.Tool {
 		switch toolCfg.Name {
 		case "generate_image":
 			parameters = buildImageGenerationSchema(&cfg.Agents.ImageGenerator)
+		case "read_url":
+			// read_url takes a URL, not a search query — its own parameter
+			// name keeps the model from pasting queries into it.
+			paramDesc := toolCfg.ParameterDescription
+			if paramDesc == "" {
+				paramDesc = translator.Get(lang, "tools.read_url.parameter_description")
+			}
+			if paramDesc == "" {
+				paramDesc = "Full URL of the page to read (https://...)."
+			}
+			parameters = map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"url": map[string]interface{}{
+						"type":        "string",
+						"description": paramDesc,
+					},
+				},
+				"required": []string{"url"},
+			}
 		default:
 			paramDesc := toolCfg.ParameterDescription
 			if paramDesc == "" {
