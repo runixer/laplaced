@@ -23,6 +23,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/jobtype"
 	"github.com/runixer/laplaced/internal/obs"
+	"github.com/runixer/laplaced/internal/textutil"
 )
 
 // Retry configuration
@@ -71,13 +72,10 @@ func FilterReasoningForLog(details interface{}) interface{} {
 	return filtered
 }
 
-// truncateForLog truncates a string to maxLen characters for logging.
+// truncateForLog truncates a string to maxLen runes for logging.
 // Adds "... (truncated)" suffix if truncation occurred.
 func truncateForLog(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "... (truncated)"
+	return textutil.TruncateRunes(s, maxLen, "... (truncated)")
 }
 
 type clientImpl struct {
@@ -214,10 +212,7 @@ func recordAttemptEvent(span trace.Span, idx int, start time.Time, o attemptOutc
 	// happy-path event lean. Redact base64 first — image-gen 200 bodies and
 	// upstream provider envelopes can carry data URLs in `error.metadata.raw`.
 	if class != "none" && len(o.body) > 0 {
-		preview := obs.RedactBase64Payloads(string(o.body))
-		if len(preview) > 256 {
-			preview = preview[:256]
-		}
+		preview := textutil.TruncateRunes(obs.RedactBase64Payloads(string(o.body)), 256, "")
 		attrs = append(attrs, attribute.String("body_preview", preview))
 	}
 	if o.err != nil {
@@ -821,10 +816,7 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		)
 
 		// Log preview for inspection
-		preview := bodyStr
-		if len(preview) > 5000 {
-			preview = preview[:5000] + "... (truncated, total: " + fmt.Sprintf("%d", len(body)) + " bytes)"
-		}
+		preview := textutil.TruncateRunes(bodyStr, 5000, fmt.Sprintf("... (truncated, total: %d bytes)", len(body)))
 		c.logger.Debug("LLM request body preview",
 			"body_preview", preview,
 		)

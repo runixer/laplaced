@@ -10,6 +10,7 @@ import (
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/reranker"
 	"github.com/runixer/laplaced/internal/storage"
+	"github.com/runixer/laplaced/internal/textutil"
 )
 
 // derefString returns the pointed-to value or "" if nil.
@@ -588,11 +589,7 @@ func (s *Service) formatSessionMessages(history []storage.Message) string {
 			role = "User"
 		}
 		// Truncate very long messages
-		content := m.Content
-		if len(content) > 500 {
-			content = content[:500] + "..."
-		}
-		fmt.Fprintf(&sb, "[%s]: %s\n", role, content)
+		fmt.Fprintf(&sb, "[%s]: %s\n", role, textutil.TruncateRunes(m.Content, 500, "..."))
 	}
 	return sb.String()
 }

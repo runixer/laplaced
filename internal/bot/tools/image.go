@@ -13,6 +13,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
+	"github.com/runixer/laplaced/internal/textutil"
 )
 
 var base64Std = base64.StdEncoding
@@ -310,7 +311,7 @@ func stopRetryResultForFailure(f *ImageGenFailure) *Result {
 		reason = "the model refused to generate this image and explained why"
 		instructionTwo = fmt.Sprintf(
 			"The model itself refused to generate this image and explained why in plain text. Quote its reason verbatim to the user (translate to their language if needed) so they understand exactly what to change. Refusal text: %q",
-			truncate(f.Text, 300),
+			textutil.TruncateRunes(f.Text, 300, "..."),
 		)
 	case ImageGenKindSilentBlockOAI:
 		reason = "OpenAI's image model returned no image and no explanation"
@@ -362,18 +363,11 @@ func stopRetryResult(reason, modelText string, underlying error) *Result {
 		fmt.Fprintf(&sb, "Internal detail: %v. ", underlying)
 	}
 	if strings.TrimSpace(modelText) != "" {
-		fmt.Fprintf(&sb, "Model note: %s ", truncate(strings.TrimSpace(modelText), 300))
+		fmt.Fprintf(&sb, "Model note: %s ", textutil.TruncateRunes(strings.TrimSpace(modelText), 300, "..."))
 	}
 	sb.WriteString("IMPORTANT INSTRUCTIONS FOR YOU: ")
 	sb.WriteString("(1) Do NOT call generate_image again in this turn — further attempts will almost certainly fail the same way. ")
 	sb.WriteString("(2) Apologize to the user briefly in their language, explain in one sentence that generation didn't work (e.g. safety filter, invalid input, temporary API issue). ")
 	sb.WriteString("(3) If appropriate, suggest they try different wording or try again later — but do NOT attempt it yourself now.")
 	return &Result{Content: sb.String()}
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
 }

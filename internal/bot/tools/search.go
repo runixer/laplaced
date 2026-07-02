@@ -8,6 +8,7 @@ import (
 	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
+	"github.com/runixer/laplaced/internal/textutil"
 )
 
 // performHistorySearch searches the user's conversation history.
@@ -114,12 +115,7 @@ func (e *ToolExecutor) performSearchPeople(ctx context.Context, userID storage.S
 			fmt.Fprintf(&sb, "Aliases: %s\n", strings.Join(p.Aliases, ", "))
 		}
 		if p.Bio != "" {
-			// Truncate long bios
-			bio := p.Bio
-			if len(bio) > 200 {
-				bio = bio[:200] + "..."
-			}
-			fmt.Fprintf(&sb, "Bio: %s\n", bio)
+			fmt.Fprintf(&sb, "Bio: %s\n", textutil.TruncateRunes(p.Bio, 200, "..."))
 		}
 		sb.WriteString("\n")
 	}
@@ -137,11 +133,7 @@ func (e *ToolExecutor) formatRAGResults(topics []rag.TopicSearchResult, query st
 		fmt.Fprintf(&sb, "   Messages: %d\n", len(t.Messages))
 		if len(t.Messages) > 0 {
 			// Show first message as preview
-			preview := t.Messages[0].Content
-			if len(preview) > 100 {
-				preview = preview[:100] + "..."
-			}
-			fmt.Fprintf(&sb, "   Preview: %s\n", preview)
+			fmt.Fprintf(&sb, "   Preview: %s\n", textutil.TruncateRunes(t.Messages[0].Content, 100, "..."))
 		}
 		sb.WriteString("\n")
 	}
