@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -340,6 +341,17 @@ func TestIsRetryableError(t *testing.T) {
 			name:     "wrapped timeout error",
 			err:      errors.New("wrapped: " + (&timeoutError{}).Error()),
 			expected: false, // Simple wrapping doesn't preserve the type
+		},
+		{
+			name: "http2 GOAWAY",
+			err: &url.Error{Op: "Post", URL: "https://openrouter.ai/api/v1/embeddings",
+				Err: errors.New(`http2: server sent GOAWAY and closed the connection; LastStreamID=3, ErrCode=NO_ERROR, debug=""`)},
+			expected: true,
+		},
+		{
+			name:     "http2 connection lost",
+			err:      errors.New("http2: client connection lost"),
+			expected: true,
 		},
 	}
 

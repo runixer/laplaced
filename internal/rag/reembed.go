@@ -104,9 +104,11 @@ func (s *Service) ReembedIfNeeded(ctx context.Context) error {
 // Embedding requests run concurrently (reembedParallelism workers, batches
 // of reembedBatchSize inputs each).
 //
-// Returns: done (rows with new embeddings saved), failed (rows that could
-// not be re-embedded but did not abort the run — NOT yet implemented; any
-// single failure currently returns an error).
+// Returns: done (rows with new embeddings saved) and failed (rows whose batch
+// errored). Failures abort the run only while done is still zero — a sign the
+// whole run is doomed (bad model, auth). After the first successful batch,
+// failed rows are skipped: they keep their old version stamp and are picked
+// up again on the next startup.
 func (s *Service) reembedTable(ctx context.Context, t reembedTable, version string) (int64, int64, error) {
 	// A first candidates fetch tells us whether there is work to do at all.
 	candidates, err := t.fetch(version, 0)
@@ -132,7 +134,11 @@ func (s *Service) reembedTable(ctx context.Context, t reembedTable, version stri
 		if ctx.Err() != nil {
 			break
 		}
-		if firstErr.Load() != nil {
+		// A batch failure with zero successes means the whole run is doomed
+		// (bad model name, auth, network down) — stop scheduling. Once at
+		// least one batch has landed, individual failures are tolerated:
+		// their rows keep the old version stamp and are retried next startup.
+		if firstErr.Load() != nil && done.Load() == 0 {
 			break
 		}
 		wg.Add(1)
@@ -159,7 +165,13 @@ func (s *Service) reembedTable(ctx context.Context, t reembedTable, version stri
 	wg.Wait()
 
 	if errPtr := firstErr.Load(); errPtr != nil {
-		return done.Load(), failed.Load(), *errPtr
+		if done.Load() == 0 {
+			return done.Load(), failed.Load(), *errPtr
+		}
+		s.logger.Warn("re-embed table finished with failures; failed rows keep their old version and are retried on next startup",
+			"kind", t.kind, "done", done.Load(), "failed", failed.Load(),
+			"first_error", (*errPtr).Error())
+		return done.Load(), failed.Load(), nil
 	}
 
 	s.logger.Info("re-embed table complete",

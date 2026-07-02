@@ -107,6 +107,47 @@ func TestReembedIfNeeded_TopicsReembedded(t *testing.T) {
 	mockClient.AssertExpectations(t)
 }
 
+// TestReembedIfNeeded_PartialBatchFailure tolerates a failed batch once at
+// least one batch has landed: successful rows are persisted, the run reports
+// success, and the failed rows keep their old version for the next startup.
+func TestReembedIfNeeded_PartialBatchFailure(t *testing.T) {
+	mockStore := new(testutil.MockStorage)
+	mockClient := new(testutil.MockLLMClient)
+
+	// 33 candidates → two batches: 32 (succeeds) + 1 (fails).
+	candidates := make([]storage.ReembedCandidate, 33)
+	for i := range candidates {
+		candidates[i] = storage.ReembedCandidate{ID: int64(i + 1), UserID: "1", Content: "topic"}
+	}
+	expectedVersion := "new-model:1536"
+	mockStore.On("GetTopicsNeedingReembed", expectedVersion, 0).Return(candidates, nil).Once()
+
+	fullBatch := make([]llm.EmbeddingObject, 32)
+	for i := range fullBatch {
+		fullBatch[i] = llm.EmbeddingObject{Embedding: []float32{0.1}, Index: i}
+	}
+	mockClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req llm.EmbeddingRequest) bool {
+		return len(req.Input) == 32
+	})).Return(llm.EmbeddingResponse{Data: fullBatch}, nil).Once()
+	mockClient.On("CreateEmbeddings", mock.Anything, mock.MatchedBy(func(req llm.EmbeddingRequest) bool {
+		return len(req.Input) == 1
+	})).Return(llm.EmbeddingResponse{}, errors.New("http2: server sent GOAWAY")).Once()
+
+	mockStore.On("UpdateTopicEmbeddingVersion", mock.Anything, mock.Anything, expectedVersion).
+		Return(nil).Times(32)
+
+	svc := newTestRAGServiceNoStart(t, mockStore, mockClient, func(c *config.Config) {
+		c.Embedding.Model = "new-model"
+		c.Embedding.Dimensions = 1536
+	})
+
+	err := svc.ReembedIfNeeded(context.Background())
+	assert.NoError(t, err, "partial failure must not abort the migration")
+
+	mockStore.AssertExpectations(t)
+	mockClient.AssertExpectations(t)
+}
+
 // TestReembedIfNeeded_EmbedError propagates a hard error and leaves the DB alone.
 func TestReembedIfNeeded_EmbedError(t *testing.T) {
 	mockStore := new(testutil.MockStorage)

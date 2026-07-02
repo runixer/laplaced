@@ -249,7 +249,17 @@ func isRetryableError(err error) bool {
 
 	// Check for connection errors
 	var opErr *net.OpError
-	return errors.As(err, &opErr)
+	if errors.As(err, &opErr) {
+		return true
+	}
+
+	// HTTP/2 connection teardown: the server (or a proxy) rotating
+	// connections sends GOAWAY and kills every in-flight stream. net/http's
+	// bundled http2 implementation returns unexported error types here, so
+	// the error text is the only stable thing to match on.
+	msg := err.Error()
+	return strings.Contains(msg, "server sent GOAWAY") ||
+		strings.Contains(msg, "http2: client connection lost")
 }
 
 // calculateBackoff returns the delay for the given attempt using exponential backoff with jitter.

@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - The forced final answer at the tool-call limit no longer comes back empty when the model tries to call yet another tool anyway.
+- The startup embedding migration no longer aborts wholesale on a dropped connection or a rate-limited batch — transient HTTP/2 disconnects are retried, and rows that still fail are skipped and picked up on the next start instead of blocking the whole run.
 
 ## [0.10.2] - 2026-07-02
 
