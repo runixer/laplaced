@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- New `read_url` tool — the bot reads a linked page directly (docs, articles, short links) instead of burning searches on it, and says honestly when a page can't be opened (captcha, site policy).
+
 ### Changed
 - The bot now answers questions about stable knowledge (science, recipes, history, how things work) from its own knowledge instead of always searching the web, and spends at most 2 web searches per reply on things that do need checking.
 
