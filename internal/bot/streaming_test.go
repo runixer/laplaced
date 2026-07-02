@@ -529,6 +529,7 @@ func TestStreamSink_StatusKeyMapping(t *testing.T) {
 		{"search_history", "bot.streaming.tool_search_history"},
 		{"internet_search", "bot.streaming.tool_internet_search"},
 		{"manage_memory", "bot.streaming.tool_manage_memory"},
+		{"read_url", "bot.streaming.tool_read_url"},
 	}
 	for _, tt := range tests {
 		assert.Equal(t, tt.key, streamingToolStatusKey(tt.toolName))

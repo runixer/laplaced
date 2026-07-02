@@ -1539,15 +1539,26 @@ func TestValidate_FetcherBackend(t *testing.T) {
 		return cfg
 	}
 
+	// read_url is in the default tools list; strip it to test the ungated path.
+	withoutReadURL := func(tools []ToolConfig) []ToolConfig {
+		out := make([]ToolConfig, 0, len(tools))
+		for _, tool := range tools {
+			if tool.Name != "read_url" {
+				out = append(out, tool)
+			}
+		}
+		return out
+	}
+
 	t.Run("bad backend without read_url tool passes", func(t *testing.T) {
 		cfg := base()
+		cfg.Tools = withoutReadURL(cfg.Tools)
 		cfg.Fetcher.Backend = "bogus"
 		assert.NoError(t, cfg.Validate())
 	})
 
 	t.Run("bad backend with read_url tool fails", func(t *testing.T) {
 		cfg := base()
-		cfg.Tools = append(cfg.Tools, ToolConfig{Name: "read_url"})
 		cfg.Fetcher.Backend = "bogus"
 		err := cfg.Validate()
 		assert.Error(t, err)
@@ -1556,7 +1567,6 @@ func TestValidate_FetcherBackend(t *testing.T) {
 
 	t.Run("raw backend with read_url tool passes", func(t *testing.T) {
 		cfg := base()
-		cfg.Tools = append(cfg.Tools, ToolConfig{Name: "read_url"})
 		cfg.Fetcher.Backend = "raw"
 		assert.NoError(t, cfg.Validate())
 	})
@@ -1565,7 +1575,6 @@ func TestValidate_FetcherBackend(t *testing.T) {
 		// Missing key leaves the tool unwired at startup (imagegen precedent);
 		// it must not fail Validate — the key may be an unresolved vault: ref.
 		cfg := base()
-		cfg.Tools = append(cfg.Tools, ToolConfig{Name: "read_url"})
 		cfg.Fetcher.Backend = "firecrawl"
 		cfg.Fetcher.Firecrawl.APIKey = ""
 		assert.NoError(t, cfg.Validate())

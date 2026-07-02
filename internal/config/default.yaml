@@ -270,6 +270,7 @@ tools:
     model: "memory"
   - name: "generate_image"
     model: "openai/gpt-5.4-image-2"
+  - name: "read_url"
 
 # Web-page fetcher backing the read_url tool. backend selects the
 # implementation — there is no automatic fallback between backends:

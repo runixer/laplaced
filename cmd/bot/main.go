@@ -23,6 +23,7 @@ import (
 	"github.com/runixer/laplaced/internal/bot"
 	botTools "github.com/runixer/laplaced/internal/bot/tools"
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/fetch"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/mattermost"
@@ -383,6 +384,19 @@ func run() int {
 		)
 	}
 
+	// Wire the read_url page fetcher. Gated on the tool being exposed in the
+	// tools list; a construction error (unknown backend, firecrawl without an
+	// API key) leaves the tool unwired — the bot starts fine and read_url
+	// reports a configuration message to the LLM.
+	if toolConfigured(cfg, "read_url") {
+		if fetcher, fErr := fetch.New(&cfg.Fetcher, logger); fErr != nil {
+			logger.Warn("read_url disabled", "error", fErr)
+		} else {
+			b.SetFetcher(fetcher)
+			logger.Info("read_url enabled", "backend", cfg.Fetcher.Backend)
+		}
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
@@ -544,4 +558,15 @@ func run() int {
 	<-srvDone
 	logger.Info("Web server stopped")
 	return 0
+}
+
+// toolConfigured reports whether a tool with the given name is exposed in the
+// tools list.
+func toolConfigured(cfg *config.Config, name string) bool {
+	for _, t := range cfg.Tools {
+		if t.Name == name {
+			return true
+		}
+	}
+	return false
 }

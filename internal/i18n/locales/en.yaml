@@ -44,6 +44,8 @@ bot:
     tool_manage_people: "👥 Updating contacts…"
     tool_generate_image: "🎨 Drawing…"
     tool_generate_image_arg: "🎨 Drawing: <i>%s</i>"
+    tool_read_url: "📖 Reading the page…"
+    tool_read_url_arg: "📖 Reading: <i>%s</i>"
     tool_generic: "⚙️ Running tool…"
   voice_instruction: |
     This is a voice message the user sent JUST NOW. MANDATORY:
@@ -111,6 +113,12 @@ bot:
     - Order: function call → receive result → respond to user.
     - SOURCES: the search result ends with a <sources> block mapping [N] markers to real URLs. Weave the 1–3 most relevant sources into your prose as markdown [short text](url), taking URLs ONLY from that block. NEVER invent, guess, or alter a URL, and do NOT add a separate "Sources" section.
 
+    READ (read_url):
+    - Have a concrete URL — a link from the user, official docs, a search source worth reading in full? Call read_url instead of searching.
+    - BUDGET: reads share the tool budget — at most 2 reads per reply.
+    - Page won't open (site policy, captcha)? Say so honestly and answer with what you have. Do NOT chase the same content through internet_search.
+    - Link the page you read using its URL from the tool result; the no-invented-URLs rule applies.
+
     MEMORY (manage_memory):
     - To save/update/delete facts — ONLY function call.
     - NEVER print JSON with operations in message text.
@@ -137,6 +145,9 @@ tools:
   internet_search:
     description: "Internet search for VOLATILE facts: news, prices, product availability, versions and releases, local businesses, anything after your cutoff. Always call it when the user asks to 'find', 'search', 'google' — and when the answer depends on fresh or verifiable data. Answer stable knowledge (science, history, recipes, how things work, language rules) without searching. LIMIT: at most 2 calls per reply — formulate one comprehensive query instead of many small ones."
     parameter_description: "Search query for Google/internet."
+  read_url:
+    description: "Read a specific web page and get its content. Use when you have a concrete URL: a link the user sent, official documentation, or a search source worth reading in full. Prefer this over internet_search when the answer lives at a known URL. Short links are fine — redirects are resolved. LIMIT: at most 2 reads per reply, sharing the overall tool budget. If a page cannot be opened (site policy, captcha), report that honestly — do NOT hunt for the same content via search."
+    parameter_description: "Full URL of the page to read (https://...)."
   search_history:
     description: "Tool for TARGETED search through conversation history (past discussions and topics). MUST call when user explicitly asks: 'search in memory', 'find in history', 'what did we discuss', 'recall our conversation about'. The automatic context provides initial results — this tool allows DEEPER search with YOUR OWN query. Do NOT use for facts about the user — they are already in context."
     parameter_description: "Search query for conversation history."

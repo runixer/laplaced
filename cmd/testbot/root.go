@@ -20,6 +20,7 @@ import (
 	"github.com/runixer/laplaced/internal/app"
 	"github.com/runixer/laplaced/internal/bot"
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/fetch"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/markdown"
@@ -361,6 +362,21 @@ func setupTestBot(cfg *config.Config, logger *slog.Logger, dbPath string, dbChan
 		tb.bot.SetImageGenerator(&testbotImageGenAdapter{agent: imgGen})
 		tb.bot.SetFileStorage(services.FileStorage)
 		tb.bot.SetArtifactRepo(tb.store)
+	}
+
+	// Wire the read_url page fetcher (mirrors cmd/bot/main.go behavior).
+	// The search-policy eval counts fetcher agent_logs, so testbot must
+	// exercise the same wiring as production.
+	for _, toolCfg := range tb.cfg.Tools {
+		if toolCfg.Name != "read_url" {
+			continue
+		}
+		if fetcher, fErr := fetch.New(&tb.cfg.Fetcher, tb.logger); fErr != nil {
+			tb.logger.Warn("read_url disabled", "error", fErr)
+		} else {
+			tb.bot.SetFetcher(fetcher)
+		}
+		break
 	}
 
 	// v0.7.0: run embedding migration in the same order as production

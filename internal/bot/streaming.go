@@ -34,6 +34,7 @@ var toolArgField = map[string]string{
 	"search_history":  "query",
 	"search_people":   "query",
 	"generate_image":  "prompt",
+	"read_url":        "url",
 }
 
 // streamSinkMode is a tag describing the current presentation state of the

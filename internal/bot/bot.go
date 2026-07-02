@@ -17,6 +17,7 @@ import (
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/bot/tools"
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/fetch"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/llm"
@@ -179,6 +180,14 @@ func (b *Bot) SetArtifactRepo(repo storage.ArtifactRepository) {
 func (b *Bot) SetImageGenerator(gen tools.ImageGenerator) {
 	if b.toolExecutor != nil {
 		b.toolExecutor.SetImageGenerator(gen)
+	}
+}
+
+// SetFetcher wires the web-page fetcher so the read_url tool becomes
+// operational. Unwired, the tool tells the LLM page reading is unavailable.
+func (b *Bot) SetFetcher(f fetch.Fetcher) {
+	if b.toolExecutor != nil {
+		b.toolExecutor.SetFetcher(f)
 	}
 }
 
