@@ -25,14 +25,10 @@ const (
 )
 
 // currentEmbeddingVersion produces the version tag written into
-// `embedding_version` columns. Format: "{model}:{dim}". A value of 0 for
-// Dimensions means "provider default" — in that case the version is just
-// the model string.
+// `embedding_version` columns. Delegates to the canonical composer in the
+// storage package, which the live write paths (Add*/Update*) also use.
 func currentEmbeddingVersion(model string, dim int) string {
-	if dim <= 0 {
-		return model
-	}
-	return fmt.Sprintf("%s:%d", model, dim)
+	return storage.EmbeddingVersion(model, dim)
 }
 
 // entityKind is an enum for logging/metrics. Values map 1:1 to tables.

@@ -19,6 +19,17 @@ type ReembedCandidate struct {
 	Content string
 }
 
+// EmbeddingVersion composes the version tag written into embedding_version
+// columns. Format: "{model}:{dim}"; a dim of 0 means "provider default" and
+// yields just the model string. This is the single source of truth — the
+// startup re-embed migration and the live write paths must agree on it.
+func EmbeddingVersion(model string, dim int) string {
+	if dim <= 0 {
+		return model
+	}
+	return fmt.Sprintf("%s:%d", model, dim)
+}
+
 // reembedSelect runs the common SELECT for "rows needing re-embed" against a
 // single table with a caller-provided content expression. Version match is
 // strict: NULL or a string different from expectedVersion both qualify.

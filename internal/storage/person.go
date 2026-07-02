@@ -46,8 +46,8 @@ func (s *Store) AddPerson(person Person) (int64, error) {
 	}
 
 	query := `
-		INSERT INTO people (user_id, display_name, aliases, telegram_id, username, circle, bio, embedding, first_seen, last_seen, mention_count, external_transport, external_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO people (user_id, display_name, aliases, telegram_id, username, circle, bio, embedding, embedding_version, first_seen, last_seen, mention_count, external_transport, external_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	id, err := s.insertReturningID(query, "id",
 		person.UserID,
@@ -58,6 +58,7 @@ func (s *Store) AddPerson(person Person) (int64, error) {
 		person.Circle,
 		person.Bio,
 		embBytes,
+		s.embeddingVersion,
 		s.dialect.BindTime(person.FirstSeen),
 		s.dialect.BindTime(person.LastSeen),
 		person.MentionCount,
@@ -91,7 +92,7 @@ func (s *Store) UpdatePerson(person Person) error {
 
 	query := `
 		UPDATE people
-		SET display_name = ?, aliases = ?, telegram_id = ?, username = ?, circle = ?, bio = ?, embedding = ?, last_seen = ?, mention_count = ?
+		SET display_name = ?, aliases = ?, telegram_id = ?, username = ?, circle = ?, bio = ?, embedding = ?, embedding_version = ?, last_seen = ?, mention_count = ?
 		WHERE id = ? AND user_id = ?
 	`
 	_, err = s.exec(query,
@@ -102,6 +103,7 @@ func (s *Store) UpdatePerson(person Person) error {
 		person.Circle,
 		person.Bio,
 		embBytes,
+		s.embeddingVersion,
 		s.dialect.BindTime(person.LastSeen),
 		person.MentionCount,
 		person.ID,

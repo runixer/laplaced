@@ -18,8 +18,8 @@ func (s *Store) AddFact(fact Fact) (int64, error) {
 		fact.LastUpdated = time.Now()
 	}
 	query := `
-		INSERT INTO structured_facts (user_id, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO structured_facts (user_id, relation, category, content, type, importance, embedding, embedding_version, topic_id, created_at, last_updated)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(user_id, relation, content) DO UPDATE SET
 			last_updated = excluded.last_updated,
 			importance = excluded.importance,
@@ -27,7 +27,7 @@ func (s *Store) AddFact(fact Fact) (int64, error) {
 			category = excluded.category,
 			topic_id = COALESCE(excluded.topic_id, structured_facts.topic_id)
 	`
-	_, err = s.exec(query, fact.UserID, fact.Relation, fact.Category, fact.Content, fact.Type, fact.Importance, embBytes, fact.TopicID, s.dialect.BindTime(fact.CreatedAt), s.dialect.BindTime(fact.LastUpdated))
+	_, err = s.exec(query, fact.UserID, fact.Relation, fact.Category, fact.Content, fact.Type, fact.Importance, embBytes, s.embeddingVersion, fact.TopicID, s.dialect.BindTime(fact.CreatedAt), s.dialect.BindTime(fact.LastUpdated))
 	if err != nil {
 		return 0, err
 	}
@@ -179,10 +179,10 @@ func (s *Store) UpdateFact(fact Fact) error {
 	}
 	query := `
 		UPDATE structured_facts
-		SET content = ?, type = ?, importance = ?, embedding = ?, last_updated = ?
+		SET content = ?, type = ?, importance = ?, embedding = ?, embedding_version = ?, last_updated = ?
 		WHERE id = ? AND user_id = ?
 	`
-	_, err = s.exec(query, fact.Content, fact.Type, fact.Importance, embBytes, s.dialect.BindTime(fact.LastUpdated), fact.ID, fact.UserID)
+	_, err = s.exec(query, fact.Content, fact.Type, fact.Importance, embBytes, s.embeddingVersion, s.dialect.BindTime(fact.LastUpdated), fact.ID, fact.UserID)
 	return err
 }
 

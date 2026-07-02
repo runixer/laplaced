@@ -292,6 +292,7 @@ func run() int {
 		return 1
 	}
 	defer store.Close()
+	store.SetEmbeddingVersion(storage.EmbeddingVersion(cfg.Embedding.Model, cfg.Embedding.Dimensions))
 
 	if err := store.Init(); err != nil {
 		logger.Error("failed to initialize storage", "error", err)

@@ -268,6 +268,7 @@ func (s *Store) UpdateArtifact(artifact Artifact) error {
 			entities = ?,
 			rag_hints = ?,
 			embedding = ?,
+			embedding_version = ?,
 			processed_at = ?
 		WHERE user_id = ? AND id = ?
 	`
@@ -321,6 +322,7 @@ func (s *Store) UpdateArtifact(artifact Artifact) error {
 		entitiesIface,
 		ragHintsIface,
 		embeddingJSON,
+		s.embeddingVersion,
 		processedAt,
 		artifact.UserID,
 		artifact.ID,

@@ -322,10 +322,24 @@ type Store struct {
 	logger  *slog.Logger
 	dbPath  string // SQLite file path (size/checkpoint); empty on postgres
 
+	// embeddingVersion is stamped into the embedding_version column whenever
+	// a row's embedding is written, so freshly created rows don't queue for
+	// the startup re-embed migration. Set once at wiring time via
+	// SetEmbeddingVersion; when left empty, rows are stamped '' and picked up
+	// by the next startup migration — the pre-stamping behavior.
+	embeddingVersion string
+
 	// scopeTypeCache memoizes IsChannelScope lookups. A scope's type is fixed at
 	// mint time and never changes, so entries are valid for the process lifetime.
 	// Keyed by internal scope id, value is bool (true=channel).
 	scopeTypeCache sync.Map
+}
+
+// SetEmbeddingVersion declares which embedding model/dimension produced the
+// vectors that callers pass to Add*/Update* methods from now on. Compose the
+// value with EmbeddingVersion.
+func (s *Store) SetEmbeddingVersion(version string) {
+	s.embeddingVersion = version
 }
 
 // PostgresConfig holds connection parameters for the postgres backend.

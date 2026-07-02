@@ -16,8 +16,8 @@ func (s *Store) CreateTopic(topic Topic) (int64, error) {
 	if topic.CreatedAt.IsZero() {
 		topic.CreatedAt = time.Now()
 	}
-	query := "INSERT INTO topics (user_id, summary, start_msg_id, end_msg_id, size_chars, embedding, facts_extracted, is_consolidated, consolidation_checked, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-	return s.insertReturningID(query, "id", topic.UserID, topic.Summary, topic.StartMsgID, topic.EndMsgID, topic.SizeChars, embBytes, topic.FactsExtracted, topic.IsConsolidated, topic.ConsolidationChecked, s.dialect.BindTime(topic.CreatedAt))
+	query := "INSERT INTO topics (user_id, summary, start_msg_id, end_msg_id, size_chars, embedding, embedding_version, facts_extracted, is_consolidated, consolidation_checked, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+	return s.insertReturningID(query, "id", topic.UserID, topic.Summary, topic.StartMsgID, topic.EndMsgID, topic.SizeChars, embBytes, s.embeddingVersion, topic.FactsExtracted, topic.IsConsolidated, topic.ConsolidationChecked, s.dialect.BindTime(topic.CreatedAt))
 }
 
 func (s *Store) AddTopic(topic Topic) (int64, error) {

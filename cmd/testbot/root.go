@@ -310,6 +310,7 @@ func setupTestBot(cfg *config.Config, logger *slog.Logger, dbPath string, dbChan
 	if err := tb.store.Init(); err != nil {
 		return nil, fmt.Errorf("failed to init store: %w", err)
 	}
+	tb.store.SetEmbeddingVersion(storage.EmbeddingVersion(tb.cfg.Embedding.Model, tb.cfg.Embedding.Dimensions))
 
 	// Create translator
 	translator, err := i18n.NewTranslator("en")
