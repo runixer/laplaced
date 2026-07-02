@@ -207,18 +207,67 @@ func (s *Service) resolveStragglers(ctx context.Context, chunk []storage.Message
 	return validTopics, nil
 }
 
+// processChunk is the background-loop entry: it archives one chunk, then
+// reloads vectors asynchronously and kicks consolidation.
 func (s *Service) processChunk(ctx context.Context, userID storage.ScopeID, chunk []storage.Message) error {
 	if len(chunk) == 0 {
 		return nil
 	}
+	if _, err := s.processChunkCore(ctx, userID, chunk, nil); err != nil {
+		return err
+	}
+
+	// Load new vectors (incremental)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		if err := s.LoadNewVectors(); err != nil {
+			s.logger.Error("failed to load new vectors", "error", err)
+		}
+	}()
+
+	// Trigger consolidation
+	s.TriggerConsolidation()
+
+	return nil
+}
+
+// processChunkWithStats is the synchronous entry (force-process, testbot):
+// it archives one chunk, accumulates LLM usage into stats, reloads vectors
+// inline, and returns the created topic IDs so the caller can run
+// consolidation for exactly those topics.
+func (s *Service) processChunkWithStats(ctx context.Context, userID storage.ScopeID, chunk []storage.Message, stats *ProcessingStats) ([]int64, error) {
+	if len(chunk) == 0 {
+		return nil, nil
+	}
+	topicIDs, err := s.processChunkCore(ctx, userID, chunk, stats)
+	if err != nil {
+		return nil, err
+	}
+
+	// Load new vectors synchronously
+	if err := s.LoadNewVectors(); err != nil {
+		s.logger.Error("failed to load new vectors", "error", err)
+	}
+
+	return topicIDs, nil
+}
+
+// processChunkCore extracts topics from a non-empty chunk, validates their
+// coverage, embeds and saves them, and returns the created topic IDs. When
+// stats is non-nil, chat and embedding usage is accumulated into it. Vector
+// reloading and consolidation are the wrappers' concern — the two entry
+// points above differ only in sync/async follow-up work.
+func (s *Service) processChunkCore(ctx context.Context, userID storage.ScopeID, chunk []storage.Message, stats *ProcessingStats) ([]int64, error) {
 	s.logger.Info("Processing chunk", "user_id", userID, "count", len(chunk), "start", chunk[0].ID, "end", chunk[len(chunk)-1].ID)
 
-	var topicsSaved int
-
 	// 1. Extract Topics (Wait for completion)
-	topics, _, err := s.extractTopics(ctx, userID, chunk)
+	topics, topicUsage, err := s.extractTopics(ctx, userID, chunk)
 	if err != nil {
-		return fmt.Errorf("extract topics: %w", err)
+		return nil, fmt.Errorf("extract topics: %w", err)
+	}
+	if stats != nil {
+		stats.AddChatUsage(topicUsage.PromptTokens, topicUsage.CompletionTokens, topicUsage.Cost)
 	}
 
 	// 2. Validate Coverage
@@ -226,7 +275,6 @@ func (s *Service) processChunk(ctx context.Context, userID storage.ScopeID, chun
 	referenceDate := chunk[len(chunk)-1].CreatedAt
 
 	var validTopics []ExtractedTopic
-
 	for _, t := range topics {
 		// Clamp IDs to chunk range
 		if t.StartMsgID < chunkStartID {
@@ -235,7 +283,6 @@ func (s *Service) processChunk(ctx context.Context, userID storage.ScopeID, chun
 		if t.EndMsgID > chunkEndID {
 			t.EndMsgID = chunkEndID
 		}
-
 		if t.StartMsgID > t.EndMsgID {
 			continue
 		}
@@ -255,17 +302,17 @@ func (s *Service) processChunk(ctx context.Context, userID storage.ScopeID, chun
 
 		// Update IDs to match actual messages found to ensure AddTopic updates them
 		t.StartMsgID, t.EndMsgID = findChunkBounds(foundMessages)
-
 		validTopics = append(validTopics, t)
 	}
 
 	// Check for stragglers — messages the splitter left out of every topic.
 	validTopics, err = s.resolveStragglers(ctx, chunk, validTopics)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// 3. Vectorize and Save Topics
+	var topicIDs []int64
 	var embeddingInputs []string
 	for _, t := range validTopics {
 		var contentBuilder strings.Builder
@@ -289,13 +336,16 @@ func (s *Service) processChunk(ctx context.Context, userID storage.ScopeID, chun
 		if err != nil {
 			RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeTopics, embeddingDuration, false, 0, nil)
 			s.logger.Error("failed to create embeddings for topics", "error", err)
-			return fmt.Errorf("create embeddings: %w", err)
+			return nil, fmt.Errorf("create embeddings: %w", err)
 		}
 		RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeTopics, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
+		if stats != nil {
+			stats.AddEmbeddingUsage(resp.Usage.TotalTokens, resp.Usage.Cost)
+		}
 
 		if len(resp.Data) != len(validTopics) {
 			s.logger.Error("embedding count mismatch", "expected", len(validTopics), "got", len(resp.Data))
-			return fmt.Errorf("embedding count mismatch")
+			return nil, fmt.Errorf("embedding count mismatch")
 		}
 
 		// Ensure response data is sorted by index to match input order
@@ -324,140 +374,6 @@ func (s *Service) processChunk(ctx context.Context, userID storage.ScopeID, chun
 			}
 
 			// AddTopic also updates messages in range with topic_id
-			if _, err := s.topicRepo.AddTopic(topic); err != nil {
-				s.logger.Error("failed to save topic", "error", err)
-				continue
-			}
-			topicsSaved++
-		}
-	}
-	if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
-		span.SetAttributes(attribute.Int("chunk.topics_saved", topicsSaved))
-	}
-
-	// Load new vectors (incremental)
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		if err := s.LoadNewVectors(); err != nil {
-			s.logger.Error("failed to load new vectors", "error", err)
-		}
-	}()
-
-	// Trigger consolidation
-	s.TriggerConsolidation()
-
-	return nil
-}
-
-// processChunkWithStats processes a chunk and returns the created topic IDs.
-func (s *Service) processChunkWithStats(ctx context.Context, userID storage.ScopeID, chunk []storage.Message, stats *ProcessingStats) ([]int64, error) {
-	if len(chunk) == 0 {
-		return nil, nil
-	}
-	s.logger.Info("Processing chunk with stats", "user_id", userID, "count", len(chunk))
-
-	// 1. Extract Topics
-	topics, topicUsage, err := s.extractTopics(ctx, userID, chunk)
-	if err != nil {
-		return nil, fmt.Errorf("extract topics: %w", err)
-	}
-	stats.AddChatUsage(topicUsage.PromptTokens, topicUsage.CompletionTokens, topicUsage.Cost)
-
-	// 2. Validate Coverage
-	chunkStartID, chunkEndID := findChunkBounds(chunk)
-	referenceDate := chunk[len(chunk)-1].CreatedAt
-
-	var validTopics []ExtractedTopic
-	for _, t := range topics {
-		if t.StartMsgID < chunkStartID {
-			t.StartMsgID = chunkStartID
-		}
-		if t.EndMsgID > chunkEndID {
-			t.EndMsgID = chunkEndID
-		}
-		if t.StartMsgID > t.EndMsgID {
-			continue
-		}
-
-		var foundMessages []storage.Message
-		for _, msg := range chunk {
-			if msg.ID >= t.StartMsgID && msg.ID <= t.EndMsgID {
-				foundMessages = append(foundMessages, msg)
-			}
-		}
-
-		if len(foundMessages) == 0 {
-			continue
-		}
-
-		t.StartMsgID, t.EndMsgID = findChunkBounds(foundMessages)
-		validTopics = append(validTopics, t)
-	}
-
-	validTopics, err = s.resolveStragglers(ctx, chunk, validTopics)
-	if err != nil {
-		return nil, err
-	}
-
-	// 3. Vectorize and Save Topics
-	var topicIDs []int64
-	var embeddingInputs []string
-
-	for _, t := range validTopics {
-		var contentBuilder strings.Builder
-		for _, msg := range chunk {
-			if msg.ID >= t.StartMsgID && msg.ID <= t.EndMsgID {
-				fmt.Fprintf(&contentBuilder, "[%s]: %s\n", msg.Role, msg.Content)
-			}
-		}
-		embeddingInput := fmt.Sprintf("Topic Summary: %s\n\nConversation Log:\n%s", t.Summary, contentBuilder.String())
-		embeddingInputs = append(embeddingInputs, embeddingInput)
-	}
-
-	if len(embeddingInputs) > 0 {
-		embeddingStart := time.Now()
-		resp, err := s.client.CreateEmbeddings(ctx, llm.EmbeddingRequest{
-			Model:      s.cfg.Embedding.Model,
-			Dimensions: s.cfg.Embedding.Dimensions,
-			Input:      embeddingInputs,
-		})
-		embeddingDuration := time.Since(embeddingStart).Seconds()
-		if err != nil {
-			RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeTopics, embeddingDuration, false, 0, nil)
-			return nil, fmt.Errorf("create embeddings: %w", err)
-		}
-		RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeTopics, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
-		stats.AddEmbeddingUsage(resp.Usage.TotalTokens, resp.Usage.Cost)
-
-		if len(resp.Data) != len(validTopics) {
-			return nil, fmt.Errorf("embedding count mismatch")
-		}
-
-		sort.Slice(resp.Data, func(i, j int) bool {
-			return resp.Data[i].Index < resp.Data[j].Index
-		})
-
-		for i, t := range validTopics {
-			// Calculate total size of message content in this topic
-			var sizeChars int
-			for _, msg := range chunk {
-				if msg.ID >= t.StartMsgID && msg.ID <= t.EndMsgID {
-					sizeChars += len(msg.Content)
-				}
-			}
-
-			topic := storage.Topic{
-				UserID:         userID,
-				Summary:        t.Summary,
-				StartMsgID:     t.StartMsgID,
-				EndMsgID:       t.EndMsgID,
-				SizeChars:      sizeChars,
-				Embedding:      resp.Data[i].Embedding,
-				CreatedAt:      referenceDate,
-				FactsExtracted: false,
-			}
-
 			id, err := s.topicRepo.AddTopic(topic)
 			if err != nil {
 				s.logger.Error("failed to save topic", "error", err)
@@ -466,10 +382,8 @@ func (s *Service) processChunkWithStats(ctx context.Context, userID storage.Scop
 			topicIDs = append(topicIDs, id)
 		}
 	}
-
-	// Load new vectors synchronously
-	if err := s.LoadNewVectors(); err != nil {
-		s.logger.Error("failed to load new vectors", "error", err)
+	if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
+		span.SetAttributes(attribute.Int("chunk.topics_saved", len(topicIDs)))
 	}
 
 	return topicIDs, nil
