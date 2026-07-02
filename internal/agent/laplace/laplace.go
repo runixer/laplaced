@@ -220,7 +220,12 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 			UserID:    string(req.UserID),
 		}
 		if synthesisTurn {
-			orReq.Tools = nil
+			// Keep the tool declarations but forbid calling them. Dropping
+			// Tools entirely is not enough: after a run of tool-call turns
+			// Gemini keeps emitting function calls by momentum even when the
+			// request offers no tools (observed on the search-policy eval),
+			// which left content empty and surfaced the placeholder reply.
+			orReq.ToolChoice = "none"
 		}
 
 		tracker.StartTurn()
@@ -250,8 +255,11 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 			outcome.cost,
 		)
 
-		// Check for empty response (no content and no tool calls) - retry
-		if strings.TrimSpace(outcome.content) == "" && len(outcome.toolCalls) == 0 {
+		// Check for empty response - retry. A tool call normally means the
+		// turn wasn't empty, but on the synthesis turn tool calls are
+		// forbidden, so a hallucinated call with no content is just another
+		// empty response worth retrying.
+		if strings.TrimSpace(outcome.content) == "" && (len(outcome.toolCalls) == 0 || synthesisTurn) {
 			logger.Warn("empty LLM response (no content, no tools)",
 				"finish_reason", outcome.finishReason,
 				"model", outcome.model,

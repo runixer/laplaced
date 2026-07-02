@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- The bot now answers questions about stable knowledge (science, recipes, history, how things work) from its own knowledge instead of always searching the web, and spends at most 2 web searches per reply on things that do need checking.
+
+### Fixed
+- The forced final answer at the tool-call limit no longer comes back empty when the model tries to call yet another tool anyway.
+
 ## [0.10.2] - 2026-07-02
 
 ### Security

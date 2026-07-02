@@ -633,21 +633,22 @@ func TestExecute_MaxIterations_ForcesSynthesis(t *testing.T) {
 	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
 
-	// Every turn that offers tools comes back as yet another tool call
-	// (infinite search spiral scenario).
+	// Every regular turn comes back as yet another tool call (infinite
+	// search spiral scenario).
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(r llm.ChatCompletionRequest) bool {
-		return len(r.Tools) > 0
+		return len(r.Tools) > 0 && r.ToolChoice == nil
 	})).Return(
 		makeToolCallWithContentResponse("Searching again...", "search_web", `{"query":"more"}`, "call_1",
 			WithTokens(10, 0, 10),
 		), nil,
 	).Times(3)
 
-	// The synthesis turn must carry no tools and end with the synthesis
-	// instruction as a system message.
+	// The synthesis turn keeps the tool declarations but forbids calling
+	// them (tool_choice=none) and ends with the synthesis instruction as a
+	// system message.
 	synthesisInstruction := translator.Get("en", "bot.tool_budget_synthesis")
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(r llm.ChatCompletionRequest) bool {
-		if len(r.Tools) != 0 || len(r.Messages) == 0 {
+		if r.ToolChoice != "none" || len(r.Messages) == 0 {
 			return false
 		}
 		last := r.Messages[len(r.Messages)-1]

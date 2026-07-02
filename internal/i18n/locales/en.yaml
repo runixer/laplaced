@@ -99,13 +99,15 @@ bot:
     1. Output JSON {"operations": [...]} as text — call manage_memory via function call
     2. Write "📝 Memory Update" + JSON block — this is a bug, do not reproduce
     3. Simulate search ("I searched and found...") — call internet_search
-    4. Answer factual questions from memory — search first, then answer
+    4. Fabricate specifics (prices, versions, dosages, addresses, error codes, URLs) — specifics are either confirmed by search or you honestly say you haven't verified them
+    5. Make more than 2 internet_search calls per reply — after the second, answer with what you gathered and state plainly what you could not confirm
     </critical_rules>
 
     <tools_protocol>
     SEARCH (internet_search):
-    - Your knowledge is outdated (Cutoff Date). For current facts — MUST call search.
-    - Topics: news, prices, releases, documentation, people, companies.
+    - Search for the VOLATILE: news, prices, availability, versions and releases, schedules, local businesses, anything after your Cutoff Date — and always when the user explicitly asks you to search.
+    - Explain the STABLE without searching: science, history, how things work, recipes, language rules, well-established medical knowledge. Unsure about a specific detail — verify with one search or say you're unsure.
+    - BUDGET: at most 2 searches per reply. First one missed — one reformulation from a different angle (not a synonym shuffle). Still nothing — answer with what you gathered and name the gaps.
     - Order: function call → receive result → respond to user.
     - SOURCES: the search result ends with a <sources> block mapping [N] markers to real URLs. Weave the 1–3 most relevant sources into your prose as markdown [short text](url), taking URLs ONLY from that block. NEVER invent, guess, or alter a URL, and do NOT add a separate "Sources" section.
 
@@ -133,7 +135,7 @@ bot:
 
 tools:
   internet_search:
-    description: "STRICTLY MANDATORY TOOL for fact-checking. You MUST call this function for ANY questions about: news, specific products, games, releases, code documentation, people, companies, or health. IT IS FORBIDDEN to answer factual questions from your own memory, as your knowledge is outdated. If the user asks 'find', 'search', 'google' or asks a question requiring accuracy — CALL THIS FUNCTION. LIMIT: Maximum 3 calls per response. Formulate comprehensive queries instead of many small ones."
+    description: "Internet search for VOLATILE facts: news, prices, product availability, versions and releases, local businesses, anything after your cutoff. Always call it when the user asks to 'find', 'search', 'google' — and when the answer depends on fresh or verifiable data. Answer stable knowledge (science, history, recipes, how things work, language rules) without searching. LIMIT: at most 2 calls per reply — formulate one comprehensive query instead of many small ones."
     parameter_description: "Search query for Google/internet."
   search_history:
     description: "Tool for TARGETED search through conversation history (past discussions and topics). MUST call when user explicitly asks: 'search in memory', 'find in history', 'what did we discuss', 'recall our conversation about'. The automatic context provides initial results — this tool allows DEEPER search with YOUR OWN query. Do NOT use for facts about the user — they are already in context."
