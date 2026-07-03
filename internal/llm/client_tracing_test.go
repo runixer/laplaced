@@ -338,7 +338,49 @@ func TestCreateEmbeddings_RecordsSpan(t *testing.T) {
 	assert.Equal(t, int64(10), attrs["emb.total_chars"].AsInt64(), "len(hello)+len(world)=10")
 	assert.Equal(t, int64(1536), attrs["emb.dimensions"].AsInt64())
 	assert.Equal(t, int64(7), attrs["gen_ai.usage.input_tokens"].AsInt64())
+	assert.Equal(t, int64(1), attrs["llm.attempts"].AsInt64(), "single successful attempt")
 	assert.Equal(t, sdkcodes.Unset, span.Status.Code)
+}
+
+// TestCreateEmbeddings_RetrySpanAttrs pins that the embeddings path reports
+// llm.attempts and llm.retry_delays_ms like the chat and stream paths do —
+// it historically lacked both.
+func TestCreateEmbeddings_RetrySpanAttrs(t *testing.T) {
+	getSpans := withTracingCapture(t)
+
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error": "unavailable"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(EmbeddingResponse{
+			Object: "list",
+			Data:   []EmbeddingObject{{Embedding: []float32{0.1}}},
+		})
+	}))
+	defer server.Close()
+
+	client, err := NewClient(slog.New(slog.NewJSONHandler(io.Discard, nil)), "test_api_key", "", server.URL+"/api/v1", nil)
+	require.NoError(t, err)
+
+	_, err = client.CreateEmbeddings(context.Background(), EmbeddingRequest{
+		Model: "emb-model",
+		Input: []string{"hello"},
+	})
+	require.NoError(t, err)
+
+	spans := getSpans()
+	require.Len(t, spans, 1)
+	attrs := map[attribute.Key]attribute.Value{}
+	for _, kv := range spans[0].Attributes {
+		attrs[kv.Key] = kv.Value
+	}
+	assert.Equal(t, int64(2), attrs["llm.attempts"].AsInt64(), "one 503 + one success")
+	require.Len(t, attrs["llm.retry_delays_ms"].AsInt64Slice(), 1, "one backoff wait recorded")
 }
 
 // TestCreateChatCompletion_RedactsBase64InContentEvents is the guard against

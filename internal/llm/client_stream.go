@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -159,13 +158,24 @@ func (c *clientImpl) CreateChatCompletionStream(ctx context.Context, req ChatCom
 		"tools_count", len(req.Tools),
 	)
 
-	//nolint:bodyclose // body is closed by pumpStream's defer once the stream finishes; bodyclose can't follow `go pumpStream(...)`.
-	httpResp, openAttempts, openRetryDelays, err := c.openStream(ctx, span, endpoint, body, req.Model, req.UserID, jt, startTime)
-	attempts = openAttempts
-	retryDelays = openRetryDelays
+	outcome, err := c.doRequestWithRetry(ctx, span, retryRequest{
+		endpoint:   endpoint,
+		body:       body,
+		opName:     "LLM stream open",
+		model:      req.Model,
+		streamMode: true,
+	})
+	attempts = outcome.attempts
+	retryDelays = outcome.retryDelays
 	if err != nil {
+		// Failure metric covers every terminal open error except parent-context
+		// cancellation; successful opens are recorded by pumpStream at stream end.
+		if ctx.Err() == nil {
+			RecordLLMRequest(req.UserID, req.Model, time.Since(startTime).Seconds(), false, 0, 0, nil, jt)
+		}
 		return nil, err
 	}
+	httpResp := outcome.resp
 
 	// Hand the span over to pumpStream — it owns lifecycle from here, including
 	// final attribute writes and span.End().
@@ -181,95 +191,6 @@ func (c *clientImpl) CreateChatCompletionStream(ctx context.Context, req ChatCom
 		Events:           events,
 		DebugRequestBody: string(body),
 	}, nil
-}
-
-// openStream performs the POST with retry on connect/early errors. Returns the
-// open HTTP response (caller takes ownership of Body) on success.
-//
-// Records one "attempt" span event per HTTP attempt and, on terminal failure,
-// lifts the OR error envelope onto the span via recordProviderError — the
-// same instrumentation surface CreateChatCompletion uses for its retry loop.
-func (c *clientImpl) openStream(
-	ctx context.Context,
-	span trace.Span,
-	endpoint string,
-	body []byte,
-	model string,
-	userID string,
-	jt string,
-	startTime time.Time,
-) (*http.Response, int, []int64, error) {
-	var (
-		lastErr     error
-		attempts    int
-		retryDelays []int64
-	)
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		attempts = attempt + 1
-		if attempt > 0 {
-			RecordLLMRetry(model)
-			delay := calculateBackoff(attempt - 1)
-			retryDelays = append(retryDelays, delay.Milliseconds())
-			c.logger.Warn("Retrying LLM stream open",
-				"attempt", attempt,
-				"max_retries", maxRetries,
-				"delay", delay,
-				"last_error", lastErr,
-			)
-			select {
-			case <-ctx.Done():
-				return nil, attempts, retryDelays, ctx.Err()
-			case <-time.After(delay):
-			}
-		}
-
-		httpReq, err := c.newAPIRequest(ctx, endpoint, body)
-		if err != nil {
-			return nil, attempts, retryDelays, err
-		}
-		httpReq.Header.Set("Accept", "text/event-stream")
-
-		attemptStart := time.Now()
-		resp, err := c.httpClient.Do(httpReq)
-		if err != nil {
-			recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{err: err})
-			if isRetryableError(err) && attempt < maxRetries {
-				lastErr = err
-				continue
-			}
-			RecordLLMRequest(userID, model, time.Since(startTime).Seconds(), false, 0, 0, nil, jt)
-			return nil, attempts, retryDelays, err
-		}
-
-		if resp.StatusCode == http.StatusOK {
-			recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode})
-			return resp, attempts, retryDelays, nil
-		}
-
-		// Non-200: read body for error detection (it's small for errors).
-		errBody, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode, body: errBody})
-
-		// 200-with-error pattern doesn't apply here (we got non-200), but the
-		// upstream sometimes returns retryable codes — match the non-stream
-		// retry policy.
-		if isRetryableStatusCode(resp.StatusCode) && attempt < maxRetries {
-			lastErr = fmt.Errorf("llm API error: %s: %s", resp.Status, truncateForLog(string(errBody), 500))
-			continue
-		}
-
-		c.logger.Error("LLM stream returned non-OK status",
-			"status", resp.Status, "body", truncateForLog(string(errBody), 500))
-		RecordLLMRequest(userID, model, time.Since(startTime).Seconds(), false, 0, 0, nil, jt)
-		recordProviderError(span, errBody, resp.StatusCode)
-		return nil, attempts, retryDelays, fmt.Errorf("llm API error: %s: %s", resp.Status, truncateForLog(string(errBody), 500))
-	}
-
-	if lastErr != nil {
-		return nil, attempts, retryDelays, lastErr
-	}
-	return nil, attempts, retryDelays, errors.New("llm stream open: exhausted retries")
 }
 
 // pumpStream reads SSE frames from body and emits StreamEvents. Closes events

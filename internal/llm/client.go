@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"math/rand/v2"
 	"net"
@@ -724,16 +723,8 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 			attribute.String("job.type", jt),
 		)...),
 	)
-	var (
-		attempts    int
-		retryDelays []int64
-		reqBody     []byte
-	)
+	var reqBody []byte
 	defer func() {
-		span.SetAttributes(attribute.Int("llm.attempts", attempts))
-		if len(retryDelays) > 0 {
-			span.SetAttributes(attribute.Int64Slice("llm.retry_delays_ms", retryDelays))
-		}
 		if resp.Model != "" {
 			span.SetAttributes(attribute.String("gen_ai.response.model", resp.Model))
 		}
@@ -837,91 +828,26 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 		return ChatCompletionResponse{}, err
 	}
 
-	var responseBody []byte
-	var lastErr error
-
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		attempts = attempt + 1
-		if attempt > 0 {
-			RecordLLMRetry(req.Model)
-			delay := calculateBackoff(attempt - 1)
-			retryDelays = append(retryDelays, delay.Milliseconds())
-			c.logger.Warn("Retrying LLM request",
-				"attempt", attempt,
-				"max_retries", maxRetries,
-				"delay", delay,
-				"last_error", lastErr,
-			)
-
-			select {
-			case <-ctx.Done():
-				return ChatCompletionResponse{}, ctx.Err()
-			case <-time.After(delay):
-			}
-		}
-
-		httpReq, err := c.newAPIRequest(ctx, endpoint, body)
-		if err != nil {
-			return ChatCompletionResponse{}, err
-		}
-
-		attemptStart := time.Now()
-		resp, err := c.httpClient.Do(httpReq)
-		if err != nil {
-			recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{err: err})
-			if isRetryableError(err) && attempt < maxRetries {
-				lastErr = err
-				continue
-			}
-			return ChatCompletionResponse{}, err
-		}
-
-		responseBody, err = io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{err: err, httpStatus: resp.StatusCode})
-			if isRetryableError(err) && attempt < maxRetries {
-				lastErr = err
-				continue
-			}
-			return ChatCompletionResponse{}, err
-		}
-
-		c.logger.Debug("LLM response received", "status", resp.Status, "attempt", attempt)
-
-		if resp.StatusCode == http.StatusOK {
-			// OpenRouter sometimes returns 200 with an error payload in body when
-			// the upstream provider fails. Treat as retryable.
-			if bodyErr := detectProviderBodyError(responseBody); bodyErr != nil {
-				recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode, bodyErr: bodyErr, body: responseBody})
-				c.logger.Warn("LLM API returned HTTP 200 with error body",
-					"error", bodyErr, "body", string(responseBody), "attempt", attempt)
-				if attempt < maxRetries && !isNonRetryableBodyError(bodyErr) {
-					lastErr = bodyErr
-					continue
-				}
-				RecordLLMRequest(req.UserID, req.Model, time.Since(startTime).Seconds(), false, 0, 0, nil, jt)
-				recordProviderError(span, responseBody, resp.StatusCode)
-				return ChatCompletionResponse{}, bodyErr
-			}
-			recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode, body: responseBody})
-			break // Success
-		}
-
-		recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode, body: responseBody})
-
-		// Check if we should retry
-		if isRetryableStatusCode(resp.StatusCode) && attempt < maxRetries {
-			lastErr = fmt.Errorf("llm API error: %s", resp.Status)
-			continue
-		}
-
-		// Non-retryable error or max retries reached
-		c.logger.Error("LLM API returned non-OK status", "status", resp.Status, "body", string(responseBody))
-		RecordLLMRequest(req.UserID, req.Model, time.Since(startTime).Seconds(), false, 0, 0, nil, jt)
-		recordProviderError(span, responseBody, resp.StatusCode)
-		return ChatCompletionResponse{}, fmt.Errorf("llm API error: %s", resp.Status)
+	outcome, err := c.doRequestWithRetry(ctx, span, retryRequest{
+		endpoint: endpoint,
+		body:     body,
+		opName:   "LLM request",
+		model:    req.Model,
+	})
+	span.SetAttributes(attribute.Int("llm.attempts", outcome.attempts))
+	if len(outcome.retryDelays) > 0 {
+		span.SetAttributes(attribute.Int64Slice("llm.retry_delays_ms", outcome.retryDelays))
 	}
+	if err != nil {
+		// Failure metric covers every terminal error — including transport
+		// errors — except parent-context cancellation (shutdown, not an LLM
+		// failure).
+		if ctx.Err() == nil {
+			RecordLLMRequest(req.UserID, req.Model, time.Since(startTime).Seconds(), false, 0, 0, nil, jt)
+		}
+		return ChatCompletionResponse{}, err
+	}
+	responseBody := outcome.body
 
 	var chatResp ChatCompletionResponse
 	if err := json.NewDecoder(bytes.NewBuffer(responseBody)).Decode(&chatResp); err != nil {
@@ -1035,86 +961,20 @@ func (c *clientImpl) CreateEmbeddings(ctx context.Context, req EmbeddingRequest)
 		return EmbeddingResponse{}, err
 	}
 
-	var responseBody []byte
-	var lastErr error
-
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		if attempt > 0 {
-			delay := calculateBackoff(attempt - 1)
-			c.logger.Warn("Retrying embeddings request",
-				"attempt", attempt,
-				"max_retries", maxRetries,
-				"delay", delay,
-				"last_error", lastErr,
-			)
-
-			select {
-			case <-ctx.Done():
-				return EmbeddingResponse{}, ctx.Err()
-			case <-time.After(delay):
-			}
-		}
-
-		httpReq, err := c.newAPIRequest(ctx, embeddingsURL, body)
-		if err != nil {
-			return EmbeddingResponse{}, err
-		}
-
-		attemptStart := time.Now()
-		resp, err := c.httpClient.Do(httpReq)
-		if err != nil {
-			recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{err: err})
-			if isRetryableError(err) && attempt < maxRetries {
-				lastErr = err
-				continue
-			}
-			return EmbeddingResponse{}, err
-		}
-
-		responseBody, err = io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{err: err, httpStatus: resp.StatusCode})
-			if isRetryableError(err) && attempt < maxRetries {
-				lastErr = err
-				continue
-			}
-			return EmbeddingResponse{}, err
-		}
-
-		if resp.StatusCode == http.StatusOK {
-			// OpenRouter returns 200 with an error payload when the upstream
-			// provider is unavailable (e.g. {"error":{"code":404}}). Treat as
-			// retryable so we don't silently return an empty Data array and
-			// cause callers to waste tokens on the next attempt.
-			if bodyErr := detectProviderBodyError(responseBody); bodyErr != nil {
-				recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode, bodyErr: bodyErr, body: responseBody})
-				c.logger.Warn("Embeddings returned HTTP 200 with error body",
-					"error", bodyErr, "body", string(responseBody), "attempt", attempt)
-				if attempt < maxRetries && !isNonRetryableBodyError(bodyErr) {
-					lastErr = bodyErr
-					continue
-				}
-				recordProviderError(span, responseBody, resp.StatusCode)
-				return EmbeddingResponse{}, bodyErr
-			}
-			recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode, body: responseBody})
-			break // Success
-		}
-
-		recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode, body: responseBody})
-
-		// Check if we should retry
-		if isRetryableStatusCode(resp.StatusCode) && attempt < maxRetries {
-			lastErr = fmt.Errorf("llm API error: %s", resp.Status)
-			continue
-		}
-
-		// Non-retryable error or max retries reached
-		c.logger.Error("Embeddings returned non-OK status", "status", resp.Status, "body", string(responseBody))
-		recordProviderError(span, responseBody, resp.StatusCode)
-		return EmbeddingResponse{}, fmt.Errorf("llm API error: %s", resp.Status)
+	outcome, err := c.doRequestWithRetry(ctx, span, retryRequest{
+		endpoint: embeddingsURL,
+		body:     body,
+		opName:   "embeddings request",
+		model:    req.Model,
+	})
+	span.SetAttributes(attribute.Int("llm.attempts", outcome.attempts))
+	if len(outcome.retryDelays) > 0 {
+		span.SetAttributes(attribute.Int64Slice("llm.retry_delays_ms", outcome.retryDelays))
 	}
+	if err != nil {
+		return EmbeddingResponse{}, err
+	}
+	responseBody := outcome.body
 
 	var embeddingResp EmbeddingResponse
 	if err := json.Unmarshal(responseBody, &embeddingResp); err != nil {
