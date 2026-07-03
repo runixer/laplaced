@@ -10,6 +10,7 @@ import (
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -43,8 +44,8 @@ func setupArtifactTest(t *testing.T) (*config.Config, *i18n.Translator, *Laplace
 	return cfg, translator, agent, mockStore, tempDir
 }
 
-// TestLoadArtifactFullContent_EarlyReturn tests early return conditions.
-func TestLoadArtifactFullContent_EarlyReturn(t *testing.T) {
+// TestArtifactLoader_EarlyReturn tests early return conditions.
+func TestArtifactLoader_EarlyReturn(t *testing.T) {
 	_, _, agent, _, _ := setupArtifactTest(t)
 
 	tests := []struct {
@@ -82,7 +83,7 @@ func TestLoadArtifactFullContent_EarlyReturn(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.setupFunc(agent)
-			parts, err := agent.loadArtifactFullContent(context.Background(), "123", tt.artifactIDs)
+			parts, err := agent.artifactLoader().Load(context.Background(), "123", tt.artifactIDs)
 			require.NoError(t, err)
 			if tt.expectNil {
 				assert.Nil(t, parts)
@@ -91,8 +92,8 @@ func TestLoadArtifactFullContent_EarlyReturn(t *testing.T) {
 	}
 }
 
-// TestLoadArtifactFullContent_FailedArtifactSkipped keeps failed artifacts out of context.
-func TestLoadArtifactFullContent_FailedArtifactSkipped(t *testing.T) {
+// TestArtifactLoader_FailedArtifactSkipped keeps failed artifacts out of context.
+func TestArtifactLoader_FailedArtifactSkipped(t *testing.T) {
 	_, _, agent, mockStore, tempDir := setupArtifactTest(t)
 
 	userID := storage.ScopeID("123")
@@ -112,16 +113,16 @@ func TestLoadArtifactFullContent_FailedArtifactSkipped(t *testing.T) {
 		CreatedAt: time.Now(),
 	}, nil)
 
-	parts, err := agent.loadArtifactFullContent(context.Background(), userID, []int64{artifactID})
+	parts, err := agent.artifactLoader().Load(context.Background(), userID, []int64{artifactID})
 	require.NoError(t, err)
 	assert.Nil(t, parts, "failed artifacts must not be loaded into context")
 
 	mockStore.AssertExpectations(t)
 }
 
-// TestLoadArtifactFullContent_PendingArtifactLoads loads session-fresh artifacts
+// TestArtifactLoader_PendingArtifactLoads loads session-fresh artifacts
 // whose extraction hasn't finished yet — the file exists, only metadata is missing.
-func TestLoadArtifactFullContent_PendingArtifactLoads(t *testing.T) {
+func TestArtifactLoader_PendingArtifactLoads(t *testing.T) {
 	_, _, agent, mockStore, tempDir := setupArtifactTest(t)
 
 	userID := storage.ScopeID("123")
@@ -134,6 +135,7 @@ func TestLoadArtifactFullContent_PendingArtifactLoads(t *testing.T) {
 	mockStore.On("GetArtifact", userID, artifactID).Return(&storage.Artifact{
 		ID:           artifactID,
 		State:        "pending",
+		FileType:     "image",
 		FilePath:     "test.png",
 		FileSize:     12,
 		MimeType:     "image/png",
@@ -142,15 +144,15 @@ func TestLoadArtifactFullContent_PendingArtifactLoads(t *testing.T) {
 	}, nil)
 	mockStore.On("IncrementContextLoadCount", userID, []int64{artifactID}).Return(nil)
 
-	parts, err := agent.loadArtifactFullContent(context.Background(), userID, []int64{artifactID})
+	parts, err := agent.artifactLoader().Load(context.Background(), userID, []int64{artifactID})
 	require.NoError(t, err)
 	assert.NotEmpty(t, parts, "pending artifacts must load into context")
 
 	mockStore.AssertExpectations(t)
 }
 
-// TestLoadArtifactFullContent_ArtifactNotFound handles GetArtifact errors gracefully.
-func TestLoadArtifactFullContent_ArtifactNotFound(t *testing.T) {
+// TestArtifactLoader_ArtifactNotFound handles GetArtifact errors gracefully.
+func TestArtifactLoader_ArtifactNotFound(t *testing.T) {
 	_, _, agent, mockStore, _ := setupArtifactTest(t)
 
 	userID := storage.ScopeID("123")
@@ -159,15 +161,15 @@ func TestLoadArtifactFullContent_ArtifactNotFound(t *testing.T) {
 	// Mock artifact not found
 	mockStore.On("GetArtifact", userID, artifactID).Return(nil, assert.AnError)
 
-	parts, err := agent.loadArtifactFullContent(context.Background(), userID, []int64{artifactID})
+	parts, err := agent.artifactLoader().Load(context.Background(), userID, []int64{artifactID})
 	require.NoError(t, err)
 	assert.Nil(t, parts, "should return nil when artifact not found")
 
 	mockStore.AssertExpectations(t)
 }
 
-// TestLoadArtifactFullContent_FileReadError handles file read errors gracefully.
-func TestLoadArtifactFullContent_FileReadError(t *testing.T) {
+// TestArtifactLoader_FileReadError handles file read errors gracefully.
+func TestArtifactLoader_FileReadError(t *testing.T) {
 	_, _, agent, mockStore, _ := setupArtifactTest(t)
 
 	userID := storage.ScopeID("123")
@@ -182,15 +184,15 @@ func TestLoadArtifactFullContent_FileReadError(t *testing.T) {
 		CreatedAt: time.Now(),
 	}, nil)
 
-	parts, err := agent.loadArtifactFullContent(context.Background(), userID, []int64{artifactID})
+	parts, err := agent.artifactLoader().Load(context.Background(), userID, []int64{artifactID})
 	require.NoError(t, err)
 	assert.Nil(t, parts, "should return nil when file cannot be read")
 
 	mockStore.AssertExpectations(t)
 }
 
-// TestLoadArtifactFullContent_CountLimit respects the max artifacts count limit.
-func TestLoadArtifactFullContent_CountLimit(t *testing.T) {
+// TestArtifactLoader_CountLimit respects the max artifacts count limit.
+func TestArtifactLoader_CountLimit(t *testing.T) {
 	cfg, _, agent, mockStore, tempDir := setupArtifactTest(t)
 
 	cfg.Agents.Reranker.Artifacts.Max = 2 // Set max to 2
@@ -226,17 +228,17 @@ func TestLoadArtifactFullContent_CountLimit(t *testing.T) {
 	// Expect IncrementContextLoadCount to be called with 2 artifact IDs
 	mockStore.On("IncrementContextLoadCount", userID, []int64{int64(1), int64(2)}).Return(nil)
 
-	parts, err := agent.loadArtifactFullContent(context.Background(), userID, []int64{1, 2, 3})
+	parts, err := agent.artifactLoader().Load(context.Background(), userID, []int64{1, 2, 3})
 	require.NoError(t, err)
 	assert.NotNil(t, parts)
-	// Should have 2 artifacts (TextPart + FilePart for each = 4 parts)
-	assert.Len(t, parts, 4, "should load max 2 artifacts")
+	// One TaggedPart per loaded artifact (markers are rendered later)
+	assert.Len(t, parts, 2, "should load max 2 artifacts")
 
 	mockStore.AssertExpectations(t)
 }
 
-// TestLoadArtifactFullContent_SizeLimit respects the max bytes limit.
-func TestLoadArtifactFullContent_SizeLimit(t *testing.T) {
+// TestArtifactLoader_SizeLimit respects the max bytes limit.
+func TestArtifactLoader_SizeLimit(t *testing.T) {
 	cfg, _, agent, mockStore, tempDir := setupArtifactTest(t)
 
 	cfg.Agents.Reranker.Artifacts.MaxContextBytes = 30 // Set very low limit
@@ -275,17 +277,17 @@ func TestLoadArtifactFullContent_SizeLimit(t *testing.T) {
 
 	mockStore.On("IncrementContextLoadCount", userID, []int64{int64(1)}).Return(nil)
 
-	parts, err := agent.loadArtifactFullContent(context.Background(), userID, []int64{1, 2})
+	parts, err := agent.artifactLoader().Load(context.Background(), userID, []int64{1, 2})
 	require.NoError(t, err)
 	assert.NotNil(t, parts)
-	// Should have only the first artifact (TextPart + FilePart = 2 parts)
-	assert.Len(t, parts, 2, "should stop loading when size limit would be exceeded")
+	// Only the first artifact fits (one TaggedPart per artifact)
+	assert.Len(t, parts, 1, "should stop loading when size limit would be exceeded")
 
 	mockStore.AssertExpectations(t)
 }
 
-// TestLoadArtifactFullContent_UsageTracking calls IncrementContextLoadCount.
-func TestLoadArtifactFullContent_UsageTracking(t *testing.T) {
+// TestArtifactLoader_UsageTracking calls IncrementContextLoadCount.
+func TestArtifactLoader_UsageTracking(t *testing.T) {
 	_, _, agent, mockStore, tempDir := setupArtifactTest(t)
 
 	userID := storage.ScopeID("123")
@@ -306,8 +308,79 @@ func TestLoadArtifactFullContent_UsageTracking(t *testing.T) {
 
 	mockStore.On("IncrementContextLoadCount", userID, []int64{int64(1)}).Return(nil)
 
-	_, err = agent.loadArtifactFullContent(context.Background(), userID, []int64{1})
+	_, err = agent.artifactLoader().Load(context.Background(), userID, []int64{1})
 	require.NoError(t, err)
+
+	mockStore.AssertExpectations(t)
+}
+
+// TestArtifactLoader_UnknownFileTypeSkipped pins the skip semantics for an
+// artifact with an unrecognized file_type: nothing is loaded, no usage is
+// counted, and no dangling 📄 marker is produced. (Before the ArtifactLoader
+// extraction, such an artifact left a marker TextPart with no media part and
+// still consumed budget + usage count.)
+func TestArtifactLoader_UnknownFileTypeSkipped(t *testing.T) {
+	_, _, agent, mockStore, tempDir := setupArtifactTest(t)
+
+	userID := storage.ScopeID("123")
+
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "blob.bin"), []byte("content"), 0600))
+
+	mockStore.On("GetArtifact", userID, int64(1)).Return(&storage.Artifact{
+		ID:        1,
+		State:     "ready",
+		FileType:  "mystery",
+		FilePath:  "blob.bin",
+		FileSize:  7,
+		CreatedAt: time.Now(),
+	}, nil).Once()
+	// No IncrementContextLoadCount expectation: a skipped artifact must not
+	// count as used.
+
+	parts, err := agent.artifactLoader().Load(context.Background(), userID, []int64{1})
+	require.NoError(t, err)
+	assert.Empty(t, parts, "unknown file type must not produce any parts")
+
+	mockStore.AssertExpectations(t)
+}
+
+// TestArtifactLoader_ProvenanceFields verifies the loader tags each part with
+// the provenance the renderer and downstream rules rely on: recalled source,
+// media kind from file type, artifact ID, display name, and the
+// memory_<id>_ filename anchor on the media part itself.
+func TestArtifactLoader_ProvenanceFields(t *testing.T) {
+	_, _, agent, mockStore, tempDir := setupArtifactTest(t)
+
+	userID := storage.ScopeID("123")
+	created := time.Date(2025, 1, 31, 12, 0, 0, 0, time.UTC)
+
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "old.ogg"), []byte("AUD"), 0600))
+
+	mockStore.On("GetArtifact", userID, int64(9)).Return(&storage.Artifact{
+		ID:        9,
+		State:     "ready",
+		FileType:  "voice",
+		FilePath:  "old.ogg",
+		MimeType:  "audio/ogg",
+		FileSize:  3,
+		CreatedAt: created,
+	}, nil).Once()
+	mockStore.On("IncrementContextLoadCount", userID, []int64{int64(9)}).Return(nil)
+
+	parts, err := agent.artifactLoader().Load(context.Background(), userID, []int64{9})
+	require.NoError(t, err)
+	require.Len(t, parts, 1)
+
+	tp := parts[0]
+	assert.Equal(t, SourceRecalled, tp.Source)
+	assert.Equal(t, KindAudio, tp.Kind)
+	assert.Equal(t, int64(9), tp.ArtifactID)
+	assert.Equal(t, "artifact_9", tp.Name, "empty OriginalName falls back to artifact_<id>")
+	assert.Equal(t, created, tp.CreatedAt)
+
+	fp, ok := tp.Part.(llm.FilePart)
+	require.True(t, ok)
+	assert.Equal(t, "memory_9_audio.ogg", fp.File.FileName)
 
 	mockStore.AssertExpectations(t)
 }

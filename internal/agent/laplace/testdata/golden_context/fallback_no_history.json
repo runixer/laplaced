@@ -1,0 +1,42 @@
+[
+  {
+    "role": "system",
+    "content": [
+      {
+        "type": "text",
+        "text": "You are a helpful assistant."
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "current question"
+      },
+      {
+        "type": "text",
+        "text": "📷 Image from the CURRENT message (sent just now — act on / analyze THIS one)."
+      },
+      {
+        "type": "file",
+        "file": {
+          "filename": "photo.jpg",
+          "file_data": "data:image/jpeg;base64,SU1HLUJZVEVT"
+        }
+      },
+      {
+        "type": "text",
+        "text": "📄 report.pdf — memory artifact #7 (31 Jan 2025)"
+      },
+      {
+        "type": "file",
+        "file": {
+          "filename": "memory_7_report.pdf",
+          "file_data": "data:application/pdf;base64,UERGLUJZVEVT"
+        }
+      }
+    ]
+  }
+]

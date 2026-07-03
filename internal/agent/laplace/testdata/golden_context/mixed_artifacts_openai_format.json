@@ -1,0 +1,80 @@
+[
+  {
+    "role": "system",
+    "content": [
+      {
+        "type": "text",
+        "text": "You are a helpful assistant."
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "earlier question"
+      }
+    ]
+  },
+  {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "earlier answer"
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "current question"
+      },
+      {
+        "type": "text",
+        "text": "📷 Image from the CURRENT message (sent just now — act on / analyze THIS one)."
+      },
+      {
+        "type": "file",
+        "file": {
+          "filename": "photo.jpg",
+          "file_data": "data:image/jpeg;base64,SU1HLUJZVEVT"
+        }
+      },
+      {
+        "type": "text",
+        "text": "📄 report.pdf — memory artifact #7 (31 Jan 2025)"
+      },
+      {
+        "type": "file",
+        "file": {
+          "filename": "memory_7_report.pdf",
+          "file_data": "data:application/pdf;base64,UERGLUJZVEVT"
+        }
+      },
+      {
+        "type": "text",
+        "text": "📄 diagram.png — memory artifact #11 (31 Jan 2025)"
+      },
+      {
+        "type": "image_url",
+        "image_url": {
+          "url": "data:image/png;base64,SU1HLUJZVEVT"
+        }
+      },
+      {
+        "type": "text",
+        "text": "📄 clip.mp4 — memory artifact #13 (31 Jan 2025)"
+      },
+      {
+        "type": "video_url",
+        "video_url": {
+          "url": "data:video/mp4;base64,VklELUJZVEVT"
+        }
+      }
+    ]
+  }
+]

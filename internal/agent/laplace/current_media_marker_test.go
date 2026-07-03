@@ -42,10 +42,11 @@ func TestCurrentMediaMarker_LocalesDefined(t *testing.T) {
 	}
 }
 
-// TestMarkCurrentMedia covers the helper in isolation: a kind-matched marker is
-// inserted before every media part (🎤 voice, 📎 file, 📷 image), never before
-// text, order is preserved.
-func TestMarkCurrentMedia(t *testing.T) {
+// TestRenderTagged_CurrentMarkers covers the renderer in isolation: with
+// markCurrent set, a kind-matched marker is inserted before every current
+// media part (🎤 voice, 📎 file, 📷 image), never before text, order is
+// preserved.
+func TestRenderTagged_CurrentMarkers(t *testing.T) {
 	cfg, _, lap, _, _ := setupArtifactTest(t)
 	cfg.Bot.Language = "en"
 	mImage := lap.translator.Get("en", "bot.current_media_marker_image")
@@ -74,7 +75,7 @@ func TestMarkCurrentMedia(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			out := lap.markCurrentMedia(tt.in)
+			out := lap.renderTagged(tagCurrentParts(tt.in), true)
 			require.Len(t, out, tt.wantLen)
 			for idx, want := range tt.markers {
 				tp, ok := out[idx].(llm.TextPart)

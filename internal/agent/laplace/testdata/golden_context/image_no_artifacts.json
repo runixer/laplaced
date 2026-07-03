@@ -1,0 +1,45 @@
+[
+  {
+    "role": "system",
+    "content": [
+      {
+        "type": "text",
+        "text": "You are a helpful assistant."
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "earlier question"
+      }
+    ]
+  },
+  {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "earlier answer"
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "current question"
+      },
+      {
+        "type": "file",
+        "file": {
+          "filename": "photo.jpg",
+          "file_data": "data:image/jpeg;base64,SU1HLUJZVEVT"
+        }
+      }
+    ]
+  }
+]

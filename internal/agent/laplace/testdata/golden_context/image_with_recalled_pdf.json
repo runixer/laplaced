@@ -1,0 +1,69 @@
+[
+  {
+    "role": "system",
+    "content": [
+      {
+        "type": "text",
+        "text": "You are a helpful assistant."
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "\u003cartifact_context query=\"user asks about the report\"\u003e\n  \u003cartifact id=\"7\" type=\"pdf (memory_7_report.pdf)\" relevance=\"0.87\"\u003e\n    \u003csummary\u003eQuarterly report\u003c/summary\u003e\n    \u003ckeywords\u003ereport, q4\u003c/keywords\u003e\n  \u003c/artifact\u003e\n\u003c/artifact_context\u003e"
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "earlier question"
+      }
+    ]
+  },
+  {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "earlier answer"
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "current question"
+      },
+      {
+        "type": "text",
+        "text": "📷 Image from the CURRENT message (sent just now — act on / analyze THIS one)."
+      },
+      {
+        "type": "file",
+        "file": {
+          "filename": "photo.jpg",
+          "file_data": "data:image/jpeg;base64,SU1HLUJZVEVT"
+        }
+      },
+      {
+        "type": "text",
+        "text": "📄 report.pdf — memory artifact #7 (31 Jan 2025)"
+      },
+      {
+        "type": "file",
+        "file": {
+          "filename": "memory_7_report.pdf",
+          "file_data": "data:application/pdf;base64,UERGLUJZVEVT"
+        }
+      }
+    ]
+  }
+]

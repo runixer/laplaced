@@ -1,0 +1,60 @@
+[
+  {
+    "role": "system",
+    "content": [
+      {
+        "type": "text",
+        "text": "You are a helpful assistant."
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "earlier question"
+      }
+    ]
+  },
+  {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "earlier answer"
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "current question"
+      },
+      {
+        "type": "text",
+        "text": "🎤 Voice/audio from the CURRENT message (sent just now — transcribe and respond to THIS one)."
+      },
+      {
+        "type": "file",
+        "file": {
+          "filename": "voice.ogg",
+          "file_data": "data:audio/ogg;base64,QVVELUJZVEVT"
+        }
+      },
+      {
+        "type": "text",
+        "text": "📄 artifact_9 — memory artifact #9 (31 Jan 2025)"
+      },
+      {
+        "type": "file",
+        "file": {
+          "filename": "memory_9_audio.ogg",
+          "file_data": "data:audio/ogg;base64,QVVELUJZVEVT"
+        }
+      }
+    ]
+  }
+]

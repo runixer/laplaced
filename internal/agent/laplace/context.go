@@ -2,23 +2,15 @@ package laplace
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
-	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/prompts"
-	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/llm"
-	"github.com/runixer/laplaced/internal/obs"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
 )
@@ -82,24 +74,22 @@ func (l *Laplace) BuildMessages(
 	// ("у меня нет глаз для файлов из прошлого диалога"), especially once its own
 	// earlier refusals are in the session. Adjacent to the current message it
 	// reads them correctly (verified by replaying a failing request both ways).
-	var artifactParts []interface{}
+	var recalled []TaggedPart
 	if len(contextData.SelectedArtifactIDs) > 0 {
 		var err error
-		artifactParts, err = l.loadArtifactFullContent(ctx, contextData.UserID, contextData.SelectedArtifactIDs)
+		recalled, err = l.artifactLoader().Load(ctx, contextData.UserID, contextData.SelectedArtifactIDs)
 		if err != nil {
 			l.logger.Warn("failed to load artifact content", "error", err)
 		}
 	}
 
-	// When memory artifacts ride alongside the live attachment, tag the current
-	// media with a 📷 marker so the model can't confuse a same-named "photo.jpg"
-	// pulled from memory (📄) with what the user just sent. Skipped when no
-	// artifacts are loaded — there is no ambiguity then, so the common
-	// single-attachment prompt is left byte-for-byte unchanged.
-	currentParts := currentMessageParts
-	if len(artifactParts) > 0 && len(currentMessageParts) > 0 {
-		currentParts = l.markCurrentMedia(currentMessageParts)
-	}
+	// Render provenance markers in one place (renderTagged). Current media is
+	// marked (🎤/🎥/📷/📎) only when memory artifacts ride alongside — so the
+	// model can't confuse a same-named "photo.jpg" pulled from memory (📄)
+	// with what the user just sent. Without artifacts there is no ambiguity,
+	// and the common single-attachment prompt stays byte-for-byte unchanged.
+	currentParts := l.renderTagged(tagCurrentParts(currentMessageParts), len(recalled) > 0)
+	artifactParts := l.renderTagged(recalled, false)
 
 	// Add Recent History (active session). The current (last user) message carries
 	// the multimodal current-message parts plus any loaded artifact parts.
@@ -134,61 +124,6 @@ func (l *Laplace) BuildMessages(
 	}
 
 	return orMessages
-}
-
-// markCurrentMedia prepends a positional marker before each media part of the
-// current message. Paired with the 📄 memory-artifact marker, it lets the model
-// tell a live attachment apart from a recalled one when both are present and may
-// share a generic name like "photo.jpg". The marker is chosen to match the media
-// kind (🎤 voice, 🎥 video, 📎 file, 📷 image) so it reads coherently and — for
-// voice — pairs with voice_instruction to stop the model transcribing a recalled
-// 📄 audio as the current one. Caller only invokes this when memory artifacts are
-// also loaded.
-func (l *Laplace) markCurrentMedia(parts []interface{}) []interface{} {
-	out := make([]interface{}, 0, len(parts)+1)
-	for _, p := range parts {
-		if marker := l.currentMediaMarker(p); marker != "" {
-			out = append(out, llm.TextPart{Type: "text", Text: marker})
-		}
-		out = append(out, p)
-	}
-	return out
-}
-
-// currentMediaMarker returns the localized "from the CURRENT message" marker for
-// a media part, keyed to its media kind. Returns "" for non-media parts (text)
-// and unknown shapes. Falls back to the generic bot.current_media_marker if a
-// per-kind key is missing.
-func (l *Laplace) currentMediaMarker(p interface{}) string {
-	var key string
-	switch part := p.(type) {
-	case llm.FilePart:
-		key = currentMediaMarkerKey(part.File.FileData)
-	case llm.ImageURLPart:
-		key = "bot.current_media_marker_image"
-	case llm.VideoURLPart:
-		key = "bot.current_media_marker_video"
-	default:
-		return ""
-	}
-	if marker := l.translator.Get(l.cfg.Bot.Language, key); marker != "" {
-		return marker
-	}
-	return l.translator.Get(l.cfg.Bot.Language, "bot.current_media_marker")
-}
-
-// currentMediaMarkerKey maps a data-URL MIME prefix to its per-kind marker key.
-func currentMediaMarkerKey(dataURL string) string {
-	switch {
-	case strings.HasPrefix(dataURL, "data:audio/"):
-		return "bot.current_media_marker_voice"
-	case strings.HasPrefix(dataURL, "data:video/"):
-		return "bot.current_media_marker_video"
-	case strings.HasPrefix(dataURL, "data:image/"):
-		return "bot.current_media_marker_image"
-	default:
-		return "bot.current_media_marker_file"
-	}
 }
 
 // platformName maps the configured transport to the human-readable platform
@@ -324,257 +259,6 @@ func (l *Laplace) LoadContextData(
 	}
 
 	return data, nil
-}
-
-// loadArtifactFullContent loads full artifact content as multimodal parts (v0.6.0).
-// loadArtifactFullContent loads full file content for artifacts as FilePart structs.
-//
-// Complexity: MEDIUM (CC=37) - artifact loading, validation, size tracking
-// Dependencies: artifactRepo, files storage
-// Side effects: Reads files from disk
-// Error handling: Skips failed artifacts, logs warnings
-//
-// Returns a slice of content parts (FilePart for all file types) for the given artifact IDs.
-// Respects max and max_context_bytes from reranker.artifacts config (v0.6.0).
-func (l *Laplace) loadArtifactFullContent(ctx context.Context, userID storage.ScopeID, artifactIDs []int64) ([]interface{}, error) {
-	if l.artifactRepo == nil || len(artifactIDs) == 0 || l.fileStorage == nil {
-		return nil, nil
-	}
-
-	// Get limits from reranker config with defaults (v0.6.0)
-	maxArtifacts := l.cfg.Agents.Reranker.Artifacts.Max
-	if maxArtifacts <= 0 {
-		maxArtifacts = 10
-	}
-	maxBytes := l.cfg.Agents.Reranker.Artifacts.MaxContextBytes
-	if maxBytes <= 0 {
-		maxBytes = 20 * 1024 * 1024 // 20MB default (aligned with Telegram Bot API limit)
-	}
-
-	var contentParts []interface{}
-	var totalBytes int
-	loadedCount := 0
-	// Track successfully loaded artifact IDs for usage counting (v0.6.0)
-	var loadedArtifactIDs []int64
-	// Capture each loaded artifact's metadata for the laplace.artifacts_loaded
-	// span event. We accumulate during the loop and emit once at the end so
-	// replay sees the full set as a single batch entry. content_hash matches
-	// artifacts.content_hash → enables snapshot-DB lookup without raw base64.
-	loadedEntries := make([]agent.MediaEntry, 0, len(artifactIDs))
-
-	for _, artifactID := range artifactIDs {
-		// Check artifact count limit (v0.6.0)
-		if loadedCount >= maxArtifacts {
-			l.logger.Info("artifact count limit reached",
-				"loaded", loadedCount,
-				"max", maxArtifacts,
-				"remaining", len(artifactIDs)-loadedCount,
-			)
-			break
-		}
-
-		artifact, err := l.artifactRepo.GetArtifact(userID, artifactID)
-		if err != nil {
-			l.logger.Warn("failed to load artifact", "artifact_id", artifactID, "error", err)
-			continue
-		}
-		// 'pending'/'processing' artifacts are loadable — the file exists, only the
-		// extracted metadata is missing (session-injected candidates arrive in this
-		// state). 'failed' stays excluded: a file that broke extraction (e.g. a
-		// safety-blocked one) must never be re-injected into context.
-		if artifact == nil || artifact.State == "failed" {
-			state := "<nil>"
-			if artifact != nil {
-				state = artifact.State
-			}
-			l.logger.Debug("artifact not loadable", "artifact_id", artifactID, "state", state)
-			continue
-		}
-
-		// Validate MIME type is supported by Gemini (skip unsupported old artifacts)
-		if artifact.MimeType != "" && !files.IsGeminiSupported(artifact.MimeType) {
-			l.logger.Debug("skipping artifact with unsupported MIME type",
-				"artifact_id", artifactID,
-				"mime_type", artifact.MimeType,
-				"original_name", artifact.OriginalName,
-			)
-			continue
-		}
-
-		// Check cumulative size limit BEFORE reading file (v0.6.0)
-		if totalBytes+int(artifact.FileSize) > maxBytes {
-			l.logger.Info("artifact size limit would be exceeded",
-				"artifact_id", artifactID,
-				"artifact_size", artifact.FileSize,
-				"current_total", totalBytes,
-				"max_bytes", maxBytes,
-			)
-			break
-		}
-
-		// Read file content from the artifact blob store
-		fileData, err := l.fileStorage.ReadFile(ctx, artifact.FilePath)
-		if err != nil {
-			l.logger.Warn("failed to read artifact file", "artifact_id", artifactID, "key", artifact.FilePath, "error", err)
-			continue
-		}
-
-		// Update tracking (v0.6.0)
-		totalBytes += len(fileData)
-		loadedCount++
-		loadedArtifactIDs = append(loadedArtifactIDs, artifact.ID)
-		// Sha256 here — the file is on disk by content_hash already, so this
-		// is mainly a defensive recompute (~5MB/ms). Replay validates: if the
-		// hash in the trace does not match what's on disk in the snapshot,
-		// surface a clear error rather than silently using corrupted bytes.
-		fileHash := sha256.Sum256(fileData)
-		entryName := artifact.OriginalName
-		if entryName == "" {
-			entryName = fmt.Sprintf("artifact_%d", artifact.ID)
-		}
-		loadedEntries = append(loadedEntries, agent.MediaEntry{
-			Filename:  entryName,
-			Mime:      artifact.MimeType,
-			SizeBytes: len(fileData),
-			SHA256:    hex.EncodeToString(fileHash[:]),
-			Source:    "reranker_selected",
-		})
-
-		// Encode as base64
-		base64Data := base64.StdEncoding.EncodeToString(fileData)
-
-		// Build display name for the artifact
-		displayName := artifact.OriginalName
-		if displayName == "" {
-			displayName = fmt.Sprintf("artifact_%d", artifact.ID)
-		}
-
-		// Format date for display (e.g., "31 янв 2026")
-		dateStr := artifact.CreatedAt.Format("2 Jan 2006")
-		if artifact.CreatedAt.Year() == time.Now().Year() {
-			// For current year, show shorter format (e.g., "31 янв")
-			dateStr = artifact.CreatedAt.Format("2 Jan")
-		}
-
-		// Add text label to identify the artifact (helps LLM follow artifact_protocol).
-		// Explicit "memory artifact #ID" cue lets the model distinguish a historical
-		// FilePart from a live attachment that may share the same OriginalName —
-		// Telegram photos default to "photo.jpg" both on download and in storage.
-		contentParts = append(contentParts, llm.TextPart{
-			Type: "text",
-			Text: fmt.Sprintf("📄 %s — memory artifact #%d (%s)", displayName, artifact.ID, dateStr),
-		})
-
-		// Create appropriate content part based on file type.
-		// Each FilePart.FileName is prefixed "memory_<id>_" so the binding the model
-		// makes between the text marker, the FilePart bytes, and the <artifact_context>
-		// summary is anchored on a unique token instead of a generic "photo.jpg".
-		switch artifact.FileType {
-		case "pdf", "document":
-			// PDF and documents use FilePart with data URL format
-			fileName := artifact.OriginalName
-			if fileName == "" {
-				fileName = "artifact.pdf"
-			}
-			fileName = fmt.Sprintf("memory_%d_%s", artifact.ID, fileName)
-			// Build MIME type for data URL
-			mimeType := artifact.MimeType
-			if mimeType == "" {
-				if artifact.FileType == "pdf" {
-					mimeType = "application/pdf"
-				} else {
-					mimeType = "application/octet-stream"
-				}
-			}
-			// Normalize MIME type for Gemini (e.g., text/x-web-markdown -> text/plain)
-			mimeType = files.NormalizeMimeForGemini(mimeType)
-			contentParts = append(contentParts, llm.MediaPart(
-				l.cfg.LLM.ImageInputFormat, mimeType, fileName,
-				fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data)))
-		case "image", "photo":
-			mimeType := artifact.MimeType
-			if mimeType == "" {
-				mimeType = "image/jpeg"
-			}
-			fileName := artifact.OriginalName
-			if fileName == "" {
-				fileName = "image"
-			}
-			fileName = fmt.Sprintf("memory_%d_%s", artifact.ID, fileName)
-			// Normalize MIME type for Gemini
-			mimeType = files.NormalizeMimeForGemini(mimeType)
-			contentParts = append(contentParts, llm.MediaPart(
-				l.cfg.LLM.ImageInputFormat, mimeType, fileName,
-				"data:"+mimeType+";base64,"+base64Data))
-		case "voice", "audio", "video_note", "video":
-			// Audio and video use FilePart
-			fileName := artifact.OriginalName
-			if fileName == "" {
-				// Generate filename from type
-				ext := "ogg" // default
-				if artifact.MimeType != "" {
-					switch artifact.MimeType {
-					case "audio/mpeg", "audio/mp3":
-						ext = "mp3"
-					case "audio/wav":
-						ext = "wav"
-					case "audio/ogg":
-						ext = "ogg"
-					case "audio/m4a":
-						ext = "m4a"
-					case "video/mp4":
-						ext = "mp4"
-					}
-				}
-				fileName = "audio." + ext
-			}
-			fileName = fmt.Sprintf("memory_%d_%s", artifact.ID, fileName)
-			mimeType := artifact.MimeType
-			if mimeType == "" {
-				mimeType = "audio/ogg"
-			}
-			// Normalize MIME type for Gemini
-			mimeType = files.NormalizeMimeForGemini(mimeType)
-			contentParts = append(contentParts, llm.MediaPart(
-				l.cfg.LLM.ImageInputFormat, mimeType, fileName,
-				fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data)))
-		default:
-			l.logger.Warn("unknown artifact file type", "artifact_id", artifactID, "file_type", artifact.FileType)
-			continue
-		}
-
-		l.logger.Debug("loaded artifact for context", "artifact_id", artifactID, "file_type", artifact.FileType, "size_bytes", len(fileData))
-	}
-
-	if loadedCount > 0 {
-		l.logger.Debug("artifact loading complete",
-			"loaded_count", loadedCount,
-			"total_bytes", totalBytes,
-			"max_artifacts", maxArtifacts,
-			"max_bytes", maxBytes,
-		)
-	}
-
-	// Emit laplace.artifacts_loaded under the laplace.Execute span — replay
-	// reads this to learn which artifacts the agent actually saw this turn,
-	// in what order, and with what bytes (sha256 contract). Always emit when
-	// we loaded anything; absence in the trace is meaningful.
-	if len(loadedEntries) > 0 && obs.ContentEnabled() {
-		if body, err := json.Marshal(loadedEntries); err == nil {
-			obs.RecordContent(trace.SpanFromContext(ctx), "laplace.artifacts_loaded", string(body))
-		}
-	}
-
-	// Track artifact usage (v0.6.0)
-	// Synchronous to avoid race condition on shutdown (CRIT-1 fix).
-	// Latency impact is negligible (~5-10ms) compared to LLM call.
-	if len(loadedArtifactIDs) > 0 && l.artifactRepo != nil {
-		if err := l.artifactRepo.IncrementContextLoadCount(userID, loadedArtifactIDs); err != nil {
-			l.logger.Warn("failed to increment artifact load count", "error", err)
-		}
-	}
-
-	return contentParts, nil
 }
 
 // deduplicateTopics removes messages from retrieved topics that are already present in recent history.

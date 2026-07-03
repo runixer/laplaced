@@ -1,0 +1,49 @@
+[
+  {
+    "role": "system",
+    "content": [
+      {
+        "type": "text",
+        "text": "You are a helpful assistant."
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "earlier question"
+      }
+    ]
+  },
+  {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "earlier answer"
+      }
+    ]
+  },
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "current question"
+      },
+      {
+        "type": "text",
+        "text": "📄 report.pdf — memory artifact #7 (31 Jan 2025)"
+      },
+      {
+        "type": "file",
+        "file": {
+          "filename": "memory_7_report.pdf",
+          "file_data": "data:application/pdf;base64,UERGLUJZVEVT"
+        }
+      }
+    ]
+  }
+]
