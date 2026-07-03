@@ -314,10 +314,7 @@ func TestServiceBuilder_ValidBuild(t *testing.T) {
 	assert.Same(t, translator, svc.translator)
 
 	// Verify internal state is initialized
-	assert.NotNil(t, svc.topicVectors)
-	assert.NotNil(t, svc.factVectors)
-	assert.NotNil(t, svc.peopleVectors)
-	assert.NotNil(t, svc.artifactVectors)
+	assert.NotNil(t, svc.vectors)
 	assert.NotNil(t, svc.stopChan)
 	assert.NotNil(t, svc.consolidationTrigger)
 }
@@ -649,23 +646,12 @@ func TestServiceBuilder_VectorMapsInitialized(t *testing.T) {
 
 	require.NoError(t, err)
 
-	// Verify all vector maps are initialized (not nil)
-	assert.NotNil(t, svc.topicVectors, "topicVectors should be initialized")
-	assert.NotNil(t, svc.factVectors, "factVectors should be initialized")
-	assert.NotNil(t, svc.peopleVectors, "peopleVectors should be initialized")
-	assert.NotNil(t, svc.artifactVectors, "artifactVectors should be initialized")
-
-	// Verify they are empty maps
-	assert.Equal(t, 0, len(svc.topicVectors), "topicVectors should be empty")
-	assert.Equal(t, 0, len(svc.factVectors), "factVectors should be empty")
-	assert.Equal(t, 0, len(svc.peopleVectors), "peopleVectors should be empty")
-	assert.Equal(t, 0, len(svc.artifactVectors), "artifactVectors should be empty")
-
-	// Verify max IDs are initialized to 0
-	assert.Equal(t, int64(0), svc.maxLoadedTopicID)
-	assert.Equal(t, int64(0), svc.maxLoadedFactID)
-	assert.Equal(t, int64(0), svc.maxLoadedPersonID)
-	assert.Equal(t, int64(0), svc.maxLoadedArtifactID)
+	// Verify the vector store is initialized and empty
+	require.NotNil(t, svc.vectors, "vector store should be initialized")
+	for _, kind := range []VectorKind{VectorKindTopics, VectorKindFacts, VectorKindPeople, VectorKindArtifacts} {
+		assert.Equal(t, 0, svc.vectors.Count(kind), "%s index should be empty", kind)
+		assert.Equal(t, int64(0), svc.vectors.MaxID(kind), "%s watermark should be 0", kind)
+	}
 }
 
 // mockAgent is a minimal mock implementation of agent.Agent for testing.

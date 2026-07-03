@@ -33,32 +33,12 @@ func TestArtifactLocking(t *testing.T) {
 	assert.True(t, s.tryStartProcessingArtifact(artifactID), "third attempt should succeed after finish")
 }
 
-// TestArtifactVectorItem tests the artifact summary vector item structure (v0.6.0).
-func TestArtifactVectorItem(t *testing.T) {
-	embedding := make([]float32, 10)
-	for i := range embedding {
-		embedding[i] = float32(i) * 0.1
-	}
-
-	item := ArtifactVectorItem{
-		ArtifactID: 123,
-		UserID:     "456",
-		Embedding:  embedding,
-	}
-
-	assert.Equal(t, int64(123), item.ArtifactID)
-	assert.Equal(t, storage.ScopeID("456"), item.UserID)
-	assert.Equal(t, 10, len(item.Embedding))
-	assert.Equal(t, float32(0.5), item.Embedding[5])
-}
-
 // TestLoadNewArtifactSummaries tests incremental artifact summary loading (v0.6.0).
 func TestLoadNewArtifactSummaries(t *testing.T) {
 	s := &Service{
-		artifactRepo:        nil, // Would be mocked in real test
-		artifactVectors:     make(map[storage.ScopeID][]ArtifactVectorItem),
-		maxLoadedArtifactID: 0,
-		logger:              testutil.TestLogger(),
+		artifactRepo: nil, // Would be mocked in real test
+		vectors:      NewMemoryVectorStore(),
+		logger:       testutil.TestLogger(),
 	}
 
 	// When artifactRepo is nil, should return nil

@@ -47,13 +47,13 @@ func TestSearchTopicCandidates(t *testing.T) {
 	userID := storage.ScopeID("123")
 
 	// Add some topic vectors
-	svc.mu.Lock()
-	svc.topicVectors[userID] = []TopicVectorItem{
-		{TopicID: 1, Embedding: []float32{1.0, 0.0, 0.0}},
-		{TopicID: 2, Embedding: []float32{0.9, 0.1, 0.0}}, // Changed to be more similar to query
-		{TopicID: 3, Embedding: []float32{0.8, 0.2, 0.0}}, // Changed to be similar to query
-	}
-	svc.mu.Unlock()
+	svc.vectors.ReplaceAll(VectorKindTopics, map[storage.ScopeID][]VectorEntry{
+		userID: {
+			{ID: 1, Embedding: []float32{1.0, 0.0, 0.0}},
+			{ID: 2, Embedding: []float32{0.9, 0.1, 0.0}}, // Changed to be more similar to query
+			{ID: 3, Embedding: []float32{0.8, 0.2, 0.0}}, // Changed to be similar to query
+		},
+	})
 
 	queryEmbedding := []float32{1.0, 0.0, 0.0}
 
@@ -766,14 +766,12 @@ func TestSearchPeopleAndArtifacts(t *testing.T) {
 	svc.SetArtifactRepository(mockArtifactRepo)
 
 	// Setup people vectors
-	svc.mu.Lock()
-	svc.peopleVectors[userID] = []PersonVectorItem{
-		{PersonID: 100, Embedding: []float32{0.5, 0.5}},
-	}
-	svc.artifactVectors[userID] = []ArtifactVectorItem{
-		{ArtifactID: 5, UserID: userID, Embedding: []float32{0.6, 0.4}},
-	}
-	svc.mu.Unlock()
+	svc.vectors.ReplaceAll(VectorKindPeople, map[storage.ScopeID][]VectorEntry{
+		userID: {{ID: 100, Embedding: []float32{0.5, 0.5}}},
+	})
+	svc.vectors.ReplaceAll(VectorKindArtifacts, map[storage.ScopeID][]VectorEntry{
+		userID: {{ID: 5, Embedding: []float32{0.6, 0.4}}},
+	})
 
 	embedding := []float32{0.1, 0.2}
 
@@ -849,11 +847,9 @@ func TestSearchPeopleAndArtifacts_SessionMergePrepend(t *testing.T) {
 	}
 	svc.SetArtifactRepository(mockArtifactRepo)
 
-	svc.mu.Lock()
-	svc.artifactVectors[userID] = []ArtifactVectorItem{
-		{ArtifactID: 5, UserID: userID, Embedding: []float32{0.6, 0.4}},
-	}
-	svc.mu.Unlock()
+	svc.vectors.ReplaceAll(VectorKindArtifacts, map[storage.ScopeID][]VectorEntry{
+		userID: {{ID: 5, Embedding: []float32{0.6, 0.4}}},
+	})
 
 	_, artifactCandidates := svc.searchPeopleAndArtifacts(
 		context.Background(), userID, []float32{0.1, 0.2}, 0.5,
@@ -955,29 +951,6 @@ func TestFormatSessionMessages_Omission(t *testing.T) {
 
 	// Should include omission marker - with 12 messages, 1 is omitted
 	assert.Contains(t, formatted, "omitted")
-}
-
-// TestVectorItemMethods tests the GetID and GetEmbedding methods for vector items.
-func TestVectorItemMethods(t *testing.T) {
-	// Test TopicVectorItem
-	topicItem := TopicVectorItem{TopicID: 42, Embedding: []float32{0.1, 0.2}}
-	assert.Equal(t, int64(42), topicItem.GetID())
-	assert.Equal(t, []float32{0.1, 0.2}, topicItem.GetEmbedding())
-
-	// Test FactVectorItem
-	factItem := FactVectorItem{FactID: 123, Embedding: []float32{0.3, 0.4}}
-	assert.Equal(t, int64(123), factItem.GetID())
-	assert.Equal(t, []float32{0.3, 0.4}, factItem.GetEmbedding())
-
-	// Test PersonVectorItem
-	personItem := PersonVectorItem{PersonID: 456, Embedding: []float32{0.5, 0.6}}
-	assert.Equal(t, int64(456), personItem.GetID())
-	assert.Equal(t, []float32{0.5, 0.6}, personItem.GetEmbedding())
-
-	// Test ArtifactVectorItem
-	artifactItem := ArtifactVectorItem{ArtifactID: 789, UserID: "999", Embedding: []float32{0.7, 0.8}}
-	assert.Equal(t, int64(789), artifactItem.GetID())
-	assert.Equal(t, []float32{0.7, 0.8}, artifactItem.GetEmbedding())
 }
 
 // TestBuildRetrievalResult_WithArtifacts tests building result with artifact candidates.

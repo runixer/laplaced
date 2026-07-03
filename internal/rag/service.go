@@ -17,31 +17,6 @@ import (
 	"github.com/runixer/laplaced/internal/storage"
 )
 
-// TopicVectorItem stores a topic's embedding for vector search.
-type TopicVectorItem struct {
-	TopicID   int64
-	Embedding []float32
-}
-
-// FactVectorItem stores a fact's embedding for vector search.
-type FactVectorItem struct {
-	FactID    int64
-	Embedding []float32
-}
-
-// PersonVectorItem stores a person's embedding for vector search.
-type PersonVectorItem struct {
-	PersonID  int64
-	Embedding []float32
-}
-
-// ArtifactVectorItem stores artifact summary embeddings for vector search (v0.6.0).
-type ArtifactVectorItem struct {
-	ArtifactID int64
-	UserID     storage.ScopeID
-	Embedding  []float32
-}
-
 // ProcessingStats contains detailed statistics about session processing.
 type ProcessingStats struct {
 	MessagesProcessed int `json:"messages_processed"`
@@ -139,21 +114,13 @@ type Service struct {
 	memoryService        MemoryService
 	translator           *i18n.Translator
 	agentLogger          *agentlog.Logger
-	enricherAgent        agent.Agent                              // Query enrichment agent
-	splitterAgent        agent.Agent                              // Topic splitting agent
-	mergerAgent          agent.Agent                              // Topic merging agent
-	rerankerAgent        agent.Agent                              // Topic reranking agent
-	extractorAgent       agent.Agent                              // Artifact extraction agent (Phase 3)
-	topicVectors         map[storage.ScopeID][]TopicVectorItem    // UserID -> []TopicVectorItem
-	factVectors          map[storage.ScopeID][]FactVectorItem     // UserID -> []FactVectorItem
-	peopleVectors        map[storage.ScopeID][]PersonVectorItem   // UserID -> []PersonVectorItem (v0.5.1)
-	artifactVectors      map[storage.ScopeID][]ArtifactVectorItem // UserID -> []ArtifactVectorItem (v0.6.0)
-	maxLoadedTopicID     int64                                    // Track max loaded topic ID for incremental loading
-	maxLoadedFactID      int64                                    // Track max loaded fact ID for incremental loading
-	maxLoadedPersonID    int64                                    // Track max loaded person ID for incremental loading (v0.5.1)
-	maxLoadedArtifactID  int64                                    // Track max loaded artifact ID for incremental loading (v0.6.0)
-	contextService       *agent.ContextService                    // Context service for loading user context
-	mu                   sync.RWMutex
+	enricherAgent        agent.Agent           // Query enrichment agent
+	splitterAgent        agent.Agent           // Topic splitting agent
+	mergerAgent          agent.Agent           // Topic merging agent
+	rerankerAgent        agent.Agent           // Topic reranking agent
+	extractorAgent       agent.Agent           // Artifact extraction agent (Phase 3)
+	vectors              VectorStore           // Vector index for topics/facts/people/artifacts
+	contextService       *agent.ContextService // Context service for loading user context
 	stopChan             chan struct{}
 	consolidationTrigger chan struct{}
 	wg                   sync.WaitGroup
@@ -372,63 +339,20 @@ func (s *Service) ReloadVectors() error {
 		}
 	}
 
-	s.mu.Lock()
+	topicEntries, tCount := collectVectorEntries(topics, func(t storage.Topic) (storage.ScopeID, int64, []float32) {
+		return t.UserID, t.ID, t.Embedding
+	})
+	factEntries, fCount := collectVectorEntries(facts, func(f storage.Fact) (storage.ScopeID, int64, []float32) {
+		return f.UserID, f.ID, f.Embedding
+	})
+	peopleEntries, pCount := collectVectorEntries(people, func(p storage.Person) (storage.ScopeID, int64, []float32) {
+		return p.UserID, p.ID, p.Embedding
+	})
 
-	// Reset maps for full reload
-	s.topicVectors = make(map[storage.ScopeID][]TopicVectorItem)
-	s.factVectors = make(map[storage.ScopeID][]FactVectorItem)
-	s.peopleVectors = make(map[storage.ScopeID][]PersonVectorItem)
-	s.artifactVectors = make(map[storage.ScopeID][]ArtifactVectorItem)
-	s.maxLoadedTopicID = 0
-	s.maxLoadedFactID = 0
-	s.maxLoadedPersonID = 0
-	s.maxLoadedArtifactID = 0
-
-	tCount := 0
-	for _, t := range topics {
-		if len(t.Embedding) > 0 {
-			s.topicVectors[t.UserID] = append(s.topicVectors[t.UserID], TopicVectorItem{
-				TopicID:   t.ID,
-				Embedding: t.Embedding,
-			})
-			tCount++
-			if t.ID > s.maxLoadedTopicID {
-				s.maxLoadedTopicID = t.ID
-			}
-		}
-	}
-
-	fCount := 0
-	for _, f := range facts {
-		if len(f.Embedding) > 0 {
-			s.factVectors[f.UserID] = append(s.factVectors[f.UserID], FactVectorItem{
-				FactID:    f.ID,
-				Embedding: f.Embedding,
-			})
-			fCount++
-			if f.ID > s.maxLoadedFactID {
-				s.maxLoadedFactID = f.ID
-			}
-		}
-	}
-
-	// v0.5.1: Load people vectors
-	pCount := 0
-	for _, p := range people {
-		if len(p.Embedding) > 0 {
-			s.peopleVectors[p.UserID] = append(s.peopleVectors[p.UserID], PersonVectorItem{
-				PersonID:  p.ID,
-				Embedding: p.Embedding,
-			})
-			pCount++
-			if p.ID > s.maxLoadedPersonID {
-				s.maxLoadedPersonID = p.ID
-			}
-		}
-	}
-
-	// Release lock before loading artifacts (LoadNewArtifactSummaries acquires its own lock)
-	s.mu.Unlock()
+	s.vectors.ReplaceAll(VectorKindTopics, topicEntries)
+	s.vectors.ReplaceAll(VectorKindFacts, factEntries)
+	s.vectors.ReplaceAll(VectorKindPeople, peopleEntries)
+	s.vectors.ReplaceAll(VectorKindArtifacts, nil) // reset watermark; reloaded below
 
 	// v0.6.0: Load artifact summaries BEFORE logging (so we can include count)
 	artifactCount := 0
@@ -436,11 +360,7 @@ func (s *Service) ReloadVectors() error {
 		s.logger.Warn("failed to load new artifact summaries", "error", err)
 		// Continue without artifact summaries - not critical
 	} else {
-		s.mu.RLock()
-		for _, userVectors := range s.artifactVectors {
-			artifactCount += len(userVectors)
-		}
-		s.mu.RUnlock()
+		artifactCount = s.vectors.Count(VectorKindArtifacts)
 	}
 
 	s.logger.Info("Loaded vectors (full)", "topics", tCount, "facts", fCount, "people", pCount, "artifacts", artifactCount)
@@ -451,11 +371,9 @@ func (s *Service) ReloadVectors() error {
 
 // LoadNewVectors incrementally loads only new topics, facts, and people since last load.
 func (s *Service) LoadNewVectors() error {
-	s.mu.RLock()
-	minTopicID := s.maxLoadedTopicID
-	minFactID := s.maxLoadedFactID
-	minPersonID := s.maxLoadedPersonID
-	s.mu.RUnlock()
+	minTopicID := s.vectors.MaxID(VectorKindTopics)
+	minFactID := s.vectors.MaxID(VectorKindFacts)
+	minPersonID := s.vectors.MaxID(VectorKindPeople)
 
 	// Load only new topics
 	topics, err := s.topicRepo.GetTopicsAfterID(minTopicID)
@@ -484,148 +402,36 @@ func (s *Service) LoadNewVectors() error {
 		return nil
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	topicEntries, _ := collectVectorEntries(topics, func(t storage.Topic) (storage.ScopeID, int64, []float32) {
+		return t.UserID, t.ID, t.Embedding
+	})
+	factEntries, _ := collectVectorEntries(facts, func(f storage.Fact) (storage.ScopeID, int64, []float32) {
+		return f.UserID, f.ID, f.Embedding
+	})
+	peopleEntries, _ := collectVectorEntries(people, func(p storage.Person) (storage.ScopeID, int64, []float32) {
+		return p.UserID, p.ID, p.Embedding
+	})
 
-	// Check if another goroutine already loaded these vectors while we were fetching
-	if minTopicID < s.maxLoadedTopicID || minFactID < s.maxLoadedFactID || minPersonID < s.maxLoadedPersonID {
-		s.logger.Debug("Skipping incremental load - already loaded by another goroutine")
-		return nil
-	}
-
-	tCount := 0
-	for _, t := range topics {
-		if len(t.Embedding) > 0 {
-			s.topicVectors[t.UserID] = append(s.topicVectors[t.UserID], TopicVectorItem{
-				TopicID:   t.ID,
-				Embedding: t.Embedding,
-			})
-			tCount++
-			if t.ID > s.maxLoadedTopicID {
-				s.maxLoadedTopicID = t.ID
-			}
-		}
-	}
-
-	fCount := 0
-	for _, f := range facts {
-		if len(f.Embedding) > 0 {
-			s.factVectors[f.UserID] = append(s.factVectors[f.UserID], FactVectorItem{
-				FactID:    f.ID,
-				Embedding: f.Embedding,
-			})
-			fCount++
-			if f.ID > s.maxLoadedFactID {
-				s.maxLoadedFactID = f.ID
-			}
-		}
-	}
-
-	// v0.5.1: Load people vectors
-	pCount := 0
-	for _, p := range people {
-		if len(p.Embedding) > 0 {
-			s.peopleVectors[p.UserID] = append(s.peopleVectors[p.UserID], PersonVectorItem{
-				PersonID:  p.ID,
-				Embedding: p.Embedding,
-			})
-			pCount++
-			if p.ID > s.maxLoadedPersonID {
-				s.maxLoadedPersonID = p.ID
-			}
-		}
-	}
+	// AppendSince skips a kind (returns 0) if another goroutine already
+	// advanced its watermark while we were fetching.
+	tCount := s.vectors.AppendSince(VectorKindTopics, minTopicID, topicEntries)
+	fCount := s.vectors.AppendSince(VectorKindFacts, minFactID, factEntries)
+	pCount := s.vectors.AppendSince(VectorKindPeople, minPersonID, peopleEntries)
 
 	if tCount > 0 || fCount > 0 || pCount > 0 {
 		s.logger.Info("Loaded vectors (incremental)", "new_topics", tCount, "new_facts", fCount, "new_people", pCount)
-		// Calculate total counts for metrics
-		totalTopics := 0
-		for _, vectors := range s.topicVectors {
-			totalTopics += len(vectors)
-		}
-		totalFacts := 0
-		for _, vectors := range s.factVectors {
-			totalFacts += len(vectors)
-		}
-		totalPeople := 0
-		for _, vectors := range s.peopleVectors {
-			totalPeople += len(vectors)
-		}
-		UpdateVectorIndexMetrics(totalTopics, totalFacts, totalPeople, s.cfg.Embedding.Dimensions)
+		UpdateVectorIndexMetrics(
+			s.vectors.Count(VectorKindTopics),
+			s.vectors.Count(VectorKindFacts),
+			s.vectors.Count(VectorKindPeople),
+			s.cfg.Embedding.Dimensions,
+		)
 	}
 
 	// v0.6.0: Load new artifact summaries (incremental)
-	// Call locked variant since we already hold s.mu.Lock()
-	if err := s.loadNewArtifactSummariesLocked(); err != nil {
+	if err := s.LoadNewArtifactSummaries(); err != nil {
 		s.logger.Warn("failed to load new artifact summaries", "error", err)
 		// Continue without artifact summaries - not critical
-	}
-
-	return nil
-}
-
-// loadNewArtifactSummariesLocked loads artifact summaries with the mutex held.
-// Requires: s.mu.Lock() already acquired.
-// Incrementally adds new artifact summaries to those already loaded (like LoadNewVectors for topics/facts/people).
-func (s *Service) loadNewArtifactSummariesLocked() error {
-	if s.artifactRepo == nil {
-		s.logger.Debug("artifactRepo is nil, skipping artifact loading")
-		return nil
-	}
-
-	minArtifactID := s.maxLoadedArtifactID
-
-	// Check if another goroutine already loaded these artifacts
-	if minArtifactID < s.maxLoadedArtifactID {
-		s.logger.Debug("Skipping incremental artifact load - already loaded by another goroutine")
-		return nil
-	}
-
-	// Load artifacts per-user (same pattern as topics/facts/people for data isolation)
-	count := 0
-	users := s.backgroundUserIDs()
-	if len(users) == 0 {
-		return nil
-	}
-
-	for _, userID := range users {
-		filter := storage.ArtifactFilter{UserID: userID, State: "ready"}
-		artifacts, _, err := s.artifactRepo.GetArtifacts(filter, 1000, 0)
-		if err != nil {
-			s.logger.Error("loadNewArtifactSummariesLocked: query failed", "user_id", userID, "error", err)
-			continue // Skip this user, try next
-		}
-
-		// Incremental load: append new artifacts only
-		for _, artifact := range artifacts {
-			if len(artifact.Embedding) > 0 && artifact.ID > minArtifactID {
-				s.artifactVectors[artifact.UserID] = append(
-					s.artifactVectors[artifact.UserID],
-					ArtifactVectorItem{
-						ArtifactID: artifact.ID,
-						UserID:     artifact.UserID,
-						Embedding:  artifact.Embedding,
-					},
-				)
-				if artifact.ID > s.maxLoadedArtifactID {
-					s.maxLoadedArtifactID = artifact.ID
-				}
-				count++
-			}
-		}
-	}
-
-	// Count per-user for metrics
-	perUserCounts := make(map[storage.ScopeID]int)
-	for userID, vectors := range s.artifactVectors {
-		perUserCounts[userID] = len(vectors)
-	}
-	UpdateArtifactSummaryMetrics(perUserCounts)
-
-	if count > 0 {
-		s.logger.Info("Loaded artifact summaries (incremental)", "new_artifacts", count, "max_id", s.maxLoadedArtifactID)
-	} else {
-		s.logger.Debug("No new artifact summaries to load", "min_id", minArtifactID)
 	}
 
 	return nil
@@ -634,9 +440,50 @@ func (s *Service) loadNewArtifactSummariesLocked() error {
 // LoadNewArtifactSummaries incrementally loads only new artifact summary embeddings.
 // Called after artifact processing completes.
 func (s *Service) LoadNewArtifactSummaries() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.loadNewArtifactSummariesLocked()
+	if s.artifactRepo == nil {
+		s.logger.Debug("artifactRepo is nil, skipping artifact loading")
+		return nil
+	}
+
+	minArtifactID := s.vectors.MaxID(VectorKindArtifacts)
+
+	// Load artifacts per-user (same pattern as topics/facts/people for data isolation)
+	users := s.backgroundUserIDs()
+	if len(users) == 0 {
+		return nil
+	}
+
+	entries := make(map[storage.ScopeID][]VectorEntry)
+	for _, userID := range users {
+		filter := storage.ArtifactFilter{UserID: userID, State: "ready"}
+		artifacts, _, err := s.artifactRepo.GetArtifacts(filter, 1000, 0)
+		if err != nil {
+			s.logger.Error("LoadNewArtifactSummaries: query failed", "user_id", userID, "error", err)
+			continue // Skip this user, try next
+		}
+
+		// Incremental load: append new artifacts only
+		for _, artifact := range artifacts {
+			if len(artifact.Embedding) > 0 && artifact.ID > minArtifactID {
+				entries[artifact.UserID] = append(entries[artifact.UserID], VectorEntry{
+					ID:        artifact.ID,
+					Embedding: artifact.Embedding,
+				})
+			}
+		}
+	}
+
+	count := s.vectors.AppendSince(VectorKindArtifacts, minArtifactID, entries)
+
+	UpdateArtifactSummaryMetrics(s.vectors.CountByUser(VectorKindArtifacts))
+
+	if count > 0 {
+		s.logger.Info("Loaded artifact summaries (incremental)", "new_artifacts", count, "max_id", s.vectors.MaxID(VectorKindArtifacts))
+	} else {
+		s.logger.Debug("No new artifact summaries to load", "min_id", minArtifactID)
+	}
+
+	return nil
 }
 
 // backgroundUserIDs returns the memory tenants the background loops should

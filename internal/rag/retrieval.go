@@ -285,17 +285,8 @@ func (s *Service) RetrieveFacts(ctx context.Context, userID storage.ScopeID, que
 	qVec := resp.Data[0].Embedding
 
 	// Use generic vector search
-	s.mu.RLock()
-	userVectors := s.factVectors[userID]
-	items := make([]embeddingItem, len(userVectors))
-	for i := range userVectors {
-		items[i] = userVectors[i]
-	}
-	s.mu.RUnlock()
-
-	results := s.vectorSearch(userID, qVec, items, VectorSearchConfig{
-		Limit:      10,
-		MetricType: searchTypeFacts,
+	results, _ := s.vectorSearch(userID, VectorKindFacts, qVec, VectorSearchConfig{
+		Limit: 10,
 	})
 
 	if len(results) == 0 {
@@ -311,18 +302,9 @@ func (s *Service) RetrieveFacts(ctx context.Context, userID storage.ScopeID, que
 }
 
 func (s *Service) FindSimilarFacts(ctx context.Context, userID storage.ScopeID, embedding []float32, threshold float32) ([]storage.Fact, error) {
-	s.mu.RLock()
-	userVectors := s.factVectors[userID]
-	items := make([]embeddingItem, len(userVectors))
-	for i := range userVectors {
-		items[i] = userVectors[i]
-	}
-	s.mu.RUnlock()
-
-	results := s.vectorSearch(userID, embedding, items, VectorSearchConfig{
-		Limit:      5,
-		Threshold:  threshold,
-		MetricType: searchTypeFacts,
+	results, _ := s.vectorSearch(userID, VectorKindFacts, embedding, VectorSearchConfig{
+		Limit:     5,
+		Threshold: threshold,
 	})
 
 	if len(results) == 0 {
@@ -370,23 +352,7 @@ func (s *Service) SearchPeople(ctx context.Context, userID storage.ScopeID, embe
 	}
 
 	searchStart := time.Now()
-	s.mu.RLock()
-
-	userVectors := s.peopleVectors[userID]
-	vectorsScanned := len(userVectors)
-	type match struct {
-		personID int64
-		score    float32
-	}
-	var matches []match
-
-	for _, item := range userVectors {
-		score := cosineSimilarity(embedding, item.Embedding)
-		if score > threshold {
-			matches = append(matches, match{personID: item.PersonID, score: score})
-		}
-	}
-	s.mu.RUnlock()
+	matches, vectorsScanned := s.vectors.Search(VectorKindPeople, userID, embedding, threshold, maxResults)
 
 	duration := time.Since(searchStart).Seconds()
 	s.logger.Debug("People vector search", "user_id", userID, "scanned", vectorsScanned, "matches", len(matches), "duration_ms", time.Since(searchStart).Milliseconds())
@@ -394,21 +360,13 @@ func (s *Service) SearchPeople(ctx context.Context, userID storage.ScopeID, embe
 	// Record metrics for people search (v0.5.1)
 	RecordVectorSearch(userID, searchTypePeople, duration, vectorsScanned)
 
-	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].score > matches[j].score
-	})
-
-	if maxResults > 0 && len(matches) > maxResults {
-		matches = matches[:maxResults]
-	}
-
 	if len(matches) == 0 {
 		return nil, nil
 	}
 
 	var ids []int64
 	for _, m := range matches {
-		ids = append(ids, m.personID)
+		ids = append(ids, m.ID)
 	}
 
 	people, err := s.peopleRepo.GetPeopleByIDs(userID, ids)
@@ -425,7 +383,7 @@ func (s *Service) SearchPeople(ctx context.Context, userID storage.ScopeID, embe
 	// Build result with scores, filtering out excluded circles
 	scoreMap := make(map[int64]float32)
 	for _, m := range matches {
-		scoreMap[m.personID] = m.score
+		scoreMap[m.ID] = m.Score
 	}
 
 	var results []PersonSearchResult
@@ -456,39 +414,14 @@ func (s *Service) SearchArtifactsBySummary(
 	embedding []float32,
 	threshold float32,
 ) ([]ArtifactResult, error) {
-	userVectors := s.artifactVectors[userID]
-	if len(userVectors) == 0 {
-		return nil, nil
-	}
-
 	searchStart := time.Now()
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	type match struct {
-		artifactID int64
-		score      float32
-	}
-	var matches []match
-	vectorsScanned := len(userVectors)
-
-	for _, item := range userVectors {
-		score := cosineSimilarity(embedding, item.Embedding)
-		if score > threshold {
-			matches = append(matches, match{
-				artifactID: item.ArtifactID,
-				score:      score,
-			})
-		}
+	matches, vectorsScanned := s.vectors.Search(VectorKindArtifacts, userID, embedding, threshold, 0)
+	if vectorsScanned == 0 {
+		return nil, nil
 	}
 
 	RecordVectorSearch(userID, searchTypeArtifacts, time.Since(searchStart).Seconds(), vectorsScanned)
 	RecordRAGCandidates(userID, searchTypeArtifacts, len(matches))
-
-	// Sort by score
-	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].score > matches[j].score
-	})
 
 	// Apply configured candidates_limit (was silently unbounded — with v2
 	// embeddings producing higher similarities, hundreds of artifacts were
@@ -504,7 +437,7 @@ func (s *Service) SearchArtifactsBySummary(
 	// Load artifact details
 	artifactIDs := make([]int64, len(matches))
 	for i, m := range matches {
-		artifactIDs[i] = m.artifactID
+		artifactIDs[i] = m.ID
 	}
 
 	artifacts, err := s.artifactRepo.GetArtifactsByIDs(userID, artifactIDs)
@@ -515,7 +448,7 @@ func (s *Service) SearchArtifactsBySummary(
 	// Build score map
 	scoreMap := make(map[int64]float32)
 	for _, m := range matches {
-		scoreMap[m.artifactID] = m.score
+		scoreMap[m.ID] = m.Score
 	}
 
 	// Build results

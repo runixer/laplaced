@@ -260,15 +260,12 @@ func TestServiceReloadVectors_FullReload(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Verify vectors were loaded
-	svc.mu.RLock()
-	defer svc.mu.RUnlock()
-
-	assert.Len(t, svc.topicVectors[userID], 2, "should have 2 topics")
-	assert.Len(t, svc.factVectors[userID], 1, "should have 1 fact")
-	assert.Len(t, svc.peopleVectors[userID], 1, "should have 1 person")
-	assert.Equal(t, int64(2), svc.maxLoadedTopicID)
-	assert.Equal(t, int64(10), svc.maxLoadedFactID)
-	assert.Equal(t, int64(100), svc.maxLoadedPersonID)
+	assert.Equal(t, 2, svc.vectors.CountByUser(VectorKindTopics)[userID], "should have 2 topics")
+	assert.Equal(t, 1, svc.vectors.CountByUser(VectorKindFacts)[userID], "should have 1 fact")
+	assert.Equal(t, 1, svc.vectors.CountByUser(VectorKindPeople)[userID], "should have 1 person")
+	assert.Equal(t, int64(2), svc.vectors.MaxID(VectorKindTopics))
+	assert.Equal(t, int64(10), svc.vectors.MaxID(VectorKindFacts))
+	assert.Equal(t, int64(100), svc.vectors.MaxID(VectorKindPeople))
 
 	mockStore.AssertExpectations(t)
 }
@@ -314,12 +311,9 @@ func TestServiceReloadVectors_EmptyEmbeddingsSkipped(t *testing.T) {
 	err = svc.ReloadVectors()
 	assert.NoError(t, err)
 
-	svc.mu.RLock()
-	defer svc.mu.RUnlock()
-
 	// Only the topic with non-empty embedding should be loaded
-	assert.Len(t, svc.topicVectors[userID], 1, "should skip topics without embeddings")
-	assert.Equal(t, int64(1), svc.maxLoadedTopicID)
+	assert.Equal(t, 1, svc.vectors.CountByUser(VectorKindTopics)[userID], "should skip topics without embeddings")
+	assert.Equal(t, int64(1), svc.vectors.MaxID(VectorKindTopics))
 }
 
 // TestServiceReloadVectors_PeopleRepoNil tests loading when people repo is nil.
@@ -356,11 +350,8 @@ func TestServiceReloadVectors_PeopleRepoNil(t *testing.T) {
 	err = svc.ReloadVectors()
 	assert.NoError(t, err)
 
-	svc.mu.RLock()
-	defer svc.mu.RUnlock()
-
-	assert.Empty(t, svc.peopleVectors)
-	assert.Equal(t, int64(0), svc.maxLoadedPersonID)
+	assert.Equal(t, 0, svc.vectors.Count(VectorKindPeople))
+	assert.Equal(t, int64(0), svc.vectors.MaxID(VectorKindPeople))
 }
 
 // TestServiceLoadNewVectors_IncrementalLoading tests incremental vector loading.
@@ -404,13 +395,12 @@ func TestServiceLoadNewVectors_IncrementalLoading(t *testing.T) {
 	svc.SetPeopleRepository(mockStore) // Set people repo
 
 	// Initialize with some baseline data
-	svc.mu.Lock()
-	svc.topicVectors[userID] = []TopicVectorItem{{TopicID: 5, Embedding: []float32{0.1, 0.1}}}
-	svc.factVectors[userID] = []FactVectorItem{{FactID: 20, Embedding: []float32{0.2, 0.2}}}
-	svc.maxLoadedTopicID = 5
-	svc.maxLoadedFactID = 20
-	svc.maxLoadedPersonID = 0
-	svc.mu.Unlock()
+	svc.vectors.ReplaceAll(VectorKindTopics, map[storage.ScopeID][]VectorEntry{
+		userID: {{ID: 5, Embedding: []float32{0.1, 0.1}}},
+	})
+	svc.vectors.ReplaceAll(VectorKindFacts, map[storage.ScopeID][]VectorEntry{
+		userID: {{ID: 20, Embedding: []float32{0.2, 0.2}}},
+	})
 
 	// Mock GetTopicsAfterID and GetFactsAfterID
 	mockStore.On("GetTopicsAfterID", int64(5)).Return(newTopics, nil).Once()
@@ -423,14 +413,11 @@ func TestServiceLoadNewVectors_IncrementalLoading(t *testing.T) {
 	err = svc.LoadNewVectors()
 	assert.NoError(t, err)
 
-	svc.mu.RLock()
-	defer svc.mu.RUnlock()
-
 	// Should have old + new
-	assert.Len(t, svc.topicVectors[userID], 3, "should have 3 topics total")
-	assert.Len(t, svc.factVectors[userID], 2, "should have 2 facts total")
-	assert.Equal(t, int64(7), svc.maxLoadedTopicID)
-	assert.Equal(t, int64(21), svc.maxLoadedFactID)
+	assert.Equal(t, 3, svc.vectors.CountByUser(VectorKindTopics)[userID], "should have 3 topics total")
+	assert.Equal(t, 2, svc.vectors.CountByUser(VectorKindFacts)[userID], "should have 2 facts total")
+	assert.Equal(t, int64(7), svc.vectors.MaxID(VectorKindTopics))
+	assert.Equal(t, int64(21), svc.vectors.MaxID(VectorKindFacts))
 
 	mockStore.AssertExpectations(t)
 }
@@ -508,31 +495,22 @@ func TestServiceLoadNewVectors_DuplicateDetection(t *testing.T) {
 	}
 	svc.SetPeopleRepository(mockStore)
 
-	// Simulate another goroutine already loaded newer data (ID 30 > topic with ID 10)
-	svc.mu.Lock()
-	svc.maxLoadedTopicID = 20
-	svc.maxLoadedFactID = 0
-	svc.maxLoadedPersonID = 0
-	svc.mu.Unlock()
-
-	// Service reads minTopicID=20, but while fetching, another goroutine updated maxLoadedTopicID to 20
-	// The returned topic has ID=30, but we only return topics AFTER ID 20
-	// Wait - this doesn't demonstrate the race condition properly.
-	// Let's test the actual scenario: minTopicID < maxLoadedTopicID triggers skip
+	// Baseline: topic 20 already loaded, watermark = 20
+	svc.vectors.ReplaceAll(VectorKindTopics, map[storage.ScopeID][]VectorEntry{
+		userID: {{ID: 20, Embedding: []float32{0.1, 0.1}}},
+	})
 
 	mockStore.On("GetTopicsAfterID", int64(20)).Return(topics, nil).Once()
 	mockStore.On("GetFactsAfterID", int64(0)).Return([]storage.Fact{}, nil).Once()
 	mockStore.On("GetPeopleAfterID", int64(0)).Return([]storage.Person{}, nil).Once()
 
-	// Load should load normally since 20 == 20 (not less)
+	// Load should load normally since the watermark didn't move while fetching
 	err = svc.LoadNewVectors()
 	assert.NoError(t, err)
 
-	svc.mu.RLock()
-	defer svc.mu.RUnlock()
-
 	// Topic with ID 30 should be added (30 > 20)
-	assert.Len(t, svc.topicVectors[userID], 1)
+	assert.Equal(t, 2, svc.vectors.CountByUser(VectorKindTopics)[userID])
+	assert.Equal(t, int64(30), svc.vectors.MaxID(VectorKindTopics))
 }
 
 // TestServiceGetRecentTopics tests retrieving recent topics.
@@ -666,11 +644,8 @@ func TestServiceLoadNewArtifactSummaries(t *testing.T) {
 	err = svc.LoadNewArtifactSummaries()
 	assert.NoError(t, err)
 
-	svc.mu.RLock()
-	defer svc.mu.RUnlock()
-
-	assert.Len(t, svc.artifactVectors[userID], 2)
-	assert.Equal(t, int64(2), svc.maxLoadedArtifactID)
+	assert.Equal(t, 2, svc.vectors.CountByUser(VectorKindArtifacts)[userID])
+	assert.Equal(t, int64(2), svc.vectors.MaxID(VectorKindArtifacts))
 
 	mockArtifactRepo.AssertExpectations(t)
 }
@@ -705,10 +680,7 @@ func TestServiceLoadNewArtifactSummaries_NoRepo(t *testing.T) {
 	err = svc.LoadNewArtifactSummaries()
 	assert.NoError(t, err)
 
-	svc.mu.RLock()
-	defer svc.mu.RUnlock()
-
-	assert.Empty(t, svc.artifactVectors)
+	assert.Equal(t, 0, svc.vectors.Count(VectorKindArtifacts))
 }
 
 // TestServiceLoadNewArtifactSummaries_Incremental tests incremental loading.
@@ -742,10 +714,9 @@ func TestServiceLoadNewArtifactSummaries_Incremental(t *testing.T) {
 	svc.SetArtifactRepository(mockArtifactRepo)
 
 	// Some artifacts already loaded
-	svc.mu.Lock()
-	svc.artifactVectors[userID] = []ArtifactVectorItem{{ArtifactID: 5, UserID: userID, Embedding: []float32{0.1, 0.1}}}
-	svc.maxLoadedArtifactID = 5
-	svc.mu.Unlock()
+	svc.vectors.ReplaceAll(VectorKindArtifacts, map[storage.ScopeID][]VectorEntry{
+		userID: {{ID: 5, Embedding: []float32{0.1, 0.1}}},
+	})
 
 	// New artifacts (ID > 5)
 	newArtifacts := []storage.Artifact{
@@ -759,12 +730,9 @@ func TestServiceLoadNewArtifactSummaries_Incremental(t *testing.T) {
 	err = svc.LoadNewArtifactSummaries()
 	assert.NoError(t, err)
 
-	svc.mu.RLock()
-	defer svc.mu.RUnlock()
-
 	// Should have old + new
-	assert.Len(t, svc.artifactVectors[userID], 3)
-	assert.Equal(t, int64(7), svc.maxLoadedArtifactID)
+	assert.Equal(t, 3, svc.vectors.CountByUser(VectorKindArtifacts)[userID])
+	assert.Equal(t, int64(7), svc.vectors.MaxID(VectorKindArtifacts))
 }
 
 // TestServiceSetAgentLogger tests setting the agent logger.

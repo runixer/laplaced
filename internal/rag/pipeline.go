@@ -66,20 +66,8 @@ type rerankerOutput struct {
 // searchTopicCandidates performs vector search for topics.
 // Returns scored candidates and vectors scanned count.
 func (s *Service) searchTopicCandidates(userID storage.ScopeID, embedding []float32, limit int) ([]topicCandidate, int) {
-	s.mu.RLock()
-	userVectors := s.topicVectors[userID]
-	vectorsScanned := len(userVectors)
-
-	// Convert []TopicVectorItem to []embeddingItem for generic search
-	items := make([]embeddingItem, len(userVectors))
-	for i := range userVectors {
-		items[i] = userVectors[i]
-	}
-	s.mu.RUnlock()
-
-	results := s.vectorSearch(userID, embedding, items, VectorSearchConfig{
-		Limit:      limit,
-		MetricType: searchTypeTopics,
+	results, vectorsScanned := s.vectorSearch(userID, VectorKindTopics, embedding, VectorSearchConfig{
+		Limit: limit,
 	})
 
 	candidates := make([]topicCandidate, len(results))
@@ -348,7 +336,7 @@ func (s *Service) searchPeopleAndArtifacts(ctx context.Context, userID storage.S
 	var artifactCandidates []reranker.ArtifactCandidate
 	if s.cfg.Artifacts.Enabled && s.cfg.RAG.Enabled && s.cfg.Agents.Reranker.Enabled {
 		// Vector-search candidates (skip when index is empty to save the round-trip).
-		if len(s.artifactVectors) > 0 {
+		if s.vectors.Count(VectorKindArtifacts) > 0 {
 			artifacts, err := s.SearchArtifactsBySummary(ctx, userID, embedding, threshold)
 			if err != nil {
 				s.logger.Warn("artifact summary search failed", "error", err)
