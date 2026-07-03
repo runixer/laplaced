@@ -154,6 +154,78 @@ func (b *Bot) errorReplyText(span trace.Span, err error) string {
 	return b.translator.Get(b.cfg.Bot.Language, "bot.api_error")
 }
 
+// prepareErrorText picks the user-facing message for a prepareUserMessage
+// failure: specific texts for file validation errors (unsupported format,
+// too large), the generic api_error otherwise.
+func (b *Bot) prepareErrorText(err error) string {
+	var unsupported *files.UnsupportedFormatError
+	var tooLarge *files.FileTooLargeError
+	switch {
+	case errors.As(err, &unsupported):
+		msg := b.translator.Get(b.cfg.Bot.Language, "bot.file_unsupported_format")
+		ext := filepath.Ext(unsupported.FileName)
+		if ext == "" && unsupported.MimeType != "" {
+			ext = "(" + unsupported.MimeType + ")"
+		}
+		return strings.ReplaceAll(msg, "{ext}", ext)
+	case errors.As(err, &tooLarge):
+		msg := b.translator.Get(b.cfg.Bot.Language, "bot.file_too_large")
+		sizeMB := float64(tooLarge.Size) / (1024 * 1024)
+		return strings.ReplaceAll(msg, "{size}", fmt.Sprintf("%.1f", sizeMB))
+	default:
+		return b.translator.Get(b.cfg.Bot.Language, "bot.api_error")
+	}
+}
+
+// linkArtifactsToLastMessage back-fills the just-stored user message's id on
+// the artifacts saved for this group. Message ID is auto-increment, so we
+// fetch the most recent history row for this user. Best-effort.
+func (b *Bot) linkArtifactsToLastMessage(userID storage.ScopeID, processedFiles []*files.ProcessedFile, logger *slog.Logger) {
+	if len(processedFiles) == 0 || b.artifactRepo == nil {
+		return
+	}
+	lastMsg, err := b.msgRepo.GetRecentHistory(userID, 1)
+	if err != nil || len(lastMsg) == 0 {
+		return
+	}
+	messageID := lastMsg[0].ID
+	for _, f := range processedFiles {
+		if f.ArtifactID == nil {
+			continue
+		}
+		if err := b.artifactRepo.UpdateMessageID(userID, *f.ArtifactID, messageID); err != nil {
+			logger.Warn("failed to link artifact to message",
+				"user_id", userID,
+				"artifact_id", *f.ArtifactID,
+				"message_id", messageID,
+				"error", err,
+			)
+		}
+	}
+}
+
+// countToolCalls walks the turn's assistant messages and returns the total
+// tool-call count plus the distinct tool names in first-use order — the
+// execution tracker doesn't expose this directly, but resp.Messages does.
+func countToolCalls(messages []llm.Message) (int, []string) {
+	total := 0
+	var names []string
+	seen := map[string]bool{}
+	for _, m := range messages {
+		if m.Role != "assistant" {
+			continue
+		}
+		for _, tc := range m.ToolCalls {
+			total++
+			if !seen[tc.Function.Name] {
+				seen[tc.Function.Name] = true
+				names = append(names, tc.Function.Name)
+			}
+		}
+	}
+	return total, names
+}
+
 // fileProcessingError wraps a file processing error for identification.
 type fileProcessingError struct {
 	err          error
@@ -274,29 +346,8 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		)
 	}
 	if err != nil {
-		// Check for file validation errors (unsupported format, too large)
-		var unsupported *files.UnsupportedFormatError
-		var tooLarge *files.FileTooLargeError
-		switch {
-		case errors.As(err, &unsupported):
-			msg := b.translator.Get(b.cfg.Bot.Language, "bot.file_unsupported_format")
-			ext := filepath.Ext(unsupported.FileName)
-			if ext == "" && unsupported.MimeType != "" {
-				ext = "(" + unsupported.MimeType + ")"
-			}
-			msg = strings.ReplaceAll(msg, "{ext}", ext)
-			b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", msg, logger)
-			return
-		case errors.As(err, &tooLarge):
-			msg := b.translator.Get(b.cfg.Bot.Language, "bot.file_too_large")
-			sizeMB := float64(tooLarge.Size) / (1024 * 1024)
-			msg = strings.ReplaceAll(msg, "{size}", fmt.Sprintf("%.1f", sizeMB))
-			b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", msg, logger)
-			return
-		default:
-			b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", b.translator.Get(b.cfg.Bot.Language, "bot.api_error"), logger)
-			return
-		}
+		b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", b.prepareErrorText(err), logger)
+		return
 	}
 
 	if len(currentUserMessageContent) == 0 {
@@ -356,38 +407,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		return
 	}
 
-	// Link artifacts to message ID (if artifact repo available)
-	// Message ID is auto-increment, so we need to get the last inserted ID
-	// For simplicity, we get the most recent message for this user
-	if len(allProcessedFiles) > 0 && b.artifactRepo != nil {
-		lastMsg, err := b.msgRepo.GetRecentHistory(userID, 1)
-		if err == nil && len(lastMsg) > 0 {
-			messageID := lastMsg[0].ID
-			for _, f := range allProcessedFiles {
-				if f.ArtifactID != nil {
-					if err := b.artifactRepo.UpdateMessageID(userID, *f.ArtifactID, messageID); err != nil {
-						logger.Warn("failed to link artifact to message",
-							"user_id", userID,
-							"artifact_id", *f.ArtifactID,
-							"message_id", messageID,
-							"error", err,
-						)
-					}
-				}
-			}
-		}
-	}
-
-	// Per-message breakdown tracking
-	var totalTelegramDuration time.Duration
-	telegramCallCount := 0
-
-	// Defer Telegram metrics recording to capture early returns
-	defer func() {
-		if telegramCallCount > 0 {
-			RecordMessageTelegram(userID, totalTelegramDuration.Seconds(), telegramCallCount)
-		}
-	}()
+	b.linkArtifactsToLastMessage(userID, allProcessedFiles, logger)
 
 	// Execute via Laplace agent
 	if b.laplaceAgent == nil {
@@ -399,28 +419,13 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	// Create tool handler
 	toolHandler := b.newBotToolHandler(userID, logger)
 
-	// Telegram-only routing ints for the streaming sink + finalize callback,
-	// parsed from the neutral envelope. They are 0 for non-Telegram transports,
-	// which never stream (gated below by the streaming capability).
-	tgChatID, _ := strconv.ParseInt(convID, 10, 64)
-	tgThreadID := atoiOrZero(threadRoot)
-	tgReplyID := atoiOrZero(lastMsg.MessageID)
-
-	// Streaming sink: when enabled, this owns the in-flight reply bubble
-	// (placeholder → tool status → progressive content → final HTML). It is
-	// Telegram-only (edit-based) and gated on the streaming capability.
-	// On error/empty paths we route through sink.Finalize so the placeholder
-	// never gets orphaned.
-	var sink *streamSink
-	if b.cfg.Bot.Streaming.Enabled && b.transport.Capabilities().SupportsStreaming {
-		sink = newStreamSink(
-			shutdownSafeCtx, b.api, b.translator, b.cfg.Bot.Language,
-			b.cfg.Bot.Streaming, tgChatID, tgThreadID, tgReplyID,
-			logger,
-		)
-		// Account for the placeholder send in Telegram metrics.
-		telegramCallCount++
-	}
+	// Delivery path for this turn: opens the streaming sink (owning the
+	// in-flight reply bubble) when the transport supports streaming, buffered
+	// sendRendered otherwise. Error/empty paths route through it too, so the
+	// placeholder never gets orphaned. Also accumulates Telegram timing
+	// counters — deferred flush captures early returns.
+	path := b.newResponsePath(shutdownSafeCtx, userID, convID, threadRoot, lastMsg.MessageID, logger)
+	defer path.recordTelegramMetrics()
 
 	// Build request
 	req := &laplace.Request{
@@ -428,26 +433,23 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		HistoryContent:      historyContent,
 		RawQuery:            rawQuery,
 		CurrentMessageParts: currentUserMessageContent,
-		ChatID:              tgChatID,
-		MessageThreadID:     tgThreadID,
-		ReplyToMsgID:        tgReplyID,
-		UseStreaming:        sink != nil,
+		ChatID:              path.tgChatID,
+		MessageThreadID:     path.tgThreadID,
+		ReplyToMsgID:        path.tgReplyID,
+		UseStreaming:        path.sink != nil,
 		OnIntermediateMessage: func(text string) {
-			tgStart := time.Now()
-			sent, _ := b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", text, logger)
-			totalTelegramDuration += time.Since(tgStart)
-			telegramCallCount += sent
+			path.sendIntermediate(shutdownSafeCtx, text)
 		},
 		OnToolStart: func(toolName, arguments string) {
-			if sink != nil {
-				sink.Status(toolName, arguments)
+			if path.sink != nil {
+				path.sink.Status(toolName, arguments)
 			}
 			_ = b.transport.SendTyping(shutdownSafeCtx, convID)
 		},
 	}
-	if sink != nil {
-		req.OnContentDelta = sink.Delta
-		req.OnRAGEnriched = sink.RAG
+	if path.sink != nil {
+		req.OnContentDelta = path.sink.Delta
+		req.OnRAGEnriched = path.sink.RAG
 	}
 
 	// Execute
@@ -457,15 +459,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		logger.Error("laplace execution fatal error", "error", err)
 		botHadErrors = true
 		botErrorKinds = append(botErrorKinds, "laplace_fatal")
-		errText := b.errorReplyText(span, err)
-		tgStart := time.Now()
-		if sink != nil {
-			sink.Finalize(finalizeArgs{UserID: userID, HadError: true, ErrorText: errText}, b.streamFinalizeCallback(shutdownSafeCtx, tgChatID, tgThreadID, logger))
-		} else {
-			n, _ := b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", errText, logger)
-			telegramCallCount += n
-		}
-		totalTelegramDuration += time.Since(tgStart)
+		path.sendError(shutdownSafeCtx, b.errorReplyText(span, err))
 		return
 	}
 
@@ -480,17 +474,11 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		logger.Error("laplace execution failed", "error", resp.Error, "total_turns", resp.TotalTurns)
 		botHadErrors = true
 		botErrorKinds = append(botErrorKinds, "laplace_partial")
-		errText := b.errorReplyText(span, resp.Error)
-		tgStart := time.Now()
-		if sink != nil {
-			sink.Finalize(finalizeArgs{UserID: userID, HadError: true, ErrorText: errText}, b.streamFinalizeCallback(shutdownSafeCtx, tgChatID, tgThreadID, logger))
-		} else {
-			n, _ := b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", errText, logger)
-			telegramCallCount += n
-		}
-		totalTelegramDuration += time.Since(tgStart)
+		path.sendError(shutdownSafeCtx, b.errorReplyText(span, resp.Error))
 
-		// Log partial execution for debugging
+		// Log partial execution for debugging. Cost stays provider-reported-
+		// or-zero: a partial turn may lack token counts, so the tiered
+		// estimate would be garbage.
 		var cost float64
 		if resp.TotalCost != nil {
 			cost = *resp.TotalCost
@@ -505,45 +493,15 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		RecordMessageTools(userID, resp.ToolDuration.Seconds(), resp.TotalTurns)
 	}
 
-	// Calculate cost
-	var cost float64
-	if resp.TotalCost != nil {
-		cost = *resp.TotalCost
-	} else {
-		cost = b.getTieredCost(resp.PromptTokens, resp.CompletionTokens, logger)
-	}
+	cost := b.turnCost(resp, logger)
 
-	// Roll up turn aggregations onto the root span. Tool counts and names
-	// come from walking the assistant messages that carry tool_calls — the
-	// tracker doesn't expose this directly, but resp.Messages does.
+	// Roll up turn aggregations onto the root span.
 	botLLMCalls = resp.TotalTurns
 	botCostUSD = cost
-	toolNamesSeen := map[string]bool{}
-	for _, m := range resp.Messages {
-		if m.Role != "assistant" {
-			continue
-		}
-		for _, tc := range m.ToolCalls {
-			botToolCalls++
-			if !toolNamesSeen[tc.Function.Name] {
-				toolNamesSeen[tc.Function.Name] = true
-				botToolsUsed = append(botToolsUsed, tc.Function.Name)
-			}
-		}
-	}
+	botToolCalls, botToolsUsed = countToolCalls(resp.Messages)
 
-	// Record stats
-	stat := storage.Stat{
-		UserID:     userID,
-		TokensUsed: resp.PromptTokens + resp.CompletionTokens,
-		CostUSD:    cost,
-	}
-	if err := b.statsRepo.AddStat(stat); err != nil {
-		logger.Error("failed to add stat", "error", err)
-	}
-
-	// Log to agent logger
-	b.laplaceAgent.LogExecution(shutdownSafeCtx, userID, resp, cost)
+	// Record stats and the agent-log entry
+	b.recordTurnStats(shutdownSafeCtx, userID, resp, cost, logger)
 
 	// Record context tokens by source
 	RecordContextTokens(resp.PromptTokens)
@@ -551,8 +509,8 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	logger.Info("usage stats recorded",
 		"prompt_tokens", resp.PromptTokens,
 		"completion_tokens", resp.CompletionTokens,
-		"total_tokens", stat.TokensUsed,
-		"cost_usd", stat.CostUSD,
+		"total_tokens", resp.PromptTokens+resp.CompletionTokens,
+		"cost_usd", cost,
 	)
 
 	// Record TTFT (stream mode only — non-streaming path leaves it zero).
@@ -578,83 +536,24 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	// Branch: if the turn produced generated images, route through the
 	// media-aware reply path. Otherwise keep the text-only path.
 	if len(resp.GeneratedArtifactIDs) > 0 {
-		// Image generation isn't streaming-aware in v1; if a sink was opened,
-		// finalize it with the response text so the placeholder doesn't
-		// linger. The media path then sends images and any follow-up text.
-		if sink != nil {
-			sink.Finalize(finalizeArgs{UserID: userID, FullText: resp.Content}, b.streamFinalizeCallback(shutdownSafeCtx, tgChatID, tgThreadID, logger))
-			RecordMessageTelegramEditCount(userID, sink.editCount)
-		}
+		path.flushSinkBeforeMedia(shutdownSafeCtx, resp.Content)
 		obs.RecordContent(span, "bot.reply_sent", resp.Content,
 			attribute.Int64Slice("generated_artifact_ids", resp.GeneratedArtifactIDs))
 		mediaDur, sentCount := b.sendResponseWithGeneratedImages(
 			shutdownSafeCtx, userID, convID, threadRoot, lastMsg.MessageID,
 			resp.Content, resp.GeneratedArtifactIDs, logger,
 		)
-		totalTelegramDuration += mediaDur
-		telegramCallCount += sentCount
+		path.tgDuration += mediaDur
+		path.tgCalls += sentCount
 		success = true
 		return
 	}
 
-	// Save assistant response to history. trace_id links this reply to the trace
-	// that produced it, so an inbound reaction on the reply (matched by transport
-	// message id, back-filled below once the send returns it) resolves straight to
-	// its trace. ConversationID is attributed; in a channel, thread_root marks the
-	// thread the bot spoke in for thread-reply gating (DM: NULL).
-	var replyTraceID *string
-	if sc := span.SpanContext(); sc.HasTraceID() {
-		replyTraceID = strPtrOrNil(sc.TraceID().String())
-	}
-	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{
-		Role:           "assistant",
-		Content:        resp.Content,
-		ConversationID: strPtrOrNil(convID),
-		ThreadRoot:     chanThreadRoot,
-		TraceID:        replyTraceID,
-	}); err != nil {
-		logger.Error("failed to add assistant message to history", "error", err)
-	}
+	b.saveAssistantReply(userID, span, resp.Content, convID, chanThreadRoot, logger)
 
-	// Finalize: streaming path goes through sink (which edits the bubble and
-	// returns any overflow chunks to send as new messages); buffered path
-	// uses the existing finalizeResponse + sendResponses pipeline.
-	if sink != nil {
-		extra, edits := sink.Finalize(
-			finalizeArgs{UserID: userID, FullText: resp.Content},
-			b.streamFinalizeCallback(shutdownSafeCtx, tgChatID, tgThreadID, logger),
-		)
-		RecordMessageTelegramEditCount(userID, edits)
-		// Link the streamed bubble (what the user reacts to) to the stored reply.
-		if mid := sink.MessageID(); mid != 0 {
-			b.linkReplyTrace(userID, strconv.Itoa(mid), logger)
-		}
-		// Capture the final reply on the root span (under content toggle).
-		// chunks=1+len(extra) — one bubble edit plus any follow-up messages.
-		obs.RecordContent(span, "bot.reply_sent", resp.Content,
-			attribute.Int("chunks", 1+len(extra)))
-		if len(extra) > 0 {
-			tgStart := time.Now()
-			b.sendResponses(shutdownSafeCtx, tgChatID, extra, logger)
-			totalTelegramDuration += time.Since(tgStart)
-			telegramCallCount += len(extra)
-		}
-		success = true
-		return
-	}
-
-	// Non-streaming path: render to wire format and send via the transport,
-	// replying to the triggering message on the first chunk.
-	tgStart := time.Now()
-	sent, firstMsgID := b.sendRendered(shutdownSafeCtx, convID, threadRoot, lastMsg.MessageID, resp.Content, logger)
-	totalTelegramDuration += time.Since(tgStart)
-	telegramCallCount += sent
-	// Link the first chunk (what the user reacts to) to the stored reply.
-	b.linkReplyTrace(userID, firstMsgID, logger)
-
-	// Capture the final reply on the root span — what the user actually saw
-	// after sanitize/markdown/chunking.
-	obs.RecordContent(span, "bot.reply_sent", resp.Content, attribute.Int("chunks", sent))
+	// Deliver the final reply (streaming: bubble edit + overflow sends;
+	// buffered: rendered chunks replying to the triggering message).
+	path.sendFinal(shutdownSafeCtx, span, resp.Content)
 
 	success = true
 }

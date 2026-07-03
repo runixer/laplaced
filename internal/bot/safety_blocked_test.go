@@ -25,17 +25,19 @@ func TestErrorReplyText(t *testing.T) {
 		llm.NewSafetyBlockErrorForTest("Gemini blocked the request: PROHIBITED_CONTENT", 400))
 	genericErr := fmt.Errorf("network: %w", context.DeadlineExceeded)
 
-	// The test translator has no bot.* copy and returns the key verbatim when a
-	// key is missing, so asserting on the key proves which translation
-	// errorReplyText selected — independent of the (separately shipped) copy.
+	// Expectations resolve through the test translator, so the assertion
+	// proves which translation errorReplyText selected — independent of the
+	// (separately shipped) copy. bot.safety_blocked is absent from the test
+	// fixture and comes back as the verbatim key; bot.api_error is present.
+	translator := testutil.TestTranslator(t)
 	tests := []struct {
 		name          string
 		err           error
-		wantKey       string
+		wantText      string
 		wantSafetyTag bool
 	}{
 		{"safety block", safetyErr, "bot.safety_blocked", true},
-		{"generic error", genericErr, "bot.api_error", false},
+		{"generic error", genericErr, translator.Get("en", "bot.api_error"), false},
 	}
 
 	for _, tt := range tests {
@@ -47,7 +49,7 @@ func TestErrorReplyText(t *testing.T) {
 			span.End()
 			_ = ctx
 
-			assert.Equal(t, tt.wantKey, got)
+			assert.Equal(t, tt.wantText, got)
 
 			spans := getSpans()
 			assert.Len(t, spans, 1)

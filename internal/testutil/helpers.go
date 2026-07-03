@@ -84,6 +84,9 @@ bot:
   voice_recognition_prefix: "(Transcribed from audio):"
   voice_message_marker: "[Voice message]"
   access_denied: "No access to this bot."
+  api_error: "API error, try again later."
+  file_unsupported_format: "Can't process .{ext} files."
+  file_too_large: "File is too large ({size} MB)."
   voice_instruction: "The user sent a voice message (audio file below). Listen to it and respond in English. Do not describe the listening process — just respond to the content."
   system_prompt: "System {{.BotName}}"
 rag:

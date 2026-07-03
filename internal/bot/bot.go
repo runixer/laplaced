@@ -1046,12 +1046,7 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID storage.ScopeID, text 
 	result.Response = resp.Content
 	result.PromptTokens = resp.PromptTokens
 	result.CompletionTokens = resp.CompletionTokens
-
-	if resp.TotalCost != nil {
-		result.TotalCost = *resp.TotalCost
-	} else {
-		result.TotalCost = b.getTieredCost(resp.PromptTokens, resp.CompletionTokens, logger)
-	}
+	result.TotalCost = b.turnCost(resp, logger)
 	result.TimingTotal = time.Since(startTotal)
 
 	// Save assistant response to history if requested
@@ -1059,27 +1054,7 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID storage.ScopeID, text 
 		if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "assistant", Content: resp.Content}); err != nil {
 			logger.Error("failed to add assistant message to history", "error", err)
 		}
-
-		// Calculate cost and log
-		var cost float64
-		if resp.TotalCost != nil {
-			cost = *resp.TotalCost
-		} else {
-			cost = b.getTieredCost(resp.PromptTokens, resp.CompletionTokens, logger)
-		}
-
-		// Record stats
-		stat := storage.Stat{
-			UserID:     userID,
-			TokensUsed: resp.PromptTokens + resp.CompletionTokens,
-			CostUSD:    cost,
-		}
-		if err := b.statsRepo.AddStat(stat); err != nil {
-			logger.Error("failed to add stat", "error", err)
-		}
-
-		// Log to agent logger
-		b.laplaceAgent.LogExecution(ctx, userID, resp, cost)
+		b.recordTurnStats(ctx, userID, resp, result.TotalCost, logger)
 	}
 
 	return result, nil
