@@ -101,10 +101,10 @@ func (s *Service) ReembedIfNeeded(ctx context.Context) error {
 // of reembedBatchSize inputs each).
 //
 // Returns: done (rows with new embeddings saved) and failed (rows whose batch
-// errored). Failures abort the run only while done is still zero — a sign the
-// whole run is doomed (bad model, auth). After the first successful batch,
-// failed rows are skipped: they keep their old version stamp and are picked
-// up again on the next startup.
+// errored). The first batch runs synchronously as a canary: its failure means
+// the whole run is doomed (bad model, auth) and aborts before any parallel
+// fan-out. Once the canary lands, individual batch failures are tolerated:
+// their rows keep the old version stamp and are picked up on the next startup.
 func (s *Service) reembedTable(ctx context.Context, t reembedTable, version string) (int64, int64, error) {
 	// A first candidates fetch tells us whether there is work to do at all.
 	candidates, err := t.fetch(version, 0)
@@ -122,19 +122,25 @@ func (s *Service) reembedTable(ctx context.Context, t reembedTable, version stri
 	var failed atomic.Int64
 	var firstErr atomic.Pointer[error]
 
+	batches := batchCandidates(candidates, reembedBatchSize)
+
+	// The first batch runs synchronously as a canary: a failure here, before
+	// anything succeeded, means the whole run is doomed (bad model name, auth,
+	// network down) and we abort without burning API calls on the rest. A
+	// mid-loop "stop when firstErr set and done == 0" gate is NOT equivalent:
+	// it races with in-flight workers — one fast-failing batch could halt
+	// scheduling while slower successful batches were still in flight,
+	// silently truncating the run to ~reembedParallelism batches per startup
+	// while still reporting success.
+	if err := s.reembedOneBatch(ctx, t, version, batches[0]); err != nil {
+		return 0, int64(len(batches[0])), fmt.Errorf("canary batch: %w", err)
+	}
+	done.Add(int64(len(batches[0])))
+
 	sem := make(chan struct{}, reembedParallelism)
 	var wg sync.WaitGroup
-
-	batches := batchCandidates(candidates, reembedBatchSize)
-	for idx, batch := range batches {
+	for idx, batch := range batches[1:] {
 		if ctx.Err() != nil {
-			break
-		}
-		// A batch failure with zero successes means the whole run is doomed
-		// (bad model name, auth, network down) — stop scheduling. Once at
-		// least one batch has landed, individual failures are tolerated:
-		// their rows keep the old version stamp and are retried next startup.
-		if firstErr.Load() != nil && done.Load() == 0 {
 			break
 		}
 		wg.Add(1)
@@ -156,14 +162,11 @@ func (s *Service) reembedTable(ctx context.Context, t reembedTable, version stri
 					"elapsed_s", int(time.Since(start).Seconds()),
 				)
 			}
-		}(idx, batch)
+		}(idx+1, batch)
 	}
 	wg.Wait()
 
 	if errPtr := firstErr.Load(); errPtr != nil {
-		if done.Load() == 0 {
-			return done.Load(), failed.Load(), *errPtr
-		}
 		s.logger.Warn("re-embed table finished with failures; failed rows keep their old version and are retried on next startup",
 			"kind", t.kind, "done", done.Load(), "failed", failed.Load(),
 			"first_error", (*errPtr).Error())
