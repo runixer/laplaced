@@ -804,8 +804,10 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 	}
 	reqBody = body
 
-	// Debug: log request body to inspect multimodal content
-	if len(body) > 0 {
+	// Debug: log request body to inspect multimodal content. Gated on the
+	// handler level: the analysis scans a body that can be tens of MB with
+	// base64 media — wasted hot-path work when debug logging is off.
+	if len(body) > 0 && c.logger.Enabled(ctx, slog.LevelDebug) {
 		// Check if file_data is present in the request (v0.6.0: unified FilePart format)
 		bodyStr := string(body)
 		hasFileData := strings.Contains(bodyStr, "file_data")

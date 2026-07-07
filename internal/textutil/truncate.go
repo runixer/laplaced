@@ -5,10 +5,23 @@ package textutil
 // Truncation happens on rune (not byte) boundaries: much of the bot's
 // content is Russian, and a byte-level slice can split a multibyte rune
 // and corrupt the tail.
+//
+// Allocation-free until the cut: callers pass multi-megabyte strings on hot
+// paths (serialized LLM request bodies with base64 media), where a
+// []rune(s) conversion would transiently cost ~4x the input size.
 func TruncateRunes(s string, max int, suffix string) string {
-	runes := []rune(s)
-	if len(runes) <= max {
-		return s
+	if len(s) <= max {
+		return s // max runes always span at least max bytes — nothing to cut
 	}
-	return string(runes[:max]) + suffix
+	if max <= 0 {
+		return suffix
+	}
+	count := 0
+	for i := range s { // i walks rune start offsets
+		if count == max {
+			return s[:i] + suffix
+		}
+		count++
+	}
+	return s // exactly max runes (multibyte), no cut needed
 }

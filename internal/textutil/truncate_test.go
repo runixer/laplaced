@@ -23,6 +23,9 @@ func TestTruncateRunes(t *testing.T) {
 		{"cyrillic shorter than max", "привет", 10, "...", "привет"},
 		{"emoji truncated", "🎤🎤🎤🎤", 2, "…", "🎤🎤…"},
 		{"empty suffix", "hello world", 5, "", "hello"},
+		{"zero max", "hello", 0, "...", "..."},
+		{"negative max", "hello", -1, "...", "..."},
+		{"exactly max multibyte", "привет", 6, "...", "привет"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
