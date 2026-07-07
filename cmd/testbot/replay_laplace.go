@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -75,6 +77,7 @@ func init() {
 	f.String("agent", "laplace", "Agent whose generation to replay: the <agent>.Execute span (e.g. laplace, enricher, reranker)")
 	f.String("model", "", "Override the request model for all variants (per-variant 'model' takes precedence)")
 	f.Bool("list-agents", false, "List the <agent>.Execute spans present in the trace and exit")
+	f.String("gen", "auto", "Which gen turn under <agent>.Execute to replay: 'auto' (prefer media-bearing, else last), 'last', 'first', or a 0-based index (negatives count from end). Use 'last' to hit the post-tool synthesis turn on a media+search trace.")
 	f.Int("runs", 1, "Runs per variant")
 	f.String("out", "data/replay-laplace/out", "Output directory for replies (gitignored)")
 	rootCmd.AddCommand(replayLaplaceCmd)
@@ -117,6 +120,7 @@ func runReplayLaplace(cmd *cobra.Command, _ []string) error {
 	agent, _ := cmd.Flags().GetString("agent")
 	modelOverride, _ := cmd.Flags().GetString("model")
 	listAgents, _ := cmd.Flags().GetBool("list-agents")
+	genSelect, _ := cmd.Flags().GetString("gen")
 	runs, _ := cmd.Flags().GetInt("runs")
 	outDir, _ := cmd.Flags().GetString("out")
 
@@ -137,10 +141,11 @@ func runReplayLaplace(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	bodyStr, err := extractGenRequestBody(traceBytes, agent)
+	bodyStr, pickedIdx, nTurns, err := selectGenRequestBody(traceBytes, agent, genSelect)
 	if err != nil {
 		return fmt.Errorf("locate gen span: %w", err)
 	}
+	fmt.Printf("gen turn: picked index %d of %d under %s.Execute (--gen=%s)\n", pickedIdx, nTurns, agent, genSelect)
 
 	specs, err := loadVariantSpecs(variantsFile)
 	if err != nil {
@@ -199,11 +204,12 @@ type otlpEvent struct {
 	Attributes []otlpAttr `json:"attributes"`
 }
 type otlpSpan struct {
-	Name         string      `json:"name"`
-	SpanID       string      `json:"spanId"`
-	ParentSpanID string      `json:"parentSpanId"`
-	Attributes   []otlpAttr  `json:"attributes"`
-	Events       []otlpEvent `json:"events"`
+	Name              string      `json:"name"`
+	SpanID            string      `json:"spanId"`
+	ParentSpanID      string      `json:"parentSpanId"`
+	StartTimeUnixNano string      `json:"startTimeUnixNano"`
+	Attributes        []otlpAttr  `json:"attributes"`
+	Events            []otlpEvent `json:"events"`
 }
 type otlpTrace struct {
 	Batches []struct {
@@ -250,16 +256,15 @@ func listAgentSpans(traceBytes []byte) ([]string, error) {
 	return names, nil
 }
 
-// extractGenRequestBody finds the generation request for the given agent: a
-// *.CreateChatCompletion span that is a child of "<agent>.Execute", reading the
-// verbatim request JSON from its llm.request event body. A gen span carrying
-// multimodal file parts is preferred (the subject of most replays); otherwise
-// the last gen span under the agent is used (covers a tool loop, or text-only
-// agents like the enricher when no media was attached).
-func extractGenRequestBody(traceBytes []byte, agent string) (string, error) {
+// collectGenRequestBodies returns the verbatim request JSON of every
+// *.CreateChatCompletion span that is a child of "<agent>.Execute", ordered by
+// span start time (so index 0 is the first turn, the last is the synthesis turn
+// after a tool loop). Each entry keeps whether the request carried multimodal
+// file parts, used by the "auto" selector.
+func collectGenRequestBodies(traceBytes []byte, agent string) (bodies []string, hasFiles []bool, err error) {
 	spans, err := flattenSpans(traceBytes)
 	if err != nil {
-		return "", err
+		return nil, nil, err
 	}
 	agentSpanName := agent + ".Execute"
 	var agentID string
@@ -270,35 +275,75 @@ func extractGenRequestBody(traceBytes []byte, agent string) (string, error) {
 		}
 	}
 	if agentID == "" {
-		return "", fmt.Errorf("no %s span in trace (use --list-agents to see options)", agentSpanName)
+		return nil, nil, fmt.Errorf("no %s span in trace (use --list-agents to see options)", agentSpanName)
 	}
-	var withFiles, lastAny string
+	type genTurn struct {
+		start int64
+		body  string
+	}
+	var turns []genTurn
 	for _, s := range spans {
 		if !strings.HasSuffix(s.Name, ".CreateChatCompletion") || s.ParentSpanID != agentID {
 			continue
 		}
+		start, _ := strconv.ParseInt(s.StartTimeUnixNano, 10, 64)
 		for _, ev := range s.Events {
 			if ev.Name != "llm.request" {
 				continue
 			}
 			for _, a := range ev.Attributes {
-				if a.Key != "body" || a.Value.StringValue == nil {
-					continue
-				}
-				lastAny = *a.Value.StringValue
-				if strings.Contains(lastAny, `"type":"file"`) {
-					withFiles = lastAny
+				if a.Key == "body" && a.Value.StringValue != nil {
+					turns = append(turns, genTurn{start: start, body: *a.Value.StringValue})
 				}
 			}
 		}
 	}
-	if withFiles != "" {
-		return withFiles, nil
+	sort.SliceStable(turns, func(i, j int) bool { return turns[i].start < turns[j].start })
+	for _, t := range turns {
+		bodies = append(bodies, t.body)
+		hasFiles = append(hasFiles, strings.Contains(t.body, `"type":"file"`))
 	}
-	if lastAny != "" {
-		return lastAny, nil
+	return bodies, hasFiles, nil
+}
+
+// selectGenRequestBody picks one gen request under <agent>.Execute per the
+// selector: "auto" (prefer the media-bearing turn, else the last — the historic
+// default), "last", "first", or a 0-based index (negatives count from the end).
+// Returns the chosen body, its index, and the total turn count.
+func selectGenRequestBody(traceBytes []byte, agent, sel string) (string, int, int, error) {
+	bodies, hasFiles, err := collectGenRequestBodies(traceBytes, agent)
+	if err != nil {
+		return "", 0, 0, err
 	}
-	return "", fmt.Errorf("no gen llm.request under %s", agentSpanName)
+	n := len(bodies)
+	if n == 0 {
+		return "", 0, 0, fmt.Errorf("no gen llm.request under %s.Execute", agent)
+	}
+	switch sel {
+	case "", "auto":
+		for i := n - 1; i >= 0; i-- {
+			if hasFiles[i] {
+				return bodies[i], i, n, nil
+			}
+		}
+		return bodies[n-1], n - 1, n, nil
+	case "last":
+		return bodies[n-1], n - 1, n, nil
+	case "first":
+		return bodies[0], 0, n, nil
+	default:
+		idx, perr := strconv.Atoi(sel)
+		if perr != nil {
+			return "", 0, n, fmt.Errorf("invalid --gen %q: want auto|last|first|<index>", sel)
+		}
+		if idx < 0 {
+			idx += n
+		}
+		if idx < 0 || idx >= n {
+			return "", 0, n, fmt.Errorf("--gen index out of range: %s resolves outside [0,%d)", sel, n)
+		}
+		return bodies[idx], idx, n, nil
+	}
 }
 
 // --- variant + rehydration ----------------------------------------------------
