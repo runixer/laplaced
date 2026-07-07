@@ -74,6 +74,10 @@ func NewTestBot(t *testing.T, opts *TestBotOptions) *TestBot {
 	var err error
 	tb.store, err = storage.NewSQLiteStore(tb.logger, tb.dbPath)
 	require.NoError(t, err, "failed to create store")
+	// Stamp embedding_version the same way production wiring does, so tests
+	// exercise the same data shape as live writes (find-all-callers rule).
+	cfg := TestConfig()
+	tb.store.SetEmbeddingVersion(storage.EmbeddingVersion(cfg.Embedding.Model, cfg.Embedding.Dimensions))
 	err = tb.store.Init()
 	require.NoError(t, err, "failed to init store")
 

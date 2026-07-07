@@ -177,12 +177,18 @@ func (s *Store) UpdateFact(fact Fact) error {
 	if err != nil {
 		return err
 	}
+	// embedding_version is re-stamped only when the vector actually changed:
+	// importance-only updates round-trip the stored embedding, and stamping
+	// them with the current version would exempt an old-space vector from the
+	// startup re-embed forever (SET expressions see pre-update column values).
 	query := `
 		UPDATE structured_facts
-		SET content = ?, type = ?, importance = ?, embedding = ?, embedding_version = ?, last_updated = ?
+		SET content = ?, type = ?, importance = ?, embedding = ?,
+		    embedding_version = CASE WHEN embedding = ? THEN embedding_version ELSE ? END,
+		    last_updated = ?
 		WHERE id = ? AND user_id = ?
 	`
-	_, err = s.exec(query, fact.Content, fact.Type, fact.Importance, embBytes, s.embeddingVersion, s.dialect.BindTime(fact.LastUpdated), fact.ID, fact.UserID)
+	_, err = s.exec(query, fact.Content, fact.Type, fact.Importance, embBytes, embBytes, s.embeddingVersion, s.dialect.BindTime(fact.LastUpdated), fact.ID, fact.UserID)
 	return err
 }
 

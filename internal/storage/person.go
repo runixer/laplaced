@@ -90,9 +90,17 @@ func (s *Store) UpdatePerson(person Person) error {
 		person.LastSeen = time.Now()
 	}
 
+	// embedding_version is re-stamped only when the vector actually changed.
+	// Callers like the mention-count/last-seen touch path round-trip the stored
+	// embedding unchanged; stamping those writes with the current version would
+	// mark an old-space vector as migrated and permanently hide the row from
+	// the startup re-embed (SET expressions see pre-update column values on
+	// both SQLite and Postgres, so `embedding` here is the old vector).
 	query := `
 		UPDATE people
-		SET display_name = ?, aliases = ?, telegram_id = ?, username = ?, circle = ?, bio = ?, embedding = ?, embedding_version = ?, last_seen = ?, mention_count = ?
+		SET display_name = ?, aliases = ?, telegram_id = ?, username = ?, circle = ?, bio = ?, embedding = ?,
+		    embedding_version = CASE WHEN embedding = ? THEN embedding_version ELSE ? END,
+		    last_seen = ?, mention_count = ?
 		WHERE id = ? AND user_id = ?
 	`
 	_, err = s.exec(query,
@@ -102,6 +110,7 @@ func (s *Store) UpdatePerson(person Person) error {
 		person.Username,
 		person.Circle,
 		person.Bio,
+		embBytes,
 		embBytes,
 		s.embeddingVersion,
 		s.dialect.BindTime(person.LastSeen),

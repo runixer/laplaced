@@ -256,6 +256,10 @@ func (s *Store) GetPendingArtifacts(userID ScopeID, maxRetries int) ([]Artifact,
 }
 
 // UpdateArtifact updates an artifact's metadata.
+// embedding_version is re-stamped only when the vector actually changed, so
+// state/retry bookkeeping writes that round-trip the stored embedding cannot
+// mark an old-space vector as already migrated (SET expressions see pre-update
+// column values on both SQLite and Postgres).
 func (s *Store) UpdateArtifact(artifact Artifact) error {
 	query := `
 		UPDATE artifacts
@@ -268,7 +272,7 @@ func (s *Store) UpdateArtifact(artifact Artifact) error {
 			entities = ?,
 			rag_hints = ?,
 			embedding = ?,
-			embedding_version = ?,
+			embedding_version = CASE WHEN embedding = ? THEN embedding_version ELSE ? END,
 			processed_at = ?
 		WHERE user_id = ? AND id = ?
 	`
@@ -321,6 +325,7 @@ func (s *Store) UpdateArtifact(artifact Artifact) error {
 		keywordsIface,
 		entitiesIface,
 		ragHintsIface,
+		embeddingJSON,
 		embeddingJSON,
 		s.embeddingVersion,
 		processedAt,
