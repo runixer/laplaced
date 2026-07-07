@@ -15,7 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - The forced final answer at the tool-call limit no longer comes back empty when the model tries to call yet another tool anyway.
-- The startup embedding migration no longer aborts wholesale on a dropped connection or a rate-limited batch — transient HTTP/2 disconnects are retried, and rows that still fail are skipped and picked up on the next start instead of blocking the whole run.
+- The startup embedding migration no longer aborts wholesale when one batch fails — failed rows are skipped and retried on the next start.
+- Touching a memory (a mention, an importance edit) no longer exempts it from a pending embedding migration, which could leave it permanently invisible to recall after an embedding model change.
+- Freshly analyzed files no longer occasionally drop out of file recall until a restart.
+- `read_url` is offered to the model only when a page-reading backend is actually configured — deployments without one keep answering link questions via web search instead of refusing to open links.
+- The bot no longer strips the user's own link from its reply as "fabricated" when the page could not be opened.
+- A site that is temporarily down is now reported as such (with one retry allowed) instead of "protected by anti-bot".
 
 ## [0.10.2] - 2026-07-02
 
