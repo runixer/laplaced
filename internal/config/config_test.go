@@ -1520,6 +1520,9 @@ func TestFetcherConfig_Getters(t *testing.T) {
 		{"invalid timeout falls back", FetcherConfig{Timeout: "bogus"}, 60 * time.Second, 15000},
 		{"explicit values", FetcherConfig{Timeout: "30s", MaxContentChars: 8000}, 30 * time.Second, 8000},
 		{"negative chars falls back", FetcherConfig{MaxContentChars: -1}, 60 * time.Second, 15000},
+		// http.Client treats Timeout <= 0 as "no timeout"; a negative config
+		// value must not disable the fetch deadline.
+		{"negative timeout falls back", FetcherConfig{Timeout: "-60s"}, 60 * time.Second, 15000},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1527,6 +1530,26 @@ func TestFetcherConfig_Getters(t *testing.T) {
 			assert.Equal(t, tt.wantChars, tt.cfg.GetMaxContentChars())
 		})
 	}
+}
+
+func TestConfig_ToolConfiguredAndDisableTool(t *testing.T) {
+	cfg := &Config{Tools: []ToolConfig{
+		{Name: "internet_search"},
+		{Name: "read_url"},
+		{Name: "manage_memory"},
+	}}
+
+	assert.True(t, cfg.ToolConfigured("read_url"))
+	assert.False(t, cfg.ToolConfigured("generate_image"))
+
+	cfg.DisableTool("read_url")
+	assert.False(t, cfg.ToolConfigured("read_url"))
+	assert.True(t, cfg.ToolConfigured("internet_search"), "other tools must survive DisableTool")
+	assert.True(t, cfg.ToolConfigured("manage_memory"))
+
+	// Disabling a missing tool is a no-op.
+	cfg.DisableTool("read_url")
+	assert.Len(t, cfg.Tools, 2)
 }
 
 func TestValidate_FetcherBackend(t *testing.T) {

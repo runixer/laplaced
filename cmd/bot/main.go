@@ -328,6 +328,24 @@ func run() int {
 	}
 	logger.Info("Translator initialized", "default_lang", cfg.Bot.Language)
 
+	// Construct the read_url page fetcher BEFORE services are built: the tool
+	// schema and the system prompt's READ section are derived from cfg.Tools at
+	// agent construction time, so when the fetcher cannot be built (unknown
+	// backend, firecrawl without an API key) the tool must be dropped from the
+	// config here — otherwise the model keeps being steered toward a tool that
+	// always fails and is told not to fall back to internet_search.
+	var fetcher fetch.Fetcher
+	if cfg.ToolConfigured("read_url") {
+		f, fErr := fetch.New(&cfg.Fetcher, logger)
+		if fErr != nil {
+			logger.Warn("read_url disabled: fetcher not available", "error", fErr)
+			cfg.DisableTool("read_url")
+		} else {
+			fetcher = f
+			logger.Info("read_url enabled", "backend", cfg.Fetcher.Backend)
+		}
+	}
+
 	// Initialize all services and agents using shared builder
 	services, err := app.SetupServices(context.Background(), logger, cfg, store, llmClient, translator)
 	if err != nil {
@@ -385,17 +403,11 @@ func run() int {
 		)
 	}
 
-	// Wire the read_url page fetcher. Gated on the tool being exposed in the
-	// tools list; a construction error (unknown backend, firecrawl without an
-	// API key) leaves the tool unwired — the bot starts fine and read_url
-	// reports a configuration message to the LLM.
-	if toolConfigured(cfg, "read_url") {
-		if fetcher, fErr := fetch.New(&cfg.Fetcher, logger); fErr != nil {
-			logger.Warn("read_url disabled", "error", fErr)
-		} else {
-			b.SetFetcher(fetcher)
-			logger.Info("read_url enabled", "backend", cfg.Fetcher.Backend)
-		}
+	// Wire the read_url page fetcher constructed above (nil when the tool is
+	// not configured or its backend failed to initialize — in that case the
+	// tool was already dropped from cfg.Tools).
+	if fetcher != nil {
+		b.SetFetcher(fetcher)
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -559,15 +571,4 @@ func run() int {
 	<-srvDone
 	logger.Info("Web server stopped")
 	return 0
-}
-
-// toolConfigured reports whether a tool with the given name is exposed in the
-// tools list.
-func toolConfigured(cfg *config.Config, name string) bool {
-	for _, t := range cfg.Tools {
-		if t.Name == name {
-			return true
-		}
-	}
-	return false
 }

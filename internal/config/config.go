@@ -430,6 +430,32 @@ type ToolConfig struct {
 	ParameterDescription string `yaml:"parameter_description"`
 }
 
+// ToolConfigured reports whether a tool with the given name is exposed in the
+// tools list. Tool schemas and prompt protocol sections are both derived from
+// this list, so it is the single source of truth for tool exposure.
+func (c *Config) ToolConfigured(name string) bool {
+	for _, t := range c.Tools {
+		if t.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// DisableTool removes a tool from the exposed tools list. Used at startup when
+// a tool's backing dependency failed to initialize (e.g. read_url without a
+// fetcher): dropping it here keeps the tool schema and the system prompt
+// consistent, instead of steering the model toward a tool that always fails.
+func (c *Config) DisableTool(name string) {
+	kept := c.Tools[:0]
+	for _, t := range c.Tools {
+		if t.Name != name {
+			kept = append(kept, t)
+		}
+	}
+	c.Tools = kept
+}
+
 // FetcherConfig configures the web-page fetcher backing the read_url tool.
 // Backend selects the implementation; there is deliberately no automatic
 // fallback between backends — a silent downgrade would mask credit exhaustion
@@ -454,13 +480,15 @@ type FirecrawlConfig struct {
 }
 
 // GetTimeout returns the per-fetch timeout. Defaults to 60s — Firecrawl
-// JS rendering routinely takes 15-30s.
+// JS rendering routinely takes 15-30s. Non-positive values also fall back:
+// http.Client treats Timeout <= 0 as "no timeout at all", so passing a
+// negative config value through would let read_url hang indefinitely.
 func (c *FetcherConfig) GetTimeout() time.Duration {
 	if c.Timeout == "" {
 		return 60 * time.Second
 	}
 	d, err := time.ParseDuration(c.Timeout)
-	if err != nil || d == 0 {
+	if err != nil || d <= 0 {
 		return 60 * time.Second
 	}
 	return d

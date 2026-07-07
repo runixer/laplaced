@@ -206,6 +206,10 @@ func (l *Laplace) LoadContextData(
 		Platform:  platformName(l.cfg.Transport),
 		KatexMath: l.cfg.Transport == "mattermost", // Mattermost/Time renders LaTeX via KaTeX; Telegram does not
 		IsChannel: isChannel,
+		// The READ protocol section must track actual tool exposure: startup
+		// wiring drops read_url from cfg.Tools when its fetcher fails to
+		// initialize, and the prompt must not steer the model to a dead tool.
+		ReadURL: l.cfg.ToolConfigured("read_url"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to build system prompt: %w", err)

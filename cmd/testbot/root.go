@@ -324,6 +324,22 @@ func setupTestBot(cfg *config.Config, logger *slog.Logger, dbPath string, dbChan
 		return nil, fmt.Errorf("failed to create LLM client: %w", err)
 	}
 
+	// Construct the read_url fetcher before services are built (mirrors
+	// cmd/bot/main.go): tool schema and prompt READ section derive from
+	// cfg.Tools at agent construction, so an unavailable fetcher must drop
+	// the tool from the config first. The search-policy eval counts fetcher
+	// agent_logs, so testbot must exercise the same wiring as production.
+	var fetcher fetch.Fetcher
+	if tb.cfg.ToolConfigured("read_url") {
+		f, fErr := fetch.New(&tb.cfg.Fetcher, tb.logger)
+		if fErr != nil {
+			tb.logger.Warn("read_url disabled: fetcher not available", "error", fErr)
+			tb.cfg.DisableTool("read_url")
+		} else {
+			fetcher = f
+		}
+	}
+
 	// Initialize all services using shared builder
 	services, err := app.SetupServices(context.Background(), tb.logger, tb.cfg, tb.store, client, translator)
 	if err != nil {
@@ -365,19 +381,10 @@ func setupTestBot(cfg *config.Config, logger *slog.Logger, dbPath string, dbChan
 		tb.bot.SetArtifactRepo(tb.store)
 	}
 
-	// Wire the read_url page fetcher (mirrors cmd/bot/main.go behavior).
-	// The search-policy eval counts fetcher agent_logs, so testbot must
-	// exercise the same wiring as production.
-	for _, toolCfg := range tb.cfg.Tools {
-		if toolCfg.Name != "read_url" {
-			continue
-		}
-		if fetcher, fErr := fetch.New(&tb.cfg.Fetcher, tb.logger); fErr != nil {
-			tb.logger.Warn("read_url disabled", "error", fErr)
-		} else {
-			tb.bot.SetFetcher(fetcher)
-		}
-		break
+	// Wire the read_url page fetcher constructed above (nil when the tool is
+	// not configured or its backend failed to initialize).
+	if fetcher != nil {
+		tb.bot.SetFetcher(fetcher)
 	}
 
 	// v0.7.0: run embedding migration in the same order as production

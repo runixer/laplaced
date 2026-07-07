@@ -103,6 +103,7 @@ type LaplaceParams struct {
 	Platform  string // Chat platform shown to the model (e.g., "Telegram", "Time")
 	KatexMath bool   // platform renders LaTeX via KaTeX → emit math-formatting rules
 	IsChannel bool   // multi-participant channel scope → emit channel-context framing (Phase 6)
+	ReadURL   bool   // read_url tool exposed in cfg.Tools → emit the READ protocol section
 }
 
 // ExtractorParams for extractor.system_prompt template.

@@ -172,6 +172,27 @@ func TestChannelPromptBranches(t *testing.T) {
 	}
 }
 
+// TestReadURLPromptBranch renders the chat system prompt with and without the
+// read_url tool exposed, asserting the READ protocol section tracks exposure:
+// a deployment whose fetcher failed to initialize must not steer the model
+// toward a tool that always fails.
+func TestReadURLPromptBranch(t *testing.T) {
+	tr, err := NewTranslator("en")
+	require.NoError(t, err)
+
+	for _, lang := range []string{"en", "ru"} {
+		on, err := tr.GetTemplate(lang, "bot.system_prompt", map[string]any{"ReadURL": true})
+		require.NoError(t, err)
+		off, err := tr.GetTemplate(lang, "bot.system_prompt", map[string]any{"ReadURL": false})
+		require.NoError(t, err)
+
+		assert.Contains(t, on, "read_url", "%s: READ section must render when the tool is exposed", lang)
+		assert.NotContains(t, off, "read_url", "%s: prompt must not mention read_url when the tool is not exposed", lang)
+		assert.NotContains(t, on, "{{", "%s: unrendered template directive", lang)
+		assert.NotContains(t, off, "{{", "%s: unrendered template directive", lang)
+	}
+}
+
 // TestReactorPrompts renders the real reactor prompts in both languages with
 // the typed params, asserting the placeholders resolve and nothing is left
 // unrendered.
