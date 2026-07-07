@@ -41,9 +41,11 @@ type VectorStore interface {
 	// incremental loads resume from.
 	MaxID(kind VectorKind) int64
 	// AppendSince appends entries fetched for IDs above sinceMaxID and
-	// advances the watermark. If the watermark already moved past sinceMaxID
-	// (a concurrent load won the race), nothing is appended and 0 is
-	// returned. Returns the number of entries appended.
+	// advances the watermark. If the watermark no longer equals sinceMaxID —
+	// a concurrent incremental load advanced it, or a ReplaceAll reset it —
+	// the batch is stale and is discarded (returns 0): appending it would
+	// jump the watermark past entries the concurrent reload has yet to fetch,
+	// silently dropping them from the index. Returns the number appended.
 	AppendSince(kind VectorKind, sinceMaxID int64, entries map[storage.ScopeID][]VectorEntry) int
 	// Search returns the user's entries with cosine similarity to query of at
 	// least threshold, sorted by score descending, capped at limit
@@ -105,8 +107,13 @@ func (m *memoryVectorStore) AppendSince(kind VectorKind, sinceMaxID int64, entri
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.maxIDs[kind] > sinceMaxID {
-		return 0 // a concurrent load already advanced the watermark
+	if m.maxIDs[kind] != sinceMaxID {
+		// The watermark moved since the caller sampled it: either a concurrent
+		// incremental load advanced it, or a ReplaceAll reset it down (full
+		// reload in progress). Either way this batch was fetched against a
+		// stale watermark — appending would advance the watermark past rows
+		// the winning load still owns, permanently hiding them from search.
+		return 0
 	}
 
 	byUser := m.entries[kind]

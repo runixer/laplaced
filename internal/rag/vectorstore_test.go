@@ -115,6 +115,19 @@ func TestMemoryVectorStore_AppendSince(t *testing.T) {
 			wantCount:  1,
 			wantMaxID:  5,
 		},
+		{
+			// Regression: a ReplaceAll reset the watermark BELOW the value this
+			// batch was fetched against. Appending would jump the watermark past
+			// entries the full reload has yet to fetch, hiding them from search.
+			name:       "skips when watermark was reset below sinceMaxID",
+			sinceMaxID: 500, // store watermark is 5 — a full reload reset it
+			entries: map[storage.ScopeID][]VectorEntry{
+				vsUser1: {{ID: 502, Embedding: []float32{1, 0}}},
+			},
+			wantAdded: 0,
+			wantCount: 1,
+			wantMaxID: 5,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
