@@ -11,6 +11,7 @@ import (
 	"net/http"
 
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/textutil"
 )
 
 // firecrawlFetcher scrapes pages via the Firecrawl REST API
@@ -81,7 +82,9 @@ func (f *firecrawlFetcher) Fetch(ctx context.Context, targetURL string) (*Result
 	if resp.StatusCode != http.StatusOK {
 		msg := parsed.Error
 		if msg == "" {
-			msg = truncateForLog(string(respBody), 200)
+			// Rune-safe: the error body may be non-ASCII, and this message
+			// reaches the model via the tool result.
+			msg = textutil.TruncateRunes(string(respBody), 200, "...")
 		}
 		return nil, &Error{Kind: classifyServiceStatus(resp.StatusCode), StatusCode: resp.StatusCode, Msg: msg}
 	}
@@ -99,11 +102,20 @@ func (f *firecrawlFetcher) Fetch(ctx context.Context, targetURL string) (*Result
 	}
 
 	// success:true with a failing target status and no content: the scrape
-	// worked but the page itself said no (404) or walled us off (captcha).
+	// worked but the page itself said no. 404/410 → dead link; other 4xx →
+	// walled off (captcha/anti-bot); 5xx → the origin is having an outage,
+	// which is transient — classifying it as "blocked" would make the bot
+	// tell the user the site bans bots and forbid the one retry that would
+	// likely succeed.
 	if meta.StatusCode >= 400 && parsed.Data.Markdown == "" {
 		kind := KindBlocked
-		if meta.StatusCode == http.StatusNotFound || meta.StatusCode == http.StatusGone {
+		switch {
+		case meta.StatusCode == http.StatusNotFound || meta.StatusCode == http.StatusGone:
 			kind = KindNotFound
+		case meta.StatusCode >= 500 && meta.StatusCode < 600:
+			// Strictly 5xx: out-of-range statuses like 999 are anti-bot
+			// walls (LinkedIn), not outages.
+			kind = KindUpstream
 		}
 		msg := meta.Error
 		if msg == "" {
@@ -150,11 +162,4 @@ func classifyTransportError(err error) *Error {
 		return &Error{Kind: KindTimeout, Msg: err.Error()}
 	}
 	return &Error{Kind: KindUpstream, Msg: err.Error()}
-}
-
-func truncateForLog(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "..."
 }

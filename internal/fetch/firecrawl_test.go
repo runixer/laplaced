@@ -116,6 +116,10 @@ func TestFirecrawlFetch_TargetPageFailures(t *testing.T) {
 		{"target 410", 410, KindNotFound},
 		{"target 403 captcha", 403, KindBlocked},
 		{"target 999 anti-bot", 999, KindBlocked},
+		// A 5xx from the target is an outage, not an anti-bot wall: the tool
+		// message must allow one retry instead of "the site blocks bots".
+		{"target 500 outage", 500, KindUpstream},
+		{"target 503 outage", 503, KindUpstream},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

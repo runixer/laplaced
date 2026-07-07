@@ -195,11 +195,16 @@ func TestPerformReadURL_FailureKinds(t *testing.T) {
 			for _, want := range tt.wantContains {
 				assert.Contains(t, res.Content, want)
 			}
+			// The requested URL must always be citable: an honest "couldn't
+			// open [link](url)" about the user's own link must survive the
+			// citation guard. The resolved URL joins it when present.
+			require.NotEmpty(t, res.Citations)
+			assert.Equal(t, "https://requested.example.com", res.Citations[0].URL)
 			if tt.fErr.FinalURL != "" {
-				require.Len(t, res.Citations, 1, "resolved URL must be citable even on failure")
-				assert.Equal(t, tt.fErr.FinalURL, res.Citations[0].URL)
+				require.Len(t, res.Citations, 2, "resolved URL must be citable even on failure")
+				assert.Equal(t, tt.fErr.FinalURL, res.Citations[1].URL)
 			} else {
-				assert.Empty(t, res.Citations)
+				assert.Len(t, res.Citations, 1)
 			}
 		})
 	}
@@ -260,30 +265,4 @@ func TestExecuteToolCall_ReadURLDispatch(t *testing.T) {
 	res, err := exec.ExecuteToolCall(context.Background(), readURLCallContext(), "read_url", `{"url":"https://e.com"}`)
 	require.NoError(t, err)
 	assert.Contains(t, res.Content, "dispatched")
-}
-
-func TestTruncateRunes(t *testing.T) {
-	tests := []struct {
-		name      string
-		s         string
-		max       int
-		wantTrunc bool
-	}{
-		{"under cap", "abc", 10, false},
-		{"exactly cap", "abcde", 5, false},
-		{"over cap ascii", "abcdef", 5, true},
-		{"over cap cyrillic", "абвгде", 5, true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, truncated := truncateRunes(tt.s, tt.max)
-			assert.Equal(t, tt.wantTrunc, truncated)
-			if !truncated {
-				assert.Equal(t, tt.s, got)
-			} else {
-				assert.Contains(t, got, "[... truncated")
-				assert.Equal(t, tt.max, len([]rune(strings.SplitN(got, "\n\n[...", 2)[0])))
-			}
-		})
-	}
 }

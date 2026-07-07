@@ -25,8 +25,8 @@ const rawMaxBodyBytes = 2 << 20 // 2 MB
 // extraction. No JavaScript rendering — SPAs and bot-walled sites won't read
 // well; it exists so read_url works without a Firecrawl key. Extraction is
 // deliberately simple (strip non-content elements, keep block structure); if
-// quality ever matters, the trafilatura-based reader from the old
-// feat/read-url-tool branch is a known upgrade path.
+// quality ever matters, a trafilatura-style readability extractor is a known
+// upgrade path.
 type rawFetcher struct {
 	client *http.Client
 	logger *slog.Logger

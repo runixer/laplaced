@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -13,6 +14,7 @@ import (
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/fetch"
 	"github.com/runixer/laplaced/internal/llm"
+	"github.com/runixer/laplaced/internal/textutil"
 )
 
 // performReadURL executes the read_url tool: fetch one page via the configured
@@ -52,16 +54,22 @@ func (e *ToolExecutor) performReadURL(ctx context.Context, cc CallContext, args 
 		}
 		e.logReadURL(ctx, cc, rawURL, backend, content, duration, agentlogFailureMeta(backend, fErr), err)
 
-		// Even on failure the resolved URL is citable — "this shortlink
-		// points to X" must survive the citation guard.
-		var citations []llm.Citation
+		// Even on failure both URL forms are citable. The requested URL first:
+		// the model's honest "couldn't open [link](url)" mention of the user's
+		// own link must survive the citation guard (which activates as soon as
+		// any tool this turn registered citations, e.g. an earlier search).
+		// And the resolved URL: "this shortlink points to X".
+		citations := []llm.Citation{{URL: rawURL}}
 		if fErr != nil && fErr.FinalURL != "" && fErr.FinalURL != rawURL {
 			citations = append(citations, llm.Citation{URL: fErr.FinalURL})
 		}
 		return &Result{Content: content, Citations: citations}, nil
 	}
 
-	content, truncated := truncateRunes(res.Content, e.cfg.Fetcher.GetMaxContentChars())
+	maxChars := e.cfg.Fetcher.GetMaxContentChars()
+	truncated := utf8.RuneCountInString(res.Content) > maxChars
+	content := textutil.TruncateRunes(res.Content, maxChars,
+		fmt.Sprintf("\n\n[... truncated: page content exceeds %d characters]", maxChars))
 
 	var b strings.Builder
 	if res.Title != "" {
@@ -89,17 +97,6 @@ func (e *ToolExecutor) performReadURL(ctx context.Context, cc CallContext, args 
 	}, nil)
 
 	return &Result{Content: toolContent, Citations: citations}, nil
-}
-
-// truncateRunes caps s at max runes, appending a model-facing marker when cut.
-// Rune (not byte) boundaries: page content is often Russian, and a split
-// multibyte rune corrupts the tail.
-func truncateRunes(s string, max int) (string, bool) {
-	runes := []rune(s)
-	if len(runes) <= max {
-		return s, false
-	}
-	return string(runes[:max]) + fmt.Sprintf("\n\n[... truncated: page content exceeds %d characters]", max), true
 }
 
 // readFailureContent maps a classified fetch error to a model-facing message
