@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -83,7 +82,7 @@ func (s *Splitter) Execute(ctx context.Context, req *agent.Request) (response *a
 		}, nil
 	}
 
-	model := s.cfg.Agents.Archivist.GetModel(s.cfg.Agents.Default.Model)
+	model := s.cfg.Agents.Splitter.GetModel(s.cfg.Agents.Default.Model)
 	if model == "" {
 		return nil, fmt.Errorf("no model configured for splitter")
 	}
@@ -145,31 +144,22 @@ func (s *Splitter) Execute(ctx context.Context, req *agent.Request) (response *a
 	// Prepare messages as JSON
 	userMessage := s.buildUserMessage(messages)
 
-	// Define JSON Schema for structured output
-	schema := s.buildJSONSchema()
-
-	// Make LLM call using executor's client directly (for ResponseFormat support)
-	start := time.Now()
-	resp, err := s.executor.Client().CreateChatCompletion(ctx, llm.ChatCompletionRequest{
-		Model: model,
-		Messages: []llm.Message{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: userMessage},
-		},
-		ResponseFormat: schema,
-		UserID:         string(userID),
+	// Make LLM call via the shared single-shot path (agentlog records,
+	// empty-content retry, strict JSON schema).
+	llmResp, err := s.executor.ExecuteSingleShot(ctx, agent.SingleShotRequest{
+		AgentType:    agent.TypeSplitter,
+		UserID:       userID,
+		Model:        model,
+		SystemPrompt: systemPrompt,
+		UserPrompt:   userMessage,
+		JSONMode:     true,
+		JSONSchema:   s.buildJSONSchema(),
 	})
-	duration := time.Since(start)
-
 	if err != nil {
 		return nil, fmt.Errorf("llm call failed: %w", err)
 	}
 
-	if len(resp.Choices) == 0 {
-		return nil, fmt.Errorf("empty response from LLM")
-	}
-
-	content := resp.Choices[0].Message.Content
+	content := llmResp.Content
 
 	// Parse JSON response (lenient: fences/preamble/trailing garbage stripped)
 	var result struct {
@@ -194,13 +184,8 @@ func (s *Splitter) Execute(ctx context.Context, req *agent.Request) (response *a
 	return &agent.Response{
 		Content:    content,
 		Structured: &Result{Topics: result.Topics},
-		Duration:   duration,
-		Tokens: agent.TokenUsage{
-			Prompt:     resp.Usage.PromptTokens,
-			Completion: resp.Usage.CompletionTokens,
-			Total:      resp.Usage.TotalTokens,
-			Cost:       resp.Usage.Cost,
-		},
+		Duration:   llmResp.Duration,
+		Tokens:     llmResp.Tokens,
 	}, nil
 }
 
@@ -289,41 +274,38 @@ func (s *Splitter) buildUserMessage(messages []storage.Message) string {
 }
 
 // buildJSONSchema creates the JSON schema for structured output.
-func (s *Splitter) buildJSONSchema() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "json_schema",
-		"json_schema": map[string]interface{}{
-			"name":   "topic_extraction",
-			"strict": true,
-			"schema": map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"topics": map[string]interface{}{
-						"type": "array",
-						"items": map[string]interface{}{
-							"type": "object",
-							"properties": map[string]interface{}{
-								"summary": map[string]interface{}{
-									"type":        "string",
-									"description": "Подробное описание темы обсуждения на русском языке. Сохраняй названия брендов и ПО на английском.",
-								},
-								"start_msg_id": map[string]interface{}{
-									"type":        "integer",
-									"description": "ID первого сообщения в теме.",
-								},
-								"end_msg_id": map[string]interface{}{
-									"type":        "integer",
-									"description": "ID последнего сообщения в теме.",
-								},
+func (s *Splitter) buildJSONSchema() *llm.JSONSchema {
+	return &llm.JSONSchema{
+		Name:   "topic_extraction",
+		Strict: true,
+		Schema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"topics": map[string]interface{}{
+					"type": "array",
+					"items": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"summary": map[string]interface{}{
+								"type":        "string",
+								"description": "Подробное описание темы обсуждения на русском языке. Сохраняй названия брендов и ПО на английском.",
 							},
-							"required":             []string{"summary", "start_msg_id", "end_msg_id"},
-							"additionalProperties": false,
+							"start_msg_id": map[string]interface{}{
+								"type":        "integer",
+								"description": "ID первого сообщения в теме.",
+							},
+							"end_msg_id": map[string]interface{}{
+								"type":        "integer",
+								"description": "ID последнего сообщения в теме.",
+							},
 						},
+						"required":             []string{"summary", "start_msg_id", "end_msg_id"},
+						"additionalProperties": false,
 					},
 				},
-				"required":             []string{"topics"},
-				"additionalProperties": false,
 			},
+			"required":             []string{"topics"},
+			"additionalProperties": false,
 		},
 	}
 }

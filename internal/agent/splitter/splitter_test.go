@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/runixer/laplaced/internal/agent"
+	"github.com/runixer/laplaced/internal/agentlog"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/testutil"
 )
@@ -30,7 +32,7 @@ func TestSplitter_Execute(t *testing.T) {
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
 	cfg := testutil.TestConfig()
-	cfg.Agents.Archivist.Model = "test-model"
+	cfg.Agents.Splitter.Model = "test-model"
 	translator := testutil.TestTranslator(t)
 
 	splitter := New(executor, translator, cfg, nil, nil)
@@ -63,6 +65,56 @@ func TestSplitter_Execute(t *testing.T) {
 	assert.Equal(t, int64(103), result.Topics[1].EndMsgID)
 
 	mockClient.AssertExpectations(t)
+}
+
+// TestSplitter_ModelOverrideAndAgentLog proves that agents.splitter.model (not
+// another agent's section) reaches the LLM request, and that the call lands in
+// agent_logs via the executor single-shot path.
+func TestSplitter_ModelOverrideAndAgentLog(t *testing.T) {
+	llmResponse := `{"topics":[{"summary":"Greeting","start_msg_id":100,"end_msg_id":100}]}`
+
+	mockClient := &testutil.MockLLMClient{}
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
+		return req.Model == "splitter-model"
+	})).Return(testutil.MockChatResponse(llmResponse), nil)
+
+	mockStore := new(testutil.MockStorage)
+	var logged storage.AgentLog
+	mockStore.On("AddAgentLog", mock.Anything).Run(func(args mock.Arguments) {
+		logged = args.Get(0).(storage.AgentLog)
+	}).Return(nil)
+	agentLogger := agentlog.NewLogger(mockStore, testutil.TestLogger(), true)
+
+	executor := agent.NewExecutor(mockClient, agentLogger, testutil.TestLogger())
+	cfg := testutil.TestConfig()
+	cfg.Agents.Splitter.Model = "splitter-model"
+	cfg.Agents.Archivist.Model = "archivist-model" // must NOT be picked up
+	translator := testutil.TestTranslator(t)
+
+	splitter := New(executor, translator, cfg, nil, nil)
+
+	req := &agent.Request{
+		Shared: &agent.SharedContext{
+			UserID:       "123",
+			Profile:      "<user_profile>\n</user_profile>",
+			RecentTopics: "<recent_topics>\n</recent_topics>",
+		},
+		Params: map[string]any{
+			ParamMessages: []storage.Message{
+				{ID: 100, Role: "user", Content: "Hello", CreatedAt: time.Now()},
+			},
+		},
+	}
+
+	_, err := splitter.Execute(context.Background(), req)
+	require.NoError(t, err)
+
+	assert.Equal(t, "splitter", logged.AgentType)
+	assert.True(t, logged.Success)
+	assert.Equal(t, "splitter-model", logged.Model)
+
+	mockClient.AssertExpectations(t)
+	mockStore.AssertExpectations(t)
 }
 
 func TestSplitter_EmptyMessages(t *testing.T) {
@@ -223,14 +275,11 @@ func TestSplitter_buildJSONSchema(t *testing.T) {
 
 	schema := s.buildJSONSchema()
 
-	assert.NotNil(t, schema)
-	assert.Equal(t, "json_schema", schema["type"])
+	require.NotNil(t, schema)
+	assert.Equal(t, "topic_extraction", schema.Name)
+	assert.True(t, schema.Strict)
 
-	jsonSchema := schema["json_schema"].(map[string]interface{})
-	assert.Equal(t, "topic_extraction", jsonSchema["name"])
-	assert.True(t, jsonSchema["strict"].(bool))
-
-	schemaDef := jsonSchema["schema"].(map[string]interface{})
+	schemaDef := schema.Schema
 	assert.Equal(t, "object", schemaDef["type"])
 
 	properties := schemaDef["properties"].(map[string]interface{})
@@ -260,7 +309,7 @@ func TestSplitter_SingleMessage(t *testing.T) {
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
 	cfg := testutil.TestConfig()
-	cfg.Agents.Archivist.Model = "test-model"
+	cfg.Agents.Splitter.Model = "test-model"
 	translator := testutil.TestTranslator(t)
 
 	splitter := New(executor, translator, cfg, nil, nil)
@@ -301,7 +350,7 @@ func TestSplitter_ParseError(t *testing.T) {
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
 	cfg := testutil.TestConfig()
-	cfg.Agents.Archivist.Model = "test-model"
+	cfg.Agents.Splitter.Model = "test-model"
 	translator := testutil.TestTranslator(t)
 
 	splitter := New(executor, translator, cfg, nil, nil)
@@ -327,8 +376,8 @@ func TestSplitter_ParseError(t *testing.T) {
 func TestSplitter_NoModel(t *testing.T) {
 	executor := agent.NewExecutor(nil, nil, testutil.TestLogger())
 	cfg := testutil.TestConfig()
-	cfg.Agents.Archivist.Model = "" // No model
-	cfg.Agents.Default.Model = ""   // No default
+	cfg.Agents.Splitter.Model = "" // No model
+	cfg.Agents.Default.Model = ""  // No default
 	translator := testutil.TestTranslator(t)
 
 	splitter := New(executor, translator, cfg, nil, nil)

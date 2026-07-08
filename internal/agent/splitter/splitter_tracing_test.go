@@ -62,7 +62,7 @@ func TestSplitter_Execute_RecordsSpan(t *testing.T) {
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
 	cfg := testutil.TestConfig()
-	cfg.Agents.Archivist.Model = "test-model"
+	cfg.Agents.Splitter.Model = "test-model"
 	translator := testutil.TestTranslator(t)
 	splitter := New(executor, translator, cfg, nil, nil)
 
@@ -106,7 +106,7 @@ func TestSplitter_Execute_ParseErrorFlag(t *testing.T) {
 
 	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
 	cfg := testutil.TestConfig()
-	cfg.Agents.Archivist.Model = "test-model"
+	cfg.Agents.Splitter.Model = "test-model"
 	translator := testutil.TestTranslator(t)
 	splitter := New(executor, translator, cfg, nil, nil)
 
