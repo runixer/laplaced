@@ -103,6 +103,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 	)
 	// Captured by the deferred closure for span attrs. tool/llm counters
 	// live with the existing tracker; we copy at end-of-turn into attrs.
+	execStart := time.Now()
 	var toolIterationsFinal int
 	var totalArtifactsLoaded int
 	defer func() {
@@ -120,6 +121,15 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 			attribute.Float64("laplace.cost_usd", costUSD),
 			attribute.Int("laplace.artifacts_loaded", totalArtifactsLoaded),
 		)
+		// Fatal exits (return nil, err) never reach the callers' LogExecution
+		// — it dereferences resp — so without this a terminal LLM failure is
+		// invisible in agent_logs (success rows only). One insertion here
+		// covers every nil-resp exit.
+		if err != nil && resp == nil && l.agentLogger != nil {
+			l.agentLogger.LogError(ctx, req.UserID, agentlog.AgentLaplace, "", nil,
+				err.Error(), l.cfg.Agents.GetChatModel(),
+				int(time.Since(execStart).Milliseconds()), nil)
+		}
 		_ = obs.ObserveErr(span, err)
 		span.End()
 	}()

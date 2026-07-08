@@ -477,10 +477,22 @@ func TestExecute_LLMError(t *testing.T) {
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
 		Return(llm.ChatCompletionResponse{}, errors.New("API error"))
 
+	// Fatal exits must land in agent_logs as failures — callers' LogExecution
+	// never runs on nil resp (see the deferred closure in Execute).
+	var logged storage.AgentLog
+	mockStore.On("AddAgentLog", mock.Anything).Run(func(args mock.Arguments) {
+		logged = args.Get(0).(storage.AgentLog)
+	}).Return(nil)
+	agent.SetAgentLogger(agentlog.NewLogger(mockStore, testutil.TestLogger(), true))
+
 	resp, err := agent.Execute(context.Background(), req, handler)
 	assert.Error(t, err)
 	assert.Nil(t, resp)
 	assert.Contains(t, err.Error(), "LLM call failed")
+
+	assert.Equal(t, "laplace", logged.AgentType)
+	assert.False(t, logged.Success)
+	assert.Contains(t, logged.ErrorMessage, "API error")
 
 	mockStore.AssertExpectations(t)
 	handler.AssertExpectations(t)
