@@ -52,6 +52,25 @@ func TestStripUnverifiedLinks(t *testing.T) {
 			wantReply: "fact one [1] and fact two [2], no links here",
 		},
 		{
+			name:      "filename destination is not a fabricated URL",
+			reply:     "attached [photo](memory_1053_photo.jpg) from memory",
+			seen:      seen,
+			wantReply: "attached [photo](memory_1053_photo.jpg) from memory",
+		},
+		{
+			name:      "non-web scheme untouched",
+			reply:     "ping me at [chat](tg://resolve?domain=johndoe)",
+			seen:      seen,
+			wantReply: "ping me at [chat](tg://resolve?domain=johndoe)",
+		},
+		{
+			name:         "uppercase scheme still guarded",
+			reply:        "see [source](HTTPS://fake.com/x)",
+			seen:         seen,
+			wantReply:    "see source",
+			wantStripped: []string{"HTTPS://fake.com/x"},
+		},
+		{
 			name:      "empty reply",
 			reply:     "",
 			seen:      seen,

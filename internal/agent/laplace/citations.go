@@ -2,10 +2,14 @@ package laplace
 
 import "regexp"
 
-// markdownLinkRE matches a markdown inline link [text](url). The url group
-// stops at the first whitespace or closing paren, matching how the renderer
-// (internal/markdown) parses link destinations.
-var markdownLinkRE = regexp.MustCompile(`\[([^\]]*)\]\((\S+?)\)`)
+// markdownLinkRE matches a markdown inline link [text](url) whose destination
+// is a web URL. The url group stops at the first whitespace or closing paren,
+// matching how the renderer (internal/markdown) parses link destinations.
+// Only http(s) destinations are candidates for the fabricated-link guard:
+// bare filenames (memory_1053_photo.jpg), anchors, and non-web schemes are
+// not something a search tool could have vouched for, so flagging them only
+// produces false bot.anomaly.fabricated_url signals.
+var markdownLinkRE = regexp.MustCompile(`\[([^\]]*)\]\(((?i:https?)://[^)\s]*)\)`)
 
 // stripUnverifiedLinks grounds source links in the model's reply against the
 // set of URLs actually returned by search tools this turn. Any markdown link
