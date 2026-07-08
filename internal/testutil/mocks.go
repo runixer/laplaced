@@ -497,8 +497,8 @@ func (m *MockStorage) CleanupFactHistory(keepPerUser int) (int64, error) {
 	return args.Get(0).(int64), args.Error(1)
 }
 
-func (m *MockStorage) CleanupAgentLogs(keepPerUserPerAgent int) (int64, error) {
-	args := m.Called(keepPerUserPerAgent)
+func (m *MockStorage) CleanupAgentLogs(keepPerUserPerAgent int, minAge time.Duration) (int64, error) {
+	args := m.Called(keepPerUserPerAgent, minAge)
 	return args.Get(0).(int64), args.Error(1)
 }
 

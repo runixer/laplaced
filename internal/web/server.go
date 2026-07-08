@@ -440,9 +440,11 @@ func (s *Server) runCleanup() {
 		}
 	}
 
-	// Cleanup agent_logs: keep 50 per user per agent
+	// Cleanup agent_logs: rows within the min-age window are always kept,
+	// beyond it the newest keep-N per user per agent survive (database.retention).
 	start = time.Now()
-	deleted, err = s.maintenanceRepo.CleanupAgentLogs(50)
+	retention := &s.cfg.Database.Retention
+	deleted, err = s.maintenanceRepo.CleanupAgentLogs(retention.GetAgentLogsKeep(), retention.GetAgentLogsMinAge())
 	duration = time.Since(start).Seconds()
 	if err != nil {
 		s.logger.Error("failed to cleanup agent_logs", "error", err)
@@ -1173,8 +1175,8 @@ func (s *Server) databasePurgeHandler(w http.ResponseWriter, r *http.Request) {
 			stats["fact_history_deleted"] = factHistoryCount
 		}
 	} else {
-		// Actually delete all debug data
-		deleted, err := s.maintenanceRepo.CleanupAgentLogs(0)
+		// Actually delete all debug data (minAge 0: no age protection on purge)
+		deleted, err := s.maintenanceRepo.CleanupAgentLogs(0, 0)
 		if err != nil {
 			s.logger.Error("Failed to purge agent_logs", "error", err)
 		} else {

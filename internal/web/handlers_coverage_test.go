@@ -843,7 +843,7 @@ func TestRoutesVerification(t *testing.T) {
 	mockStorage.On("GetDBSize").Return(int64(1024), nil).Maybe()
 	mockStorage.On("GetTableSizes").Return([]storage.TableSize{}, nil).Maybe()
 	mockStorage.On("CleanupFactHistory", mock.Anything).Return(int64(0), nil).Maybe()
-	mockStorage.On("CleanupAgentLogs", mock.Anything).Return(int64(0), nil).Maybe()
+	mockStorage.On("CleanupAgentLogs", mock.Anything, mock.Anything).Return(int64(0), nil).Maybe()
 	mockStorage.On("GetStats").Return(map[storage.ScopeID]storage.Stat{}, nil).Maybe()
 	mockStorage.On("GetDashboardStats", storage.ScopeID("123")).Return(&storage.DashboardStats{}, nil).Maybe()
 	mockStorage.On("GetFacts", storage.ScopeID("123")).Return([]storage.Fact{}, nil).Maybe()
@@ -965,7 +965,7 @@ func TestStart_DebugModeDisabled(t *testing.T) {
 	mockStorage.On("GetDBSize").Return(int64(1024), nil)
 	mockStorage.On("GetTableSizes").Return([]storage.TableSize{}, nil)
 	mockStorage.On("CleanupFactHistory", mock.Anything).Return(int64(0), nil)
-	mockStorage.On("CleanupAgentLogs", mock.Anything).Return(int64(0), nil)
+	mockStorage.On("CleanupAgentLogs", mock.Anything, mock.Anything).Return(int64(0), nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()

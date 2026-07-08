@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -142,8 +143,15 @@ func TestCleanupAgentLogs(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// Keep 2 per user per agent - should delete 2 for laplace, 1 for reranker = 3 total
-	deleted, err := store.CleanupAgentLogs(2)
+	// All rows were just created: with a min-age guard nothing is deletable
+	// even though the keep-N limit is exceeded.
+	deleted, err := store.CleanupAgentLogs(2, 14*24*time.Hour)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), deleted, "Rows younger than min-age must survive the keep-N trim")
+
+	// Keep 2 per user per agent without age protection - should delete
+	// 2 for laplace, 1 for reranker = 3 total
+	deleted, err = store.CleanupAgentLogs(2, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), deleted, "Should delete 3 records (2 from laplace, 1 from reranker)")
 
@@ -152,6 +160,13 @@ func TestCleanupAgentLogs(t *testing.T) {
 	err = store.db.QueryRow("SELECT COUNT(*) FROM agent_logs").Scan(&count)
 	require.NoError(t, err)
 	assert.Equal(t, 4, count, "Should have 4 records remaining (2 per agent)")
+
+	// Backdate the survivors past the min-age window: keep-N now applies again.
+	_, err = store.db.Exec("UPDATE agent_logs SET created_at = datetime('now', '-30 days')")
+	require.NoError(t, err)
+	deleted, err = store.CleanupAgentLogs(1, 14*24*time.Hour)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), deleted, "Rows past min-age are trimmed to keep-N")
 }
 
 func TestContaminatedTopicsDetection(t *testing.T) {

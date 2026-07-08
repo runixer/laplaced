@@ -227,7 +227,7 @@ func TestStart_PasswordGeneration(t *testing.T) {
 	mockStorage.On("GetDBSize").Return(int64(1024), nil)
 	mockStorage.On("GetTableSizes").Return([]storage.TableSize{}, nil)
 	mockStorage.On("CleanupFactHistory", mock.Anything).Return(int64(0), nil)
-	mockStorage.On("CleanupAgentLogs", mock.Anything).Return(int64(0), nil)
+	mockStorage.On("CleanupAgentLogs", mock.Anything, mock.Anything).Return(int64(0), nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 

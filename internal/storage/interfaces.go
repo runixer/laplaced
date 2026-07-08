@@ -200,7 +200,7 @@ type MaintenanceRepository interface {
 	GetDBSize() (int64, error)
 	GetTableSizes() ([]TableSize, error)
 	CleanupFactHistory(keepPerUser int) (int64, error)
-	CleanupAgentLogs(keepPerUserPerAgent int) (int64, error)
+	CleanupAgentLogs(keepPerUserPerAgent int, minAge time.Duration) (int64, error)
 	CountAgentLogs() (int64, error)
 	CountFactHistory() (int64, error)
 

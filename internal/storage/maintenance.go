@@ -2,6 +2,7 @@ package storage
 
 import (
 	"os"
+	"time"
 )
 
 // TableSize represents the size of a database table.
@@ -97,9 +98,14 @@ func (s *Store) CleanupFactHistory(keepPerUser int) (int64, error) {
 	return result.RowsAffected()
 }
 
-// CleanupAgentLogs removes old agent_logs records, keeping only the N most recent per user per agent type.
+// CleanupAgentLogs removes old agent_logs records, keeping the N most recent
+// per user per agent type. Rows younger than minAge are kept regardless of
+// count, so an active user's burst of calls cannot flush the debugging window
+// within hours (agent_logs is the only place full prompts/responses survive;
+// trace retention is much shorter). minAge <= 0 disables the age protection
+// and trims purely by count (the purge path relies on this with keep=0).
 // Returns the number of deleted rows.
-func (s *Store) CleanupAgentLogs(keepPerUserPerAgent int) (int64, error) {
+func (s *Store) CleanupAgentLogs(keepPerUserPerAgent int, minAge time.Duration) (int64, error) {
 	// Delete records that are not in the top N per (user_id, agent_type) group
 	// (by id DESC). See CleanupFactHistory: the derived table alias is required
 	// on Postgres 15 and older.
@@ -112,7 +118,12 @@ func (s *Store) CleanupAgentLogs(keepPerUserPerAgent int) (int64, error) {
 			) ranked WHERE rn <= ?
 		)
 	`
-	result, err := s.exec(query, keepPerUserPerAgent)
+	args := []any{keepPerUserPerAgent}
+	if minAge > 0 {
+		query += " AND " + s.dialect.SecondsAgoExpr("created_at")
+		args = append(args, int64(minAge.Seconds()))
+	}
+	result, err := s.exec(query, args...)
 	if err != nil {
 		return 0, err
 	}

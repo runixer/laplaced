@@ -305,6 +305,13 @@ database:
   # driver selects the backend: "sqlite" (default) or "postgres".
   driver: "sqlite"
   path: "data/laplaced.db"
+  # Debug-table trim policy. agent_logs is the only store of full agent
+  # prompts/responses, so rows younger than agent_logs_min_age are never
+  # deleted; beyond that age the newest agent_logs_keep rows per
+  # (user, agent type) survive. "0" min_age disables the age protection.
+  retention:
+    agent_logs_keep: 50
+    agent_logs_min_age: "336h"  # 14 days
   # PostgreSQL backend (driver: postgres). Password MUST come from the env var
   # LAPLACED_DATABASE_PASSWORD, never a committed literal.
   # postgres:

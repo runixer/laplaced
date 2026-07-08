@@ -756,6 +756,38 @@ type TelemetryConfig struct {
 	TraceContent bool `yaml:"trace_content" env:"LAPLACED_TELEMETRY_TRACE_CONTENT"`
 }
 
+// RetentionConfig bounds the periodic cleanup of debug tables (database.retention).
+type RetentionConfig struct {
+	// AgentLogsKeep is how many of the newest agent_logs rows survive per
+	// (user, agent type) once past the min-age window. 0 uses the default.
+	AgentLogsKeep int `yaml:"agent_logs_keep" env:"LAPLACED_DATABASE_AGENT_LOGS_KEEP"`
+	// AgentLogsMinAge protects recent rows from the keep-N trim: rows younger
+	// than this are never deleted regardless of count. Duration string
+	// ("336h" = 14 days). Empty uses the default; "0" disables the protection.
+	AgentLogsMinAge string `yaml:"agent_logs_min_age" env:"LAPLACED_DATABASE_AGENT_LOGS_MIN_AGE"`
+}
+
+// GetAgentLogsKeep returns the keep-N for agent_logs cleanup (default 50).
+func (r *RetentionConfig) GetAgentLogsKeep() int {
+	if r.AgentLogsKeep > 0 {
+		return r.AgentLogsKeep
+	}
+	return 50
+}
+
+// GetAgentLogsMinAge returns the min-age guard for agent_logs cleanup
+// (default 14 days). An explicit "0" disables the guard.
+func (r *RetentionConfig) GetAgentLogsMinAge() time.Duration {
+	if r.AgentLogsMinAge == "" {
+		return 14 * 24 * time.Hour
+	}
+	d, err := time.ParseDuration(r.AgentLogsMinAge)
+	if err != nil || d < 0 {
+		return 14 * 24 * time.Hour
+	}
+	return d
+}
+
 type Config struct {
 	Log struct {
 		Level string `yaml:"level" env:"LAPLACED_LOG_LEVEL"`
@@ -802,6 +834,10 @@ type Config struct {
 			Password string `yaml:"password" env:"LAPLACED_DATABASE_PASSWORD"`
 			SSLMode  string `yaml:"sslmode" env:"LAPLACED_DATABASE_SSLMODE"`
 		} `yaml:"postgres"`
+		// Retention bounds the periodic trim of debug tables. agent_logs is
+		// the only store of full agent prompts/responses (trace retention is
+		// much shorter), so an over-eager trim blinds any postmortem.
+		Retention RetentionConfig `yaml:"retention"`
 	} `yaml:"database"`
 	Artifacts ArtifactsConfig `yaml:"artifacts"`
 	Memory    MemoryConfig    `yaml:"memory"`

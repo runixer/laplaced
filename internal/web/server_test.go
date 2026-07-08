@@ -373,7 +373,7 @@ func TestUpdateMetrics(t *testing.T) {
 		{Name: "facts", Bytes: 300000},
 	}, nil)
 	mockStorage.On("CleanupFactHistory", 100).Return(int64(50), nil)
-	mockStorage.On("CleanupAgentLogs", 50).Return(int64(25), nil)
+	mockStorage.On("CleanupAgentLogs", 50, 14*24*time.Hour).Return(int64(25), nil)
 
 	// Act
 	server.updateMetrics()
