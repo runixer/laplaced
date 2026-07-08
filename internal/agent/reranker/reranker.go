@@ -94,7 +94,7 @@ func (r *Reranker) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 	userProfile, recentTopics, _ := agent.GetSharedContext(ctx, req)
 	userID := agent.GetUserID(req)
 
-	result, err := r.rerank(ctx, userID, candidates, personCandidates, artifactCandidates, contextualizedQuery, originalQuery, currentMessages, userProfile, recentTopics, mediaParts)
+	result, fallbackReason, err := r.rerank(ctx, userID, candidates, personCandidates, artifactCandidates, contextualizedQuery, originalQuery, currentMessages, userProfile, recentTopics, mediaParts)
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +105,10 @@ func (r *Reranker) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 			"topics_count":    len(result.Topics),
 			"people_count":    len(result.People),
 			"artifacts_count": len(result.Artifacts),
+			// Non-empty when the result came from a fallback path (model_empty,
+			// max_tool_calls, ...). Matches the reranker.fallback_reason span
+			// attribute; the rag layer turns it into a Prometheus counter.
+			"fallback_reason": fallbackReason,
 		},
 	}, nil
 }
@@ -117,6 +121,8 @@ func (r *Reranker) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 // Error handling: Returns fallback result on timeout/API error
 //
 // Uses agentic loop with tool calls to select relevant topics, people, and artifacts.
+// The second return value is the fallback reason ("" when the model's own
+// selection was used) — the same value recorded on the span.
 func (r *Reranker) rerank(
 	ctx context.Context,
 	userID storage.ScopeID,
@@ -129,7 +135,7 @@ func (r *Reranker) rerank(
 	userProfile string,
 	recentTopics string,
 	mediaParts []interface{},
-) (*Result, error) {
+) (*Result, string, error) {
 	cfg := r.cfg.Agents.Reranker
 
 	// Tracing-observable state hoisted here so the deferred End() sees the
@@ -251,7 +257,7 @@ func (r *Reranker) rerank(
 	// v0.6.0: Use LLM reranking if we have any candidates (topics, people, or artifacts)
 	// Only fallback immediately if ALL candidate lists are empty
 	if !cfg.Enabled || (len(candidates) == 0 && len(personCandidates) == 0 && len(artifactCandidates) == 0) {
-		return fallbackToVectorTop(r.cfg, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger), nil
+		return fallbackToVectorTop(r.cfg, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger), "", nil
 	}
 
 	// Parse timeouts
@@ -316,7 +322,7 @@ func (r *Reranker) rerank(
 		MaxArtifacts:  cfg.Artifacts.Max,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to build reranker system prompt: %w", err)
+		return nil, "", fmt.Errorf("failed to build reranker system prompt: %w", err)
 	}
 
 	candidatesList := formatCandidatesForReranker(candidates)
@@ -333,7 +339,7 @@ func (r *Reranker) rerank(
 		ArtifactCandidates: artifactsCandidatesList,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to build reranker user prompt: %w", err)
+		return nil, "", fmt.Errorf("failed to build reranker user prompt: %w", err)
 	}
 
 	tr.systemPrompt = systemPrompt
@@ -438,7 +444,7 @@ func (r *Reranker) rerank(
 			tr.selectedPeople = result.People
 			tr.selectedArtifacts = result.Artifacts
 			saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
-			return result, nil
+			return result, tr.fallbackReason, nil
 		}
 
 		tr.tracker.EndTurn(
@@ -457,7 +463,7 @@ func (r *Reranker) rerank(
 			tr.selectedPeople = result.People
 			tr.selectedArtifacts = result.Artifacts
 			saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
-			return result, nil
+			return result, tr.fallbackReason, nil
 		}
 
 		choice := resp.Choices[0]
@@ -568,7 +574,7 @@ func (r *Reranker) rerank(
 			tr.selectedPeople = fallbackResult.People
 			tr.selectedArtifacts = fallbackResult.Artifacts
 			saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
-			return fallbackResult, nil
+			return fallbackResult, tr.fallbackReason, nil
 		}
 
 		// Track raw counts BEFORE filtering to distinguish "model explicitly
@@ -637,7 +643,7 @@ func (r *Reranker) rerank(
 			tr.selectedPeople = emptyResult.People
 			tr.selectedArtifacts = emptyResult.Artifacts
 			saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
-			return emptyResult, nil
+			return emptyResult, tr.fallbackReason, nil
 		}
 
 		logger.Info("reranker completed",
@@ -658,7 +664,7 @@ func (r *Reranker) rerank(
 		tr.selectedArtifacts = result.Artifacts
 		saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
 
-		return result, nil
+		return result, tr.fallbackReason, nil
 	}
 
 	// Max tool calls reached
@@ -669,5 +675,5 @@ func (r *Reranker) rerank(
 	tr.selectedPeople = result.People
 	tr.selectedArtifacts = result.Artifacts
 	saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
-	return result, nil
+	return result, tr.fallbackReason, nil
 }

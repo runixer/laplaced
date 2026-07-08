@@ -132,8 +132,11 @@ func TestReranker_RecordsModelRawCounts_EmptyResponse(t *testing.T) {
 		},
 	}
 
-	_, err := r.Execute(context.Background(), req)
+	resp, err := r.Execute(context.Background(), req)
 	require.NoError(t, err)
+	// The fallback reason is also surfaced to the caller via Metadata — the
+	// rag layer turns it into the laplaced_reranker_fallback_total counter.
+	assert.Equal(t, "model_empty", resp.Metadata["fallback_reason"])
 
 	spans := getSpans()
 	require.Len(t, spans, 1)
