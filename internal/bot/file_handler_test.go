@@ -43,11 +43,39 @@ func TestFileHandler_SaveFile_Success(t *testing.T) {
 		"image/jpeg",    // mimeType
 		data,            // reader
 		"photo caption", // messageText
+		false,           // skipExtraction
 	)
 
 	require.NoError(t, err)
 	require.NotNil(t, id)
 	assert.Equal(t, int64(1), *id)
+}
+
+// TestFileHandler_SaveFile_SkipExtraction_Retained verifies that skipExtraction
+// creates the artifact in the 'retained' state (kept for replay, not RAG-indexed).
+func TestFileHandler_SaveFile_SkipExtraction_Retained(t *testing.T) {
+	tmpDir := t.TempDir()
+	fileStorage := files.NewFileStorage(tmpDir, testutil.TestLogger())
+
+	mockRepo := &testutil.MockStorage{}
+	mockRepo.On("GetByHash", storage.ScopeID("123"), mock.AnythingOfType("string")).Return(nil, nil)
+	mockRepo.On("AddArtifact", mock.MatchedBy(func(a storage.Artifact) bool {
+		return a.FileType == "voice" && a.State == "retained"
+	})).Return(int64(7), nil)
+
+	handler := NewFileHandler(fileStorage, mockRepo, testutil.TestLogger())
+
+	id, err := handler.SaveFile(
+		context.Background(),
+		"123", 0, "voice", "voice.ogg", "audio/ogg",
+		bytes.NewReader([]byte("fake ogg")), "",
+		true, // skipExtraction -> retained
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, id)
+	assert.Equal(t, int64(7), *id)
+	mockRepo.AssertExpectations(t)
 }
 
 // TestFileHandler_SaveFile_Deduplication tests deduplication by hash.
@@ -77,6 +105,7 @@ func TestFileHandler_SaveFile_Deduplication(t *testing.T) {
 		"application/pdf",
 		data,
 		"",
+		false, // skipExtraction
 	)
 
 	require.NoError(t, err)
@@ -106,6 +135,7 @@ func TestFileHandler_SaveFile_StorageError(t *testing.T) {
 		"image/jpeg",
 		data,
 		"",
+		false, // skipExtraction
 	)
 
 	assert.Nil(t, id)
@@ -133,6 +163,7 @@ func TestFileHandler_SaveFile_GetByHashError(t *testing.T) {
 		"image/jpeg",
 		data,
 		"",
+		false, // skipExtraction
 	)
 
 	assert.Nil(t, id)
@@ -163,6 +194,7 @@ func TestFileHandler_SaveFile_AddArtifactError(t *testing.T) {
 		"image/jpeg",
 		data,
 		"",
+		false, // skipExtraction
 	)
 
 	assert.Nil(t, id)
@@ -195,6 +227,7 @@ func TestFileHandler_SaveFile_WithUserContext(t *testing.T) {
 		"image/jpeg",
 		data,
 		"This is my vacation photo",
+		false, // skipExtraction
 	)
 
 	require.NoError(t, err)
@@ -224,7 +257,8 @@ func TestFileHandler_SaveFile_EmptyMessageText(t *testing.T) {
 		"doc.pdf",
 		"application/pdf",
 		data,
-		"", // Empty message text
+		"",    // Empty message text
+		false, // skipExtraction
 	)
 
 	require.NoError(t, err)

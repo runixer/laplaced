@@ -210,10 +210,17 @@ func (p *Processor) mediaPart(fileName, mimeType, base64Data string) interface{}
 // saveArtifact persists a file as an artifact when a file handler is configured.
 // Returns the artifact id (nil on disabled handler or save failure — non-fatal).
 func (p *Processor) saveArtifact(ctx context.Context, userID storage.ScopeID, artifactType, fileName, mimeType string, data []byte, groupText, sourceID string) *int64 {
+	return p.saveArtifactWithState(ctx, userID, artifactType, fileName, mimeType, data, groupText, sourceID, false)
+}
+
+// saveArtifactWithState is saveArtifact with control over extraction. When
+// skipExtraction is true the raw file is retained (bytes + content_hash) but the
+// row is created 'retained' so it is never summarized/embedded or surfaced in RAG.
+func (p *Processor) saveArtifactWithState(ctx context.Context, userID storage.ScopeID, artifactType, fileName, mimeType string, data []byte, groupText, sourceID string, skipExtraction bool) *int64 {
 	if p.fileHandler == nil {
 		return nil
 	}
-	artifactID, err := p.fileHandler.SaveFile(ctx, userID, 0, artifactType, fileName, mimeType, bytes.NewReader(data), groupText)
+	artifactID, err := p.fileHandler.SaveFile(ctx, userID, 0, artifactType, fileName, mimeType, bytes.NewReader(data), groupText, skipExtraction)
 	if err != nil {
 		p.logger.Warn("failed to save artifact", "error", err, "file_id", sourceID, "file_name", fileName, "user_id", userID)
 		return nil
@@ -222,7 +229,10 @@ func (p *Processor) saveArtifact(ctx context.Context, userID storage.ScopeID, ar
 }
 
 // saveVoiceArtifact applies the voice-duration gating before saving:
-// -1 disables voice artifacts, 0 saves all, N saves voices >= N seconds.
+// -1 disables voice artifacts entirely, 0 saves and RAG-indexes all voices,
+// N saves and indexes voices >= N seconds. Shorter voices are still RETAINED
+// (raw file + content_hash) for reproducibility/replay but not RAG-indexed —
+// the duration threshold now gates indexing, not retention.
 func (p *Processor) saveVoiceArtifact(ctx context.Context, userID storage.ScopeID, mimeType string, data []byte, groupText, sourceID string, durationSec int) *int64 {
 	if p.fileHandler == nil {
 		return nil
@@ -232,11 +242,11 @@ func (p *Processor) saveVoiceArtifact(ctx context.Context, userID storage.ScopeI
 		p.logger.Debug("voice artifacts disabled, skipping save", "user_id", userID, "duration", durationSec)
 		return nil
 	case p.minVoiceDurationSec == 0 || durationSec >= p.minVoiceDurationSec:
-		return p.saveArtifact(ctx, userID, "voice", "voice.ogg", mimeType, data, groupText, sourceID)
+		return p.saveArtifactWithState(ctx, userID, "voice", "voice.ogg", mimeType, data, groupText, sourceID, false)
 	default:
-		p.logger.Debug("voice too short, skipping artifact save",
+		p.logger.Debug("voice below RAG threshold, retaining raw file without extraction",
 			"user_id", userID, "duration", durationSec, "min_duration", p.minVoiceDurationSec)
-		return nil
+		return p.saveArtifactWithState(ctx, userID, "voice", "voice.ogg", mimeType, data, groupText, sourceID, true)
 	}
 }
 

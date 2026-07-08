@@ -861,8 +861,8 @@ type MockFileSaver struct {
 	mock.Mock
 }
 
-func (m *MockFileSaver) SaveFile(ctx context.Context, userID storage.ScopeID, messageID int64, fileType string, originalName string, mimeType string, reader io.Reader, messageText string) (*int64, error) {
-	args := m.Called(ctx, userID, messageID, fileType, originalName, mimeType, mock.Anything, messageText)
+func (m *MockFileSaver) SaveFile(ctx context.Context, userID storage.ScopeID, messageID int64, fileType string, originalName string, mimeType string, reader io.Reader, messageText string, skipExtraction bool) (*int64, error) {
+	args := m.Called(ctx, userID, messageID, fileType, originalName, mimeType, mock.Anything, messageText, skipExtraction)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

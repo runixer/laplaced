@@ -368,7 +368,7 @@ type ArtifactsConfig struct {
 	AllowedTypes []string `yaml:"allowed_types"`
 
 	// Voice settings (about storage filtering, not extraction)
-	MinVoiceDurationSeconds int `yaml:"min_voice_duration_seconds" env:"LAPLACED_ARTIFACTS_MIN_VOICE_DURATION_SECONDS"` // 0 = save all, -1 = disable voice artifacts
+	MinVoiceDurationSeconds int `yaml:"min_voice_duration_seconds" env:"LAPLACED_ARTIFACTS_MIN_VOICE_DURATION_SECONDS"` // gates RAG-indexing of voice: 0 = index all, -1 = disable voice artifacts, N = index voices >= N sec (shorter are still retained raw for replay)
 
 	// S3, when present, switches the artifact blob store from the local disk
 	// (StoragePath) to an S3-compatible bucket. Absence keeps the local backend,

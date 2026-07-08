@@ -246,7 +246,7 @@ func TestProcessor_VoiceArtifactDurationThreshold(t *testing.T) {
 
 		mockSaver.ExpectedCalls = nil
 		artifactID := int64(1)
-		mockSaver.On("SaveFile", mock.Anything, storage.ScopeID("12345"), int64(0), "voice", "voice.ogg", "audio/ogg", mock.Anything, "").Return(&artifactID, nil)
+		mockSaver.On("SaveFile", mock.Anything, storage.ScopeID("12345"), int64(0), "voice", "voice.ogg", "audio/ogg", mock.Anything, "", false).Return(&artifactID, nil)
 
 		msg := &telegram.Message{
 			Voice: &telegram.Voice{
@@ -262,19 +262,22 @@ func TestProcessor_VoiceArtifactDurationThreshold(t *testing.T) {
 		mockSaver.AssertExpectations(t)
 	})
 
-	t.Run("minVoiceDurationSec=300 skips short voices", func(t *testing.T) {
+	t.Run("minVoiceDurationSec=300 retains short voices without extraction", func(t *testing.T) {
 		processor := NewProcessor(mockDownloader, translator, "en", logger)
 		processor.SetFileHandler(mockSaver)
 		processor.SetMinVoiceDurationSec(300) // 5 minutes
 
 		mockSaver.ExpectedCalls = nil
 		mockSaver.Calls = nil // Clear previous calls
-		// Should NOT call SaveFile for short voice
+		// Short voice is still saved for replay, but with skipExtraction=true
+		// (retained, not RAG-indexed).
+		artifactID := int64(3)
+		mockSaver.On("SaveFile", mock.Anything, storage.ScopeID("12345"), int64(0), "voice", "voice.ogg", "audio/ogg", mock.Anything, "", true).Return(&artifactID, nil)
 
 		msg := &telegram.Message{
 			Voice: &telegram.Voice{
 				FileID:   "voice-short",
-				Duration: 30, // 30 seconds - too short
+				Duration: 30, // 30 seconds - too short to index, still retained
 				MimeType: "audio/ogg",
 			},
 		}
@@ -282,7 +285,8 @@ func TestProcessor_VoiceArtifactDurationThreshold(t *testing.T) {
 		files, err := processor.ProcessMessage(ctx, msg, "12345", "")
 		require.NoError(t, err)
 		require.Len(t, files, 1) // Still returns processed file
-		assert.Empty(t, mockSaver.Calls, "SaveFile should not be called for short voices")
+		mockSaver.AssertExpectations(t)
+		mockSaver.AssertCalled(t, "SaveFile", mock.Anything, storage.ScopeID("12345"), int64(0), "voice", "voice.ogg", "audio/ogg", mock.Anything, "", true)
 	})
 
 	t.Run("minVoiceDurationSec=300 saves long voices", func(t *testing.T) {
@@ -292,7 +296,7 @@ func TestProcessor_VoiceArtifactDurationThreshold(t *testing.T) {
 
 		mockSaver.ExpectedCalls = nil
 		artifactID := int64(2)
-		mockSaver.On("SaveFile", mock.Anything, storage.ScopeID("12345"), int64(0), "voice", "voice.ogg", "audio/ogg", mock.Anything, "").Return(&artifactID, nil)
+		mockSaver.On("SaveFile", mock.Anything, storage.ScopeID("12345"), int64(0), "voice", "voice.ogg", "audio/ogg", mock.Anything, "", false).Return(&artifactID, nil)
 
 		msg := &telegram.Message{
 			Voice: &telegram.Voice{
@@ -763,7 +767,7 @@ func TestProcessor_ProcessMessage_WithFileHandler(t *testing.T) {
 	mockDownloader.On("DownloadFile", mock.Anything, "photo-999").Return(photoData, nil)
 
 	artifactID := int64(42)
-	mockSaver.On("SaveFile", mock.Anything, storage.ScopeID("12345"), int64(0), "image", "photo.jpg", "image/jpeg", mock.Anything, "").
+	mockSaver.On("SaveFile", mock.Anything, storage.ScopeID("12345"), int64(0), "image", "photo.jpg", "image/jpeg", mock.Anything, "", false).
 		Return(&artifactID, nil)
 
 	msg := &telegram.Message{
@@ -796,7 +800,7 @@ func TestProcessor_ProcessMessage_WithFileHandlerError(t *testing.T) {
 	photoData := []byte("fake-jpeg-data")
 	mockDownloader.On("DownloadFile", mock.Anything, "photo-err").Return(photoData, nil)
 
-	mockSaver.On("SaveFile", mock.Anything, storage.ScopeID("12345"), int64(0), "image", "photo.jpg", "image/jpeg", mock.Anything, "").
+	mockSaver.On("SaveFile", mock.Anything, storage.ScopeID("12345"), int64(0), "image", "photo.jpg", "image/jpeg", mock.Anything, "", false).
 		Return(nil, errors.New("database error"))
 
 	msg := &telegram.Message{

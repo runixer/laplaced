@@ -22,7 +22,7 @@ type Processor struct {
 	fileHandler         FileSaver // Optional: for saving artifacts
 	maxRetries          int
 	retryDelay          time.Duration
-	minVoiceDurationSec int    // Minimum voice duration (seconds) to save as artifact. 0 = save all, -1 = disable
+	minVoiceDurationSec int    // Min voice duration (sec) to RAG-index. 0 = index all, -1 = disable voice artifacts, N = index >= N (shorter still retained raw for replay)
 	imageInputFormat    string // How image/video parts are encoded for the LLM (llm.ImageInputFormat*). "" = file.
 }
 
@@ -30,7 +30,7 @@ type Processor struct {
 type FileSaver interface {
 	// SaveFile saves a file and returns the artifact ID (existing on dedup, new on creation).
 	// messageText is the text content of the message (msg.Text or msg.Caption) for context (v0.6.0).
-	SaveFile(ctx context.Context, userID storage.ScopeID, messageID int64, fileType string, originalName string, mimeType string, reader io.Reader, messageText string) (*int64, error)
+	SaveFile(ctx context.Context, userID storage.ScopeID, messageID int64, fileType string, originalName string, mimeType string, reader io.Reader, messageText string, skipExtraction bool) (*int64, error)
 }
 
 // NewProcessor creates a new file processor.

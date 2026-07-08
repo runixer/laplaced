@@ -33,6 +33,11 @@ func NewFileHandler(
 // SaveFile saves a Telegram file as an artifact.
 // Returns artifact ID (existing on deduplication, new on creation) and any error.
 // messageText is the text content of the message (msg.Text or msg.Caption) for context (v0.6.0).
+// skipExtraction retains the raw file (bytes + content_hash + row) for
+// reproducibility/replay but creates the row in the 'retained' state instead of
+// 'pending', so the Extractor never processes it and it never gets a summary or
+// embedding — keeping trivial files (e.g. short voice notes) out of RAG while
+// still leaving them replayable. See saveVoiceArtifact.
 func (fh *FileHandler) SaveFile(
 	ctx context.Context,
 	userID storage.ScopeID,
@@ -42,6 +47,7 @@ func (fh *FileHandler) SaveFile(
 	mimeType string,
 	reader io.Reader,
 	messageText string,
+	skipExtraction bool,
 ) (*int64, error) {
 	// Log file type detection for debugging
 	fh.logger.Debug("saving file as artifact",
@@ -74,7 +80,12 @@ func (fh *FileHandler) SaveFile(
 		return &existing.ID, nil
 	}
 
-	// Create new artifact record
+	// Create new artifact record. 'retained' rows are kept for replay only —
+	// GetPendingArtifacts and the reranker candidate query both exclude them.
+	state := "pending"
+	if skipExtraction {
+		state = "retained"
+	}
 	artifact := storage.Artifact{
 		UserID:       userID,
 		MessageID:    messageID,
@@ -84,7 +95,7 @@ func (fh *FileHandler) SaveFile(
 		MimeType:     mimeType,
 		OriginalName: originalName,
 		ContentHash:  savedFile.ContentHash,
-		State:        "pending",
+		State:        state,
 	}
 
 	// Add user context if provided (v0.6.0)
