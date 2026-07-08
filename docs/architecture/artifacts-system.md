@@ -253,7 +253,7 @@ artifacts:
   enabled: true
   storage_path: "data/artifacts"
   allowed_types: ["image", "voice", "pdf", "video_note", "video", "document"]
-  min_voice_duration_seconds: 300
+  min_voice_duration_seconds: 300  # порог RAG-индексации голоса; короче — сохраняются сырыми для replay, но не индексируются
 
 # Extractor agent (processing settings)
 agents:
@@ -488,7 +488,7 @@ artifacts:
   enabled: true
   storage_path: "data/artifacts"
   allowed_types: ["image", "voice", "pdf", "video_note", "video", "document"]
-  min_voice_duration_seconds: 300  # 5 мин; 0 = все, -1 = отключить
+  min_voice_duration_seconds: 300  # порог RAG-индексации: 0 = индексировать все, -1 = отключить голос-артефакты, N = индексировать голос >= N сек (короче — сохраняются сырыми для replay, но без индексации)
 
 # Extractor agent (processing settings)
 agents:
@@ -518,7 +518,7 @@ agents:
 | `LAPLACED_ARTIFACTS_ENABLED` | Enable/disable system |
 | `LAPLACED_ARTIFACTS_STORAGE_PATH` | Path for file storage |
 | `LAPLACED_ARTIFACTS_ALLOWED_TYPES` | Comma-separated file types to process |
-| `LAPLACED_ARTIFACTS_MIN_VOICE_DURATION_SECONDS` | Minimum voice duration (0=all, -1=disable) |
+| `LAPLACED_ARTIFACTS_MIN_VOICE_DURATION_SECONDS` | Voice RAG-index threshold (0=index all, -1=disable; shorter voices still retained raw for replay) |
 | `LAPLACED_EXTRACTOR_MAX_FILE_SIZE_MB` | Max file size |
 | `LAPLACED_EXTRACTOR_POLLING_INTERVAL` | Background polling interval |
 | `LAPLACED_EXTRACTOR_TIMEOUT` | Single file timeout |
