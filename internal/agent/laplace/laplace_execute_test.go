@@ -335,6 +335,51 @@ func TestExecute_WithToolCall(t *testing.T) {
 	_ = translator
 }
 
+// TestExecute_LLMErrorAfterImageGen verifies the imagegen-lost-on-error fix:
+// when a tool call has already generated an image and the post-tool LLM call
+// fails terminally, the partial Response still carries the artifact ID so the
+// bot layer can deliver the paid-for image.
+func TestExecute_LLMErrorAfterImageGen(t *testing.T) {
+	cfg, translator, agent, mockStore, mockORClient, handler := setupExecuteTest(t)
+
+	userID := storage.ScopeID("123")
+	req := &Request{
+		UserID:              userID,
+		RawQuery:            "draw a cat",
+		HistoryContent:      "draw a cat",
+		CurrentMessageParts: []interface{}{llm.TextPart{Type: "text", Text: "draw a cat"}},
+	}
+
+	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
+	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
+
+	// First call: model requests image generation; the tool succeeds and
+	// produces artifact 42.
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
+		makeToolCallResponse("generate_image", `{"prompt": "a cat"}`,
+			WithID("resp-1"),
+			WithTokens(15, 20, 35),
+		), nil,
+	).Once()
+	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "generate_image", `{"prompt": "a cat"}`).
+		Return(&ToolResult{Content: "image generated", GeneratedArtifactIDs: []int64{42}}, nil)
+
+	// Second call (post-tool): terminal API failure after retries.
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(llm.ChatCompletionResponse{}, errors.New("429 upstream"))
+
+	resp, err := agent.Execute(context.Background(), req, handler)
+	assert.Error(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, []int64{42}, resp.GeneratedArtifactIDs)
+
+	mockStore.AssertExpectations(t)
+	handler.AssertExpectations(t)
+
+	_ = cfg
+	_ = translator
+}
+
 // TestExecute_CitationGuard verifies the final reply's source links are
 // grounded against the URLs a search tool actually returned: a verified link
 // survives, an invented one is unwrapped to plain text, and the stripped URL
@@ -487,8 +532,11 @@ func TestExecute_LLMError(t *testing.T) {
 
 	resp, err := agent.Execute(context.Background(), req, handler)
 	assert.Error(t, err)
-	assert.Nil(t, resp)
 	assert.Contains(t, err.Error(), "LLM call failed")
+	// LLM-fatal returns a partial Response (err stays non-nil) so the bot
+	// layer can deliver any generated artifacts produced before the failure.
+	require.NotNil(t, resp)
+	assert.Empty(t, resp.GeneratedArtifactIDs)
 
 	assert.Equal(t, "laplace", logged.AgentType)
 	assert.False(t, logged.Success)

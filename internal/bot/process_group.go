@@ -455,10 +455,14 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	// Execute
 	resp, err := b.laplaceAgent.Execute(shutdownSafeCtx, req, toolHandler)
 	if err != nil {
-		// Fatal error (not a partial execution failure)
+		// Fatal error (not a partial execution failure). Generated images that
+		// tool iterations already produced (and paid for) are still delivered.
 		logger.Error("laplace execution fatal error", "error", err)
 		botHadErrors = true
 		botErrorKinds = append(botErrorKinds, "laplace_fatal")
+		if b.deliverGeneratedOnError(shutdownSafeCtx, path, userID, convID, threadRoot, lastMsg.MessageID, resp, logger) {
+			return
+		}
 		path.sendError(shutdownSafeCtx, b.errorReplyText(span, err))
 		return
 	}
@@ -474,7 +478,9 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		logger.Error("laplace execution failed", "error", resp.Error, "total_turns", resp.TotalTurns)
 		botHadErrors = true
 		botErrorKinds = append(botErrorKinds, "laplace_partial")
-		path.sendError(shutdownSafeCtx, b.errorReplyText(span, resp.Error))
+		if !b.deliverGeneratedOnError(shutdownSafeCtx, path, userID, convID, threadRoot, lastMsg.MessageID, resp, logger) {
+			path.sendError(shutdownSafeCtx, b.errorReplyText(span, resp.Error))
+		}
 
 		// Log partial execution for debugging. Cost stays provider-reported-
 		// or-zero: a partial turn may lack token counts, so the tiered

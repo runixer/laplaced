@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agent/laplace"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -105,6 +106,36 @@ func (b *Bot) sendResponseWithGeneratedImages(
 	}
 
 	return time.Since(tgStart), calls
+}
+
+// deliverGeneratedOnError delivers generated images from a failed laplace turn
+// with a short canned caption instead of the error text (no double apology: the
+// caption already says the text reply failed). Returns false when there is
+// nothing to deliver — the caller then sends its normal error reply. On the
+// streaming path the placeholder bubble is finalized with the caption first,
+// mirroring the success path's flushSinkBeforeMedia ordering.
+func (b *Bot) deliverGeneratedOnError(
+	ctx context.Context,
+	path *responsePath,
+	userID storage.ScopeID,
+	convID, threadRoot, replyTo string,
+	resp *laplace.Response,
+	logger *slog.Logger,
+) bool {
+	if resp == nil || len(resp.GeneratedArtifactIDs) == 0 {
+		return false
+	}
+	caption := b.translator.Get(b.cfg.Bot.Language, "bot.image_delivered_text_failed")
+	logger.Info("delivering generated images despite laplace failure",
+		"artifact_ids", resp.GeneratedArtifactIDs)
+	path.flushSinkBeforeMedia(ctx, caption)
+	mediaDur, sentCount := b.sendResponseWithGeneratedImages(
+		ctx, userID, convID, threadRoot, replyTo,
+		caption, resp.GeneratedArtifactIDs, logger,
+	)
+	path.tgDuration += mediaDur
+	path.tgCalls += sentCount
+	return sentCount > 0
 }
 
 // sendTextOnlyFallback is the emergency path when media cannot be sent.

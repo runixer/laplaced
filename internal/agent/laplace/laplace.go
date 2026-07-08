@@ -121,11 +121,12 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 			attribute.Float64("laplace.cost_usd", costUSD),
 			attribute.Int("laplace.artifacts_loaded", totalArtifactsLoaded),
 		)
-		// Fatal exits (return nil, err) never reach the callers' LogExecution
-		// — it dereferences resp — so without this a terminal LLM failure is
-		// invisible in agent_logs (success rows only). One insertion here
-		// covers every nil-resp exit.
-		if err != nil && resp == nil && l.agentLogger != nil {
+		// Fatal exits (err != nil) never reach the callers' LogExecution —
+		// callers only log completed turns — so without this a terminal LLM
+		// failure is invisible in agent_logs (success rows only). Covers both
+		// fatal shapes: nil resp (context load) and partial resp carrying
+		// generated artifacts (LLM failure mid-loop).
+		if err != nil && l.agentLogger != nil {
 			l.agentLogger.LogError(ctx, req.UserID, agentlog.AgentLaplace, "", nil,
 				err.Error(), l.cfg.Agents.GetChatModel(),
 				int(time.Since(execStart).Milliseconds()), nil)
@@ -249,7 +250,24 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 
 		if err != nil {
 			logger.Error("failed to get LLM completion", "error", err)
-			return nil, fmt.Errorf("LLM call failed: %w", err)
+			// Fatal, but tool iterations may already have produced (and paid
+			// for) generated images. Return them in a partial Response so the
+			// bot layer can still deliver them; err stays non-nil, so callers
+			// must not treat this as a normal reply.
+			promptTokens, completionTokens := tracker.TotalTokens()
+			resp = &Response{
+				GeneratedArtifactIDs: generatedArtifactIDs,
+				PromptTokens:         promptTokens,
+				CompletionTokens:     completionTokens,
+				TotalCost:            tracker.TotalCost(),
+				LLMDuration:          totalLLMDuration,
+				ToolDuration:         totalToolDuration,
+				TotalTurns:           tracker.TurnCount(),
+				RAGInfo:              contextData.RAGInfo,
+				Messages:             orMessages,
+				ConversationTurns:    tracker.Build(),
+			}
+			return resp, fmt.Errorf("LLM call failed: %w", err)
 		}
 
 		// Capture TTFT from the first iteration that produced content (stream mode only).
@@ -297,19 +315,20 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 			// Build partial response with error for debugging
 			promptTokens, completionTokens := tracker.TotalTokens()
 			return &Response{
-				Content:           "", // Empty due to error
-				Error:             errors.New("max empty response retries reached"),
-				PromptTokens:      promptTokens,
-				CompletionTokens:  completionTokens,
-				TotalCost:         tracker.TotalCost(),
-				LLMDuration:       totalLLMDuration,
-				ToolDuration:      totalToolDuration,
-				TotalTurns:        tracker.TurnCount(),
-				FirstContentDelay: firstContentDelay,
-				RAGInfo:           contextData.RAGInfo,
-				Messages:          orMessages,
-				ConversationTurns: tracker.Build(),
-				WasEmpty:          true, // retries exhausted — orchestrator surfaces bot.anomaly.empty_response
+				Content:              "", // Empty due to error
+				Error:                errors.New("max empty response retries reached"),
+				GeneratedArtifactIDs: generatedArtifactIDs,
+				PromptTokens:         promptTokens,
+				CompletionTokens:     completionTokens,
+				TotalCost:            tracker.TotalCost(),
+				LLMDuration:          totalLLMDuration,
+				ToolDuration:         totalToolDuration,
+				TotalTurns:           tracker.TurnCount(),
+				FirstContentDelay:    firstContentDelay,
+				RAGInfo:              contextData.RAGInfo,
+				Messages:             orMessages,
+				ConversationTurns:    tracker.Build(),
+				WasEmpty:             true, // retries exhausted — orchestrator surfaces bot.anomaly.empty_response
 			}, nil
 		}
 

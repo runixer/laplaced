@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - New `read_url` tool — the bot reads a linked page directly (docs, articles, short links) instead of burning searches on it, and says honestly when a page can't be opened (captcha, site policy).
+- Debug-log retention is now configurable (`database.retention`), and recent agent logs are kept for at least 14 days by default instead of being trimmed purely by count.
 
 ### Changed
 - The bot now answers questions about stable knowledge (science, recipes, history, how things work) from its own knowledge instead of always searching the web, and spends at most 2 web searches per reply on things that do need checking.
@@ -21,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `read_url` is offered to the model only when a page-reading backend is actually configured — deployments without one keep answering link questions via web search instead of refusing to open links.
 - The bot no longer strips the user's own link from its reply as "fabricated" when the page could not be opened.
 - A site that is temporarily down is now reported as such (with one retry allowed) instead of "protected by anti-bot".
+- A generated image is now delivered (with a short apology caption) even when the text reply around it fails — previously the paid-for image silently vanished.
+- Plain file references like `photo.jpg` in replies are no longer unwrapped as "fabricated links" — only web URLs are checked against search results.
+- `agents.splitter.model` is no longer silently ignored (the topic splitter read the archivist's model setting instead of its own).
 
 ## [0.10.2] - 2026-07-02
 

@@ -12,6 +12,7 @@ bot:
   api_error: "Sorry, I can't answer right now. Please try asking something else a bit later."
   safety_blocked: "🛡 The response was blocked by the safety filter. Try rephrasing the request or removing the attachment."
   empty_response: "Seems I got lost in thought and couldn't come up with anything. Ask about something else?"
+  image_delivered_text_failed: "Here's the image 👇 The text reply didn't work out this time — ask me again."
   tool_budget_synthesis: "Tool budget for this reply is exhausted. Do not request any more tools. Answer the user now using everything gathered above. If the information is incomplete or contradictory, say so honestly and give the best answer you can."
   current_media_marker: "📷 Attachment from the CURRENT message (the user sent it just now — this is what to act on / analyze)."
   current_media_marker_image: "📷 Image from the CURRENT message (sent just now — act on / analyze THIS one)."
