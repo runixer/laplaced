@@ -3,6 +3,7 @@ package fetch
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,12 +16,19 @@ import (
 	"github.com/runixer/laplaced/internal/testutil"
 )
 
+// newLoopbackRawFetcher builds a rawFetcher that may dial httptest servers on
+// 127.0.0.1 — the SSRF guard blocks loopback unconditionally in production.
+func newLoopbackRawFetcher(cfg *config.FetcherConfig) *rawFetcher {
+	f := newRawFetcher(cfg, testutil.TestLogger())
+	f.allowLoopbackForTest = true
+	return f
+}
+
 func newRawTest(t *testing.T, handler http.HandlerFunc) (*rawFetcher, *httptest.Server) {
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	cfg := config.FetcherConfig{Backend: "raw"}
-	return newRawFetcher(&cfg, testutil.TestLogger()), srv
+	return newLoopbackRawFetcher(&config.FetcherConfig{Backend: "raw"}), srv
 }
 
 func TestRawFetch_HTMLExtraction(t *testing.T) {
@@ -63,7 +71,7 @@ func TestRawFetch_Redirect(t *testing.T) {
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprint(w, "<html><head><title>Final</title></head><body><p>ok</p></body></html>")
 	})
-	f := newRawFetcher(&config.FetcherConfig{Backend: "raw"}, testutil.TestLogger())
+	f := newLoopbackRawFetcher(&config.FetcherConfig{Backend: "raw"})
 
 	res, err := f.Fetch(context.Background(), srv.URL+"/short")
 	require.NoError(t, err)
@@ -90,7 +98,7 @@ func TestRawFetch_StatusMapping(t *testing.T) {
 				w.WriteHeader(tt.status)
 			}))
 			t.Cleanup(srv.Close)
-			f := newRawFetcher(&config.FetcherConfig{Backend: "raw"}, testutil.TestLogger())
+			f := newLoopbackRawFetcher(&config.FetcherConfig{Backend: "raw"})
 
 			_, err := f.Fetch(context.Background(), srv.URL)
 			var fErr *Error
@@ -114,7 +122,7 @@ func TestRawFetch_RedirectThenBlocked_ReportsFinalURL(t *testing.T) {
 	mux.HandleFunc("/product/super-iron-9000", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	})
-	f := newRawFetcher(&config.FetcherConfig{Backend: "raw"}, testutil.TestLogger())
+	f := newLoopbackRawFetcher(&config.FetcherConfig{Backend: "raw"})
 
 	_, err := f.Fetch(context.Background(), srv.URL+"/t/abc")
 	var fErr *Error
@@ -160,7 +168,7 @@ func TestRawFetch_UnsupportedContentType(t *testing.T) {
 }
 
 func TestRawFetch_InvalidURL(t *testing.T) {
-	f := newRawFetcher(&config.FetcherConfig{Backend: "raw"}, testutil.TestLogger())
+	f := newLoopbackRawFetcher(&config.FetcherConfig{Backend: "raw"})
 	tests := []string{"ftp://example.com/file", "not a url", "file:///etc/passwd", ""}
 	for _, u := range tests {
 		t.Run(u, func(t *testing.T) {
@@ -188,4 +196,61 @@ func TestExtractHTMLText_Empty(t *testing.T) {
 	title, text := extractHTMLText(nil)
 	assert.Empty(t, title)
 	assert.Empty(t, text)
+}
+
+// TestRawFetch_CheckIP pins the SSRF network policy: loopback/link-local
+// (incl. the cloud metadata endpoint) are refused unconditionally; private
+// ranges are gated on allow_private_networks; public addresses always pass.
+func TestRawFetch_CheckIP(t *testing.T) {
+	tests := []struct {
+		name         string
+		ip           string
+		allowPrivate bool
+		wantBlocked  bool
+	}{
+		{"public v4", "93.184.216.34", false, false},
+		{"public v6", "2606:2800:220:1:248:1893:25c8:1946", false, false},
+		{"loopback", "127.0.0.1", false, true},
+		{"loopback v6", "::1", false, true},
+		{"loopback stays blocked with allow_private", "127.0.0.1", true, true},
+		{"cloud metadata stays blocked with allow_private", "169.254.169.254", true, true},
+		{"link-local v6", "fe80::1", false, true},
+		{"unspecified", "0.0.0.0", false, true},
+		{"rfc1918 10/8", "10.1.2.3", false, true},
+		{"rfc1918 172.16/12", "172.20.0.5", false, true},
+		{"rfc1918 192.168/16", "192.168.1.10", false, true},
+		{"cgnat (tailscale)", "100.100.1.1", false, true},
+		{"ipv6 ula", "fd12:3456::1", false, true},
+		{"rfc1918 allowed on intranet", "192.168.1.10", true, false},
+		{"cgnat allowed on intranet", "100.100.1.1", true, false},
+		{"ula allowed on intranet", "fd12:3456::1", true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newRawFetcher(&config.FetcherConfig{Backend: "raw", AllowPrivateNetworks: tt.allowPrivate}, testutil.TestLogger())
+			err := f.checkIP(net.ParseIP(tt.ip))
+			if tt.wantBlocked {
+				require.ErrorIs(t, err, errForbiddenNetwork)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestRawFetch_ForbiddenNetwork_EndToEnd drives the guard through a real
+// dial: without the test override, a fetch to a loopback httptest server must
+// classify as KindForbiddenNetwork (the guard fires in the dialer, so DNS
+// tricks and redirect hops go through the same check).
+func TestRawFetch_ForbiddenNetwork_EndToEnd(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("should never be reached"))
+	}))
+	t.Cleanup(srv.Close)
+
+	f := newRawFetcher(&config.FetcherConfig{Backend: "raw"}, testutil.TestLogger())
+	_, err := f.Fetch(context.Background(), srv.URL)
+	var fErr *Error
+	require.ErrorAs(t, err, &fErr)
+	assert.Equal(t, KindForbiddenNetwork, fErr.Kind)
 }

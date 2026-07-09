@@ -129,6 +129,8 @@ func readFailureContent(rawURL string, err error) (string, *fetch.Error) {
 		return "READ FAILED: the page-reading service is out of quota. Do NOT retry and do NOT substitute internet_search for reading this exact page — answer from what you have and mention you could not open the link.", fErr
 	case fetch.KindConfig:
 		return "READ FAILED: the page-reading backend is misconfigured (authentication error). Do NOT retry — answer from what you have and tell the user you cannot open links right now.", fErr
+	case fetch.KindForbiddenNetwork:
+		return fmt.Sprintf("READ FAILED: %s points to a private/internal network address, which this bot does not open. Do NOT retry and do NOT probe other internal addresses — tell the user honestly that internal links cannot be read.", rawURL), fErr
 	default: // KindUpstream and anything new
 		return fmt.Sprintf("READ FAILED: could not fetch %s (%s). You may retry ONCE if a transient error seems likely; if it fails again, tell the user honestly.%s", rawURL, fErr.Msg, redirectNote), fErr
 	}

@@ -468,8 +468,15 @@ type FetcherConfig struct {
 	Timeout string `yaml:"timeout" env:"LAPLACED_FETCHER_TIMEOUT"`
 	// MaxContentChars caps the tool result size in runes; longer pages are
 	// truncated with a marker. Guards the main model's context from page dumps.
-	MaxContentChars int             `yaml:"max_content_chars" env:"LAPLACED_FETCHER_MAX_CONTENT_CHARS"`
-	Firecrawl       FirecrawlConfig `yaml:"firecrawl"`
+	MaxContentChars int `yaml:"max_content_chars" env:"LAPLACED_FETCHER_MAX_CONTENT_CHARS"`
+	// AllowPrivateNetworks lets the raw backend fetch RFC1918/CGNAT/ULA
+	// addresses — for intranet deployments where the bot reads internal
+	// wiki/docs pages. Loopback and link-local (incl. the cloud metadata
+	// endpoint) stay blocked regardless: the bot's own host carries its admin
+	// surface and no page the model should read. The firecrawl backend is
+	// unaffected (an external service fetching from its own network).
+	AllowPrivateNetworks bool            `yaml:"allow_private_networks" env:"LAPLACED_FETCHER_ALLOW_PRIVATE_NETWORKS"`
+	Firecrawl            FirecrawlConfig `yaml:"firecrawl"`
 }
 
 // FirecrawlConfig holds the Firecrawl REST API settings. APIKey may be a

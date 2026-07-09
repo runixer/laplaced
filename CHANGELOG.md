@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - New `read_url` tool — the bot reads a linked page directly (docs, articles, short links) instead of burning searches on it, and says honestly when a page can't be opened (captcha, site policy).
+- `read_url`'s direct-fetch backend refuses links pointing into private networks (SSRF guard); intranet deployments can re-allow private ranges via `fetcher.allow_private_networks`, while localhost and cloud-metadata addresses stay blocked regardless.
 - Debug-log retention is now configurable (`database.retention`), and recent agent logs are kept for at least 14 days by default instead of being trimmed purely by count.
 
 ### Changed

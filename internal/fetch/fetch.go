@@ -37,6 +37,9 @@ const (
 	KindQuota       ErrorKind = "quota"        // fetch service out of credits
 	KindConfig      ErrorKind = "config"       // bad/missing API key, unwired backend
 	KindUpstream    ErrorKind = "upstream"     // 5xx, malformed response, network error
+	// KindForbiddenNetwork is the raw backend's SSRF guard: the URL resolves
+	// to a loopback/link-local/private address the network policy forbids.
+	KindForbiddenNetwork ErrorKind = "forbidden_network"
 )
 
 // Error is a classified fetch failure. FinalURL carries the best-known

@@ -282,6 +282,12 @@ fetcher:
   backend: "firecrawl"
   timeout: "60s"            # Firecrawl JS rendering routinely takes 15-30s
   max_content_chars: 15000  # tool result cap (runes); longer pages truncated
+  # SSRF guard (raw backend only): URLs resolving to private ranges (RFC1918,
+  # CGNAT, IPv6 ULA) are refused unless enabled here — set true on intranet
+  # deployments that read internal wiki/docs pages. Loopback and link-local
+  # (incl. cloud metadata) are always refused. Firecrawl is unaffected
+  # (external service fetching from its own network).
+  allow_private_networks: false
   firecrawl:
     base_url: "https://api.firecrawl.dev"
     api_key: ""             # env LAPLACED_FIRECRAWL_API_KEY or a vault: ref

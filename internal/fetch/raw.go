@@ -2,14 +2,17 @@ package fetch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
+	"syscall"
 
 	"golang.org/x/net/html"
 
@@ -30,13 +33,80 @@ const rawMaxBodyBytes = 2 << 20 // 2 MB
 type rawFetcher struct {
 	client *http.Client
 	logger *slog.Logger
+
+	// allowPrivate permits dialing RFC1918/CGNAT/ULA addresses — intranet
+	// deployments read internal wiki/docs pages. Loopback and link-local
+	// stay blocked regardless (see checkIP).
+	allowPrivate bool
+	// allowLoopbackForTest disables the loopback guard so package tests can
+	// dial httptest servers on 127.0.0.1. Never set in production wiring.
+	allowLoopbackForTest bool
 }
 
 func newRawFetcher(cfg *config.FetcherConfig, logger *slog.Logger) *rawFetcher {
-	return &rawFetcher{
-		client: &http.Client{Timeout: cfg.GetTimeout()},
-		logger: logger,
+	f := &rawFetcher{
+		logger:       logger,
+		allowPrivate: cfg.AllowPrivateNetworks,
 	}
+	// SSRF guard lives in the dialer's Control hook: it sees the resolved IP
+	// of every connection — the model picks the URL, so neither a hostname
+	// resolving inward nor a redirect chain may become a door into internal
+	// services. Checking post-DNS at dial time defeats DNS rebinding, and
+	// each redirect hop opens a fresh connection so it is re-checked for
+	// free. Clone keeps DefaultTransport's sane defaults (TLS timeouts,
+	// proxy-from-env, connection pooling).
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	dialer := &net.Dialer{Control: f.dialControl}
+	transport.DialContext = dialer.DialContext
+	f.client = &http.Client{Timeout: cfg.GetTimeout(), Transport: transport}
+	return f
+}
+
+// errForbiddenNetwork marks a dial refused by the SSRF guard; Fetch unwraps it
+// (errors.Is walks through url.Error/net.OpError) into KindForbiddenNetwork.
+var errForbiddenNetwork = errors.New("destination address is not allowed")
+
+// cgnatNet is 100.64.0.0/10 (RFC 6598 carrier-grade NAT, also Tailscale's
+// range) — net.IP.IsPrivate does not cover it.
+var cgnatNet = func() *net.IPNet {
+	_, n, _ := net.ParseCIDR("100.64.0.0/10")
+	return n
+}()
+
+// dialControl validates the address a connection is actually being opened to.
+func (f *rawFetcher) dialControl(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		host = address
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return fmt.Errorf("%w: unparseable dial address %q", errForbiddenNetwork, address)
+	}
+	return f.checkIP(ip)
+}
+
+// checkIP enforces the network policy:
+//   - loopback, link-local (incl. the cloud metadata endpoint), unspecified
+//     and multicast addresses are always blocked — the bot's own host is the
+//     most sensitive surface (dashboard, metrics, sibling containers), and no
+//     legitimate page for the model to read lives there;
+//   - private ranges (RFC1918, CGNAT 100.64/10, IPv6 ULA) are blocked unless
+//     fetcher.allow_private_networks is set (intranet deployments).
+func (f *rawFetcher) checkIP(ip net.IP) error {
+	if ip.IsLoopback() {
+		if f.allowLoopbackForTest {
+			return nil
+		}
+		return fmt.Errorf("%w: %s is a loopback address", errForbiddenNetwork, ip)
+	}
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
+		return fmt.Errorf("%w: %s is a link-local or non-unicast address", errForbiddenNetwork, ip)
+	}
+	if !f.allowPrivate && (ip.IsPrivate() || cgnatNet.Contains(ip)) {
+		return fmt.Errorf("%w: %s is a private network address (fetcher.allow_private_networks enables intranet fetching)", errForbiddenNetwork, ip)
+	}
+	return nil
 }
 
 func (f *rawFetcher) Fetch(ctx context.Context, targetURL string) (*Result, error) {
@@ -55,6 +125,9 @@ func (f *rawFetcher) Fetch(ctx context.Context, targetURL string) (*Result, erro
 
 	resp, err := f.client.Do(req)
 	if err != nil {
+		if errors.Is(err, errForbiddenNetwork) {
+			return nil, &Error{Kind: KindForbiddenNetwork, Msg: err.Error()}
+		}
 		return nil, classifyTransportError(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
