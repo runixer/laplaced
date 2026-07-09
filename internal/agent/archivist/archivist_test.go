@@ -190,6 +190,98 @@ func TestArchivist_Execute_RemoveFacts(t *testing.T) {
 	mockClient.AssertExpectations(t)
 }
 
+// TestArchivist_Execute_ParseError_RetriesOnce pins the parse-failure retry:
+// a first response with a raw quote inside a JSON string value (a failure
+// shape seen live on 2026-07-02) is unparseable, and without a retry the
+// topic's memory updates would be silently lost — there is no re-run for facts.
+func TestArchivist_Execute_ParseError_RetriesOnce(t *testing.T) {
+	malformed := `{"facts": {"added": [{"content": "he said "quoted words" here"}]}}`
+	valid := `{
+		"facts": {
+			"added": [{
+				"relation": "likes",
+				"content": "Photography",
+				"category": "hobby",
+				"type": "preference",
+				"importance": 60,
+				"reason": "User mentioned it"
+			}],
+			"updated": [],
+			"removed": []
+		},
+		"people": {"added": [], "updated": [], "merged": []}
+	}`
+
+	mockClient := &testutil.MockLLMClient{}
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(testutil.MockChatResponse(malformed), nil).Once()
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(testutil.MockChatResponse(valid), nil).Once()
+
+	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
+	cfg := testutil.TestConfig()
+	cfg.Agents.Archivist.Model = "test-model"
+	translator := testutil.TestTranslator(t)
+
+	archivist := New(executor, translator, cfg, testutil.TestLogger(), nil)
+
+	req := &agent.Request{
+		Shared: &agent.SharedContext{UserID: "123"},
+		Params: map[string]any{
+			ParamMessages: []storage.Message{
+				{ID: 1, Role: "user", Content: "I love photography", CreatedAt: time.Now()},
+			},
+			ParamFacts:         []storage.Fact{},
+			ParamReferenceDate: time.Now(),
+		},
+	}
+
+	resp, err := archivist.Execute(context.Background(), req)
+	require.NoError(t, err)
+
+	result, ok := resp.Structured.(*Result)
+	require.True(t, ok)
+	require.Len(t, result.Facts.Added, 1)
+	assert.Equal(t, "Photography", result.Facts.Added[0].Content)
+
+	mockClient.AssertExpectations(t)
+}
+
+// TestArchivist_Execute_ParseError_RetryAlsoFails: the retry is single-shot —
+// a second unparseable response fails the run after exactly two LLM calls.
+func TestArchivist_Execute_ParseError_RetryAlsoFails(t *testing.T) {
+	malformed := `{"facts": {"added": [{"content": "he said "quoted words" here"}]}}`
+
+	mockClient := &testutil.MockLLMClient{}
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(testutil.MockChatResponse(malformed), nil).Twice()
+
+	executor := agent.NewExecutor(mockClient, nil, testutil.TestLogger())
+	cfg := testutil.TestConfig()
+	cfg.Agents.Archivist.Model = "test-model"
+	translator := testutil.TestTranslator(t)
+
+	archivist := New(executor, translator, cfg, testutil.TestLogger(), nil)
+
+	req := &agent.Request{
+		Shared: &agent.SharedContext{UserID: "123"},
+		Params: map[string]any{
+			ParamMessages: []storage.Message{
+				{ID: 1, Role: "user", Content: "I love photography", CreatedAt: time.Now()},
+			},
+			ParamFacts:         []storage.Fact{},
+			ParamReferenceDate: time.Now(),
+		},
+	}
+
+	_, err := archivist.Execute(context.Background(), req)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "json parse error")
+
+	mockClient.AssertExpectations(t)
+	mockClient.AssertNumberOfCalls(t, "CreateChatCompletion", 2)
+}
+
 func TestArchivist_Execute_EmptyMessages(t *testing.T) {
 	executor := agent.NewExecutor(nil, nil, testutil.TestLogger())
 	cfg := testutil.TestConfig()

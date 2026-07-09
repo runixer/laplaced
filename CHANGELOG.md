@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Plain file references like `photo.jpg` in replies are no longer unwrapped as "fabricated links" — only web URLs are checked against search results.
 - `agents.splitter.model` is no longer silently ignored (the topic splitter read the archivist's model setting instead of its own).
 - A transient Gemini reasoning glitch ("corrupted thought signature") no longer fails the reply — it was misclassified as a permanent error and never retried.
+- Memory extraction now retries once when the model returns broken JSON, instead of silently dropping that conversation's memory updates.
 
 ## [0.10.2] - 2026-07-02
 

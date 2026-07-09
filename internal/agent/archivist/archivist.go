@@ -355,6 +355,7 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (response *
 		peopleExtracted  int
 		archivistCostUSD float64
 		parseError       bool
+		parseRetry       bool
 		jsonRepaired     bool
 		emptyRetry       bool
 	)
@@ -365,6 +366,7 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (response *
 			attribute.Int("archivist.people_extracted", peopleExtracted),
 			attribute.Float64("archivist.cost_usd", archivistCostUSD),
 			attribute.Bool("archivist.parse_error", parseError),
+			attribute.Bool("archivist.parse_retry", parseRetry),
 			attribute.Bool("archivist.json_repaired", jsonRepaired),
 			attribute.Bool("archivist.empty_retry", emptyRetry),
 		)
@@ -472,10 +474,39 @@ func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (response *
 	result, repaired, err := a.parseResponse(content)
 	jsonRepaired = repaired
 	if err != nil {
-		parseError = true
-		a.logger.Warn("failed to parse archivist response", "error", err, "content_preview", truncate(content, 500))
-		a.saveTrace(userID, conversation, tracker, startTime, false, "parse_error: "+err.Error())
-		return nil, fmt.Errorf("json parse error: %w, content: %s", err, content)
+		// One fresh sample before giving up: parse failures here are model
+		// flakiness (e.g. raw quotes inside JSON string values), and unlike
+		// the reranker there is no fallback — a discarded response silently
+		// loses this topic's facts/people updates forever. Off the hot path,
+		// so one extra call is cheap. archivist.parse_retry marks the retry
+		// engaging; archivist.parse_error stays "the run failed on parse".
+		parseRetry = true
+		a.logger.Warn("failed to parse archivist response, retrying once", "error", err, "content_preview", truncate(content, 500))
+		tracker.StartTurn()
+		retryResp, retryErr := a.executor.Client().CreateChatCompletion(ctx, llmReq)
+		turns++
+		tracker.EndTurn(
+			retryResp.DebugRequestBody,
+			retryResp.DebugResponseBody,
+			retryResp.Usage.PromptTokens,
+			retryResp.Usage.CompletionTokens,
+			retryResp.Usage.Cost,
+		)
+		if retryErr != nil || len(retryResp.Choices) == 0 {
+			parseError = true
+			a.saveTrace(userID, conversation, tracker, startTime, false, "parse_error: "+err.Error())
+			return nil, fmt.Errorf("json parse error: %w, content: %s", err, content)
+		}
+		content = retryResp.Choices[0].Message.Content
+		var retryRepaired bool
+		result, retryRepaired, err = a.parseResponse(content)
+		jsonRepaired = jsonRepaired || retryRepaired
+		if err != nil {
+			parseError = true
+			a.logger.Warn("failed to parse archivist response after retry", "error", err, "content_preview", truncate(content, 500))
+			a.saveTrace(userID, conversation, tracker, startTime, false, "parse_error: "+err.Error())
+			return nil, fmt.Errorf("json parse error: %w, content: %s", err, content)
+		}
 	}
 	factsExtracted = len(result.Facts.Added) + len(result.Facts.Updated)
 	peopleExtracted = len(result.People.Added) + len(result.People.Updated) + len(result.People.Merged)
