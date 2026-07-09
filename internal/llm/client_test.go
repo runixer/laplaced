@@ -160,6 +160,73 @@ func TestCreateChatCompletionRetry(t *testing.T) {
 	assert.Equal(t, "Success after retry!", resp.Choices[0].Message.Content)
 }
 
+// TestCreateChatCompletionThoughtSignature400Retried pins the retry gate for
+// Gemini's "Corrupted thought signature": it arrives as HTTP 400 — a status
+// the blanket gate treats as permanent — but is a transient reasoning-state
+// failure, so the classified body must open the retry path. Mirrors a
+// 2026-07-02 live failure where the raw body's "status": "INVALID_ARGUMENT"
+// won classification and the turn failed on the first attempt.
+func TestCreateChatCompletionThoughtSignature400Retried(t *testing.T) {
+	attempts := 0
+	envelope := `{"error":{"message":"Provider returned error","code":400,"metadata":{"raw":"{\"error\":{\"code\":400,\"message\":\"Corrupted thought signature.\",\"status\":\"INVALID_ARGUMENT\"}}","provider_name":"Google AI Studio"}}}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(envelope))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		resp := ChatCompletionResponse{
+			Choices: []ResponseChoice{
+				{
+					Message:      ResponseMessage{Role: "assistant", Content: "recovered"},
+					FinishReason: "stop",
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client, err := NewClient(logger, "test_api_key", "", server.URL+"/api/v1", nil)
+	assert.NoError(t, err)
+
+	resp, err := client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
+		Model:    "test_model",
+		Messages: []Message{{Role: "user", Content: "Hello"}},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, 2, attempts, "400 with a thought-signature body must be retried")
+	assert.Equal(t, "recovered", resp.Choices[0].Message.Content)
+}
+
+// TestCreateChatCompletionPlain400NotRetried guards the other side of the
+// thought-signature gate: an ordinary 400 body is a deterministic rejection
+// of this exact request and must fail on the first attempt.
+func TestCreateChatCompletionPlain400NotRetried(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"Request contains an invalid argument.","code":400}}`))
+	}))
+	defer server.Close()
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	client, err := NewClient(logger, "test_api_key", "", server.URL+"/api/v1", nil)
+	assert.NoError(t, err)
+
+	_, err = client.CreateChatCompletion(context.Background(), ChatCompletionRequest{
+		Model:    "test_model",
+		Messages: []Message{{Role: "user", Content: "Hello"}},
+	})
+	assert.Error(t, err)
+	assert.Equal(t, 1, attempts, "a plain 400 must not be retried")
+}
+
 func TestCreateChatCompletionMaxRetriesExceeded(t *testing.T) {
 	attempts := 0
 

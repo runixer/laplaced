@@ -213,6 +213,13 @@ func recordAttemptEvent(span trace.Span, idx int, start time.Time, o attemptOutc
 	if class != "none" && len(o.body) > 0 {
 		preview := textutil.TruncateRunes(obs.RedactBase64Payloads(string(o.body)), 256, "")
 		attrs = append(attrs, attribute.String("body_preview", preview))
+		// Per-attempt classified kind. The span-level error.upstream_kind is
+		// only set on terminal failures (recordProviderError), so a transient
+		// error that a retry clears — e.g. a thought-signature 400 — would
+		// otherwise leave no queryable trace of what was retried.
+		if kind := classifyUpstreamError(detectProviderBodyError(o.body)); kind != KindNone {
+			attrs = append(attrs, attribute.String("error.upstream_kind", kind.String()))
+		}
 	}
 	if o.err != nil {
 		attrs = append(attrs, attribute.String("error.message", o.err.Error()))

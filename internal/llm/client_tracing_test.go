@@ -490,8 +490,12 @@ func TestClassifyUpstreamError(t *testing.T) {
 			KindInvalidArgument,
 		},
 		{
+			// Full prod shape: the raw body also carries "status":
+			// "INVALID_ARGUMENT", which must NOT win over the more specific
+			// thought-signature match (it did until 2026-07 — the transient
+			// error was classified permanent and never retried).
 			"thought signature corruption",
-			&providerBodyError{Message: "Provider returned error", Code: 400, Raw: `{"error":{"message":"Corrupted thought signature."}}`},
+			&providerBodyError{Message: "Provider returned error", Code: 400, Raw: `{"error":{"code":400,"message":"Corrupted thought signature.","status":"INVALID_ARGUMENT"}}`},
 			KindThoughtSignature,
 		},
 		{

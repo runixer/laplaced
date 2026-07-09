@@ -172,6 +172,12 @@ func classifyUpstreamError(bodyErr *providerBodyError) ErrorKind {
 	}
 	msg := strings.ToLower(bodyErr.Message + " " + bodyErr.Raw)
 	switch {
+	// Most specific match first: Gemini's thought-signature body also carries
+	// `"status": "INVALID_ARGUMENT"`, so the invalid_argument case would
+	// shadow it — misclassifying a transient failure as permanent (never
+	// retried, and the thought_signature TraceQL kind never matching).
+	case strings.Contains(msg, "corrupted thought signature"):
+		return KindThoughtSignature
 	case strings.Contains(msg, "invalid_argument") || strings.Contains(msg, "invalid argument"):
 		return KindInvalidArgument
 	case strings.Contains(msg, "safety") || strings.Contains(msg, "harm_category") ||
@@ -182,8 +188,6 @@ func classifyUpstreamError(bodyErr *providerBodyError) ErrorKind {
 		return KindRateLimited
 	case strings.Contains(msg, "context") && strings.Contains(msg, "length"):
 		return KindContextLength
-	case strings.Contains(msg, "corrupted thought signature"):
-		return KindThoughtSignature
 	case bodyErr.Code >= 500:
 		return KindUpstream5xx
 	case bodyErr.Code >= 400:

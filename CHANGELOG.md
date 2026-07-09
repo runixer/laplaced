@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A generated image is now delivered (with a short apology caption) even when the text reply around it fails — previously the paid-for image silently vanished.
 - Plain file references like `photo.jpg` in replies are no longer unwrapped as "fabricated links" — only web URLs are checked against search results.
 - `agents.splitter.model` is no longer silently ignored (the topic splitter read the archivist's model setting instead of its own).
+- A transient Gemini reasoning glitch ("corrupted thought signature") no longer fails the reply — it was misclassified as a permanent error and never retried.
 
 ## [0.10.2] - 2026-07-02
 

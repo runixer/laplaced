@@ -137,7 +137,13 @@ func (c *clientImpl) doRequestWithRetry(ctx context.Context, span trace.Span, r 
 
 		recordAttemptEvent(span, attempt, attemptStart, attemptOutcome{httpStatus: resp.StatusCode, body: responseBody})
 
-		if isRetryableStatusCode(resp.StatusCode) && attempt < maxRetries {
+		// Gemini's "Corrupted thought signature" arrives as HTTP 400 — a
+		// status the blanket gate treats as permanent — but it is a transient
+		// reasoning-state failure a retry usually clears. Gate on the specific
+		// kind rather than widening to all 4xx: most 4xx bodies really are
+		// deterministic rejections of this exact request.
+		retryableBody := classifyUpstreamError(detectProviderBodyError(responseBody)) == KindThoughtSignature
+		if (isRetryableStatusCode(resp.StatusCode) || retryableBody) && attempt < maxRetries {
 			lastErr = fmt.Errorf("llm API error: %s: %s", resp.Status, truncateForLog(string(responseBody), 500))
 			continue
 		}
