@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-07-10
+
 ### Added
 - New `read_url` tool — the bot reads a linked page directly (docs, articles, short links) instead of burning searches on it, and says honestly when a page can't be opened (captcha, site policy).
 - `read_url`'s direct-fetch backend refuses links pointing into private networks (SSRF guard); intranet deployments can re-allow private ranges via `fetcher.allow_private_networks`, while localhost and cloud-metadata addresses stay blocked regardless.
@@ -641,7 +643,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-language support (en, ru)
 - Docker deployment
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.10.2...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.10.3...HEAD
+[0.10.3]: https://github.com/runixer/laplaced/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/runixer/laplaced/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/runixer/laplaced/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/runixer/laplaced/compare/v0.9.2...v0.10.0
