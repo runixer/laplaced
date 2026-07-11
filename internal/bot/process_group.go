@@ -355,6 +355,18 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		return
 	}
 
+	// Deterministic pre-LLM gate: forwarded "assistant instruction" blocks
+	// (cross-user profile injections) are refused with a fixed reply and never
+	// persisted — no LLM call, so the injected text cannot sweet-talk the model,
+	// and no history row, so background pipelines cannot archive it.
+	if DetectAssistantInjection(historyContent) {
+		span.SetAttributes(attribute.Bool("bot.anomaly.injection_refused", true))
+		logger.Warn("assistant-instruction injection detected, refused and not persisted")
+		b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", b.translator.Get(b.cfg.Bot.Language, "bot.injection_refused"), logger)
+		success = true
+		return
+	}
+
 	// Record live attachments on the root span so triage can answer
 	// "what did the user just send" without parsing the llm.request
 	// body. Each entry is {filename, mime, sha256, size, source}; the sha256

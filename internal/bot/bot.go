@@ -747,6 +747,13 @@ func (b *Bot) storePassiveChannelMessage(scopeID storage.ScopeID, im IncomingMes
 	if content == "" {
 		return
 	}
+	// Passive posts skip the LLM turn entirely, so the injection gate in
+	// processMessageGroup never sees them — check here before persisting.
+	if DetectAssistantInjection(content) {
+		b.logger.Warn("assistant-instruction injection in passive channel post, not persisted",
+			"scope_id", scopeID, "sender", im.SenderDisplay)
+		return
+	}
 	msg := storage.Message{
 		Role:           "user",
 		Content:        content,
