@@ -70,6 +70,7 @@ func TestSetCommands_APIError_ReturnsError(t *testing.T) {
 func TestGetActiveSessions_DelegatesToRAG(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	mockAPI := new(testutil.MockBotAPI)
 
@@ -139,6 +140,7 @@ func TestGetActiveSessions_RAGServiceNil_Panics(t *testing.T) {
 func TestForceCloseSession_DelegatesToRAG(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	mockAPI := new(testutil.MockBotAPI)
 
@@ -309,6 +311,7 @@ func TestAPI_ReturnsAPI(t *testing.T) {
 func TestSetArtifactRepo_VerifiesAssignment(t *testing.T) {
 	bot := &Bot{}
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 
 	assert.NotPanics(t, func() {
 		bot.SetArtifactRepo(mockStore)
@@ -335,6 +338,7 @@ func TestSetFileProcessor_VerifiesAssignment(t *testing.T) {
 func TestSetAgentLogger_VerifiesAssignment(t *testing.T) {
 	bot := &Bot{}
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	logger := testutil.TestLogger()
 
@@ -355,6 +359,7 @@ func TestSetAgentLogger_VerifiesAssignment(t *testing.T) {
 func TestSetLaplaceAgent_VerifiesAssignment(t *testing.T) {
 	bot := &Bot{}
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	logger := testutil.TestLogger()
 	translator := testutil.TestTranslator(t)
@@ -372,6 +377,7 @@ func TestSetLaplaceAgent_VerifiesAssignment(t *testing.T) {
 func TestSetFileHandler_VerifiesAssignment(t *testing.T) {
 	bot := &Bot{}
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockAPI := new(testutil.MockBotAPI)
 	logger := testutil.TestLogger()
 	translator := testutil.TestTranslator(t)
@@ -405,6 +411,7 @@ func TestSetFileHandler_VerifiesAssignment(t *testing.T) {
 func TestStop_StopsGracefully(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockAPI := new(testutil.MockBotAPI)
 
 	cfg := testutil.TestConfig()

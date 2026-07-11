@@ -17,6 +17,7 @@ import (
 func TestPerformManageMemory_BatchOperations(t *testing.T) {
 	// Setup
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 	cfg.Embedding.Model = "test-embedding-model"
@@ -98,6 +99,7 @@ func TestPerformManageMemory_BatchOperations(t *testing.T) {
 func TestPerformManageMemory_BatchOperations_PartialFailure(t *testing.T) {
 	// Setup
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 	cfg.Embedding.Model = "test-embedding-model"

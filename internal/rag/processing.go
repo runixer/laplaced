@@ -25,6 +25,10 @@ const maxStragglerIDsInTrace = 50
 // output is too far off to paper over and we fail the chunk so it is retried.
 const minCoverageForSalvage = 0.5
 
+// doNotStoreRedaction replaces the content of do-not-store messages in the
+// copy of the chunk handed to the splitter and topic embeddings.
+const doNotStoreRedaction = "[message hidden at the user's request]"
+
 // recordCoverage attaches splitter coverage diagnostics to the active span
 // (rag.processChunk). Shared by both processChunk variants so the
 // `{ span.splitter.coverage_ok = false }` TraceQL query catches either path.
@@ -260,6 +264,38 @@ func (s *Service) processChunkWithStats(ctx context.Context, userID storage.Scop
 // points above differ only in sync/async follow-up work.
 func (s *Service) processChunkCore(ctx context.Context, userID storage.ScopeID, chunk []storage.Message, stats *ProcessingStats) ([]int64, error) {
 	s.logger.Info("Processing chunk", "user_id", userID, "count", len(chunk), "start", chunk[0].ID, "end", chunk[len(chunk)-1].ID)
+
+	// Redact do-not-store content before anything downstream (splitter prompt,
+	// topic embeddings, straggler resolution) can see it. The rows keep their
+	// IDs, so chunk ranges and coverage math are unchanged: flagged messages
+	// get a topic_id like the rest and leave the active session, but their
+	// content never enters topics or embeddings (the read side filters them
+	// via GetMessagesByTopicID).
+	hadDoNotStore := false
+	for i := range chunk {
+		if chunk[i].DoNotStore {
+			hadDoNotStore = true
+			break
+		}
+	}
+	if hadDoNotStore {
+		redacted := make([]storage.Message, len(chunk))
+		copy(redacted, chunk)
+		for i := range redacted {
+			if redacted[i].DoNotStore {
+				redacted[i].Content = doNotStoreRedaction
+			}
+		}
+		chunk = redacted
+		// The privacy-mode session is over once it reaches archival (chunks
+		// close after an hour of silence). Auto-reset the flag so a forgotten
+		// "disable" cannot silently exclude everything from memory forever.
+		if s.userRepo != nil {
+			if err := s.userRepo.SetPrivacyMode(userID, false); err != nil {
+				s.logger.Warn("failed to auto-disable privacy mode", "user_id", userID, "error", err)
+			}
+		}
+	}
 
 	// 1. Extract Topics (Wait for completion)
 	topics, topicUsage, err := s.extractTopics(ctx, userID, chunk)

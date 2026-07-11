@@ -72,6 +72,10 @@ type ToolExecutor struct {
 	// fetcher backs the read_url tool (wired via SetFetcher when configured;
 	// nil → read_url returns a configuration message instead of erroring).
 	fetcher fetch.Fetcher
+
+	// userRepo backs the privacy_mode tool (wired via SetUserRepository;
+	// nil → the tool returns a configuration error).
+	userRepo storage.UserRepository
 }
 
 // ImageGenerator is the narrow interface performImageGeneration needs from
@@ -124,6 +128,12 @@ func NewToolExecutor(
 // SetPeopleRepository sets the optional people repository.
 func (e *ToolExecutor) SetPeopleRepository(repo storage.PeopleRepository) {
 	e.peopleRepo = repo
+}
+
+// SetUserRepository wires the user repository. Required for the
+// privacy_mode tool; without it the tool returns a configuration error.
+func (e *ToolExecutor) SetUserRepository(repo storage.UserRepository) {
+	e.userRepo = repo
 }
 
 // SetRAGService sets the optional RAG service for search tools.
@@ -219,6 +229,10 @@ func (e *ToolExecutor) ExecuteToolCall(ctx context.Context, cc CallContext, tool
 	case "manage_memory":
 		e.logger.Info("Executing Manage Memory tool", "tool", matchedTool.Name)
 		return textResult(e.performManageMemory(ctx, cc.UserID, args))
+
+	case "privacy_mode":
+		e.logger.Info("Executing privacy mode tool", "tool", matchedTool.Name, "action", args["action"])
+		return textResult(e.performPrivacyMode(cc.UserID, args))
 
 	case "search_people":
 		e.logger.Info("Executing search people tool", "tool", matchedTool.Name, "query", args["query"])

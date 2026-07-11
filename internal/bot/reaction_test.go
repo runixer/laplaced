@@ -32,6 +32,7 @@ func TestAddedReactions(t *testing.T) {
 func newReactionTestBot(t *testing.T, allowedID int64) (*Bot, *testutil.MockStorage) {
 	t.Helper()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	cfg := testutil.TestConfig()
 	cfg.Bot.AllowedUserIDs = []int64{allowedID}
 	logger := testutil.TestLogger()

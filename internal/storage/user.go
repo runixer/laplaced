@@ -154,3 +154,27 @@ func (s *Store) ResetUserData(userID ScopeID) error {
 
 	return tx.Commit()
 }
+
+// SetPrivacyMode toggles the scope's do-not-store mode. While enabled, the
+// bot writes new history rows with do_not_store=1 so their content never
+// enters long-term memory (topics, facts, embeddings). Upserts so the flag
+// works even before the scope has a users row.
+func (s *Store) SetPrivacyMode(userID ScopeID, enabled bool) error {
+	query := `
+		INSERT INTO users (id, privacy_mode) VALUES (?, ?)
+		ON CONFLICT(id) DO UPDATE SET privacy_mode = excluded.privacy_mode
+	`
+	_, err := s.exec(query, userID, enabled)
+	return err
+}
+
+// GetPrivacyMode reports whether the scope's do-not-store mode is on.
+// A missing users row means off.
+func (s *Store) GetPrivacyMode(userID ScopeID) (bool, error) {
+	var enabled bool
+	err := s.queryRow("SELECT privacy_mode FROM users WHERE id = ?", userID).Scan(&enabled)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return enabled, err
+}

@@ -24,6 +24,7 @@ func setupBotForPeopleTests(t *testing.T) (*Bot, *testutil.MockStorage, *testuti
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 	mockDownloader := new(testutil.MockFileDownloader)
@@ -330,6 +331,7 @@ func TestPerformSearchPeople_FoundByUsername(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
@@ -369,6 +371,7 @@ func TestPerformSearchPeople_FoundByName(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
@@ -404,6 +407,7 @@ func TestPerformSearchPeople_NotFound(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
@@ -429,6 +433,7 @@ func TestPerformUpdatePerson_Success(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
@@ -475,6 +480,7 @@ func TestPerformUpdatePerson_PersonNotFound(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
@@ -502,6 +508,7 @@ func TestPerformMergePeople_Success(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
@@ -560,6 +567,7 @@ func TestPerformMergePeople_SelfMerge(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
@@ -595,6 +603,7 @@ func TestPerformMergePeople_SourceNotFound(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
@@ -631,6 +640,7 @@ func TestPerformCreatePerson_Success(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
@@ -672,6 +682,7 @@ func TestPerformCreatePerson_AlreadyExists(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
@@ -705,6 +716,7 @@ func TestPerformCreatePerson_AliasAlreadyExists(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
@@ -742,6 +754,7 @@ func TestPerformCreatePerson_WithUsername(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
@@ -776,6 +789,7 @@ func TestPerformDeletePerson_Success(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
@@ -810,6 +824,7 @@ func TestPerformDeletePerson_ByID(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
@@ -844,6 +859,7 @@ func TestPerformDeletePerson_NotFound(t *testing.T) {
 	// Setup
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 

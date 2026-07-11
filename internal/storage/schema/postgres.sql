@@ -19,12 +19,14 @@
 -- Isolation is enforced in application SQL (WHERE user_id = ?), not by the DB.
 
 CREATE TABLE IF NOT EXISTS users (
-    id          uuid PRIMARY KEY,
-    username    text,
-    first_name  text,
-    last_name   text,
-    last_seen   timestamptz DEFAULT now()
+    id           uuid PRIMARY KEY,
+    username     text,
+    first_name   text,
+    last_name    text,
+    last_seen    timestamptz DEFAULT now(),
+    privacy_mode boolean NOT NULL DEFAULT false
 );
+ALTER TABLE users ADD COLUMN IF NOT EXISTS privacy_mode boolean NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS history (
     id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -37,7 +39,8 @@ CREATE TABLE IF NOT EXISTS history (
     message_id      text,
     conversation_id text,
     thread_root     text,
-    trace_id        text
+    trace_id        text,
+    do_not_store    boolean NOT NULL DEFAULT false
 );
 CREATE INDEX IF NOT EXISTS idx_history_user_id ON history(user_id);
 CREATE INDEX IF NOT EXISTS idx_history_topic_id ON history(topic_id);
@@ -45,6 +48,7 @@ CREATE INDEX IF NOT EXISTS idx_history_topic_id ON history(topic_id);
 -- above is pure CREATE IF NOT EXISTS, so it never alters an existing table; these
 -- idempotent ALTERs bring older Postgres DBs up to the current shape on startup.
 ALTER TABLE history ADD COLUMN IF NOT EXISTS trace_id text;
+ALTER TABLE history ADD COLUMN IF NOT EXISTS do_not_store boolean NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS stats (
     id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

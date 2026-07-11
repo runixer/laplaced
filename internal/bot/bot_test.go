@@ -30,6 +30,7 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 
@@ -104,6 +105,7 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 		{Role: "user", Content: expectedHistoryContent},
 	}, nil)
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockStore.On("AddMessageToHistory", userID, mock.MatchedBy(func(msg storage.Message) bool {
 		return msg.Role == "user" && msg.Content == expectedHistoryContent
 	})).Return(nil)
@@ -162,6 +164,7 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
@@ -231,6 +234,7 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 		{Role: "user", Content: expectedHistoryContent},
 	}, nil)
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockStore.On("AddMessageToHistory", userID, mock.MatchedBy(func(msg storage.Message) bool {
 		return msg.Role == "user" && msg.Content == expectedHistoryContent
 	})).Return(nil)
@@ -294,6 +298,7 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
@@ -364,6 +369,7 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 		{Role: "user", Content: expectedHistoryContent},
 	}, nil)
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockStore.On("AddMessageToHistory", userID, mock.MatchedBy(func(msg storage.Message) bool {
 		return msg.Role == "user" && msg.Content == expectedHistoryContent
 	})).Return(nil)
@@ -427,6 +433,7 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
@@ -498,6 +505,7 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 		{Role: "user", Content: expectedHistoryContent},
 	}, nil)
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockStore.On("AddMessageToHistory", userID, mock.MatchedBy(func(msg storage.Message) bool {
 		return msg.Role == "user" && msg.Content == expectedHistoryContent
 	})).Return(nil)
@@ -566,6 +574,7 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
@@ -644,6 +653,7 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 		{Role: "user", Content: expectedHistoryContent},
 	}, nil)
 	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockStore.On("AddMessageToHistory", userID, mock.MatchedBy(func(msg storage.Message) bool {
 		return msg.Role == "user" && msg.Content == expectedHistoryContent
 	})).Return(nil)
@@ -706,6 +716,7 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	mockDownloader := new(testutil.MockFileDownloader)
 
@@ -831,6 +842,7 @@ func TestProcessUpdate(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := &config.Config{
 		Bot: config.BotConfig{
@@ -993,6 +1005,7 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 	cfg.RAG.Enabled = false
@@ -1283,6 +1296,7 @@ func TestSendTestMessage_Success(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 
 	cfg := testutil.TestConfig()
@@ -1368,6 +1382,7 @@ func TestSendTestMessage_SaveToHistoryFalse(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 
 	cfg := testutil.TestConfig()
@@ -1441,6 +1456,7 @@ func TestSendTestMessage_LLMError(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 
 	cfg := testutil.TestConfig()
@@ -1509,6 +1525,7 @@ func TestLogExecution_WithError(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 
 	cfg := testutil.TestConfig()
@@ -1573,6 +1590,7 @@ func TestPrepareUserMessage_UnsupportedFormat(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 	mockDownloader := new(testutil.MockFileDownloader)
@@ -1633,6 +1651,7 @@ func TestPrepareUserMessage_FileTooLarge(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 	mockDownloader := new(testutil.MockFileDownloader)
@@ -1708,6 +1727,7 @@ func TestSendTestMessage_SaveToHistoryError_ReturnsError(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 
 	cfg := testutil.TestConfig()
@@ -1763,6 +1783,7 @@ func TestNewBot_Success(t *testing.T) {
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockORClient := new(testutil.MockLLMClient)
 	cfg := testutil.TestConfig()
 

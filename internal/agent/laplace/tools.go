@@ -21,6 +21,26 @@ func BuildTools(cfg *config.Config, translator *i18n.Translator) []llm.Tool {
 		switch toolCfg.Name {
 		case "generate_image":
 			parameters = buildImageGenerationSchema(&cfg.Agents.ImageGenerator)
+		case "privacy_mode":
+			// privacy_mode takes an enable/disable action, not a query.
+			paramDesc := toolCfg.ParameterDescription
+			if paramDesc == "" {
+				paramDesc = translator.Get(lang, "tools.privacy_mode.parameter_description")
+			}
+			if paramDesc == "" {
+				paramDesc = "Action: 'enable' to exclude new messages from long-term memory, 'disable' to store normally again."
+			}
+			parameters = map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"action": map[string]interface{}{
+						"type":        "string",
+						"enum":        []string{"enable", "disable"},
+						"description": paramDesc,
+					},
+				},
+				"required": []string{"action"},
+			}
 		case "read_url":
 			// read_url takes a URL, not a search query — its own parameter
 			// name keeps the model from pasting queries into it.

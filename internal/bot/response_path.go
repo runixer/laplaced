@@ -178,6 +178,7 @@ func (b *Bot) saveAssistantReply(userID storage.ScopeID, span trace.Span, conten
 		ConversationID: strPtrOrNil(convID),
 		ThreadRoot:     threadRoot,
 		TraceID:        replyTraceID,
+		DoNotStore:     b.privacyModeEnabled(userID, logger),
 	}); err != nil {
 		logger.Error("failed to add assistant message to history", "error", err)
 	}

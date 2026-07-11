@@ -248,6 +248,7 @@ func TestNotifyAccessDenied(t *testing.T) {
 func handleIncomingTestBot(t *testing.T, resolver PrincipalResolver, tr *stubTransport) (*Bot, *testutil.MockStorage) {
 	t.Helper()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	testutil.SetupDefaultMocks(mockStore)
 	cfg := &config.Config{}
 	cfg.Bot.Language = "en"

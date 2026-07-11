@@ -34,6 +34,7 @@ func TestShouldReply(t *testing.T) {
 
 func TestStorePassiveChannelMessage_AttributesAuthor(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	b := &Bot{logger: testutil.TestLogger(), msgRepo: mockStore}
 
 	im := IncomingMessage{
@@ -60,6 +61,7 @@ func TestStorePassiveChannelMessage_AttributesAuthor(t *testing.T) {
 
 func TestStorePassiveChannelMessage_EmptyContentSkipped(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	b := &Bot{logger: testutil.TestLogger(), msgRepo: mockStore}
 
 	// No text and no files → incomingContent returns "" → nothing stored.
@@ -73,6 +75,7 @@ func TestStorePassiveChannelMessage_EmptyContentSkipped(t *testing.T) {
 func TestUpsertChannelParticipant(t *testing.T) {
 	t.Run("DM is a no-op", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
+		mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 		b := &Bot{logger: testutil.TestLogger(), peopleRepo: mockStore, transport: &stubTransport{kind: "mattermost"}}
 		b.upsertChannelParticipant("1", IncomingMessage{IsDirect: true, SenderID: "u1"})
 		mockStore.AssertNotCalled(t, "FindPersonByExternalID")
@@ -80,6 +83,7 @@ func TestUpsertChannelParticipant(t *testing.T) {
 
 	t.Run("creates a new participant with external id", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
+		mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 		b := &Bot{logger: testutil.TestLogger(), peopleRepo: mockStore, transport: &stubTransport{kind: "mattermost"}}
 		im := IncomingMessage{IsDirect: false, SenderID: "u1", ConversationID: "chanA", SenderDisplay: "Alice (@alice)"}
 		mockStore.On("FindPersonByExternalID", storage.ScopeID("2"), "mattermost", "u1").Return(nil, nil)
@@ -94,6 +98,7 @@ func TestUpsertChannelParticipant(t *testing.T) {
 
 	t.Run("touches an existing participant", func(t *testing.T) {
 		mockStore := new(testutil.MockStorage)
+		mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 		b := &Bot{logger: testutil.TestLogger(), peopleRepo: mockStore, transport: &stubTransport{kind: "mattermost"}}
 		im := IncomingMessage{IsDirect: false, SenderID: "u1", ConversationID: "chanA", SenderDisplay: "Alice"}
 		existing := &storage.Person{ID: 5, UserID: "2", DisplayName: "Alice", MentionCount: 3}

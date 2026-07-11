@@ -56,7 +56,7 @@ func (b *Bot) sendResponseWithGeneratedImages(
 	historyContent := buildAssistantHistoryContent(loaded, responseText)
 
 	// 3. Save assistant message to history (so artifacts can be linked).
-	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "assistant", Content: historyContent}); err != nil {
+	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "assistant", Content: historyContent, DoNotStore: b.privacyModeEnabled(userID, logger)}); err != nil {
 		logger.Error("failed to add assistant message to history", "error", err)
 	}
 
@@ -147,7 +147,7 @@ func (b *Bot) sendTextOnlyFallback(
 	responseText string,
 	logger *slog.Logger,
 ) (time.Duration, int) {
-	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "assistant", Content: responseText}); err != nil {
+	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "assistant", Content: responseText, DoNotStore: b.privacyModeEnabled(userID, logger)}); err != nil {
 		logger.Error("failed to add assistant message to history", "error", err)
 	}
 	tgStart := time.Now()

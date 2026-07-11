@@ -42,6 +42,14 @@ type Message struct {
 	// assistant replies so an inbound reaction on the reply resolves to its
 	// trace. NULL on user rows and on replies stored before migration 016.
 	TraceID *string
+
+	// DoNotStore marks a message written while the scope's privacy mode was
+	// on (migration 018). The row stays in raw history for short-term session
+	// context, but its content is excluded from long-term memory: the topic
+	// pipeline redacts it before the splitter/embeddings, and
+	// GetMessagesByTopicID filters it out (archivist, RAG re-injection,
+	// merger, topic views).
+	DoNotStore bool
 }
 
 type User struct {

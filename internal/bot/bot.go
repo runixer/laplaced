@@ -91,6 +91,7 @@ func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRe
 	toolExecutor := tools.NewToolExecutor(orClient, factRepo, factHistoryRepo, cfg, botLogger)
 	toolExecutor.SetPeopleRepository(peopleRepo)
 	toolExecutor.SetRAGService(ragService)
+	toolExecutor.SetUserRepository(userRepo)
 
 	b := &Bot{
 		api:             api,
@@ -980,7 +981,7 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID storage.ScopeID, text 
 
 	// Save user message to history if requested
 	if saveToHistory {
-		if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "user", Content: text}); err != nil {
+		if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "user", Content: text, DoNotStore: b.privacyModeEnabled(userID, logger)}); err != nil {
 			logger.Error("failed to add message to history", "error", err)
 			return nil, fmt.Errorf("failed to save message: %w", err)
 		}
@@ -1058,7 +1059,7 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID storage.ScopeID, text 
 
 	// Save assistant response to history if requested
 	if saveToHistory {
-		if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "assistant", Content: resp.Content}); err != nil {
+		if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{Role: "assistant", Content: resp.Content, DoNotStore: b.privacyModeEnabled(userID, logger)}); err != nil {
 			logger.Error("failed to add assistant message to history", "error", err)
 		}
 		b.recordTurnStats(ctx, userID, resp, result.TotalCost, logger)

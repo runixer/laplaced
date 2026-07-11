@@ -247,6 +247,16 @@ func (m *MockStorage) ResetUserData(userID storage.ScopeID) error {
 	return args.Error(0)
 }
 
+func (m *MockStorage) SetPrivacyMode(userID storage.ScopeID, enabled bool) error {
+	args := m.Called(userID, enabled)
+	return args.Error(0)
+}
+
+func (m *MockStorage) GetPrivacyMode(userID storage.ScopeID) (bool, error) {
+	args := m.Called(userID)
+	return args.Bool(0), args.Error(1)
+}
+
 // TopicRepository methods
 
 func (m *MockStorage) AddTopic(topic storage.Topic) (int64, error) {
@@ -913,6 +923,9 @@ func SetupDefaultMocks(s *MockStorage) {
 	s.On("GetSessionArtifacts", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]storage.Artifact{}, nil).Maybe()
 	// Reply back-fill on the response-send path (bad-response-flag feature).
 	s.On("SetReplyTransportID", mock.Anything, mock.Anything).Return(nil).Maybe()
+	// Privacy mode (migration 018): off by default; save paths read it per turn.
+	s.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
+	s.On("SetPrivacyMode", mock.Anything, mock.Anything).Return(nil).Maybe()
 	// v0.7.0 re-embed defaults are auto-installed by MockStorage itself on first call.
 }
 

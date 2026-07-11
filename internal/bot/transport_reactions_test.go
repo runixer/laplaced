@@ -122,6 +122,7 @@ func setupReactionBot(t *testing.T, fake *fakeReactorAgent) (*Bot, *testutil.Moc
 	t.Helper()
 	mockAPI := new(testutil.MockBotAPI)
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	mockStore.On("GetRecentHistory", mock.Anything, mock.Anything).Return([]storage.Message{}, nil).Maybe()
 
 	cfg := testutil.TestConfig()

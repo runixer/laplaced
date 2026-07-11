@@ -7,8 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- New privacy mode: ask the bot not to save something and the following messages are excluded from long-term memory, with an honest explanation of what is and isn't covered.
+
 ### Changed
 - The assistant no longer retracts risk warnings under emotional pushback, avoids verdicts about people it only knows one-sidedly, keeps crisis replies short with real-help referrals, and refuses forwarded "assistant instructions", loyalty vows, and promises not to remember things.
+- Memory now records where each fact came from: judgments about other people are stored and re-read as the user's opinion rather than established truth, and stored "don't analyze/don't be harsh" instructions never override honesty on health, money, or safety.
+
+### Security
+- Forwarded "instructions for an AI assistant" blocks are refused outright and never written to memory, closing a confirmed cross-user injection path.
 
 ## [0.10.3] - 2026-07-10
 

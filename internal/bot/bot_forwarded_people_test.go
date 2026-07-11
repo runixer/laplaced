@@ -20,6 +20,7 @@ func setupBotForExtractedPeopleTests(t *testing.T) (*Bot, *testutil.MockStorage)
 
 	logger := testutil.TestLogger()
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 
 	cfg := &config.Config{
 		Bot: config.BotConfig{

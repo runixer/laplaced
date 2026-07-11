@@ -414,6 +414,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		MessageID:      strPtrOrNil(lastMsg.MessageID),
 		ConversationID: strPtrOrNil(convID),
 		ThreadRoot:     chanThreadRoot,
+		DoNotStore:     b.privacyModeEnabled(userID, logger),
 	}); err != nil {
 		logger.Error("failed to add message to history", "error", err)
 		return

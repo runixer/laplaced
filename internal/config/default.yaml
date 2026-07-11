@@ -264,6 +264,8 @@ tools:
     model: "memory"
   - name: "manage_memory"
     model: "memory"
+  - name: "privacy_mode"
+    model: "memory"
   - name: "search_people"
     model: "memory"
   - name: "manage_people"

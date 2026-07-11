@@ -70,6 +70,10 @@ type UserRepository interface {
 	UpsertUser(user User) error
 	GetAllUsers() ([]User, error)
 	ResetUserData(userID ScopeID) error
+	// SetPrivacyMode toggles the scope's do-not-store mode (migration 018);
+	// GetPrivacyMode reads it, a missing users row meaning off.
+	SetPrivacyMode(userID ScopeID, enabled bool) error
+	GetPrivacyMode(userID ScopeID) (bool, error)
 }
 
 // ScopeRepository exposes scope-type detection over the memory partition key.

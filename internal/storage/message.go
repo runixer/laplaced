@@ -13,9 +13,9 @@ func (s *Store) AddMessageToHistory(userID ScopeID, message Message) error {
 	// nullable transport attribution; they stay NULL when the caller leaves them
 	// unset (DM/Telegram path). trace_id (migration 016) is set on assistant
 	// replies so an inbound reaction can resolve the reply to its trace.
-	query := "INSERT INTO history (user_id, role, content, topic_id, created_at, author, message_id, conversation_id, thread_root, trace_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+	query := "INSERT INTO history (user_id, role, content, topic_id, created_at, author, message_id, conversation_id, thread_root, trace_id, do_not_store) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 	_, err := s.exec(query, userID, message.Role, message.Content, message.TopicID, s.dialect.BindTime(message.CreatedAt),
-		message.Author, message.MessageID, message.ConversationID, message.ThreadRoot, message.TraceID)
+		message.Author, message.MessageID, message.ConversationID, message.ThreadRoot, message.TraceID, message.DoNotStore)
 	return err
 }
 
@@ -168,7 +168,7 @@ func (s *Store) GetUnprocessedMessages(userID ScopeID) ([]Message, error) {
 	// But we also want to respect the "chunking" logic which might rely on time.
 	// Actually, getting all unprocessed messages is fine, the caller (RAG) handles chunking.
 
-	query := "SELECT id, user_id, role, content, created_at, topic_id FROM history WHERE user_id = ? AND topic_id IS NULL ORDER BY created_at ASC, id ASC"
+	query := "SELECT id, user_id, role, content, created_at, topic_id, do_not_store FROM history WHERE user_id = ? AND topic_id IS NULL ORDER BY created_at ASC, id ASC"
 	rows, err := s.query(query, userID)
 	if err != nil {
 		return nil, err
@@ -178,7 +178,7 @@ func (s *Store) GetUnprocessedMessages(userID ScopeID) ([]Message, error) {
 	var messages []Message
 	for rows.Next() {
 		var msg Message
-		if err := rows.Scan(&msg.ID, &msg.UserID, &msg.Role, &msg.Content, &msg.CreatedAt, &msg.TopicID); err != nil {
+		if err := rows.Scan(&msg.ID, &msg.UserID, &msg.Role, &msg.Content, &msg.CreatedAt, &msg.TopicID, &msg.DoNotStore); err != nil {
 			return nil, err
 		}
 		messages = append(messages, msg)
@@ -193,7 +193,10 @@ func (s *Store) UpdateMessageTopic(userID ScopeID, messageID, topicID int64) err
 }
 
 func (s *Store) GetMessagesByTopicID(ctx context.Context, topicID int64) ([]Message, error) {
-	query := "SELECT id, user_id, role, content, created_at, topic_id FROM history WHERE topic_id = ? ORDER BY created_at ASC, id ASC"
+	// do-not-store rows are structurally part of the topic (they carry its
+	// topic_id) but their content must not resurface: this method feeds the
+	// archivist, RAG topic re-injection, the merger, and topic views.
+	query := "SELECT id, user_id, role, content, created_at, topic_id FROM history WHERE topic_id = ? AND NOT do_not_store ORDER BY created_at ASC, id ASC"
 	rows, err := s.queryContext(ctx, query, topicID)
 	if err != nil {
 		return nil, err

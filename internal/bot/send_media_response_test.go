@@ -49,6 +49,7 @@ func TestDeliverGeneratedOnError(t *testing.T) {
 	setup := func(t *testing.T) (*Bot, *testutil.MockStorage, *recordingTransport) {
 		t.Helper()
 		mockStore := new(testutil.MockStorage)
+		mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 		transport := &recordingTransport{}
 		b := &Bot{
 			cfg:          testutil.TestConfig(),

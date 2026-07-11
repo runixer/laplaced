@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/runixer/laplaced/internal/storage"
@@ -55,6 +56,7 @@ func (f *fakeResolver) Invalidate(_ string) { f.invalidated++ }
 
 func TestResolveScopeID_TelegramPassthrough(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 
 	id, err := resolveScopeID(context.Background(), mockStore, nil, transportTelegram, IncomingMessage{SenderID: "123456", IsDirect: true})
 	require.NoError(t, err)
@@ -68,6 +70,7 @@ func TestResolveScopeID_TelegramPassthrough(t *testing.T) {
 
 func TestResolveScopeID_TelegramNonNumericIsPassthrough(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	id, err := resolveScopeID(context.Background(), mockStore, nil, transportTelegram, IncomingMessage{SenderID: "not-an-int", IsDirect: true})
 	require.NoError(t, err)
 	assert.Equal(t, storage.PassthroughScopeID("telegram", "not-an-int"), id)
@@ -75,6 +78,7 @@ func TestResolveScopeID_TelegramNonNumericIsPassthrough(t *testing.T) {
 
 func TestResolveScopeID_MattermostDMNoResolverIsPassthrough(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 
 	// A DM on a transport with no resolver wired is deterministic passthrough —
 	// the same scope id ResolveScope used to mint, but with no identity state and
@@ -93,6 +97,7 @@ func TestResolveScopeID_MattermostDMNoResolverIsPassthrough(t *testing.T) {
 
 func TestResolveScopeID_ChannelGetsChannelScope(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	// A channel is its own scope, keyed by the conversation; never principal-resolved.
 	mockStore.On("GetOrCreateChannel", transportMattermost, "chan26charchannel", "Release Team").
 		Return(storage.ScopeID("scope-42"), nil)
@@ -113,6 +118,7 @@ func TestResolveScopeID_ChannelGetsChannelScope(t *testing.T) {
 
 func TestResolveScopeID_DMWithResolver_LinksPrincipal(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	pin := storage.PrincipalInput{ADLogin: "j.doe", DisplayName: "John Doe"}
 	resolver := &fakeResolver{out: &pin}
 
@@ -133,6 +139,7 @@ func TestResolveScopeID_DMWithResolver_LinksPrincipal(t *testing.T) {
 
 func TestResolveScopeID_DMWithResolver_ReusesExistingIdentity(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	resolver := &fakeResolver{out: &storage.PrincipalInput{ADLogin: "should.not.matter"}}
 
 	// A known handle short-circuits: reuse the mapped scope, never re-resolve.
@@ -152,6 +159,7 @@ func TestResolveScopeID_DMWithResolver_ReusesExistingIdentity(t *testing.T) {
 
 func TestResolveScopeID_DMWithResolver_UnlinkableGetsIsolatedScope(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	// Resolver returns nil (local account / untrusted) → isolated passthrough scope,
 	// NEVER linked to a principal.
 	resolver := &fakeResolver{out: nil}
@@ -173,6 +181,7 @@ func TestResolveScopeID_DMWithResolver_UnlinkableGetsIsolatedScope(t *testing.T)
 
 func TestResolveScopeID_DMWithResolver_ResolveErrorPropagates(t *testing.T) {
 	mockStore := new(testutil.MockStorage)
+	mockStore.On("GetPrivacyMode", mock.Anything).Return(false, nil).Maybe()
 	resolver := &fakeResolver{err: errors.New("mm down")}
 	mockStore.On("GetIdentity", transportMattermost, "u1").Return(nil, nil)
 
