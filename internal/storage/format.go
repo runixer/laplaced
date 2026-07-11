@@ -30,11 +30,30 @@ func formatProfileWithIDs(facts []Fact, tag string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "<%s>\n", tag)
 	for _, f := range facts {
-		fmt.Fprintf(&sb, "- [Fact:%d] [%s/%s] (Updated: %s) %s\n",
-			f.ID, f.Category, f.Type, f.LastUpdated.Format("2006-01-02"), f.Content)
+		fmt.Fprintf(&sb, "- [Fact:%d] [%s/%s%s] (Updated: %s) %s\n",
+			f.ID, f.Category, f.Type, factKindMarker(f.Kind), f.LastUpdated.Format("2006-01-02"), f.Content)
 	}
 	fmt.Fprintf(&sb, "</%s>", tag)
 	return sb.String()
+}
+
+// factKindMarker renders non-default provenance as a suffix inside the fact's
+// category/type bracket, e.g. [people/context/opinion]. Facts injected into
+// every LLM context read as ground truth; the marker lets the system prompt
+// treat one-sided verdicts (/opinion) as testimony and behavioral
+// restrictions (/constraint) as overridable preferences. self_report is the
+// default and stays unmarked to keep the common case compact.
+func factKindMarker(kind string) string {
+	switch kind {
+	case FactKindUserOpinion:
+		return "/opinion"
+	case FactKindConstraint:
+		return "/constraint"
+	case FactKindVerified:
+		return "/verified"
+	default:
+		return ""
+	}
 }
 
 // FormatUserProfileCompact formats user facts without Fact IDs.
@@ -50,8 +69,8 @@ func FormatUserProfileCompact(facts []Fact) string {
 	var sb strings.Builder
 	sb.WriteString("<user_profile>\n")
 	for _, f := range facts {
-		fmt.Fprintf(&sb, "- [%s/%s] (%s) %s\n",
-			f.Category, f.Type, f.LastUpdated.Format("2006-01-02"), f.Content)
+		fmt.Fprintf(&sb, "- [%s/%s%s] (%s) %s\n",
+			f.Category, f.Type, factKindMarker(f.Kind), f.LastUpdated.Format("2006-01-02"), f.Content)
 	}
 	sb.WriteString("</user_profile>")
 	return sb.String()
@@ -80,10 +99,13 @@ func FormatRecentTopics(topics []TopicExtended) string {
 
 // FilterProfileFacts filters facts to identity and high-importance facts only.
 // This is the standard filter used across all agents.
+// Constraint facts are always included regardless of importance: a stored
+// behavioral restriction the model never sees is silently either violated or
+// (worse) half-remembered — it must reach the prompt to be weighed at all.
 func FilterProfileFacts(facts []Fact) []Fact {
 	var relevant []Fact
 	for _, f := range facts {
-		if f.Type == "identity" || f.Importance >= 80 {
+		if f.Type == "identity" || f.Importance >= 80 || f.Kind == FactKindConstraint {
 			relevant = append(relevant, f)
 		}
 	}
