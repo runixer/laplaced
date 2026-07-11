@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS structured_facts (
     category          text NOT NULL,
     content           text NOT NULL,
     type              text NOT NULL,
+    kind              text NOT NULL DEFAULT 'self_report',
     importance        integer NOT NULL,
     embedding         bytea,
     topic_id          bigint,
@@ -110,6 +111,7 @@ CREATE TABLE IF NOT EXISTS structured_facts (
 CREATE INDEX IF NOT EXISTS idx_structured_facts_category ON structured_facts(user_id, category);
 CREATE INDEX IF NOT EXISTS idx_structured_facts_type ON structured_facts(user_id, type);
 CREATE INDEX IF NOT EXISTS idx_structured_facts_topic_id ON structured_facts(topic_id);
+ALTER TABLE structured_facts ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'self_report';
 
 CREATE TABLE IF NOT EXISTS fact_history (
     id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

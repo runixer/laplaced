@@ -18,16 +18,17 @@ func (s *Store) AddFact(fact Fact) (int64, error) {
 		fact.LastUpdated = time.Now()
 	}
 	query := `
-		INSERT INTO structured_facts (user_id, relation, category, content, type, importance, embedding, embedding_version, topic_id, created_at, last_updated)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO structured_facts (user_id, relation, category, content, type, kind, importance, embedding, embedding_version, topic_id, created_at, last_updated)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(user_id, relation, content) DO UPDATE SET
 			last_updated = excluded.last_updated,
 			importance = excluded.importance,
 			type = excluded.type,
+			kind = excluded.kind,
 			category = excluded.category,
 			topic_id = COALESCE(excluded.topic_id, structured_facts.topic_id)
 	`
-	_, err = s.exec(query, fact.UserID, fact.Relation, fact.Category, fact.Content, fact.Type, fact.Importance, embBytes, s.embeddingVersion, fact.TopicID, s.dialect.BindTime(fact.CreatedAt), s.dialect.BindTime(fact.LastUpdated))
+	_, err = s.exec(query, fact.UserID, fact.Relation, fact.Category, fact.Content, fact.Type, NormalizeFactKind(fact.Kind), fact.Importance, embBytes, s.embeddingVersion, fact.TopicID, s.dialect.BindTime(fact.CreatedAt), s.dialect.BindTime(fact.LastUpdated))
 	if err != nil {
 		return 0, err
 	}
@@ -44,7 +45,7 @@ func (s *Store) AddFact(fact Fact) (int64, error) {
 // GetAllFacts retrieves all facts across all users.
 // WARNING: Cross-user access - used for vector index loading only.
 func (s *Store) GetAllFacts() ([]Fact, error) {
-	query := "SELECT id, user_id, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts"
+	query := "SELECT id, user_id, relation, category, content, type, kind, importance, embedding, topic_id, created_at, last_updated FROM structured_facts"
 	rows, err := s.query(query)
 	if err != nil {
 		return nil, err
@@ -55,7 +56,7 @@ func (s *Store) GetAllFacts() ([]Fact, error) {
 	for rows.Next() {
 		var f Fact
 		var embBytes []byte
-		if err := rows.Scan(&f.ID, &f.UserID, &f.Relation, &f.Category, &f.Content, &f.Type, &f.Importance, &embBytes, &f.TopicID, &f.CreatedAt, &f.LastUpdated); err != nil {
+		if err := rows.Scan(&f.ID, &f.UserID, &f.Relation, &f.Category, &f.Content, &f.Type, &f.Kind, &f.Importance, &embBytes, &f.TopicID, &f.CreatedAt, &f.LastUpdated); err != nil {
 			return nil, err
 		}
 		if len(embBytes) > 0 {
@@ -72,7 +73,7 @@ func (s *Store) GetAllFacts() ([]Fact, error) {
 // GetFactsAfterID retrieves facts created after given ID across all users.
 // WARNING: Cross-user access - used for incremental vector index updates.
 func (s *Store) GetFactsAfterID(minID int64) ([]Fact, error) {
-	query := "SELECT id, user_id, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE id > ? ORDER BY id ASC"
+	query := "SELECT id, user_id, relation, category, content, type, kind, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE id > ? ORDER BY id ASC"
 	rows, err := s.query(query, minID)
 	if err != nil {
 		return nil, err
@@ -83,7 +84,7 @@ func (s *Store) GetFactsAfterID(minID int64) ([]Fact, error) {
 	for rows.Next() {
 		var f Fact
 		var embBytes []byte
-		if err := rows.Scan(&f.ID, &f.UserID, &f.Relation, &f.Category, &f.Content, &f.Type, &f.Importance, &embBytes, &f.TopicID, &f.CreatedAt, &f.LastUpdated); err != nil {
+		if err := rows.Scan(&f.ID, &f.UserID, &f.Relation, &f.Category, &f.Content, &f.Type, &f.Kind, &f.Importance, &embBytes, &f.TopicID, &f.CreatedAt, &f.LastUpdated); err != nil {
 			return nil, err
 		}
 		if len(embBytes) > 0 {
@@ -181,14 +182,21 @@ func (s *Store) UpdateFact(fact Fact) error {
 	// importance-only updates round-trip the stored embedding, and stamping
 	// them with the current version would exempt an old-space vector from the
 	// startup re-embed forever (SET expressions see pre-update column values).
+	// kind is overwritten only when the caller supplies one: an empty Kind on
+	// an importance-only update must not silently downgrade user_opinion or
+	// constraint provenance back to self_report.
 	query := `
 		UPDATE structured_facts
-		SET content = ?, type = ?, importance = ?, embedding = ?,
+		SET content = ?, type = ?, kind = COALESCE(NULLIF(?, ''), kind), importance = ?, embedding = ?,
 		    embedding_version = CASE WHEN embedding = ? THEN embedding_version ELSE ? END,
 		    last_updated = ?
 		WHERE id = ? AND user_id = ?
 	`
-	_, err = s.exec(query, fact.Content, fact.Type, fact.Importance, embBytes, embBytes, s.embeddingVersion, s.dialect.BindTime(fact.LastUpdated), fact.ID, fact.UserID)
+	kind := fact.Kind
+	if kind != "" {
+		kind = NormalizeFactKind(kind)
+	}
+	_, err = s.exec(query, fact.Content, fact.Type, kind, fact.Importance, embBytes, embBytes, s.embeddingVersion, s.dialect.BindTime(fact.LastUpdated), fact.ID, fact.UserID)
 	return err
 }
 
@@ -213,7 +221,7 @@ func (s *Store) DeleteAllFacts(userID ScopeID) error {
 }
 
 func (s *Store) GetFacts(userID ScopeID) ([]Fact, error) {
-	query := "SELECT id, user_id, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE user_id = ?"
+	query := "SELECT id, user_id, relation, category, content, type, kind, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE user_id = ?"
 	rows, err := s.query(query, userID)
 	if err != nil {
 		return nil, err
@@ -224,7 +232,7 @@ func (s *Store) GetFacts(userID ScopeID) ([]Fact, error) {
 	for rows.Next() {
 		var f Fact
 		var embBytes []byte
-		if err := rows.Scan(&f.ID, &f.UserID, &f.Relation, &f.Category, &f.Content, &f.Type, &f.Importance, &embBytes, &f.TopicID, &f.CreatedAt, &f.LastUpdated); err != nil {
+		if err := rows.Scan(&f.ID, &f.UserID, &f.Relation, &f.Category, &f.Content, &f.Type, &f.Kind, &f.Importance, &embBytes, &f.TopicID, &f.CreatedAt, &f.LastUpdated); err != nil {
 			return nil, err
 		}
 		if len(embBytes) > 0 {
@@ -243,7 +251,7 @@ func (s *Store) GetFactsByIDs(userID ScopeID, ids []int64) ([]Fact, error) {
 		return nil, nil
 	}
 	query, args, err := ExpandIn(
-		"SELECT id, user_id, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE user_id = ? AND id IN (?)",
+		"SELECT id, user_id, relation, category, content, type, kind, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE user_id = ? AND id IN (?)",
 		userID, ids,
 	)
 	if err != nil {
@@ -260,7 +268,7 @@ func (s *Store) GetFactsByIDs(userID ScopeID, ids []int64) ([]Fact, error) {
 	for rows.Next() {
 		var f Fact
 		var embBytes []byte
-		if err := rows.Scan(&f.ID, &f.UserID, &f.Relation, &f.Category, &f.Content, &f.Type, &f.Importance, &embBytes, &f.TopicID, &f.CreatedAt, &f.LastUpdated); err != nil {
+		if err := rows.Scan(&f.ID, &f.UserID, &f.Relation, &f.Category, &f.Content, &f.Type, &f.Kind, &f.Importance, &embBytes, &f.TopicID, &f.CreatedAt, &f.LastUpdated); err != nil {
 			return nil, err
 		}
 		if len(embBytes) > 0 {
@@ -275,7 +283,7 @@ func (s *Store) GetFactsByIDs(userID ScopeID, ids []int64) ([]Fact, error) {
 }
 
 func (s *Store) GetFactsByTopicID(userID ScopeID, topicID int64) ([]Fact, error) {
-	query := "SELECT id, user_id, relation, category, content, type, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE user_id = ? AND topic_id = ?"
+	query := "SELECT id, user_id, relation, category, content, type, kind, importance, embedding, topic_id, created_at, last_updated FROM structured_facts WHERE user_id = ? AND topic_id = ?"
 	rows, err := s.query(query, userID, topicID)
 	if err != nil {
 		return nil, err
@@ -286,7 +294,7 @@ func (s *Store) GetFactsByTopicID(userID ScopeID, topicID int64) ([]Fact, error)
 	for rows.Next() {
 		var f Fact
 		var embBytes []byte
-		if err := rows.Scan(&f.ID, &f.UserID, &f.Relation, &f.Category, &f.Content, &f.Type, &f.Importance, &embBytes, &f.TopicID, &f.CreatedAt, &f.LastUpdated); err != nil {
+		if err := rows.Scan(&f.ID, &f.UserID, &f.Relation, &f.Category, &f.Content, &f.Type, &f.Kind, &f.Importance, &embBytes, &f.TopicID, &f.CreatedAt, &f.LastUpdated); err != nil {
 			return nil, err
 		}
 		if len(embBytes) > 0 {

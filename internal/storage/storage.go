@@ -97,6 +97,7 @@ type Fact struct {
 	Content     string
 	Category    string
 	Type        string // identity, context, status
+	Kind        string // provenance: self_report, user_opinion, verified, constraint (see factkind.go)
 	Importance  int    // 0-100
 	Embedding   []float32
 	TopicID     *int64 // Nullable
