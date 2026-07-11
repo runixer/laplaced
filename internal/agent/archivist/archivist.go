@@ -46,6 +46,7 @@ type AddedFact struct {
 	Content    string `json:"content"`
 	Category   string `json:"category"`
 	Type       string `json:"type"`
+	Kind       string `json:"kind,omitempty"` // provenance: self_report/user_opinion/constraint
 	Importance int    `json:"importance"`
 	Reason     string `json:"reason"`
 }
@@ -56,6 +57,7 @@ type UpdatedFact struct {
 	FactID     agent.FlexID `json:"fact_id,omitempty"` // Preferred: "Fact:1522" or "1522"; numbers tolerated
 	Content    string       `json:"content"`
 	Type       string       `json:"type,omitempty"`
+	Kind       string       `json:"kind,omitempty"` // empty = keep the stored kind
 	Importance int          `json:"importance"`
 	Reason     string       `json:"reason"`
 }
@@ -793,6 +795,7 @@ type FactView struct {
 	Content    string `json:"content"`
 	Category   string `json:"category"`
 	Type       string `json:"type"`
+	Kind       string `json:"kind"`
 	Importance int    `json:"importance"`
 }
 
@@ -807,6 +810,7 @@ func (a *Archivist) prepareUserFacts(facts []storage.Fact) []FactView {
 			Content:    f.Content,
 			Category:   f.Category,
 			Type:       f.Type,
+			Kind:       f.Kind,
 			Importance: f.Importance,
 		})
 	}

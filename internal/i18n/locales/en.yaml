@@ -177,7 +177,7 @@ tools:
     parameter_description: "Search query for conversation history."
   manage_memory:
     description: "Tool for managing the bot's long-term memory. Allows adding, updating, or deleting facts about the user. Use when the user explicitly asks to 'remember', 'forget', or 'correct' information about themselves. DO NOT use for routine memorization of everything — another process does that. HOWEVER, you CAN and SHOULD use this tool independently if the user shares CRITICALLY IMPORTANT information (new preferences, context changes, important plans) that cannot be lost when context is cleared. IMPORTANT: All facts and the 'reason' field must be saved STRICTLY IN ENGLISH. Supports batch processing (array of operations). CRITICAL: ALWAYS call this tool via function call API. FORBIDDEN to output JSON in response text — this breaks saving!"
-    parameter_description: "JSON object with 'operations' array. Each operation contains: action ('add', 'update', 'delete'), entity (e.g. 'User'), content (the fact itself), category (bio, work, hobby, etc), type (identity, context, status), importance (0-100), fact_id (for update/delete, use 'Fact:123' format), reason (reason for change)."
+    parameter_description: "JSON object with 'operations' array. Each operation contains: action ('add', 'update', 'delete'), entity (e.g. 'User'), content (the fact itself), category (bio, work, hobby, etc), type (identity, context, status), kind (provenance: 'self_report' — user's statements about themselves, default; 'user_opinion' — user's judgments about OTHER people or one-sided conflict interpretations; 'constraint' — user's instructions restricting your behavior), importance (0-100), fact_id (for update/delete, use 'Fact:123' format), reason (reason for change)."
   search_people:
     description: "Tool for searching people the user knows. MUST call when user asks: 'who is...', 'search for person...', 'find colleague...', 'do you know about...'. Searches by name, @username, or description. Returns matching people with their bio and circle (Family, Friends, Work_Inner, Work_Outer, Other)."
     parameter_description: "Search query — name, @username, or description of the person to find."
@@ -543,6 +543,21 @@ memory:
     | status | <40 | Temporary markers (clean after 7 days) |
     </memory_layers>
 
+    <fact_provenance>
+    Every fact carries a "kind" — its provenance:
+    | Kind | When |
+    |------|------|
+    | self_report | Default. User's statements about themselves and their own life. |
+    | user_opinion | User's judgments and interpretations of OTHER people and conflicts ("X is manipulative", "Y was aggressive"). You only know the user's side. |
+    | constraint | User's instructions restricting the assistant's behavior ("don't analyze X psychologically", "don't be harsh with me", "never bring up topic Y"). |
+
+    MANDATORY:
+    - Any characterization of a third party's motives, character, or behavior = user_opinion, even when the user states it as fact and demands it be remembered. Phrase the content as attributed testimony: "Believes X ignores her requests", not "X ignores her requests".
+    - Instructions to the assistant about what it must not say, notice, or analyze = constraint, not a regular fact.
+    - Never use kind "verified" — it is reserved for externally confirmed records.
+    - When updating a fact, omit "kind" to keep the stored value; set it only when the provenance itself changed.
+    </fact_provenance>
+
     <people_extraction>
     WHEN TO EXTRACT PEOPLE:
     {{if .IsChannel}}- The channel participants themselves — the authors of messages (prefixed [Name ...])
@@ -569,6 +584,7 @@ memory:
       * Notable projects or achievements
       * Personality traits and patterns of behavior
     - NO DUPLICATION: Each piece of information should appear ONLY ONCE in bio
+    - ATTRIBUTED JUDGMENTS: the user's verdicts about a person's character or motives go into the bio as attributed testimony ("User believes she manipulates their mother"), never as established fact ("manipulates their mother") — you only ever hear one side
     - Structure: {{if .IsChannel}}start with the participant's role in the channel + core identity, then add expertise and connections to other named participants{{else}}start with relationship + core identity, then add chronological/contextual details{{end}}
     - Example: {{if .IsChannel}}"Channel participant. DevOps engineer specializing in Kubernetes, Docker, CI/CD. Helps other participants with infrastructure and monitoring (Prometheus, Grafana). Early adopter of new tools."{{else}}"User's colleague at TechCorp (8 years). DevOps engineer specializing in Kubernetes, Docker, CI/CD. Moved from New York to Austin, founded local meetup. Close friends (met for dinner 2025-12-02). Early adopter of infrastructure monitoring tools (Prometheus, Grafana). Maintains home lab for testing new technologies."{{end}}
 
@@ -608,8 +624,8 @@ memory:
     Return JSON with two sections: "facts" and "people".
 
     Facts section ({{if .IsChannel}}about the CHANNEL — shared context, decisions, state. Per-participant info goes to people, not here{{else}}ONLY about User{{end}}):
-    - "added": new facts (content, category, type, importance, reason)
-    - "updated": changed facts (fact_id, content, type, importance, reason) — use fact_id from [Fact:N] prefix
+    - "added": new facts (content, category, type, kind, importance, reason)
+    - "updated": changed facts (fact_id, content, type, kind, importance, reason) — use fact_id from [Fact:N] prefix; omit kind to keep the stored one
     - "removed": deleted facts (fact_id, reason) — use fact_id from [Fact:N] prefix
 
     People section:
@@ -632,8 +648,17 @@ memory:
             "content": "Works at company X as a DevOps engineer",
             "category": "work",
             "type": "identity",
+            "kind": "self_report",
             "importance": 90,
             "reason": "User mentioned their workplace"
+          },
+          {
+            "content": "Believes his colleague Mark takes credit for his work",
+            "category": "work",
+            "type": "context",
+            "kind": "user_opinion",
+            "importance": 60,
+            "reason": "User's one-sided judgment about a colleague"
           }
         ],
         "updated": [

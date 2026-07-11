@@ -458,6 +458,7 @@ func TestApplyUpdateWithStats(t *testing.T) {
 					Content    string `json:"content"`
 					Category   string `json:"category"`
 					Type       string `json:"type"`
+					Kind       string `json:"kind,omitempty"`
 					Importance int    `json:"importance"`
 					Reason     string `json:"reason"`
 				}{
@@ -479,6 +480,7 @@ func TestApplyUpdateWithStats(t *testing.T) {
 					ID         int64  `json:"id"`
 					Content    string `json:"content"`
 					Type       string `json:"type,omitempty"`
+					Kind       string `json:"kind,omitempty"`
 					Importance int    `json:"importance"`
 					Reason     string `json:"reason"`
 				}{
@@ -520,6 +522,7 @@ func TestApplyUpdateWithStats(t *testing.T) {
 					Content    string `json:"content"`
 					Category   string `json:"category"`
 					Type       string `json:"type"`
+					Kind       string `json:"kind,omitempty"`
 					Importance int    `json:"importance"`
 					Reason     string `json:"reason"`
 				}{
@@ -529,6 +532,7 @@ func TestApplyUpdateWithStats(t *testing.T) {
 					ID         int64  `json:"id"`
 					Content    string `json:"content"`
 					Type       string `json:"type,omitempty"`
+					Kind       string `json:"kind,omitempty"`
 					Importance int    `json:"importance"`
 					Reason     string `json:"reason"`
 				}{

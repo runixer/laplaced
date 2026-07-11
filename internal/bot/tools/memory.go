@@ -46,6 +46,7 @@ func (e *ToolExecutor) performAddFact(ctx context.Context, userID storage.ScopeI
 		UserID:     userID,
 		Content:    p.Content,
 		Type:       factType,
+		Kind:       storage.NormalizeFactKind(p.Kind),
 		Importance: importance,
 		Embedding:  resp.Data[0].Embedding,
 		Relation:   "related_to",
@@ -161,6 +162,7 @@ func (e *ToolExecutor) performUpdateFact(ctx context.Context, userID storage.Sco
 		UserID:     userID,
 		Content:    p.Content,
 		Type:       factType,
+		Kind:       p.Kind, // empty = UpdateFact keeps the stored kind
 		Importance: importance,
 		Embedding:  resp.Data[0].Embedding,
 	}

@@ -102,6 +102,7 @@ type MemoryUpdate struct {
 		Content    string `json:"content"`
 		Category   string `json:"category"`
 		Type       string `json:"type"`
+		Kind       string `json:"kind,omitempty"`
 		Importance int    `json:"importance"`
 		Reason     string `json:"reason"`
 	} `json:"added"`
@@ -109,6 +110,7 @@ type MemoryUpdate struct {
 		ID         int64  `json:"id"`
 		Content    string `json:"content"`
 		Type       string `json:"type,omitempty"`
+		Kind       string `json:"kind,omitempty"`
 		Importance int    `json:"importance"`
 		Reason     string `json:"reason"`
 	} `json:"updated"`
@@ -319,6 +321,7 @@ func convertArchivistResult(result *archivist.Result) *MemoryUpdate {
 			Content    string `json:"content"`
 			Category   string `json:"category"`
 			Type       string `json:"type"`
+			Kind       string `json:"kind,omitempty"`
 			Importance int    `json:"importance"`
 			Reason     string `json:"reason"`
 		}{
@@ -326,6 +329,7 @@ func convertArchivistResult(result *archivist.Result) *MemoryUpdate {
 			Content:    a.Content,
 			Category:   a.Category,
 			Type:       a.Type,
+			Kind:       a.Kind,
 			Importance: a.Importance,
 			Reason:     a.Reason,
 		})
@@ -341,12 +345,14 @@ func convertArchivistResult(result *archivist.Result) *MemoryUpdate {
 			ID         int64  `json:"id"`
 			Content    string `json:"content"`
 			Type       string `json:"type,omitempty"`
+			Kind       string `json:"kind,omitempty"`
 			Importance int    `json:"importance"`
 			Reason     string `json:"reason"`
 		}{
 			ID:         factID,
 			Content:    u.Content,
 			Type:       u.Type,
+			Kind:       u.Kind,
 			Importance: u.Importance,
 			Reason:     u.Reason,
 		})
@@ -393,6 +399,7 @@ func (s *Service) applyUpdateWithStats(ctx context.Context, userID storage.Scope
 			Content:     added.Content,
 			Category:    added.Category,
 			Type:        added.Type,
+			Kind:        storage.NormalizeFactKind(added.Kind),
 			Importance:  added.Importance,
 			Embedding:   emb,
 			TopicID:     tID,
@@ -444,6 +451,7 @@ func (s *Service) applyUpdateWithStats(ctx context.Context, userID storage.Scope
 			UserID:      userID,
 			Content:     updated.Content,
 			Type:        updated.Type,
+			Kind:        updated.Kind, // empty = UpdateFact keeps the stored kind
 			Importance:  updated.Importance,
 			Embedding:   emb,
 			LastUpdated: referenceDate,

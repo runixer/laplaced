@@ -15,6 +15,7 @@ type MemoryOpParams struct {
 	Content    string
 	Category   string
 	FactType   string
+	Kind       string
 	Reason     string
 	Importance int
 	FactID     int64
@@ -95,6 +96,9 @@ func ParseMemoryOpParams(params map[string]interface{}) (MemoryOpParams, error) 
 	}
 	if v, ok := params["type"].(string); ok {
 		p.FactType = v
+	}
+	if v, ok := params["kind"].(string); ok {
+		p.Kind = v
 	}
 	if v, ok := params["reason"].(string); ok {
 		p.Reason = v
