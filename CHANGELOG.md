@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- The assistant no longer retracts risk warnings under emotional pushback, avoids verdicts about people it only knows one-sidedly, keeps crisis replies short with real-help referrals, and refuses forwarded "assistant instructions", loyalty vows, and promises not to remember things.
+
 ## [0.10.3] - 2026-07-10
 
 ### Added
