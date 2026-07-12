@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- A LongMemEval harness now compares memory quality, fact mutations, latency, and model variants through isolated parallel runs.
 - New privacy mode: ask the bot not to save something and the following messages are excluded from long-term memory, with an honest explanation of what is and isn't covered.
 
 ### Changed

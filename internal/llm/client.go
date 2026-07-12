@@ -426,13 +426,14 @@ type ImageConfig struct {
 }
 
 type ChatCompletionRequest struct {
-	Model          string           `json:"model"`
-	Messages       []Message        `json:"messages"`
-	Plugins        []Plugin         `json:"plugins,omitempty"`
-	Tools          []Tool           `json:"tools,omitempty"`
-	ToolChoice     any              `json:"tool_choice,omitempty"`
-	ResponseFormat interface{}      `json:"response_format,omitempty"`
-	Reasoning      *ReasoningConfig `json:"reasoning,omitempty"`
+	Model              string           `json:"model"`
+	Messages           []Message        `json:"messages"`
+	Plugins            []Plugin         `json:"plugins,omitempty"`
+	Tools              []Tool           `json:"tools,omitempty"`
+	ToolChoice         any              `json:"tool_choice,omitempty"`
+	ResponseFormat     interface{}      `json:"response_format,omitempty"`
+	Reasoning          *ReasoningConfig `json:"reasoning,omitempty"`
+	ChatTemplateKwargs map[string]any   `json:"chat_template_kwargs,omitempty"`
 	// Modalities enables image-output models. Use ["image","text"] for Gemini
 	// image models that return both text and images. Required for image generation;
 	// see TestAllImageGenerationRequestsSetModalities.
