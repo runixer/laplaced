@@ -3,6 +3,7 @@ package reranker
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/runixer/laplaced/internal/agent"
@@ -1149,6 +1150,55 @@ func TestExecute_WithMediaParts(t *testing.T) {
 	require.NoError(t, err)
 	result := resp.Structured.(*Result)
 	assert.Equal(t, []int64{1}, result.TopicIDs())
+}
+
+// TestExecute_InputBudgetPreservesMediaAndWholeCandidates verifies bounded input assembly.
+func TestExecute_InputBudgetPreservesMediaAndWholeCandidates(t *testing.T) {
+	mockClient := &testutil.MockLLMClient{}
+	mockStorage := &testutil.MockStorage{}
+	cfg := testConfig()
+	cfg.Agents.Reranker.InputTokenBudget = 2500
+	translator := testutil.TestTranslator(t)
+	reranker := New(mockClient, cfg, testutil.TestLogger(), translator, mockStorage, nil)
+
+	candidates := make([]Candidate, 10)
+	for i := range candidates {
+		id := int64(i + 1)
+		candidates[i] = Candidate{
+			TopicID: id,
+			Score:   1 - float32(i)/10,
+			Topic:   mockTopic(id, "candidate-"+string(rune('A'+i))+strings.Repeat("x", 1000)),
+		}
+	}
+	media := map[string]interface{}{"type": "image_url", "image_url": map[string]string{"url": "data:image/png;base64,test"}}
+
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
+		if llm.EstimateMessagesTokens(req.Messages) > cfg.Agents.Reranker.InputTokenBudget {
+			return false
+		}
+		parts, ok := req.Messages[1].Content.([]interface{})
+		if !ok || len(parts) < 2 || !assert.ObjectsAreEqual(media, parts[len(parts)-1]) {
+			return false
+		}
+		text, ok := parts[0].(llm.TextPart)
+		return ok && strings.Contains(text.Text, "candidate-A") && !strings.Contains(text.Text, "candidate-J")
+	})).Return(makeFinalJSONResponse(`{"topic_ids": []}`), nil).Once()
+
+	resp, err := reranker.Execute(context.Background(), &agent.Request{
+		Params: map[string]any{
+			ParamCandidates:          candidates,
+			ParamContextualizedQuery: "test query",
+			ParamOriginalQuery:       "original",
+			ParamCurrentMessages:     "recent messages",
+			ParamMediaParts:          []interface{}{media},
+		},
+		Shared: &agent.SharedContext{UserID: "123"},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "model_empty", resp.Metadata["fallback_reason"])
+	require.LessOrEqual(t, resp.Metadata["input_tokens_estimated"].(int), cfg.Agents.Reranker.InputTokenBudget)
+	mockClient.AssertExpectations(t)
 }
 
 // TestRerank_OnlyPeopleNoTopics verifies reranking with only people,
