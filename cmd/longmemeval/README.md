@@ -190,6 +190,29 @@ Each cache entry is a closed, WAL-checkpointed SQLite snapshot created after ing
 
 - A correct final answer does not guarantee correct memory state. Inspect `facts` and `fact_changes` when analyzing regressions.
 
+## Offline reports and paired comparison
+
+Build a summary without loading the dataset or calling an LLM:
+
+```bash
+go run ./cmd/longmemeval \
+  --report-input data/results.jsonl \
+  --report-format markdown \
+  --output data/report.md
+```
+
+Compare two judged runs case-by-case:
+
+```bash
+go run ./cmd/longmemeval \
+  --compare-baseline data/baseline.jsonl \
+  --compare-candidate data/candidate.jsonl \
+  --report-format json \
+  --output data/comparison.json
+```
+
+Comparison requires identical variant/question keys, question types, modes, and judge models. It reports accuracy and evidence-recall deltas, answer-context and cost changes, plus explicit `fail_to_pass` and `pass_to_fail` case lists. Results created before evidence tracing are marked as having zero retrieval cases rather than being interpreted as zero recall.
+
 ## Recommended workflow
 
 1. Start with one oracle case.

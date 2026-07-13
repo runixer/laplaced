@@ -26,23 +26,27 @@ import (
 )
 
 type options struct {
-	dataset      string
-	output       string
-	config       string
-	mode         string
-	caseID       string
-	limit        int
-	verbose      bool
-	chatBaseURL  string
-	chatModel    string
-	chatProxy    string
-	chatThinking bool
-	matrix       string
-	parallel     int
-	judge        bool
-	judgeModel   string
-	cacheDir     string
-	roleRoutes   map[agent.AgentType]matrixAgentRoute
+	dataset          string
+	output           string
+	config           string
+	mode             string
+	caseID           string
+	limit            int
+	verbose          bool
+	chatBaseURL      string
+	chatModel        string
+	chatProxy        string
+	chatThinking     bool
+	matrix           string
+	parallel         int
+	judge            bool
+	judgeModel       string
+	cacheDir         string
+	roleRoutes       map[agent.AgentType]matrixAgentRoute
+	reportInput      string
+	compareBaseline  string
+	compareCandidate string
+	reportFormat     string
 }
 
 type runResult struct {
@@ -124,6 +128,9 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if opts.reportInput != "" || opts.compareBaseline != "" {
+		return runOfflineReport(opts)
+	}
 	cases, err := loadDataset(opts.dataset)
 	if err != nil {
 		return err
@@ -165,6 +172,34 @@ func run(ctx context.Context, args []string) error {
 		})
 	}
 	return group.Wait()
+}
+
+func runOfflineReport(opts options) error {
+	writer, closeWriter, err := resultWriter(opts.output)
+	if err != nil {
+		return err
+	}
+	defer closeWriter()
+	if opts.reportInput != "" {
+		results, err := loadRunResults(opts.reportInput)
+		if err != nil {
+			return err
+		}
+		return writeOfflineReport(writer, summarizeResults(results), opts.reportFormat)
+	}
+	baseline, err := loadRunResults(opts.compareBaseline)
+	if err != nil {
+		return err
+	}
+	candidate, err := loadRunResults(opts.compareCandidate)
+	if err != nil {
+		return err
+	}
+	report, err := compareResults(baseline, candidate)
+	if err != nil {
+		return err
+	}
+	return writeOfflineReport(writer, report, opts.reportFormat)
 }
 
 func resolveVariants(opts options) ([]matrixVariant, error) {
@@ -421,11 +456,25 @@ func parseOptions(args []string) (options, error) {
 	set.BoolVar(&opts.judge, "judge", false, "Judge generated answers with the official LongMemEval V1 protocol")
 	set.StringVar(&opts.judgeModel, "judge-model", defaultJudgeModel, "Model used by the LongMemEval judge")
 	set.StringVar(&opts.cacheDir, "cache-dir", "", "Directory for immutable per-case ingestion snapshots")
+	set.StringVar(&opts.reportInput, "report-input", "", "Build an offline summary from a result JSONL file")
+	set.StringVar(&opts.compareBaseline, "compare-baseline", "", "Baseline result JSONL for offline paired comparison")
+	set.StringVar(&opts.compareCandidate, "compare-candidate", "", "Candidate result JSONL for offline paired comparison")
+	set.StringVar(&opts.reportFormat, "report-format", "json", "Offline report format: json or markdown")
 	if err := set.Parse(args); err != nil {
 		return opts, err
 	}
-	if opts.dataset == "" {
+	offlineReport := opts.reportInput != "" || opts.compareBaseline != "" || opts.compareCandidate != ""
+	if !offlineReport && opts.dataset == "" {
 		return opts, errors.New("--dataset is required")
+	}
+	if opts.reportInput != "" && (opts.compareBaseline != "" || opts.compareCandidate != "") {
+		return opts, errors.New("--report-input cannot be combined with comparison flags")
+	}
+	if (opts.compareBaseline == "") != (opts.compareCandidate == "") {
+		return opts, errors.New("--compare-baseline and --compare-candidate must be used together")
+	}
+	if opts.reportFormat != "json" && opts.reportFormat != "markdown" {
+		return opts, fmt.Errorf("unsupported --report-format %q", opts.reportFormat)
 	}
 	if opts.mode != "oracle" && opts.mode != "full" {
 		return opts, fmt.Errorf("unsupported --mode %q", opts.mode)

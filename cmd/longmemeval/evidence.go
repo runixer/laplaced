@@ -17,10 +17,11 @@ type evidenceRecall struct {
 }
 
 type retrievalEvidence struct {
-	Candidate    evidenceRecall `json:"candidate"`
-	PostReranker evidenceRecall `json:"post_reranker"`
-	FinalContext evidenceRecall `json:"final_context"`
-	UsedReranker bool           `json:"used_reranker"`
+	Candidate      evidenceRecall `json:"candidate"`
+	PostReranker   evidenceRecall `json:"post_reranker"`
+	FinalContext   evidenceRecall `json:"final_context"`
+	UsedReranker   bool           `json:"used_reranker"`
+	FallbackReason string         `json:"fallback_reason,omitempty"`
 }
 
 func calculateRetrievalEvidence(store *storage.Store, scopeID storage.ScopeID, eval evalCase, snapshot ingestionSnapshot, debug *rag.RetrievalDebugInfo) (*retrievalEvidence, error) {
@@ -59,10 +60,11 @@ func calculateRetrievalEvidence(store *storage.Store, scopeID storage.ScopeID, e
 		addSessions(candidateSessions, topicSessions[candidate.TopicID])
 	}
 	return &retrievalEvidence{
-		Candidate:    buildEvidenceRecall(eval.AnswerSessionIDs, candidateSessions),
-		PostReranker: buildEvidenceRecall(eval.AnswerSessionIDs, sessionsFromResults(debug.PostReranker, messageSession)),
-		FinalContext: buildEvidenceRecall(eval.AnswerSessionIDs, sessionsFromResults(debug.FinalContext, messageSession)),
-		UsedReranker: debug.UsedReranker,
+		Candidate:      buildEvidenceRecall(eval.AnswerSessionIDs, candidateSessions),
+		PostReranker:   buildEvidenceRecall(eval.AnswerSessionIDs, sessionsFromResults(debug.PostReranker, messageSession)),
+		FinalContext:   buildEvidenceRecall(eval.AnswerSessionIDs, sessionsFromResults(debug.FinalContext, messageSession)),
+		UsedReranker:   debug.UsedReranker,
+		FallbackReason: debug.RerankerFallback,
 	}, nil
 }
 

@@ -34,6 +34,16 @@ func TestParseOptionsJudgeRejectsEmptyModel(t *testing.T) {
 	require.ErrorContains(t, err, "cannot be empty")
 }
 
+func TestParseOptionsOfflineReport(t *testing.T) {
+	opts, err := parseOptions([]string{"--report-input", "results.jsonl", "--report-format", "markdown"})
+	require.NoError(t, err)
+	require.Empty(t, opts.dataset)
+	require.Equal(t, "markdown", opts.reportFormat)
+
+	_, err = parseOptions([]string{"--compare-baseline", "before.jsonl"})
+	require.ErrorContains(t, err, "must be used together")
+}
+
 func TestParseOptionsCacheDir(t *testing.T) {
 	opts, err := parseOptions([]string{"--dataset", "test.json", "--cache-dir", "data/cache"})
 	require.NoError(t, err)

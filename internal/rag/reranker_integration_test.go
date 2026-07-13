@@ -390,7 +390,7 @@ func TestRerankViaAgent_Success(t *testing.T) {
 		{TopicID: 2, Score: 0.8, Topic: storage.Topic{ID: 2, Summary: "Topic 2"}},
 	}
 
-	result, err := svc.rerankViaAgent(
+	result, _, err := svc.rerankViaAgent(
 		context.Background(),
 		userID,
 		candidates,
@@ -466,7 +466,7 @@ func TestRerankViaAgent_SharedContext(t *testing.T) {
 		{TopicID: 1, Score: 0.9, Topic: storage.Topic{ID: 1, Summary: "Topic 1"}},
 	}
 
-	result, err := svc.rerankViaAgent(
+	result, _, err := svc.rerankViaAgent(
 		ctx,
 		userID,
 		candidates,
@@ -526,7 +526,7 @@ func TestRerankViaAgent_UnexpectedType(t *testing.T) {
 		{TopicID: 1, Score: 0.9, Topic: storage.Topic{ID: 1, Summary: "Topic 1"}},
 	}
 
-	_, err = svc.rerankViaAgent(
+	_, _, err = svc.rerankViaAgent(
 		context.Background(),
 		userID,
 		candidates,
@@ -596,7 +596,7 @@ func TestRerankViaAgent_WithArtifacts(t *testing.T) {
 		{ArtifactID: 20, Score: 0.75, FileType: "image", OriginalName: "photo.jpg"},
 	}
 
-	result, err := svc.rerankViaAgent(
+	result, _, err := svc.rerankViaAgent(
 		context.Background(),
 		userID,
 		candidates,

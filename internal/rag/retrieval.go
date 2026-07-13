@@ -28,6 +28,7 @@ type RetrievalDebugInfo struct {
 	FinalContext     []TopicSearchResult
 	Results          []TopicSearchResult // Backward-compatible alias for PostReranker.
 	UsedReranker     bool
+	RerankerFallback string
 }
 
 type TopicCandidateDebug struct {
@@ -189,12 +190,14 @@ func (s *Service) Retrieve(ctx context.Context, userID storage.ScopeID, query st
 			// Reranker fallback is graceful — flip the span attr to reflect
 			// that the final result did not honor reranker selection.
 			usedReranker = false
+			debugInfo.RerankerFallback = "error"
 		} else {
 			// Capture selected IDs BEFORE filter for trace visibility; the
 			// filter drops matches but the IDs chosen by the reranker are
 			// the single most useful "why was this retrieved" signal.
 			selectedTopicIDs = append(selectedTopicIDs, rerankerOut.selectedTopicIDs...)
 			matches = filterMatchesByReranker(matches, rerankerOut.selectedTopicIDs, rerankerOut.topicReasons)
+			debugInfo.RerankerFallback = rerankerOut.fallbackReason
 		}
 	} else {
 		// Legacy behavior: limit by maxTopics
