@@ -222,6 +222,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 		}
 		toolIterationsFinal++
 
+		contextData.TokenEstimates.FinalTotal = llm.EstimateMessagesTokens(orMessages)
 		orReq := llm.ChatCompletionRequest{
 			Model:     l.cfg.Agents.GetChatModel(),
 			Messages:  orMessages,
@@ -266,6 +267,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 				RAGInfo:              contextData.RAGInfo,
 				Messages:             orMessages,
 				ConversationTurns:    tracker.Build(),
+				TokenEstimates:       contextData.TokenEstimates,
 			}
 			return resp, fmt.Errorf("LLM call failed: %w", err)
 		}
@@ -328,6 +330,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 				RAGInfo:              contextData.RAGInfo,
 				Messages:             orMessages,
 				ConversationTurns:    tracker.Build(),
+				TokenEstimates:       contextData.TokenEstimates,
 				WasEmpty:             true, // retries exhausted — orchestrator surfaces bot.anomaly.empty_response
 			}, nil
 		}
@@ -426,6 +429,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 		WasEmpty:             wasEmpty,
 		WasSanitized:         wasSanitized,
 		StrippedURLs:         strippedURLs,
+		TokenEstimates:       contextData.TokenEstimates,
 	}
 	if wasSanitized {
 		resp.OriginalContent = originalContent

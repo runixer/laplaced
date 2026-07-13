@@ -788,8 +788,8 @@ func (c *clientImpl) CreateChatCompletion(ctx context.Context, req ChatCompletio
 			}
 		}
 	}
-	// Rough estimate: ~4 chars per token for Gemini
-	estimatedTokens := contextChars / 4
+	// Model-agnostic text-only estimate; media tokenization is provider-specific.
+	estimatedTokens := EstimateMessagesTokens(req.Messages)
 
 	if req.Provider == nil && c.defaultProvider != nil {
 		req.Provider = c.defaultProvider

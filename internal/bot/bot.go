@@ -1059,6 +1059,9 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID storage.ScopeID, text 
 	result.PromptTokens = resp.PromptTokens
 	result.CompletionTokens = resp.CompletionTokens
 	result.TotalCost = b.turnCost(resp, logger)
+	result.SystemPromptTokensEstimated = resp.TokenEstimates.SystemPrompt
+	result.MemoryContextTokensEstimated = resp.TokenEstimates.MemoryContext
+	result.FinalContextTokensEstimated = resp.TokenEstimates.FinalTotal
 	result.TimingTotal = time.Since(startTotal)
 
 	// Save assistant response to history if requested

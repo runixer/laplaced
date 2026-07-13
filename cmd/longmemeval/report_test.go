@@ -13,7 +13,9 @@ func judgedResult(id, questionType string, correct bool, finalRecall float64) ru
 		AutoevalLabel: &autoevalLabel{Model: defaultJudgeModel, Label: correct},
 		Judge:         &judgeStats{Cost: &cost},
 		Ingestion:     aggregateStats{Cost: 0.2},
-		Answer:        answerStats{Cost: 0.3, PromptTokens: 1000},
+		Answer: answerStats{Cost: 0.3, PromptTokens: 1000, TokenBreakdown: &tokenBreakdown{
+			Source: "estimate", MemoryContext: 200, RerankerInput: 300, FinalTotalContext: 400,
+		}},
 		Retrieval: &retrievalEvidence{
 			Candidate: evidenceRecall{Recall: 1}, PostReranker: evidenceRecall{Recall: 0.75},
 			FinalContext: evidenceRecall{Recall: finalRecall},
@@ -32,6 +34,9 @@ func TestSummarizeResults(t *testing.T) {
 	require.Equal(t, 1, summary.Correct)
 	require.Equal(t, 0.5, summary.Accuracy)
 	require.Equal(t, 0.75, summary.AverageFinalRecall)
+	require.Equal(t, float64(200), summary.AverageMemoryTokens)
+	require.Equal(t, float64(300), summary.AverageRerankerTokens)
+	require.Equal(t, float64(400), summary.AverageFinalTokens)
 	require.InDelta(t, 1.2, summary.TotalCost, 0.000001)
 	require.Equal(t, 0.5, summary.QuestionTypes["multi-session"].Accuracy)
 }
@@ -45,6 +50,11 @@ func TestCompareResults(t *testing.T) {
 		judgedResult("q1", "multi-session", true, 1),
 		judgedResult("q2", "temporal-reasoning", false, 0.5),
 	}
+	for i := range candidate {
+		candidate[i].Answer.TokenBreakdown.MemoryContext += 10
+		candidate[i].Answer.TokenBreakdown.RerankerInput += 20
+		candidate[i].Answer.TokenBreakdown.FinalTotalContext += 30
+	}
 	report, err := compareResults(baseline, candidate)
 	require.NoError(t, err)
 	require.Equal(t, 1, report.FailToPass)
@@ -53,6 +63,9 @@ func TestCompareResults(t *testing.T) {
 	require.Equal(t, "q1", report.Improvements[0].QuestionID)
 	require.Len(t, report.Regressions, 1)
 	require.Equal(t, "q2", report.Regressions[0].QuestionID)
+	require.Equal(t, float64(10), report.MemoryTokensDelta)
+	require.Equal(t, float64(20), report.RerankerTokensDelta)
+	require.Equal(t, float64(30), report.FinalTokensDelta)
 }
 
 func TestCompareResultsRejectsDuplicateCases(t *testing.T) {

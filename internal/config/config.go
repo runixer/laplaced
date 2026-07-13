@@ -143,6 +143,7 @@ type RerankerAgentConfig struct {
 	MaxToolCalls       int    `yaml:"max_tool_calls" env:"LAPLACED_RERANKER_MAX_TOOL_CALLS"`
 	ThinkingLevel      string `yaml:"thinking_level" env:"LAPLACED_RERANKER_THINKING_LEVEL"`
 	TargetContextChars int    `yaml:"target_context_chars" env:"LAPLACED_RERANKER_TARGET_CONTEXT_CHARS"`
+	InputTokenBudget   int    `yaml:"input_token_budget" env:"LAPLACED_RERANKER_INPUT_TOKEN_BUDGET"`
 
 	// Per-type limits (v0.6.0)
 	Topics    RerankerTypeConfig      `yaml:"topics"`
@@ -611,6 +612,7 @@ type EmbeddingConfig struct {
 type RAGConfig struct {
 	Enabled                          bool    `yaml:"enabled" env:"LAPLACED_RAG_ENABLED"`
 	MaxContextMessages               int     `yaml:"max_context_messages"`
+	AnswerMemoryTokenBudget          int     `yaml:"answer_memory_token_budget" env:"LAPLACED_RAG_ANSWER_MEMORY_TOKEN_BUDGET"`
 	MaxProfileFacts                  int     `yaml:"max_profile_facts"`
 	RetrievedMessagesCount           int     `yaml:"retrieved_messages_count"`
 	RetrievedTopicsCount             int     `yaml:"retrieved_topics_count"`

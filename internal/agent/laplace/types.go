@@ -38,6 +38,14 @@ type Request struct {
 	OnRAGEnriched         func(enrichedQuery string)       // Called once after context loading completes, when the enricher produced a non-empty rephrased query
 }
 
+// ContextTokenEstimates contains model-agnostic text estimates. Media tokens
+// are intentionally excluded and provider-reported usage remains authoritative.
+type ContextTokenEstimates struct {
+	SystemPrompt  int
+	MemoryContext int
+	FinalTotal    int
+}
+
 // Response contains the result of Laplace agent execution.
 type Response struct {
 	// Main response
@@ -56,6 +64,7 @@ type Response struct {
 	PromptTokens     int
 	CompletionTokens int
 	TotalCost        *float64
+	TokenEstimates   ContextTokenEstimates
 
 	// Timing
 	LLMDuration  time.Duration
@@ -144,4 +153,5 @@ type ContextData struct {
 	SelectedArtifactIDs []int64              // v0.6.0: Artifact IDs selected by reranker for full content loading
 	RAGInfo             *rag.RetrievalDebugInfo
 	RelevantPeople      []storage.Person // v0.5.1: People selected by reranker
+	TokenEstimates      ContextTokenEstimates
 }

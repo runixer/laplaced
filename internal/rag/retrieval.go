@@ -19,16 +19,17 @@ import (
 
 // RetrievalDebugInfo contains trace data for RAG debugging
 type RetrievalDebugInfo struct {
-	OriginalQuery    string
-	EnrichedQuery    string
-	EnrichmentPrompt string
-	EnrichmentTokens int
-	Candidates       []TopicCandidateDebug
-	PostReranker     []TopicSearchResult
-	FinalContext     []TopicSearchResult
-	Results          []TopicSearchResult // Backward-compatible alias for PostReranker.
-	UsedReranker     bool
-	RerankerFallback string
+	OriginalQuery                string
+	EnrichedQuery                string
+	EnrichmentPrompt             string
+	EnrichmentTokens             int
+	Candidates                   []TopicCandidateDebug
+	PostReranker                 []TopicSearchResult
+	FinalContext                 []TopicSearchResult
+	Results                      []TopicSearchResult // Backward-compatible alias for PostReranker.
+	UsedReranker                 bool
+	RerankerFallback             string
+	RerankerInputTokensEstimated int
 }
 
 type TopicCandidateDebug struct {
@@ -198,6 +199,7 @@ func (s *Service) Retrieve(ctx context.Context, userID storage.ScopeID, query st
 			selectedTopicIDs = append(selectedTopicIDs, rerankerOut.selectedTopicIDs...)
 			matches = filterMatchesByReranker(matches, rerankerOut.selectedTopicIDs, rerankerOut.topicReasons)
 			debugInfo.RerankerFallback = rerankerOut.fallbackReason
+			debugInfo.RerankerInputTokensEstimated = rerankerOut.inputTokensEstimated
 		}
 	} else {
 		// Legacy behavior: limit by maxTopics

@@ -40,7 +40,7 @@ Every JSONL row includes the official `question_id` and `hypothesis` fields plus
 - model variant and backend;
 - reference answer and question type;
 - ingestion and answer durations;
-- token and cost counters;
+- provider token/cost counters and model-agnostic text estimates for the system prompt, memory context, reranker input, and final answer context;
 - final facts;
 - fact add/update/delete history;
 - optional official judge label, raw response, token usage, cost, and latency;
@@ -183,6 +183,15 @@ go run ./cmd/longmemeval \
 ```
 
 Each cache entry is a closed, WAL-checkpointed SQLite snapshot created after ingestion and before answering, plus a metadata sidecar mapping dataset sessions to imported message IDs. The harness always copies the database to a writable temporary path, so answer-time writes cannot mutate cached memory. Cache keys include the selected sessions, ingestion models, embedding configuration, memory/RAG configuration, and an ingestion pipeline version. Cache hits report zero ingestion tokens and cost because no ingestion API calls occur in that run.
+
+## Context budgets
+
+The production defaults bound memory-specific context without truncating arbitrary text:
+
+- `agents.reranker.input_token_budget` limits the initial reranker request by dropping complete trailing topic candidates while preserving instructions, the active query/session, people, artifacts, and media;
+- `rag.answer_memory_token_budget` limits the answerer's synthetic memory message by dropping complete trailing topics while preserving the active session and attached or recalled media.
+
+Token breakdowns use a model-agnostic estimate of four Unicode code points per token and exclude media tokenization. They are intended for paired diagnostics, not billing, and do not need to sum to provider-reported prompt tokens across an agentic tool loop.
 
 ## Current limitations
 

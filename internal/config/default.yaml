@@ -128,6 +128,7 @@ agents:
     turn_timeout: "30s"
     max_tool_calls: 3
     thinking_level: "minimal"
+    input_token_budget: 12000
 
     # Per-type limits (v0.6.0)
     topics:
@@ -243,6 +244,7 @@ embedding:
 rag:
   enabled: true
   max_context_messages: 50
+  answer_memory_token_budget: 24000
   max_profile_facts: 50
   retrieved_messages_count: 20
   retrieved_topics_count: 5

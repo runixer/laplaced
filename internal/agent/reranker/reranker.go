@@ -98,7 +98,7 @@ func (r *Reranker) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 	if referenceTime.IsZero() {
 		referenceTime = time.Now()
 	}
-	result, fallbackReason, err := r.rerank(ctx, userID, candidates, personCandidates, artifactCandidates, contextualizedQuery, originalQuery, currentMessages, userProfile, recentTopics, mediaParts, referenceTime)
+	result, fallbackReason, inputTokensEstimated, err := r.rerank(ctx, userID, candidates, personCandidates, artifactCandidates, contextualizedQuery, originalQuery, currentMessages, userProfile, recentTopics, mediaParts, referenceTime)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +112,8 @@ func (r *Reranker) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 			// Non-empty when the result came from a fallback path (model_empty,
 			// max_tool_calls, ...). Matches the reranker.fallback_reason span
 			// attribute; the rag layer turns it into a Prometheus counter.
-			"fallback_reason": fallbackReason,
+			"fallback_reason":        fallbackReason,
+			"input_tokens_estimated": inputTokensEstimated,
 		},
 	}, nil
 }
@@ -140,7 +141,7 @@ func (r *Reranker) rerank(
 	recentTopics string,
 	mediaParts []interface{},
 	referenceTime time.Time,
-) (*Result, string, error) {
+) (*Result, string, int, error) {
 	ctx = agent.WithAgentType(ctx, agent.TypeReranker)
 	cfg := r.cfg.Agents.Reranker
 
@@ -263,7 +264,7 @@ func (r *Reranker) rerank(
 	// v0.6.0: Use LLM reranking if we have any candidates (topics, people, or artifacts)
 	// Only fallback immediately if ALL candidate lists are empty
 	if !cfg.Enabled || (len(candidates) == 0 && len(personCandidates) == 0 && len(artifactCandidates) == 0) {
-		return fallbackToVectorTop(r.cfg, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger), "", nil
+		return fallbackToVectorTop(r.cfg, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger), "", 0, nil
 	}
 
 	// Parse timeouts
@@ -293,19 +294,6 @@ func (r *Reranker) rerank(
 	}
 	startTime := time.Now()
 
-	// Build candidate map and collect trace data
-	candidateMap := buildCandidateMap(candidates)
-	for _, c := range candidates {
-		tr.candidates = append(tr.candidates, storage.RerankerCandidate{
-			TopicID:      c.TopicID,
-			Summary:      c.Topic.Summary,
-			Score:        c.Score,
-			Date:         c.Topic.CreatedAt.Format("2006-01-02"),
-			MessageCount: c.MessageCount,
-			SizeChars:    c.SizeChars,
-		})
-	}
-
 	// v0.5.1: Build person candidate map
 	peopleMap := buildPeopleMap(personCandidates)
 	// v0.6.0: Build artifact candidate map
@@ -328,24 +316,43 @@ func (r *Reranker) rerank(
 		MaxArtifacts:  cfg.Artifacts.Max,
 	})
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to build reranker system prompt: %w", err)
+		return nil, "", 0, fmt.Errorf("failed to build reranker system prompt: %w", err)
 	}
 
-	candidatesList := formatCandidatesForReranker(candidates)
 	peopleCandidatesList := FormatPeopleForReranker(personCandidates)
 	artifactsCandidatesList := formatArtifactCandidates(artifactCandidates)
+	buildUserPrompt := func(topicCandidates []Candidate) (string, error) {
+		return r.translator.GetTemplate(lang, "rag.reranker_user_prompt", prompts.RerankerUserParams{
+			Date:               referenceTime.Format("2006-01-02"),
+			Query:              originalQuery,
+			EnrichedQuery:      contextualizedQuery,
+			CurrentMessages:    currentMessages,
+			Candidates:         formatCandidatesForReranker(topicCandidates),
+			PeopleCandidates:   peopleCandidatesList,
+			ArtifactCandidates: artifactsCandidatesList,
+		})
+	}
 
-	userPrompt, err := r.translator.GetTemplate(lang, "rag.reranker_user_prompt", prompts.RerankerUserParams{
-		Date:               referenceTime.Format("2006-01-02"),
-		Query:              originalQuery,
-		EnrichedQuery:      contextualizedQuery,
-		CurrentMessages:    currentMessages,
-		Candidates:         candidatesList,
-		PeopleCandidates:   peopleCandidatesList,
-		ArtifactCandidates: artifactsCandidatesList,
-	})
+	userPrompt, err := buildUserPrompt(candidates)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to build reranker user prompt: %w", err)
+		return nil, "", 0, fmt.Errorf("failed to build reranker user prompt: %w", err)
+	}
+	for cfg.InputTokenBudget > 0 && len(candidates) > 0 &&
+		estimateRerankerInputTokens(systemPrompt, userPrompt, mediaParts, r.translator.Get(lang, "rag.reranker_media_instruction")) > cfg.InputTokenBudget {
+		candidates = candidates[:len(candidates)-1]
+		userPrompt, err = buildUserPrompt(candidates)
+		if err != nil {
+			return nil, "", 0, fmt.Errorf("failed to rebuild budgeted reranker user prompt: %w", err)
+		}
+	}
+
+	candidateMap := buildCandidateMap(candidates)
+	tr.candidates = tr.candidates[:0]
+	for _, c := range candidates {
+		tr.candidates = append(tr.candidates, storage.RerankerCandidate{
+			TopicID: c.TopicID, Summary: c.Topic.Summary, Score: c.Score,
+			Date: c.Topic.CreatedAt.Format("2006-01-02"), MessageCount: c.MessageCount, SizeChars: c.SizeChars,
+		})
 	}
 
 	tr.systemPrompt = systemPrompt
@@ -395,6 +402,7 @@ func (r *Reranker) rerank(
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: userMessageContent},
 	}
+	inputTokensEstimated := llm.EstimateMessagesTokens(messages)
 
 	// Agentic loop
 	iterations = 0
@@ -450,7 +458,7 @@ func (r *Reranker) rerank(
 			tr.selectedPeople = result.People
 			tr.selectedArtifacts = result.Artifacts
 			saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
-			return result, tr.fallbackReason, nil
+			return result, tr.fallbackReason, inputTokensEstimated, nil
 		}
 
 		tr.tracker.EndTurn(
@@ -469,7 +477,7 @@ func (r *Reranker) rerank(
 			tr.selectedPeople = result.People
 			tr.selectedArtifacts = result.Artifacts
 			saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
-			return result, tr.fallbackReason, nil
+			return result, tr.fallbackReason, inputTokensEstimated, nil
 		}
 
 		choice := resp.Choices[0]
@@ -580,7 +588,7 @@ func (r *Reranker) rerank(
 			tr.selectedPeople = fallbackResult.People
 			tr.selectedArtifacts = fallbackResult.Artifacts
 			saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
-			return fallbackResult, tr.fallbackReason, nil
+			return fallbackResult, tr.fallbackReason, inputTokensEstimated, nil
 		}
 
 		// Track raw counts BEFORE filtering to distinguish "model explicitly
@@ -649,7 +657,7 @@ func (r *Reranker) rerank(
 			tr.selectedPeople = emptyResult.People
 			tr.selectedArtifacts = emptyResult.Artifacts
 			saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
-			return emptyResult, tr.fallbackReason, nil
+			return emptyResult, tr.fallbackReason, inputTokensEstimated, nil
 		}
 
 		logger.Info("reranker completed",
@@ -670,7 +678,7 @@ func (r *Reranker) rerank(
 		tr.selectedArtifacts = result.Artifacts
 		saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
 
-		return result, tr.fallbackReason, nil
+		return result, tr.fallbackReason, inputTokensEstimated, nil
 	}
 
 	// Max tool calls reached
@@ -681,5 +689,21 @@ func (r *Reranker) rerank(
 	tr.selectedPeople = result.People
 	tr.selectedArtifacts = result.Artifacts
 	saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
-	return result, tr.fallbackReason, nil
+	return result, tr.fallbackReason, inputTokensEstimated, nil
+}
+
+func estimateRerankerInputTokens(systemPrompt, userPrompt string, mediaParts []interface{}, mediaInstruction string) int {
+	content := interface{}(userPrompt)
+	if len(mediaParts) > 0 {
+		if mediaInstruction != "" {
+			userPrompt += "\n\n" + mediaInstruction
+		}
+		parts := []interface{}{llm.TextPart{Type: "text", Text: userPrompt}}
+		parts = append(parts, mediaParts...)
+		content = parts
+	}
+	return llm.EstimateMessagesTokens([]llm.Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: content},
+	})
 }

@@ -9,6 +9,19 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestFitTopicsToMemoryBudgetKeepsWholeTopics(t *testing.T) {
+	topics := []rag.TopicSearchResult{
+		{Topic: storage.Topic{ID: 1, Summary: "first"}, Messages: []storage.Message{{Content: "short"}}},
+		{Topic: storage.Topic{ID: 2, Summary: "second"}, Messages: []storage.Message{{Content: string(make([]byte, 400))}}},
+	}
+	firstTokens := (len([]rune(formatRAGResults(topics[:1], "query"))) + 3) / 4
+
+	selected := fitTopicsToMemoryBudget(topics, nil, nil, "query", firstTokens)
+
+	assert.Len(t, selected, 1)
+	assert.Equal(t, int64(1), selected[0].Topic.ID)
+}
+
 func TestDeduplicateTopics(t *testing.T) {
 	tests := []struct {
 		name          string

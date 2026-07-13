@@ -83,18 +83,21 @@ type ProgressCallback func(event ProgressEvent)
 // TestMessageResult contains the result of a test message sent through the bot pipeline.
 // Used by the debug chat interface to display detailed metrics.
 type TestMessageResult struct {
-	Response         string
-	TimingTotal      time.Duration
-	TimingEmbedding  time.Duration
-	TimingSearch     time.Duration
-	TimingLLM        time.Duration
-	PromptTokens     int
-	CompletionTokens int
-	TotalCost        float64
-	TopicsMatched    int
-	FactsInjected    int
-	ContextPreview   string
-	RAGDebugInfo     *RetrievalDebugInfo
+	Response                     string
+	TimingTotal                  time.Duration
+	TimingEmbedding              time.Duration
+	TimingSearch                 time.Duration
+	TimingLLM                    time.Duration
+	PromptTokens                 int
+	CompletionTokens             int
+	TotalCost                    float64
+	TopicsMatched                int
+	FactsInjected                int
+	ContextPreview               string
+	SystemPromptTokensEstimated  int
+	MemoryContextTokensEstimated int
+	FinalContextTokensEstimated  int
+	RAGDebugInfo                 *RetrievalDebugInfo
 }
 
 // Service provides RAG (Retrieval-Augmented Generation) functionality.

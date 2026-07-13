@@ -38,6 +38,7 @@ func (l *Laplace) BuildMessages(
 		fullSystemPrompt += "\n\n" + contextData.RecentTopics
 	}
 
+	contextData.TokenEstimates.SystemPrompt = llm.EstimateTextTokens(fullSystemPrompt)
 	if fullSystemPrompt != "" {
 		orMessages = append(orMessages, llm.Message{
 			Role: "system",
@@ -59,10 +60,12 @@ func (l *Laplace) BuildMessages(
 		contextParts = append(contextParts, storage.FormatPeople(contextData.RelevantPeople, storage.TagRelevantPeople))
 	}
 	if len(contextParts) > 0 {
+		memoryContext := strings.Join(contextParts, "\n\n")
+		contextData.TokenEstimates.MemoryContext = llm.EstimateTextTokens(memoryContext)
 		orMessages = append(orMessages, llm.Message{
 			Role: "user",
 			Content: []interface{}{
-				llm.TextPart{Type: "text", Text: strings.Join(contextParts, "\n\n")},
+				llm.TextPart{Type: "text", Text: memoryContext},
 			},
 		})
 	}
@@ -124,6 +127,7 @@ func (l *Laplace) BuildMessages(
 		orMessages = append(orMessages, llm.Message{Role: "user", Content: parts})
 	}
 
+	contextData.TokenEstimates.FinalTotal = llm.EstimateMessagesTokens(orMessages)
 	return orMessages
 }
 
@@ -260,18 +264,52 @@ func (l *Laplace) LoadContextData(
 		if err != nil {
 			l.logger.Error("RAG retrieval failed", "error", err)
 		} else if result != nil {
-			data.RAGResults = deduplicateTopics(result.Topics, recentHistory)
-			if debugInfo != nil {
-				debugInfo.FinalContext = data.RAGResults
+			memoryQuery := rawQuery
+			if debugInfo != nil && debugInfo.EnrichedQuery != "" {
+				memoryQuery = debugInfo.EnrichedQuery
 			}
 			data.ArtifactResults = result.Artifacts               // v0.5.2
 			data.SelectedArtifactIDs = result.SelectedArtifactIDs // v0.6.0: IDs selected by reranker for full content loading
+			data.RelevantPeople = result.People                   // v0.5.1: selected by reranker
+			data.RAGResults = fitTopicsToMemoryBudget(
+				deduplicateTopics(result.Topics, recentHistory),
+				data.ArtifactResults,
+				data.RelevantPeople,
+				memoryQuery,
+				l.cfg.RAG.AnswerMemoryTokenBudget,
+			)
+			if debugInfo != nil {
+				debugInfo.FinalContext = data.RAGResults
+			}
 			data.RAGInfo = debugInfo
-			data.RelevantPeople = result.People // v0.5.1: selected by reranker
 		}
 	}
 
 	return data, nil
+}
+
+// fitTopicsToMemoryBudget keeps complete topics in retrieval order.
+func fitTopicsToMemoryBudget(topics []rag.TopicSearchResult, artifacts []rag.ArtifactResult, people []storage.Person, query string, budget int) []rag.TopicSearchResult {
+	if budget <= 0 || len(topics) == 0 {
+		return topics
+	}
+	var fixed []string
+	if len(artifacts) > 0 {
+		fixed = append(fixed, formatArtifactResults(artifacts, query))
+	}
+	if len(people) > 0 {
+		fixed = append(fixed, storage.FormatPeople(people, storage.TagRelevantPeople))
+	}
+	selected := make([]rag.TopicSearchResult, 0, len(topics))
+	for _, topic := range topics {
+		candidate := append(append([]rag.TopicSearchResult{}, selected...), topic)
+		parts := append([]string{formatRAGResults(candidate, query)}, fixed...)
+		if llm.EstimateTextTokens(strings.Join(parts, "\n\n")) > budget {
+			break
+		}
+		selected = candidate
+	}
+	return selected
 }
 
 // deduplicateTopics removes messages from retrieved topics that are already present in recent history.

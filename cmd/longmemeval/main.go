@@ -104,13 +104,22 @@ type factChange struct {
 	Reason     string `json:"reason,omitempty"`
 }
 
+type tokenBreakdown struct {
+	Source            string `json:"source"`
+	SystemPrompt      int    `json:"system_prompt"`
+	MemoryContext     int    `json:"memory_context"`
+	RerankerInput     int    `json:"reranker_input"`
+	FinalTotalContext int    `json:"final_total_context"`
+}
+
 type answerStats struct {
-	PromptTokens     int     `json:"prompt_tokens"`
-	CompletionTokens int     `json:"completion_tokens"`
-	Cost             float64 `json:"cost_usd"`
-	DurationMS       int64   `json:"duration_ms"`
-	TopicsMatched    int     `json:"topics_matched"`
-	FactsInjected    int     `json:"facts_injected"`
+	PromptTokens     int             `json:"prompt_tokens"`
+	CompletionTokens int             `json:"completion_tokens"`
+	Cost             float64         `json:"cost_usd"`
+	DurationMS       int64           `json:"duration_ms"`
+	TopicsMatched    int             `json:"topics_matched"`
+	FactsInjected    int             `json:"facts_injected"`
+	TokenBreakdown   *tokenBreakdown `json:"token_breakdown,omitempty"`
 }
 
 func main() {
@@ -360,11 +369,21 @@ func answerCase(ctx context.Context, runtime *evalRuntime, eval evalCase, mode s
 			return nil, fmt.Errorf("judge answer: %w", err)
 		}
 	}
+	rerankerInputTokens := 0
+	if answer.RAGDebugInfo != nil {
+		rerankerInputTokens = answer.RAGDebugInfo.RerankerInputTokensEstimated
+	}
 	return &runResult{
 		QuestionID: eval.QuestionID, Hypothesis: answer.Response, QuestionType: eval.QuestionType,
 		ReferenceAnswer: string(eval.Answer), Mode: mode, ChatBackend: chatBackend(opts), ChatModel: chatModel(runtime, opts), QuestionDate: eval.QuestionDate,
 		Sessions: sessionCount, TotalDurationMS: time.Since(startedAt).Milliseconds(), Ingestion: ingestion.Stats,
-		Answer:        answerStats{PromptTokens: answer.PromptTokens, CompletionTokens: answer.CompletionTokens, Cost: answer.TotalCost, DurationMS: answer.TimingTotal.Milliseconds(), TopicsMatched: answer.TopicsMatched, FactsInjected: answer.FactsInjected},
+		Answer: answerStats{
+			PromptTokens: answer.PromptTokens, CompletionTokens: answer.CompletionTokens, Cost: answer.TotalCost,
+			DurationMS: answer.TimingTotal.Milliseconds(), TopicsMatched: answer.TopicsMatched, FactsInjected: answer.FactsInjected,
+			TokenBreakdown: &tokenBreakdown{Source: "estimate", SystemPrompt: answer.SystemPromptTokensEstimated,
+				MemoryContext: answer.MemoryContextTokensEstimated, RerankerInput: rerankerInputTokens,
+				FinalTotalContext: answer.FinalContextTokensEstimated},
+		},
 		Facts:         snapshotFacts(facts),
 		FactChanges:   snapshotFactChanges(history),
 		AutoevalLabel: label,

@@ -20,6 +20,9 @@ type reportSummary struct {
 	TotalCost              float64                `json:"total_cost_usd"`
 	AverageDurationMS      float64                `json:"average_duration_ms"`
 	AverageAnswerTokens    float64                `json:"average_answer_prompt_tokens"`
+	AverageMemoryTokens    float64                `json:"average_memory_context_tokens_estimated"`
+	AverageFinalTokens     float64                `json:"average_final_context_tokens_estimated"`
+	AverageRerankerTokens  float64                `json:"average_reranker_input_tokens_estimated"`
 	AverageCandidateRecall float64                `json:"average_candidate_recall"`
 	AverageRerankerRecall  float64                `json:"average_post_reranker_recall"`
 	AverageFinalRecall     float64                `json:"average_final_context_recall"`
@@ -42,6 +45,9 @@ type comparisonReport struct {
 	RerankerRecallDelta  float64            `json:"post_reranker_recall_delta"`
 	FinalRecallDelta     float64            `json:"final_context_recall_delta"`
 	AnswerTokensDelta    float64            `json:"answer_prompt_tokens_delta"`
+	MemoryTokensDelta    float64            `json:"memory_context_tokens_estimated_delta"`
+	FinalTokensDelta     float64            `json:"final_context_tokens_estimated_delta"`
+	RerankerTokensDelta  float64            `json:"reranker_input_tokens_estimated_delta"`
 	CostDelta            float64            `json:"total_cost_delta_usd"`
 	FailToPass           int                `json:"fail_to_pass"`
 	PassToFail           int                `json:"pass_to_fail"`
@@ -118,6 +124,11 @@ func summarizeResults(results []runResult) reportSummary {
 		}
 		summary.AverageDurationMS += float64(result.TotalDurationMS)
 		summary.AverageAnswerTokens += float64(result.Answer.PromptTokens)
+		if result.Answer.TokenBreakdown != nil {
+			summary.AverageMemoryTokens += float64(result.Answer.TokenBreakdown.MemoryContext)
+			summary.AverageFinalTokens += float64(result.Answer.TokenBreakdown.FinalTotalContext)
+			summary.AverageRerankerTokens += float64(result.Answer.TokenBreakdown.RerankerInput)
+		}
 		if result.Retrieval != nil {
 			recallCases++
 			summary.AverageCandidateRecall += result.Retrieval.Candidate.Recall
@@ -132,6 +143,9 @@ func summarizeResults(results []runResult) reportSummary {
 	if summary.Cases > 0 {
 		summary.AverageDurationMS /= float64(summary.Cases)
 		summary.AverageAnswerTokens /= float64(summary.Cases)
+		summary.AverageMemoryTokens /= float64(summary.Cases)
+		summary.AverageFinalTokens /= float64(summary.Cases)
+		summary.AverageRerankerTokens /= float64(summary.Cases)
 	}
 	summary.RetrievalCases = recallCases
 	if recallCases > 0 {
@@ -199,6 +213,9 @@ func compareResults(baseline, candidate []runResult) (*comparisonReport, error) 
 	report.RerankerRecallDelta = report.Candidate.AverageRerankerRecall - report.Baseline.AverageRerankerRecall
 	report.FinalRecallDelta = report.Candidate.AverageFinalRecall - report.Baseline.AverageFinalRecall
 	report.AnswerTokensDelta = report.Candidate.AverageAnswerTokens - report.Baseline.AverageAnswerTokens
+	report.MemoryTokensDelta = report.Candidate.AverageMemoryTokens - report.Baseline.AverageMemoryTokens
+	report.FinalTokensDelta = report.Candidate.AverageFinalTokens - report.Baseline.AverageFinalTokens
+	report.RerankerTokensDelta = report.Candidate.AverageRerankerTokens - report.Baseline.AverageRerankerTokens
 	report.CostDelta = report.Candidate.TotalCost - report.Baseline.TotalCost
 	for questionType, before := range report.Baseline.QuestionTypes {
 		after, ok := report.Candidate.QuestionTypes[questionType]
@@ -248,10 +265,10 @@ func writeOfflineReport(writer io.Writer, value any, format string) error {
 		} else if _, err := fmt.Fprintf(writer, "- Candidate recall: %.2f%%\n- Post-reranker recall: %.2f%%\n- Final-context recall: %.2f%%\n", report.AverageCandidateRecall*100, report.AverageRerankerRecall*100, report.AverageFinalRecall*100); err != nil {
 			return err
 		}
-		_, err := fmt.Fprintf(writer, "- Total cost: $%.6f\n- Average answer prompt: %.0f tokens\n", report.TotalCost, report.AverageAnswerTokens)
+		_, err := fmt.Fprintf(writer, "- Total cost: $%.6f\n- Average answer prompt: %.0f tokens\n- Average memory context estimate: %.0f tokens\n- Average final context estimate: %.0f tokens\n- Average reranker input estimate: %.0f tokens\n", report.TotalCost, report.AverageAnswerTokens, report.AverageMemoryTokens, report.AverageFinalTokens, report.AverageRerankerTokens)
 		return err
 	case *comparisonReport:
-		_, err := fmt.Fprintf(writer, "# LongMemEval comparison\n\n- Baseline accuracy: %.2f%%\n- Candidate accuracy: %.2f%%\n- Accuracy delta: %+.2f pp\n- Fail → pass: %d\n- Pass → fail: %d\n- Final-context recall delta: %+.2f pp\n- Answer prompt delta: %+.0f tokens\n- Cost delta: $%+.6f\n", report.Baseline.Accuracy*100, report.Candidate.Accuracy*100, report.AccuracyDelta*100, report.FailToPass, report.PassToFail, report.FinalRecallDelta*100, report.AnswerTokensDelta, report.CostDelta)
+		_, err := fmt.Fprintf(writer, "# LongMemEval comparison\n\n- Baseline accuracy: %.2f%%\n- Candidate accuracy: %.2f%%\n- Accuracy delta: %+.2f pp\n- Fail → pass: %d\n- Pass → fail: %d\n- Final-context recall delta: %+.2f pp\n- Answer prompt delta: %+.0f tokens\n- Memory context estimate delta: %+.0f tokens\n- Final context estimate delta: %+.0f tokens\n- Reranker input estimate delta: %+.0f tokens\n- Cost delta: $%+.6f\n", report.Baseline.Accuracy*100, report.Candidate.Accuracy*100, report.AccuracyDelta*100, report.FailToPass, report.PassToFail, report.FinalRecallDelta*100, report.AnswerTokensDelta, report.MemoryTokensDelta, report.FinalTokensDelta, report.RerankerTokensDelta, report.CostDelta)
 		return err
 	default:
 		return fmt.Errorf("unsupported markdown report type %T", value)

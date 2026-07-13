@@ -56,12 +56,13 @@ type rerankerInput struct {
 
 // rerankerOutput holds the reranker agent's selection.
 type rerankerOutput struct {
-	selectedTopicIDs    []int64
-	topicReasons        map[int64]string // ID -> reason
-	selectedPersonIDs   []int64
-	selectedArtifactIDs []int64
-	personCandidates    []reranker.PersonCandidate // For final result
-	fallbackReason      string
+	selectedTopicIDs     []int64
+	topicReasons         map[int64]string // ID -> reason
+	selectedPersonIDs    []int64
+	selectedArtifactIDs  []int64
+	personCandidates     []reranker.PersonCandidate // For final result
+	fallbackReason       string
+	inputTokensEstimated int
 }
 
 // searchTopicCandidates performs vector search for topics.
@@ -141,7 +142,7 @@ func (s *Service) executeReranker(ctx context.Context, userID storage.ScopeID, i
 	}
 
 	// Call reranker agent
-	result, fallbackReason, err := s.rerankViaAgent(ctx, userID, candidates, input.personCandidates, input.artifactCandidates,
+	result, fallbackReason, inputTokensEstimated, err := s.rerankViaAgent(ctx, userID, candidates, input.personCandidates, input.artifactCandidates,
 		input.contextualizedQuery, input.originalQuery, input.currentMessages, input.userProfile, input.recentTopics, input.mediaParts)
 	if err != nil {
 		s.logger.Warn("reranker failed, falling back to vector search", "error", err)
@@ -150,9 +151,10 @@ func (s *Service) executeReranker(ctx context.Context, userID storage.ScopeID, i
 	}
 
 	output := &rerankerOutput{
-		topicReasons:        make(map[int64]string),
-		selectedArtifactIDs: result.ArtifactIDs(),
-		fallbackReason:      fallbackReason,
+		topicReasons:         make(map[int64]string),
+		selectedArtifactIDs:  result.ArtifactIDs(),
+		fallbackReason:       fallbackReason,
+		inputTokensEstimated: inputTokensEstimated,
 	}
 
 	// Parse selected topics with reasons
@@ -480,7 +482,7 @@ func (s *Service) shouldUseReranker(lenMatches, lenPeople, lenArtifacts int) boo
 // getMaxCandidates returns the max candidates based on reranker usage.
 func (s *Service) getMaxCandidates(useReranker bool) int {
 	if useReranker {
-		maxCandidates := s.cfg.Agents.Reranker.Candidates
+		maxCandidates := s.cfg.Agents.Reranker.Topics.CandidatesLimit
 		if maxCandidates <= 0 {
 			return 50
 		}
@@ -503,9 +505,9 @@ func (s *Service) rerankViaAgent(
 	userProfile string,
 	recentTopics string,
 	mediaParts []interface{},
-) (*reranker.Result, string, error) {
+) (*reranker.Result, string, int, error) {
 	if s.rerankerAgent == nil {
-		return nil, "", fmt.Errorf("reranker agent not configured")
+		return nil, "", 0, fmt.Errorf("reranker agent not configured")
 	}
 	startTime := time.Now()
 
@@ -538,12 +540,12 @@ func (s *Service) rerankViaAgent(
 
 	resp, err := s.rerankerAgent.Execute(ctx, req)
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
 
 	result, ok := resp.Structured.(*reranker.Result)
 	if !ok {
-		return nil, "", fmt.Errorf("unexpected result type from reranker agent")
+		return nil, "", 0, fmt.Errorf("unexpected result type from reranker agent")
 	}
 
 	// Record metrics
@@ -558,7 +560,8 @@ func (s *Service) rerankViaAgent(
 		RecordRerankerFallback(userID, fallbackReason)
 	}
 
-	return result, fallbackReason, nil
+	inputTokensEstimated, _ := resp.Metadata["input_tokens_estimated"].(int)
+	return result, fallbackReason, inputTokensEstimated, nil
 }
 
 // formatSessionMessages formats the current session history for the reranker prompt.
