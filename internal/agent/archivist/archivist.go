@@ -306,7 +306,8 @@ func (a *Archivist) Description() string {
 }
 
 // Execute runs the archivist with the given request.
-func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (response *agent.Response, err error) {
+func (a *Archivist) Execute(ctx context.Context, req *agent.Request) (*agent.Response, error) {
+	ctx = agent.WithAgentType(ctx, agent.TypeArchivist)
 	// Extract parameters
 	messages := a.getMessages(req)
 	if len(messages) == 0 {

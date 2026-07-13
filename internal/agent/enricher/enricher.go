@@ -91,8 +91,12 @@ func (e *Enricher) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 	profile, recentTopics := e.getContext(ctx, req)
 
 	// Build system prompt
+	referenceTime := agent.ReferenceTime(ctx, req)
+	if referenceTime.IsZero() {
+		referenceTime = time.Now()
+	}
 	systemPrompt, err := e.translator.GetTemplate(e.cfg.Bot.Language, "rag.enrichment_system_prompt", prompts.EnricherParams{
-		Date:         time.Now().Format("2006-01-02"),
+		Date:         referenceTime.Format("2006-01-02"),
 		Profile:      profile,
 		RecentTopics: recentTopics,
 	})

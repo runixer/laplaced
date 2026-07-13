@@ -12,6 +12,7 @@ import (
 
 // contextKey is the key type for storing SharedContext in context.Context.
 type contextKey struct{}
+type referenceTimeKey struct{}
 
 // SharedContext holds user data shared across all agents.
 // Loaded once per request to ensure all agents see the same data.
@@ -36,8 +37,9 @@ type SharedContext struct {
 	// LastSummary *storage.SessionSummary
 
 	// Metadata
-	Language string // "en" or "ru"
-	LoadedAt time.Time
+	Language      string // "en" or "ru"
+	ReferenceTime time.Time
+	LoadedAt      time.Time
 }
 
 // maxChannelParticipantsInContext caps how many channel members are injected
@@ -98,10 +100,15 @@ func (c *ContextService) isChannelScope(userID storage.ScopeID) bool {
 // Load creates SharedContext for a user.
 // Call once per request at the beginning of processing.
 func (c *ContextService) Load(ctx context.Context, userID storage.ScopeID) *SharedContext {
+	loadedAt := time.Now()
 	shared := &SharedContext{
-		UserID:   userID,
-		Language: c.cfg.Bot.Language,
-		LoadedAt: time.Now(),
+		UserID:        userID,
+		Language:      c.cfg.Bot.Language,
+		ReferenceTime: ReferenceTime(ctx, nil),
+		LoadedAt:      loadedAt,
+	}
+	if shared.ReferenceTime.IsZero() {
+		shared.ReferenceTime = loadedAt
 	}
 
 	// A channel scope frames its profile/participants around the channel rather
@@ -234,6 +241,25 @@ func FromContext(ctx context.Context) *SharedContext {
 		return shared
 	}
 	return nil
+}
+
+// WithReferenceTime sets the request-scoped time used to interpret relative dates.
+func WithReferenceTime(ctx context.Context, referenceTime time.Time) context.Context {
+	return context.WithValue(ctx, referenceTimeKey{}, referenceTime)
+}
+
+// ReferenceTime returns the request-scoped reference time, if one is available.
+func ReferenceTime(ctx context.Context, req *Request) time.Time {
+	if req != nil && req.Shared != nil && !req.Shared.ReferenceTime.IsZero() {
+		return req.Shared.ReferenceTime
+	}
+	if referenceTime, ok := ctx.Value(referenceTimeKey{}).(time.Time); ok && !referenceTime.IsZero() {
+		return referenceTime
+	}
+	if shared := FromContext(ctx); shared != nil && !shared.ReferenceTime.IsZero() {
+		return shared.ReferenceTime
+	}
+	return time.Time{}
 }
 
 // MustFromContext extracts SharedContext from context.Context.

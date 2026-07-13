@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -197,11 +198,16 @@ func (l *Laplace) LoadContextData(
 	data.RecentHistory = recentHistory
 
 	// Build base system prompt
+	referenceTime := agent.ReferenceTime(ctx, nil)
+	if referenceTime.IsZero() {
+		referenceTime = time.Now()
+	}
 	botName := l.cfg.Agents.Chat.Name
 	if botName == "" {
 		botName = "Bot"
 	}
 	basePrompt, err := l.translator.GetTemplate(l.cfg.Bot.Language, "bot.system_prompt", prompts.LaplaceParams{
+		Date:      referenceTime.Format("2006-01-02"),
 		BotName:   botName,
 		Platform:  platformName(l.cfg.Transport),
 		KatexMath: l.cfg.Transport == "mattermost", // Mattermost/Time renders LaTeX via KaTeX; Telegram does not

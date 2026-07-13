@@ -21,3 +21,21 @@ func TestParseOptionsRequiresCompleteChatOverride(t *testing.T) {
 	_, err := parseOptions([]string{"--dataset", "test.json", "--chat-model", "qwen"})
 	require.ErrorContains(t, err, "must be used together")
 }
+
+func TestParseOptionsJudge(t *testing.T) {
+	opts, err := parseOptions([]string{"--dataset", "test.json", "--judge"})
+	require.NoError(t, err)
+	require.True(t, opts.judge)
+	require.Equal(t, defaultJudgeModel, opts.judgeModel)
+}
+
+func TestParseOptionsJudgeRejectsEmptyModel(t *testing.T) {
+	_, err := parseOptions([]string{"--dataset", "test.json", "--judge", "--judge-model", ""})
+	require.ErrorContains(t, err, "cannot be empty")
+}
+
+func TestParseOptionsCacheDir(t *testing.T) {
+	opts, err := parseOptions([]string{"--dataset", "test.json", "--cache-dir", "data/cache"})
+	require.NoError(t, err)
+	require.Equal(t, "data/cache", opts.cacheDir)
+}

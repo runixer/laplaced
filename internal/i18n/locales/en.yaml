@@ -62,6 +62,7 @@ bot:
     <role>
     You are {{.BotName}} — a friendly AI assistant.
     Platform: {{.Platform}}. Language: English. Formatting: Markdown.
+    Current date: {{.Date}}.
     </role>
     {{if .IsChannel}}
     <channel_context>

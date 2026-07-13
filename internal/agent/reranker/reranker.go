@@ -94,7 +94,11 @@ func (r *Reranker) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 	userProfile, recentTopics, _ := agent.GetSharedContext(ctx, req)
 	userID := agent.GetUserID(req)
 
-	result, fallbackReason, err := r.rerank(ctx, userID, candidates, personCandidates, artifactCandidates, contextualizedQuery, originalQuery, currentMessages, userProfile, recentTopics, mediaParts)
+	referenceTime := agent.ReferenceTime(ctx, req)
+	if referenceTime.IsZero() {
+		referenceTime = time.Now()
+	}
+	result, fallbackReason, err := r.rerank(ctx, userID, candidates, personCandidates, artifactCandidates, contextualizedQuery, originalQuery, currentMessages, userProfile, recentTopics, mediaParts, referenceTime)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +139,9 @@ func (r *Reranker) rerank(
 	userProfile string,
 	recentTopics string,
 	mediaParts []interface{},
+	referenceTime time.Time,
 ) (*Result, string, error) {
+	ctx = agent.WithAgentType(ctx, agent.TypeReranker)
 	cfg := r.cfg.Agents.Reranker
 
 	// Tracing-observable state hoisted here so the deferred End() sees the
@@ -330,7 +336,7 @@ func (r *Reranker) rerank(
 	artifactsCandidatesList := formatArtifactCandidates(artifactCandidates)
 
 	userPrompt, err := r.translator.GetTemplate(lang, "rag.reranker_user_prompt", prompts.RerankerUserParams{
-		Date:               time.Now().Format("2006-01-02"),
+		Date:               referenceTime.Format("2006-01-02"),
 		Query:              originalQuery,
 		EnrichedQuery:      contextualizedQuery,
 		CurrentMessages:    currentMessages,

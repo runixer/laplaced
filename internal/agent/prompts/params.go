@@ -99,6 +99,7 @@ type ArchivistParams struct {
 // LaplaceParams for bot.system_prompt template.
 // The main chat agent system prompt.
 type LaplaceParams struct {
+	Date      string // Current request reference date
 	BotName   string // Bot's name (e.g., "Laplaced")
 	Platform  string // Chat platform shown to the model (e.g., "Telegram", "Time")
 	KatexMath bool   // platform renders LaTeX via KaTeX → emit math-formatting rules

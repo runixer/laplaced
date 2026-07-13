@@ -22,7 +22,7 @@ func TestLoadDataset(t *testing.T) {
 
 func TestLoadDatasetAcceptsNumericAnswer(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dataset.json")
-	data := `[{"question_id":"q1","question":"How many?","answer":3,"haystack_session_ids":[],"haystack_dates":[],"haystack_sessions":[],"answer_session_ids":[]}]`
+	data := `[{"question_id":"q1","question_type":"multi-session","question":"How many?","answer":3,"question_date":"2024-02-01","haystack_session_ids":[],"haystack_dates":[],"haystack_sessions":[],"answer_session_ids":[]}]`
 	require.NoError(t, os.WriteFile(path, []byte(data), 0o600))
 
 	cases, err := loadDataset(path)

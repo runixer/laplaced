@@ -4,10 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/app"
 	"github.com/runixer/laplaced/internal/bot"
 	"github.com/runixer/laplaced/internal/config"
@@ -22,15 +21,12 @@ type evalRuntime struct {
 	store    *storage.Store
 	services *app.Services
 	bot      *bot.Bot
-	tempDir  string
+	judge    *longMemEvalJudge
 }
 
-func newEvalRuntime(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts options) (*evalRuntime, error) {
-	tempDir, err := os.MkdirTemp("", "laplaced-longmemeval-*")
-	if err != nil {
-		return nil, fmt.Errorf("create temp directory: %w", err)
-	}
-	runtime := &evalRuntime{cfg: cfg, tempDir: tempDir}
+func newEvalRuntime(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts options, dbPath string) (*evalRuntime, error) {
+	runtime := &evalRuntime{cfg: cfg}
+	var err error
 	cleanup := true
 	defer func() {
 		if cleanup {
@@ -38,7 +34,7 @@ func newEvalRuntime(ctx context.Context, cfg *config.Config, logger *slog.Logger
 		}
 	}()
 
-	cfg.Database.Path = filepath.Join(tempDir, "eval.db")
+	cfg.Database.Path = dbPath
 	cfg.Bot.Language = "en"
 	cfg.Artifacts.Enabled = false
 
@@ -59,16 +55,12 @@ func newEvalRuntime(ctx context.Context, cfg *config.Config, logger *slog.Logger
 	if err != nil {
 		return nil, fmt.Errorf("create LLM client: %w", err)
 	}
-	var client llm.Client
-	if opts.chatBaseURL == "" {
-		client = defaultClient
-	} else {
-		chatClient, chatErr := llm.NewClient(logger, "local", opts.chatProxy, opts.chatBaseURL, nil)
-		if chatErr != nil {
-			return nil, fmt.Errorf("create chat-only LLM client: %w", chatErr)
-		}
-		client = &routedClient{chat: chatClient, embeddings: defaultClient, enableThinking: opts.chatThinking}
-		overrideChatModels(cfg, opts.chatModel)
+	if opts.judge {
+		runtime.judge = newLongMemEvalJudge(defaultClient, opts.judgeModel)
+	}
+	client, err := buildEvalClient(logger, defaultClient, opts)
+	if err != nil {
+		return nil, err
 	}
 	runtime.services, err = app.SetupServices(ctx, logger, cfg, runtime.store, client, translator)
 	if err != nil {
@@ -89,6 +81,30 @@ func newEvalRuntime(ctx context.Context, cfg *config.Config, logger *slog.Logger
 	}
 	cleanup = false
 	return runtime, nil
+}
+
+func buildEvalClient(logger *slog.Logger, defaultClient llm.Client, opts options) (llm.Client, error) {
+	routes := make(map[agent.AgentType]agentClientRoute)
+	if opts.chatBaseURL != "" {
+		chatClient, err := llm.NewClient(logger, "local", opts.chatProxy, opts.chatBaseURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("create chat-only LLM client: %w", err)
+		}
+		for _, role := range []agent.AgentType{agent.TypeSplitter, agent.TypeArchivist, agent.TypeMerger, agent.TypeEnricher, agent.TypeReranker, agent.TypeLaplace} {
+			routes[role] = agentClientRoute{client: chatClient, enableThinking: opts.chatThinking}
+		}
+	}
+	for role, route := range opts.roleRoutes {
+		roleClient, err := llm.NewClient(logger, "local", route.Proxy, route.BaseURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("create %s LLM client: %w", role, err)
+		}
+		routes[role] = agentClientRoute{client: roleClient, enableThinking: route.ChatThinking}
+	}
+	if len(routes) == 0 {
+		return defaultClient, nil
+	}
+	return &routedClient{fallback: defaultClient, embeddings: defaultClient, routes: routes}, nil
 }
 
 func overrideChatModels(cfg *config.Config, model string) {
@@ -136,11 +152,7 @@ func (r *evalRuntime) Close() error {
 	if r.store != nil {
 		closeErr = r.store.Close()
 	}
-	if r.tempDir != "" {
-		// tempDir is returned by os.MkdirTemp above and never accepts user input.
-		if err := os.RemoveAll(r.tempDir); closeErr == nil && err != nil { // #nosec G703
-			closeErr = err
-		}
-	}
+	r.store = nil
+	r.services = nil
 	return closeErr
 }

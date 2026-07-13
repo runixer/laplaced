@@ -79,6 +79,9 @@ func validateCase(c *evalCase) error {
 	if strings.TrimSpace(c.Question) == "" {
 		return fmt.Errorf("question is required for %s", c.QuestionID)
 	}
+	if _, err := parseDatasetTime(c.QuestionDate); err != nil {
+		return fmt.Errorf("question date: %w", err)
+	}
 	if len(c.Sessions) != len(c.SessionIDs) || len(c.Sessions) != len(c.SessionDates) {
 		return fmt.Errorf("session arrays have different lengths for %s", c.QuestionID)
 	}

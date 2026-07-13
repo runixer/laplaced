@@ -432,6 +432,9 @@ type ChatCompletionRequest struct {
 	Tools              []Tool           `json:"tools,omitempty"`
 	ToolChoice         any              `json:"tool_choice,omitempty"`
 	ResponseFormat     interface{}      `json:"response_format,omitempty"`
+	N                  int              `json:"n,omitempty"`
+	Temperature        *float64         `json:"temperature,omitempty"`
+	MaxTokens          int              `json:"max_tokens,omitempty"`
 	Reasoning          *ReasoningConfig `json:"reasoning,omitempty"`
 	ChatTemplateKwargs map[string]any   `json:"chat_template_kwargs,omitempty"`
 	// Modalities enables image-output models. Use ["image","text"] for Gemini

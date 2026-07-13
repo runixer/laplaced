@@ -30,6 +30,9 @@ Useful flags:
 - `--mode oracle` imports only `answer_session_ids`;
 - `--mode full` imports every session present in the input file;
 - `--limit 0` removes the case limit;
+- `--judge` evaluates each answer with the official LongMemEval V1 judge protocol;
+- `--judge-model` selects the judge model (default `gpt-4o-2024-08-06`);
+- `--cache-dir <path>` reuses immutable per-case ingestion snapshots;
 - `--verbose` writes pipeline logs to stderr.
 
 Every JSONL row includes the official `question_id` and `hypothesis` fields plus:
@@ -39,7 +42,8 @@ Every JSONL row includes the official `question_id` and `hypothesis` fields plus
 - ingestion and answer durations;
 - token and cost counters;
 - final facts;
-- fact add/update/delete history.
+- fact add/update/delete history;
+- optional official judge label, raw response, token usage, cost, and latency.
 
 The additional fields do not prevent the official judge from reading the file.
 
@@ -120,12 +124,69 @@ go run ./cmd/longmemeval \
 
 Matrix mode cannot be combined with command-line chat override flags; put those settings in the matrix file instead.
 
+### Per-agent model routing
+
+Matrix variants can route ingestion, retrieval, and answer agents independently:
+
+```yaml
+variants:
+  - name: mixed
+    agents:
+      splitter:
+        base_url: http://localhost:8081
+        model: local-model
+      archivist:
+        base_url: http://localhost:8082
+        model: local-model
+        chat_template_thinking: true
+      merger:
+        base_url: http://localhost:8081
+        model: local-model
+      enricher:
+        base_url: http://localhost:8083
+        model: local-model
+      reranker:
+        base_url: http://localhost:8083
+        model: local-model
+      answerer:
+        base_url: http://localhost:8084
+        model: stronger-local-model
+```
+
+Supported roles are `splitter`, `archivist`, `merger`, `enricher`, `reranker`, and `answerer`. Omitted roles use the configured production client and model. `chat_template_thinking` controls the local chat template's `enable_thinking`; it is distinct from provider reasoning effort. Legacy `chat_*` fields remain available as shorthand for routing all six roles together, but cannot be combined with `agents` in the same variant.
+
+## Judge
+
+Add `--judge` to score generated answers in the same run:
+
+```bash
+go run ./cmd/longmemeval \
+  --dataset data/longmemeval_s_cleaned.json \
+  --mode full \
+  --judge \
+  --output data/longmemeval-judged.jsonl
+```
+
+The native judge reproduces the upstream LongMemEval V1 task-specific prompts and response parsing. It uses the configured default LLM endpoint even when the evaluated chat agents use `--chat-base-url`, keeping the judge independent from local model variants. A custom judge model makes the result non-comparable with the official GPT-4o metric.
+
+## Ingestion cache
+
+Use `--cache-dir` to avoid repeating Splitter, Merger, Archivist, and embedding work for unchanged cases:
+
+```bash
+go run ./cmd/longmemeval \
+  --dataset data/longmemeval_s_cleaned.json \
+  --mode full \
+  --cache-dir data/longmemeval-cache \
+  --output data/longmemeval-results.jsonl
+```
+
+Each cache entry is a closed, WAL-checkpointed SQLite snapshot created after ingestion and before answering. The harness always copies it to a writable temporary database, so answer-time writes cannot mutate the cached memory. Cache keys include the selected sessions, ingestion models, embedding configuration, memory/RAG configuration, and an ingestion pipeline version. Cache hits report zero ingestion tokens and cost because no ingestion API calls occur in that run.
+
 ## Current limitations
 
-- `question_date` is recorded but not injected as the process clock. Temporal prompts may therefore observe the real current date. Session and topic timestamps still come from the dataset.
-- There is no ingestion cache. Every run repeats Splitter, Archivist, embedding, and consolidation work.
 - Cost fields from a local chat backend may reflect configured pricing rather than actual local cost. Cloud embedding costs remain meaningful.
-- The harness does not run the official LLM judge. Pass the generated JSONL to LongMemEval's evaluation scripts.
+
 - A correct final answer does not guarantee correct memory state. Inspect `facts` and `fact_changes` when analyzing regressions.
 
 ## Recommended workflow

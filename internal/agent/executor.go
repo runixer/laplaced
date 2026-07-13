@@ -48,6 +48,7 @@ type SingleShotRequest struct {
 
 // ExecuteSingleShot runs a single LLM call with logging.
 func (e *Executor) ExecuteSingleShot(ctx context.Context, req SingleShotRequest) (*Response, error) {
+	ctx = WithAgentType(ctx, req.AgentType)
 	start := time.Now()
 
 	messages := req.Messages
@@ -139,6 +140,7 @@ type AgenticOptions struct {
 
 // ExecuteAgentic runs a multi-turn agent loop with tool calls.
 func (e *Executor) ExecuteAgentic(ctx context.Context, req SingleShotRequest, opts AgenticOptions) (*Response, error) {
+	ctx = WithAgentType(ctx, req.AgentType)
 	tracker := agentlog.NewTurnTracker()
 
 	messages := req.Messages

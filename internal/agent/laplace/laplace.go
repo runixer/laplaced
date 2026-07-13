@@ -458,6 +458,7 @@ func (l *Laplace) runChatTurn(
 	req *Request,
 	logger *slog.Logger,
 ) (*turnOutcome, error) {
+	ctx = agent.WithAgentType(ctx, agent.TypeLaplace)
 	if req.UseStreaming {
 		stream, err := l.runStreamingTurn(ctx, orReq, req.OnContentDelta, logger)
 		if err != nil {

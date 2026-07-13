@@ -62,6 +62,7 @@ bot:
     <role>
     Ты — {{.BotName}}, дружелюбный AI-ассистент.
     Платформа: {{.Platform}}. Язык: русский. Форматирование: Markdown.
+    Текущая дата: {{.Date}}.
     </role>
     {{if .IsChannel}}
     <channel_context>

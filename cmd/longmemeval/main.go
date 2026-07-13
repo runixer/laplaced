@@ -11,10 +11,12 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/app"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/rag"
@@ -37,6 +39,10 @@ type options struct {
 	chatThinking bool
 	matrix       string
 	parallel     int
+	judge        bool
+	judgeModel   string
+	cacheDir     string
+	roleRoutes   map[agent.AgentType]matrixAgentRoute
 }
 
 type runResult struct {
@@ -55,7 +61,9 @@ type runResult struct {
 	Answer          answerStats    `json:"answer"`
 	Facts           []factSnapshot `json:"facts,omitempty"`
 	FactChanges     []factChange   `json:"fact_changes,omitempty"`
-	TemporalWarning string         `json:"temporal_warning,omitempty"`
+	AutoevalLabel   *autoevalLabel `json:"autoeval_label,omitempty"`
+	Judge           *judgeStats    `json:"judge,omitempty"`
+	CacheHit        bool           `json:"cache_hit"`
 }
 
 type aggregateStats struct {
@@ -162,19 +170,24 @@ func resolveVariants(opts options) ([]matrixVariant, error) {
 
 func runVariant(ctx context.Context, base options, variant matrixVariant, cases []evalCase, writeResult func(*runResult) error) error {
 	opts := variant.apply(base)
-	cfg, logger, err := loadRuntimeConfig(ctx, opts)
+	baseCfg, logger, err := loadRuntimeConfig(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("variant %s: %w", variant.Name, err)
 	}
-	runtime, err := newEvalRuntime(ctx, cfg, logger, opts)
+	baseCfg.Bot.Language = "en"
+	baseCfg.Artifacts.Enabled = false
+	if opts.chatBaseURL != "" {
+		overrideChatModels(baseCfg, opts.chatModel)
+	}
+	applyRoleModels(baseCfg, opts.roleRoutes)
+	cache, err := newIngestionCache(opts.cacheDir)
 	if err != nil {
 		return fmt.Errorf("variant %s: %w", variant.Name, err)
 	}
-	defer runtime.Close()
 
 	for i, eval := range cases {
 		logger.Info("running evaluation case", "variant", variant.Name, "index", i+1, "total", len(cases), "question_id", eval.QuestionID)
-		result, err := runCase(ctx, runtime, eval, base.mode, opts)
+		result, err := runCachedCase(ctx, baseCfg, logger, opts, cache, eval, base.mode)
 		if err != nil {
 			return fmt.Errorf("variant %s case %s: %w", variant.Name, eval.QuestionID, err)
 		}
@@ -186,28 +199,99 @@ func runVariant(ctx context.Context, base options, variant matrixVariant, cases 
 	return nil
 }
 
-func runCase(ctx context.Context, runtime *evalRuntime, eval evalCase, mode string, opts options) (*runResult, error) {
+func runCachedCase(ctx context.Context, baseCfg *config.Config, logger *slog.Logger, opts options, cache *ingestionCache, eval evalCase, mode string) (*runResult, error) {
 	startedAt := time.Now()
 	sessions, err := selectSessions(eval, mode)
 	if err != nil {
 		return nil, err
 	}
-	scopeID := storage.PassthroughScopeID("longmemeval", eval.QuestionID)
-	if err := runtime.store.UpsertUser(storage.User{ID: scopeID, Username: "eval-user", FirstName: "Eval", LastSeen: time.Now()}); err != nil {
-		return nil, fmt.Errorf("create evaluation user: %w", err)
+	tempDir, err := os.MkdirTemp("", "laplaced-longmemeval-case-*")
+	if err != nil {
+		return nil, fmt.Errorf("create case directory: %w", err)
 	}
-
-	var ingestion aggregateStats
-	ingestionStartedAt := time.Now()
-	for _, session := range sessions {
-		stats, err := runtime.ingestSession(ctx, scopeID, session)
+	defer os.RemoveAll(tempDir)
+	dbPath := filepath.Join(tempDir, "eval.db")
+	key := ""
+	cacheHit := false
+	if cache != nil {
+		key, err = cache.key(eval, sessions, mode, baseCfg, opts)
 		if err != nil {
 			return nil, err
 		}
+		cacheHit, err = cache.materialize(key, dbPath)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	var ingestion aggregateStats
+	if !cacheHit {
+		ingestCfg := *baseCfg
+		ingestRuntime, runtimeErr := newEvalRuntime(ctx, &ingestCfg, logger, opts, dbPath)
+		if runtimeErr != nil {
+			return nil, runtimeErr
+		}
+		ingestion, err = ingestCase(ctx, ingestRuntime, eval, sessions)
+		if err == nil {
+			err = ingestRuntime.store.Checkpoint()
+		}
+		closeErr := ingestRuntime.Close()
+		if err != nil {
+			return nil, err
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("close ingestion runtime: %w", closeErr)
+		}
+		if cache != nil {
+			if err := cache.publish(ctx, key, dbPath); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	answerCfg := *baseCfg
+	answerRuntime, err := newEvalRuntime(ctx, &answerCfg, logger, opts, dbPath)
+	if err != nil {
+		return nil, err
+	}
+	defer answerRuntime.Close()
+	result, err := answerCase(ctx, answerRuntime, eval, mode, opts, len(sessions), ingestion, startedAt)
+	if err != nil {
+		return nil, err
+	}
+	result.CacheHit = cacheHit
+	return result, nil
+}
+
+func ingestCase(ctx context.Context, runtime *evalRuntime, eval evalCase, sessions []datedSession) (aggregateStats, error) {
+	scopeID := storage.PassthroughScopeID("longmemeval", eval.QuestionID)
+	if err := runtime.store.UpsertUser(storage.User{ID: scopeID, Username: "eval-user", FirstName: "Eval", LastSeen: time.Now()}); err != nil {
+		return aggregateStats{}, fmt.Errorf("create evaluation user: %w", err)
+	}
+	var ingestion aggregateStats
+	startedAt := time.Now()
+	for _, session := range sessions {
+		stats, err := runtime.ingestSession(ctx, scopeID, session)
+		if err != nil {
+			return ingestion, err
+		}
 		ingestion.add(stats)
 	}
-	ingestion.DurationMS = time.Since(ingestionStartedAt).Milliseconds()
-	answer, err := runtime.bot.SendTestMessage(ctx, scopeID, eval.Question, false)
+	ingestion.DurationMS = time.Since(startedAt).Milliseconds()
+	return ingestion, nil
+}
+
+func answerCase(ctx context.Context, runtime *evalRuntime, eval evalCase, mode string, opts options, sessionCount int, ingestion aggregateStats, startedAt time.Time) (*runResult, error) {
+	scopeID := storage.PassthroughScopeID("longmemeval", eval.QuestionID)
+	if err := runtime.store.UpsertUser(storage.User{ID: scopeID, Username: "eval-user", FirstName: "Eval", LastSeen: time.Now()}); err != nil {
+		return nil, fmt.Errorf("load evaluation user: %w", err)
+	}
+	questionDate, err := parseDatasetTime(eval.QuestionDate)
+	if err != nil {
+		return nil, fmt.Errorf("question date: %w", err)
+	}
+	answerCtx := agent.WithReferenceTime(ctx, questionDate)
+	answer, err := runtime.bot.SendTestMessage(answerCtx, scopeID, eval.Question, false)
 	if err != nil {
 		return nil, fmt.Errorf("answer question: %w", err)
 	}
@@ -219,15 +303,44 @@ func runCase(ctx context.Context, runtime *evalRuntime, eval evalCase, mode stri
 	if err != nil {
 		return nil, fmt.Errorf("load fact history: %w", err)
 	}
+	var label *autoevalLabel
+	var judge *judgeStats
+	if runtime.judge != nil {
+		label, judge, err = runtime.judge.Evaluate(ctx, eval, answer.Response)
+		if err != nil {
+			return nil, fmt.Errorf("judge answer: %w", err)
+		}
+	}
 	return &runResult{
 		QuestionID: eval.QuestionID, Hypothesis: answer.Response, QuestionType: eval.QuestionType,
 		ReferenceAnswer: string(eval.Answer), Mode: mode, ChatBackend: chatBackend(opts), ChatModel: chatModel(runtime, opts), QuestionDate: eval.QuestionDate,
-		Sessions: len(sessions), TotalDurationMS: time.Since(startedAt).Milliseconds(), Ingestion: ingestion,
-		Answer:          answerStats{PromptTokens: answer.PromptTokens, CompletionTokens: answer.CompletionTokens, Cost: answer.TotalCost, DurationMS: answer.TimingTotal.Milliseconds(), TopicsMatched: answer.TopicsMatched, FactsInjected: answer.FactsInjected},
-		Facts:           snapshotFacts(facts),
-		FactChanges:     snapshotFactChanges(history),
-		TemporalWarning: "question_date is recorded but not injected; temporal questions use the process clock",
+		Sessions: sessionCount, TotalDurationMS: time.Since(startedAt).Milliseconds(), Ingestion: ingestion,
+		Answer:        answerStats{PromptTokens: answer.PromptTokens, CompletionTokens: answer.CompletionTokens, Cost: answer.TotalCost, DurationMS: answer.TimingTotal.Milliseconds(), TopicsMatched: answer.TopicsMatched, FactsInjected: answer.FactsInjected},
+		Facts:         snapshotFacts(facts),
+		FactChanges:   snapshotFactChanges(history),
+		AutoevalLabel: label,
+		Judge:         judge,
 	}, nil
+}
+
+func applyRoleModels(cfg *config.Config, routes map[agent.AgentType]matrixAgentRoute) {
+	for role, route := range routes {
+		switch role {
+		case agent.TypeSplitter:
+			cfg.Agents.Splitter.Model = route.Model
+		case agent.TypeArchivist:
+			cfg.Agents.Archivist.Model = route.Model
+		case agent.TypeMerger:
+			cfg.Agents.Merger.Model = route.Model
+		case agent.TypeEnricher:
+			cfg.Agents.Enricher.Model = route.Model
+		case agent.TypeReranker:
+			cfg.Agents.Reranker.Model = route.Model
+		case agent.TypeLaplace:
+			cfg.Agents.Chat.Model = route.Model
+			cfg.Agents.ChatModel = route.Model
+		}
+	}
 }
 
 func chatBackend(opts options) string {
@@ -290,6 +403,9 @@ func parseOptions(args []string) (options, error) {
 	set.BoolVar(&opts.chatThinking, "chat-thinking", false, "Enable thinking through chat_template_kwargs on the chat-only endpoint")
 	set.StringVar(&opts.matrix, "matrix", "", "YAML file containing evaluation variants")
 	set.IntVar(&opts.parallel, "parallel", 1, "Maximum matrix variants to run concurrently")
+	set.BoolVar(&opts.judge, "judge", false, "Judge generated answers with the official LongMemEval V1 protocol")
+	set.StringVar(&opts.judgeModel, "judge-model", defaultJudgeModel, "Model used by the LongMemEval judge")
+	set.StringVar(&opts.cacheDir, "cache-dir", "", "Directory for immutable per-case ingestion snapshots")
 	if err := set.Parse(args); err != nil {
 		return opts, err
 	}
@@ -304,6 +420,9 @@ func parseOptions(args []string) (options, error) {
 	}
 	if opts.parallel < 1 {
 		return opts, errors.New("--parallel must be at least 1")
+	}
+	if opts.judge && strings.TrimSpace(opts.judgeModel) == "" {
+		return opts, errors.New("--judge-model cannot be empty when --judge is enabled")
 	}
 	if (opts.chatBaseURL == "") != (opts.chatModel == "") {
 		return opts, errors.New("--chat-base-url and --chat-model must be used together")
