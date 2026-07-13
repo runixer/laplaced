@@ -1029,9 +1029,13 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID storage.ScopeID, text 
 	// Extract timing breakdown from RAG info
 	if resp.RAGInfo != nil {
 		result.RAGDebugInfo = resp.RAGInfo
-		result.TopicsMatched = len(resp.RAGInfo.Results)
+		finalContext := resp.RAGInfo.FinalContext
+		if finalContext == nil {
+			finalContext = resp.RAGInfo.Results
+		}
+		result.TopicsMatched = len(finalContext)
 
-		for _, topicRes := range resp.RAGInfo.Results {
+		for _, topicRes := range finalContext {
 			result.FactsInjected += len(topicRes.Messages)
 		}
 	}

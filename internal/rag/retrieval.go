@@ -23,7 +23,16 @@ type RetrievalDebugInfo struct {
 	EnrichedQuery    string
 	EnrichmentPrompt string
 	EnrichmentTokens int
-	Results          []TopicSearchResult
+	Candidates       []TopicCandidateDebug
+	PostReranker     []TopicSearchResult
+	FinalContext     []TopicSearchResult
+	Results          []TopicSearchResult // Backward-compatible alias for PostReranker.
+	UsedReranker     bool
+}
+
+type TopicCandidateDebug struct {
+	TopicID int64
+	Score   float32
 }
 
 // TopicSearchResult represents a matched topic with its messages
@@ -136,6 +145,10 @@ func (s *Service) Retrieve(ctx context.Context, userID storage.ScopeID, query st
 	// 6. Limit candidates
 	matches = limitMatches(matches, maxCandidates)
 	candidatesIn = len(matches)
+	debugInfo.Candidates = make([]TopicCandidateDebug, 0, len(matches))
+	for _, match := range matches {
+		debugInfo.Candidates = append(debugInfo.Candidates, TopicCandidateDebug{TopicID: match.topicID, Score: match.score})
+	}
 
 	// 7. Load topic map
 	topicMap, err := s.loadTopicMap(ctx, userID, matches)
@@ -204,7 +217,9 @@ func (s *Service) Retrieve(ctx context.Context, userID storage.ScopeID, query st
 	selectedArtifactIDs = append(selectedArtifactIDs, result.SelectedArtifactIDs...)
 
 	// 10. Record metrics
+	debugInfo.PostReranker = result.Topics
 	debugInfo.Results = result.Topics
+	debugInfo.UsedReranker = usedReranker
 	RecordRAGRetrieval(userID, len(result.Topics) > 0)
 	RecordRAGLatency(userID, opts.Source, time.Since(startTime).Seconds())
 

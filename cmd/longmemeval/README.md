@@ -43,7 +43,8 @@ Every JSONL row includes the official `question_id` and `hypothesis` fields plus
 - token and cost counters;
 - final facts;
 - fact add/update/delete history;
-- optional official judge label, raw response, token usage, cost, and latency.
+- optional official judge label, raw response, token usage, cost, and latency;
+- evidence-session recall for candidates, post-reranker results, and final answer context.
 
 The additional fields do not prevent the official judge from reading the file.
 
@@ -181,7 +182,7 @@ go run ./cmd/longmemeval \
   --output data/longmemeval-results.jsonl
 ```
 
-Each cache entry is a closed, WAL-checkpointed SQLite snapshot created after ingestion and before answering. The harness always copies it to a writable temporary database, so answer-time writes cannot mutate the cached memory. Cache keys include the selected sessions, ingestion models, embedding configuration, memory/RAG configuration, and an ingestion pipeline version. Cache hits report zero ingestion tokens and cost because no ingestion API calls occur in that run.
+Each cache entry is a closed, WAL-checkpointed SQLite snapshot created after ingestion and before answering, plus a metadata sidecar mapping dataset sessions to imported message IDs. The harness always copies the database to a writable temporary path, so answer-time writes cannot mutate cached memory. Cache keys include the selected sessions, ingestion models, embedding configuration, memory/RAG configuration, and an ingestion pipeline version. Cache hits report zero ingestion tokens and cost because no ingestion API calls occur in that run.
 
 ## Current limitations
 

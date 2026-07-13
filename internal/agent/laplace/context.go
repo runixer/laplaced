@@ -261,6 +261,9 @@ func (l *Laplace) LoadContextData(
 			l.logger.Error("RAG retrieval failed", "error", err)
 		} else if result != nil {
 			data.RAGResults = deduplicateTopics(result.Topics, recentHistory)
+			if debugInfo != nil {
+				debugInfo.FinalContext = data.RAGResults
+			}
 			data.ArtifactResults = result.Artifacts               // v0.5.2
 			data.SelectedArtifactIDs = result.SelectedArtifactIDs // v0.6.0: IDs selected by reranker for full content loading
 			data.RAGInfo = debugInfo

@@ -120,28 +120,47 @@ func overrideChatModels(cfg *config.Config, model string) {
 	cfg.Agents.Extractor.Model = model
 }
 
-func (r *evalRuntime) ingestSession(ctx context.Context, scopeID storage.ScopeID, session datedSession) (*rag.ProcessingStats, error) {
+type importedSession struct {
+	SessionID  string  `json:"session_id"`
+	MessageIDs []int64 `json:"message_ids"`
+}
+
+func (r *evalRuntime) ingestSession(ctx context.Context, scopeID storage.ScopeID, session datedSession) (*rag.ProcessingStats, importedSession, error) {
 	for i, message := range session.Messages {
 		createdAt := session.Date.Add(time.Duration(i) * time.Millisecond)
 		if err := r.store.ImportMessage(scopeID, storage.Message{Role: message.Role, Content: message.Content, CreatedAt: createdAt}); err != nil {
-			return nil, fmt.Errorf("import message %d: %w", i, err)
+			return nil, importedSession{}, fmt.Errorf("import message %d: %w", i, err)
 		}
+	}
+	imported, err := r.store.GetUnprocessedMessages(scopeID)
+	if err != nil {
+		return nil, importedSession{}, fmt.Errorf("load imported session %s: %w", session.ID, err)
+	}
+	if len(imported) != len(session.Messages) {
+		return nil, importedSession{}, fmt.Errorf("session %s imported %d of %d messages", session.ID, len(imported), len(session.Messages))
+	}
+	mapping := importedSession{SessionID: session.ID, MessageIDs: make([]int64, len(imported))}
+	for i, message := range imported {
+		if message.Role != session.Messages[i].Role || message.Content != session.Messages[i].Content {
+			return nil, importedSession{}, fmt.Errorf("session %s imported message %d does not match source", session.ID, i)
+		}
+		mapping.MessageIDs[i] = message.ID
 	}
 	stats, err := r.services.RAGService.ForceProcessUserWithProgress(ctx, scopeID, func(rag.ProgressEvent) {})
 	if err != nil {
-		return stats, fmt.Errorf("process session %s: %w", session.ID, err)
+		return stats, mapping, fmt.Errorf("process session %s: %w", session.ID, err)
 	}
 	if stats.MessagesProcessed != len(session.Messages) {
-		return stats, fmt.Errorf("session %s processed %d of %d messages", session.ID, stats.MessagesProcessed, len(session.Messages))
+		return stats, mapping, fmt.Errorf("session %s processed %d of %d messages", session.ID, stats.MessagesProcessed, len(session.Messages))
 	}
 	remaining, err := r.store.GetUnprocessedMessages(scopeID)
 	if err != nil {
-		return stats, fmt.Errorf("check unprocessed messages: %w", err)
+		return stats, mapping, fmt.Errorf("check unprocessed messages: %w", err)
 	}
 	if len(remaining) != 0 {
-		return stats, fmt.Errorf("session %s left %d unprocessed messages", session.ID, len(remaining))
+		return stats, mapping, fmt.Errorf("session %s left %d unprocessed messages", session.ID, len(remaining))
 	}
-	return stats, nil
+	return stats, mapping, nil
 }
 
 func (r *evalRuntime) Close() error {

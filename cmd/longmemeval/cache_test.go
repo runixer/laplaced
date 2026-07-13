@@ -63,18 +63,20 @@ func TestIngestionCachePublishAndMaterialize(t *testing.T) {
 	source := filepath.Join(t.TempDir(), "source.db")
 	require.NoError(t, os.WriteFile(source, []byte("snapshot"), 0o600))
 
-	require.NoError(t, cache.publish(context.Background(), "key", source))
+	snapshot := ingestionSnapshot{Sessions: []importedSession{{SessionID: "s1", MessageIDs: []int64{1, 2}}}}
+	require.NoError(t, cache.publish(context.Background(), "key", source, snapshot))
 	destination := filepath.Join(t.TempDir(), "working.db")
-	hit, err := cache.materialize("key", destination)
+	materialized, hit, err := cache.materialize("key", destination)
 	require.NoError(t, err)
 	require.True(t, hit)
+	require.Equal(t, snapshot.Sessions, materialized.Sessions)
 	data, err := os.ReadFile(destination)
 	require.NoError(t, err)
 	require.Equal(t, []byte("snapshot"), data)
 
 	require.NoError(t, os.WriteFile(destination, []byte("mutated"), 0o600))
 	second := filepath.Join(t.TempDir(), "second.db")
-	hit, err = cache.materialize("key", second)
+	_, hit, err = cache.materialize("key", second)
 	require.NoError(t, err)
 	require.True(t, hit)
 	data, err = os.ReadFile(second)
@@ -85,7 +87,7 @@ func TestIngestionCachePublishAndMaterialize(t *testing.T) {
 func TestIngestionCacheMiss(t *testing.T) {
 	cache, err := newIngestionCache(t.TempDir())
 	require.NoError(t, err)
-	hit, err := cache.materialize("missing", filepath.Join(t.TempDir(), "working.db"))
+	_, hit, err := cache.materialize("missing", filepath.Join(t.TempDir(), "working.db"))
 	require.NoError(t, err)
 	require.False(t, hit)
 }

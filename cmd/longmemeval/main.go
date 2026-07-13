@@ -46,24 +46,30 @@ type options struct {
 }
 
 type runResult struct {
-	Variant         string         `json:"variant"`
-	QuestionID      string         `json:"question_id"`
-	Hypothesis      string         `json:"hypothesis"`
-	QuestionType    string         `json:"question_type,omitempty"`
-	ReferenceAnswer string         `json:"reference_answer,omitempty"`
-	Mode            string         `json:"mode"`
-	ChatBackend     string         `json:"chat_backend"`
-	ChatModel       string         `json:"chat_model"`
-	QuestionDate    string         `json:"question_date,omitempty"`
-	Sessions        int            `json:"sessions"`
-	TotalDurationMS int64          `json:"total_duration_ms"`
-	Ingestion       aggregateStats `json:"ingestion"`
-	Answer          answerStats    `json:"answer"`
-	Facts           []factSnapshot `json:"facts,omitempty"`
-	FactChanges     []factChange   `json:"fact_changes,omitempty"`
-	AutoevalLabel   *autoevalLabel `json:"autoeval_label,omitempty"`
-	Judge           *judgeStats    `json:"judge,omitempty"`
-	CacheHit        bool           `json:"cache_hit"`
+	Variant         string             `json:"variant"`
+	QuestionID      string             `json:"question_id"`
+	Hypothesis      string             `json:"hypothesis"`
+	QuestionType    string             `json:"question_type,omitempty"`
+	ReferenceAnswer string             `json:"reference_answer,omitempty"`
+	Mode            string             `json:"mode"`
+	ChatBackend     string             `json:"chat_backend"`
+	ChatModel       string             `json:"chat_model"`
+	QuestionDate    string             `json:"question_date,omitempty"`
+	Sessions        int                `json:"sessions"`
+	TotalDurationMS int64              `json:"total_duration_ms"`
+	Ingestion       aggregateStats     `json:"ingestion"`
+	Answer          answerStats        `json:"answer"`
+	Facts           []factSnapshot     `json:"facts,omitempty"`
+	FactChanges     []factChange       `json:"fact_changes,omitempty"`
+	AutoevalLabel   *autoevalLabel     `json:"autoeval_label,omitempty"`
+	Judge           *judgeStats        `json:"judge,omitempty"`
+	CacheHit        bool               `json:"cache_hit"`
+	Retrieval       *retrievalEvidence `json:"retrieval,omitempty"`
+}
+
+type ingestionSnapshot struct {
+	Stats    aggregateStats    `json:"stats"`
+	Sessions []importedSession `json:"sessions"`
 }
 
 type aggregateStats struct {
@@ -213,18 +219,21 @@ func runCachedCase(ctx context.Context, baseCfg *config.Config, logger *slog.Log
 	dbPath := filepath.Join(tempDir, "eval.db")
 	key := ""
 	cacheHit := false
+	var ingestion ingestionSnapshot
 	if cache != nil {
 		key, err = cache.key(eval, sessions, mode, baseCfg, opts)
 		if err != nil {
 			return nil, err
 		}
-		cacheHit, err = cache.materialize(key, dbPath)
+		ingestion, cacheHit, err = cache.materialize(key, dbPath)
 		if err != nil {
 			return nil, err
 		}
+		if cacheHit {
+			ingestion.Stats = aggregateStats{}
+		}
 	}
 
-	var ingestion aggregateStats
 	if !cacheHit {
 		ingestCfg := *baseCfg
 		ingestRuntime, runtimeErr := newEvalRuntime(ctx, &ingestCfg, logger, opts, dbPath)
@@ -243,7 +252,7 @@ func runCachedCase(ctx context.Context, baseCfg *config.Config, logger *slog.Log
 			return nil, fmt.Errorf("close ingestion runtime: %w", closeErr)
 		}
 		if cache != nil {
-			if err := cache.publish(ctx, key, dbPath); err != nil {
+			if err := cache.publish(ctx, key, dbPath, ingestion); err != nil {
 				return nil, err
 			}
 		}
@@ -263,25 +272,26 @@ func runCachedCase(ctx context.Context, baseCfg *config.Config, logger *slog.Log
 	return result, nil
 }
 
-func ingestCase(ctx context.Context, runtime *evalRuntime, eval evalCase, sessions []datedSession) (aggregateStats, error) {
+func ingestCase(ctx context.Context, runtime *evalRuntime, eval evalCase, sessions []datedSession) (ingestionSnapshot, error) {
 	scopeID := storage.PassthroughScopeID("longmemeval", eval.QuestionID)
 	if err := runtime.store.UpsertUser(storage.User{ID: scopeID, Username: "eval-user", FirstName: "Eval", LastSeen: time.Now()}); err != nil {
-		return aggregateStats{}, fmt.Errorf("create evaluation user: %w", err)
+		return ingestionSnapshot{}, fmt.Errorf("create evaluation user: %w", err)
 	}
-	var ingestion aggregateStats
+	var ingestion ingestionSnapshot
 	startedAt := time.Now()
 	for _, session := range sessions {
-		stats, err := runtime.ingestSession(ctx, scopeID, session)
+		stats, mapping, err := runtime.ingestSession(ctx, scopeID, session)
 		if err != nil {
 			return ingestion, err
 		}
-		ingestion.add(stats)
+		ingestion.Stats.add(stats)
+		ingestion.Sessions = append(ingestion.Sessions, mapping)
 	}
-	ingestion.DurationMS = time.Since(startedAt).Milliseconds()
+	ingestion.Stats.DurationMS = time.Since(startedAt).Milliseconds()
 	return ingestion, nil
 }
 
-func answerCase(ctx context.Context, runtime *evalRuntime, eval evalCase, mode string, opts options, sessionCount int, ingestion aggregateStats, startedAt time.Time) (*runResult, error) {
+func answerCase(ctx context.Context, runtime *evalRuntime, eval evalCase, mode string, opts options, sessionCount int, ingestion ingestionSnapshot, startedAt time.Time) (*runResult, error) {
 	scopeID := storage.PassthroughScopeID("longmemeval", eval.QuestionID)
 	if err := runtime.store.UpsertUser(storage.User{ID: scopeID, Username: "eval-user", FirstName: "Eval", LastSeen: time.Now()}); err != nil {
 		return nil, fmt.Errorf("load evaluation user: %w", err)
@@ -303,6 +313,10 @@ func answerCase(ctx context.Context, runtime *evalRuntime, eval evalCase, mode s
 	if err != nil {
 		return nil, fmt.Errorf("load fact history: %w", err)
 	}
+	retrieval, err := calculateRetrievalEvidence(runtime.store, scopeID, eval, ingestion, answer.RAGDebugInfo)
+	if err != nil {
+		return nil, err
+	}
 	var label *autoevalLabel
 	var judge *judgeStats
 	if runtime.judge != nil {
@@ -314,12 +328,13 @@ func answerCase(ctx context.Context, runtime *evalRuntime, eval evalCase, mode s
 	return &runResult{
 		QuestionID: eval.QuestionID, Hypothesis: answer.Response, QuestionType: eval.QuestionType,
 		ReferenceAnswer: string(eval.Answer), Mode: mode, ChatBackend: chatBackend(opts), ChatModel: chatModel(runtime, opts), QuestionDate: eval.QuestionDate,
-		Sessions: sessionCount, TotalDurationMS: time.Since(startedAt).Milliseconds(), Ingestion: ingestion,
+		Sessions: sessionCount, TotalDurationMS: time.Since(startedAt).Milliseconds(), Ingestion: ingestion.Stats,
 		Answer:        answerStats{PromptTokens: answer.PromptTokens, CompletionTokens: answer.CompletionTokens, Cost: answer.TotalCost, DurationMS: answer.TimingTotal.Milliseconds(), TopicsMatched: answer.TopicsMatched, FactsInjected: answer.FactsInjected},
 		Facts:         snapshotFacts(facts),
 		FactChanges:   snapshotFactChanges(history),
 		AutoevalLabel: label,
 		Judge:         judge,
+		Retrieval:     retrieval,
 	}, nil
 }
 

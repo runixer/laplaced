@@ -16,7 +16,7 @@ import (
 	"github.com/runixer/laplaced/internal/config"
 )
 
-const ingestionPipelineVersion = "2"
+const ingestionPipelineVersion = "3"
 
 type ingestionCache struct {
 	dir string
@@ -129,28 +129,41 @@ func (c *ingestionCache) key(eval evalCase, sessions []datedSession, mode string
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func (c *ingestionCache) materialize(key, destination string) (bool, error) {
+func (c *ingestionCache) materialize(key, destination string) (ingestionSnapshot, bool, error) {
 	if c == nil {
-		return false, nil
+		return ingestionSnapshot{}, false, nil
 	}
 	source := filepath.Join(c.dir, key+".db")
+	metadataPath := filepath.Join(c.dir, key+".json")
 	if _, err := os.Stat(source); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return false, nil
+			return ingestionSnapshot{}, false, nil
 		}
-		return false, fmt.Errorf("stat ingestion cache: %w", err)
+		return ingestionSnapshot{}, false, fmt.Errorf("stat ingestion cache: %w", err)
+	}
+	metadata, err := os.ReadFile(metadataPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ingestionSnapshot{}, false, nil
+		}
+		return ingestionSnapshot{}, false, fmt.Errorf("read ingestion cache metadata: %w", err)
+	}
+	var snapshot ingestionSnapshot
+	if err := json.Unmarshal(metadata, &snapshot); err != nil {
+		return ingestionSnapshot{}, false, nil
 	}
 	if err := copyFile(source, destination, 0o600); err != nil {
-		return false, fmt.Errorf("materialize ingestion cache: %w", err)
+		return ingestionSnapshot{}, false, fmt.Errorf("materialize ingestion cache: %w", err)
 	}
-	return true, nil
+	return snapshot, true, nil
 }
 
-func (c *ingestionCache) publish(ctx context.Context, key, source string) error {
+func (c *ingestionCache) publish(ctx context.Context, key, source string, snapshot ingestionSnapshot) error {
 	if c == nil {
 		return nil
 	}
 	finalPath := filepath.Join(c.dir, key+".db")
+	metadataPath := filepath.Join(c.dir, key+".json")
 	lockPath := filepath.Join(c.dir, key+".lock")
 	for {
 		err := os.Mkdir(lockPath, 0o700)
@@ -161,7 +174,9 @@ func (c *ingestionCache) publish(ctx context.Context, key, source string) error 
 			return fmt.Errorf("acquire ingestion cache lock: %w", err)
 		}
 		if _, statErr := os.Stat(finalPath); statErr == nil {
-			return nil
+			if _, metadataErr := os.Stat(metadataPath); metadataErr == nil {
+				return nil
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -171,7 +186,10 @@ func (c *ingestionCache) publish(ctx context.Context, key, source string) error 
 	}
 	defer os.Remove(lockPath)
 	if _, err := os.Stat(finalPath); err == nil {
-		return nil
+		if _, metadataErr := os.Stat(metadataPath); metadataErr == nil {
+			return nil
+		}
+		_ = os.Remove(finalPath)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("stat ingestion cache destination: %w", err)
 	}
@@ -208,6 +226,33 @@ func (c *ingestionCache) publish(ctx context.Context, key, source string) error 
 	}
 	if err := os.Chmod(finalPath, 0o400); err != nil {
 		return fmt.Errorf("protect ingestion cache: %w", err)
+	}
+	metadata, err := json.Marshal(snapshot)
+	if err != nil {
+		return fmt.Errorf("encode ingestion cache metadata: %w", err)
+	}
+	metadataStaging, err := os.CreateTemp(c.dir, "."+key+"-*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("create ingestion metadata staging file: %w", err)
+	}
+	metadataStagingPath := metadataStaging.Name()
+	defer os.Remove(metadataStagingPath)
+	if _, err := metadataStaging.Write(metadata); err != nil {
+		_ = metadataStaging.Close()
+		return fmt.Errorf("write ingestion cache metadata: %w", err)
+	}
+	if err := metadataStaging.Sync(); err != nil {
+		_ = metadataStaging.Close()
+		return fmt.Errorf("sync ingestion cache metadata: %w", err)
+	}
+	if err := metadataStaging.Close(); err != nil {
+		return fmt.Errorf("close ingestion cache metadata: %w", err)
+	}
+	if err := os.Rename(metadataStagingPath, metadataPath); err != nil {
+		return fmt.Errorf("publish ingestion cache metadata: %w", err)
+	}
+	if err := os.Chmod(metadataPath, 0o400); err != nil {
+		return fmt.Errorf("protect ingestion cache metadata: %w", err)
 	}
 	return nil
 }

@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- The LongMemEval harness now compares isolated memory runs, reuses immutable ingestion snapshots, uses dataset-relative dates, and can score answers with the official judge protocol.
+- The LongMemEval harness now compares isolated memory runs with stage-level evidence recall, reuses immutable ingestion snapshots, uses dataset-relative dates, and can score answers with the official judge protocol.
 - New privacy mode: ask the bot not to save something and the following messages are excluded from long-term memory, with an honest explanation of what is and isn't covered.
 
 ### Changed
