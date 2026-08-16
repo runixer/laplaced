@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New privacy mode: ask the bot not to save something and the following messages are excluded from long-term memory, with an honest explanation of what is and isn't covered.
 
 ### Changed
+- The default chat model is now `google/gemini-3.7-flash` (was `google/gemini-3.5-flash`). Replaying ten captured production traces showed shorter, denser replies at roughly a third of the cost and unchanged latency.
 - The assistant no longer retracts risk warnings under emotional pushback, avoids verdicts about people it only knows one-sidedly, keeps crisis replies short with real-help referrals, and refuses forwarded "assistant instructions", loyalty vows, and promises not to remember things.
 - Memory now records where each fact came from: judgments about other people are stored and re-read as the user's opinion rather than established truth, and stored "don't analyze/don't be harsh" instructions never override honesty on health, money, or safety.
 

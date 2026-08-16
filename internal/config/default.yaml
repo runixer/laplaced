@@ -91,7 +91,7 @@ agents:
   # — with "auto", watch the bot.anomaly.sanitized span attribute.
   chat:
     name: "Laplaced"
-    model: "google/gemini-3.5-flash"
+    model: "google/gemini-3.7-flash"
     thinking_level: "auto"
     # Alternative: "google/gemini-3.1-pro-preview" — stronger on complex
     # multi-tool reasoning, but slower and noticeably more expensive per turn.
