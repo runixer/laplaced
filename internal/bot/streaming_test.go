@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -9,11 +10,13 @@ import (
 
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
+	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
 	"github.com/runixer/laplaced/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
 )
 
 // fakeClock is an injectable time source. NextTick advances time by the given
@@ -280,12 +283,13 @@ func TestStreamSink_FinalizePrefixesStatusJourney(t *testing.T) {
 		return req.ParseMode == "HTML" &&
 			strings.HasPrefix(req.Text, "<blockquote expandable>") &&
 			strings.Contains(req.Text, "</blockquote>\n\n<b>Final</b>")
-	})).Return(&telegram.Message{}, nil).Once()
+	})).Return(&telegram.Message{MessageID: 42}, nil).Once()
 
 	finalizer := func(text string) ([]telegram.SendMessageRequest, error) {
 		return []telegram.SendMessageRequest{{Text: "<b>Final</b>", ParseMode: "HTML"}}, nil
 	}
-	extra, _ := sink.Finalize(finalizeArgs{FullText: "**Final**"}, finalizer)
+	extra, _, err := sink.Finalize(finalizeArgs{FullText: "**Final**"}, finalizer)
+	require.NoError(t, err)
 	assert.Empty(t, extra)
 	api.AssertExpectations(t)
 }
@@ -305,7 +309,7 @@ func TestStreamSink_StatusGenericFallbackForUnknownTool(t *testing.T) {
 	sink, api, _, _ := newSinkWithMockAPI(t)
 	api.On("EditMessageText", mock.Anything, mock.MatchedBy(func(req telegram.EditMessageTextRequest) bool {
 		return strings.Contains(req.Text, "Running tool") && req.ParseMode == "HTML"
-	})).Return(&telegram.Message{}, nil).Once()
+	})).Return(&telegram.Message{MessageID: 42}, nil).Once()
 
 	sink.Status("nonexistent_tool", "")
 	api.AssertExpectations(t)
@@ -396,18 +400,19 @@ func TestStreamSink_FinalizeNormalRendersHTML(t *testing.T) {
 	// (already balanced) untouched; goldmark renders it as "<b>bold</b> ok".
 	api.On("EditMessageText", mock.Anything, mock.MatchedBy(func(req telegram.EditMessageTextRequest) bool {
 		return req.ParseMode == "HTML" && strings.Contains(req.Text, "<b>bold</b>")
-	})).Return(&telegram.Message{}, nil).Once()
+	})).Return(&telegram.Message{MessageID: 42}, nil).Once()
 	sink.Delta("**bold** ok")
 
 	// Finalize: ONE more edit with HTML parse mode, content from finalizer.
 	api.On("EditMessageText", mock.Anything, mock.MatchedBy(func(req telegram.EditMessageTextRequest) bool {
 		return req.ParseMode == "HTML" && strings.Contains(req.Text, "<b>bold</b>")
-	})).Return(&telegram.Message{}, nil).Once()
+	})).Return(&telegram.Message{MessageID: 42}, nil).Once()
 
 	finalizer := func(text string) ([]telegram.SendMessageRequest, error) {
 		return []telegram.SendMessageRequest{{Text: "<b>bold</b> ok", ParseMode: "HTML"}}, nil
 	}
-	extra, edits := sink.Finalize(finalizeArgs{FullText: "**bold** ok"}, finalizer)
+	extra, edits, err := sink.Finalize(finalizeArgs{FullText: "**bold** ok"}, finalizer)
+	require.NoError(t, err)
 	assert.Empty(t, extra)
 	assert.GreaterOrEqual(t, edits, 2)
 	api.AssertExpectations(t)
@@ -436,12 +441,13 @@ func TestStreamSink_FinalizeEmptyUsesEmptyResponseLocale(t *testing.T) {
 
 	api.On("EditMessageText", mock.Anything, mock.MatchedBy(func(req telegram.EditMessageTextRequest) bool {
 		return req.ParseMode == "HTML" && strings.Contains(req.Text, "Seems")
-	})).Return(&telegram.Message{}, nil).Once()
+	})).Return(&telegram.Message{MessageID: 42}, nil).Once()
 
-	extra, _ := sink.Finalize(finalizeArgs{FullText: ""}, func(string) ([]telegram.SendMessageRequest, error) {
+	extra, _, err := sink.Finalize(finalizeArgs{FullText: ""}, func(string) ([]telegram.SendMessageRequest, error) {
 		t.Fatal("finalizeResponse should not be called for empty FullText")
 		return nil, nil
 	})
+	require.NoError(t, err)
 	assert.Empty(t, extra)
 	api.AssertExpectations(t)
 }
@@ -451,15 +457,16 @@ func TestStreamSink_FinalizeErrorUsesErrorText(t *testing.T) {
 
 	api.On("EditMessageText", mock.Anything, mock.MatchedBy(func(req telegram.EditMessageTextRequest) bool {
 		return req.ParseMode == "HTML" && strings.Contains(req.Text, "boom")
-	})).Return(&telegram.Message{}, nil).Once()
+	})).Return(&telegram.Message{MessageID: 42}, nil).Once()
 
-	extra, _ := sink.Finalize(
+	extra, _, err := sink.Finalize(
 		finalizeArgs{HadError: true, ErrorText: "boom"},
 		func(string) ([]telegram.SendMessageRequest, error) {
 			t.Fatal("finalizeResponse should not be called for error path")
 			return nil, nil
 		},
 	)
+	require.NoError(t, err)
 	assert.Empty(t, extra)
 	api.AssertExpectations(t)
 }
@@ -471,7 +478,7 @@ func TestStreamSink_FinalizeOverflowReturnsExtraChunks(t *testing.T) {
 	// huge follow-up flips mode to overflow before any edit).
 	api.On("EditMessageText", mock.Anything, mock.MatchedBy(func(req telegram.EditMessageTextRequest) bool {
 		return req.ParseMode == "HTML" && strings.Contains(req.Text, "seed")
-	})).Return(&telegram.Message{}, nil).Once()
+	})).Return(&telegram.Message{MessageID: 42}, nil).Once()
 	sink.Delta("seed")
 	sink.Delta(strings.Repeat("z", 3500))
 	require.Equal(t, streamModeOverflow, sink.mode)
@@ -479,7 +486,7 @@ func TestStreamSink_FinalizeOverflowReturnsExtraChunks(t *testing.T) {
 	// Finalize: chunks[0] edits the placeholder; chunks[1:] returned to caller.
 	api.On("EditMessageText", mock.Anything, mock.MatchedBy(func(req telegram.EditMessageTextRequest) bool {
 		return req.Text == "first chunk"
-	})).Return(&telegram.Message{}, nil).Once()
+	})).Return(&telegram.Message{MessageID: 42}, nil).Once()
 
 	finalizer := func(text string) ([]telegram.SendMessageRequest, error) {
 		return []telegram.SendMessageRequest{
@@ -488,9 +495,183 @@ func TestStreamSink_FinalizeOverflowReturnsExtraChunks(t *testing.T) {
 			{Text: "third chunk", ParseMode: "HTML"},
 		}, nil
 	}
-	extra, _ := sink.Finalize(finalizeArgs{FullText: "long text"}, finalizer)
+	extra, _, err := sink.Finalize(finalizeArgs{FullText: "long text"}, finalizer)
+	require.NoError(t, err)
 	assert.Len(t, extra, 2, "extra chunks returned for caller to send as new messages")
 	assert.Equal(t, "second chunk", extra[0].Text)
+	api.AssertExpectations(t)
+}
+
+func TestStreamSink_FinalizePropagatesUnconfirmedTerminalEdit(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "network", err: errors.New("connection reset after request write")},
+		{name: "telegram 500", err: &telegram.APIError{Code: 500, Description: "Internal Server Error"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sink, api, _, _ := newSinkWithMockAPI(t)
+			api.On("EditMessageText", mock.Anything, mock.Anything).Return(nil, tt.err).Once()
+
+			extra, edits, err := sink.Finalize(
+				finalizeArgs{FullText: "unique terminal answer"},
+				func(string) ([]telegram.SendMessageRequest, error) {
+					return []telegram.SendMessageRequest{{Text: "unique terminal answer", ParseMode: "HTML"}}, nil
+				},
+			)
+
+			require.Error(t, err)
+			assert.ErrorIs(t, err, tt.err)
+			assert.Empty(t, extra, "overflow must not escape an unconfirmed terminal edit")
+			assert.Equal(t, 1, edits)
+			assert.True(t, sink.hadFinalize)
+			api.AssertExpectations(t)
+		})
+	}
+}
+
+func TestStreamSink_FinalizeMalformedSuccessIsUnconfirmed(t *testing.T) {
+	sink, api, _, _ := newSinkWithMockAPI(t)
+	api.On("EditMessageText", mock.Anything, mock.Anything).
+		Return((*telegram.Message)(nil), nil).
+		Once()
+
+	extra, edits, err := sink.Finalize(
+		finalizeArgs{FullText: "terminal answer"},
+		func(string) ([]telegram.SendMessageRequest, error) {
+			return []telegram.SendMessageRequest{{Text: "terminal answer", ParseMode: "HTML"}}, nil
+		},
+	)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid message_id")
+	assert.Empty(t, extra)
+	assert.Equal(t, 1, edits)
+	api.AssertExpectations(t)
+}
+
+func TestStreamSink_FinalizeExactlyOnceAndIgnoresLateCallbacks(t *testing.T) {
+	sink, api, _, _ := newSinkWithMockAPI(t)
+	api.On("EditMessageText", mock.Anything, mock.Anything).
+		Return(&telegram.Message{MessageID: 42}, nil).
+		Once()
+	finalizer := func(string) ([]telegram.SendMessageRequest, error) {
+		return []telegram.SendMessageRequest{{Text: "final", ParseMode: "HTML"}}, nil
+	}
+
+	extra, edits, err := sink.Finalize(finalizeArgs{FullText: "final"}, finalizer)
+	require.NoError(t, err)
+	assert.Empty(t, extra)
+	assert.Equal(t, 1, edits)
+	bufferBefore := sink.buf.String()
+
+	// Agent callbacks can race with the terminal path. They are ignored after
+	// Finalize and cannot issue another edit or mutate the source of truth.
+	sink.Delta(" late delta")
+	sink.Status("internet_search", `{"query":"late"}`)
+	sink.RAG("late query")
+	assert.Equal(t, bufferBefore, sink.buf.String())
+
+	extra, edits, err = sink.Finalize(finalizeArgs{FullText: "different final"}, finalizer)
+	assert.ErrorIs(t, err, errStreamSinkAlreadyFinalized)
+	assert.Empty(t, extra)
+	assert.Equal(t, 1, edits)
+	api.AssertNumberOfCalls(t, "EditMessageText", 1)
+	api.AssertExpectations(t)
+}
+
+func TestStreamSink_FinalizeMessageNotModifiedIsConfirmed(t *testing.T) {
+	sink, api, _, _ := newSinkWithMockAPI(t)
+	api.On("EditMessageText", mock.Anything, mock.Anything).
+		Return(nil, telegram.ErrMessageNotModified).
+		Once()
+
+	extra, _, err := sink.Finalize(
+		finalizeArgs{FullText: "already visible"},
+		func(string) ([]telegram.SendMessageRequest, error) {
+			return []telegram.SendMessageRequest{{Text: "already visible", ParseMode: "HTML"}}, nil
+		},
+	)
+
+	require.NoError(t, err)
+	assert.Empty(t, extra)
+	api.AssertExpectations(t)
+}
+
+func TestResponsePath_StreamingTerminalFailureIsNotPersistedOrResent(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "network", err: errors.New("connection reset after request write")},
+		{name: "telegram 500", err: &telegram.APIError{Code: 500, Description: "Internal Server Error"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := &recordingRichTransport{}
+			bot := newRichDeliveryTestBot(t, transport)
+			bot.cfg.Telegram.RichMessages.Mode = "off"
+			bot.cfg.Bot.Streaming.Enabled = true
+			api := new(testutil.MockBotAPI)
+			api.On("SendMessage", mock.Anything, mock.Anything).
+				Return(&telegram.Message{MessageID: 42}, nil).
+				Once()
+			api.On("EditMessageText", mock.Anything, mock.Anything).Return(nil, tt.err).Once()
+			bot.api = api
+			store := new(testutil.MockStorage)
+			bot.msgRepo = store
+
+			ctx, span := otel.Tracer("test").Start(context.Background(), "stream-terminal")
+			path := bot.newResponsePath(ctx, storage.ScopeID("user"), "123", true, "123", "", "7", bot.logger)
+			require.NotNil(t, path.sink)
+			ok := path.sendFinalAndPersist(ctx, span, "unique terminal answer", nil)
+			span.End()
+
+			assert.False(t, ok)
+			assert.Empty(t, path.deliveredMessageID)
+			assert.Empty(t, transport.responses, "unknown terminal edit must not use a fresh send path")
+			store.AssertNotCalled(t, "AddMessageToHistory", mock.Anything, mock.Anything)
+			store.AssertNotCalled(t, "SetReplyTransportID", mock.Anything, mock.Anything)
+			api.AssertNumberOfCalls(t, "SendMessage", 1)
+			api.AssertNumberOfCalls(t, "EditMessageText", 1)
+			api.AssertExpectations(t)
+		})
+	}
+}
+
+func TestResponsePath_FailedTerminalEditDoesNotSendOverflow(t *testing.T) {
+	transport := &recordingRichTransport{}
+	bot := newRichDeliveryTestBot(t, transport)
+	bot.cfg.Telegram.RichMessages.Mode = "off"
+	bot.cfg.Bot.Streaming.Enabled = true
+	api := new(testutil.MockBotAPI)
+	api.On("SendMessage", mock.Anything, mock.Anything).
+		Return(&telegram.Message{MessageID: 42}, nil).
+		Once()
+	api.On("EditMessageText", mock.Anything, mock.Anything).
+		Return(&telegram.Message{MessageID: 42}, nil).
+		Once()
+	api.On("EditMessageText", mock.Anything, mock.Anything).
+		Return(nil, errors.New("connection reset after request write")).
+		Once()
+	bot.api = api
+
+	ctx, span := otel.Tracer("test").Start(context.Background(), "stream-overflow")
+	path := bot.newResponsePath(ctx, storage.ScopeID("user"), "123", true, "123", "", "7", bot.logger)
+	require.NotNil(t, path.sink)
+	path.sink.Delta("seed")
+	path.sink.Delta(strings.Repeat("x", 3500))
+	require.Equal(t, streamModeOverflow, path.sink.mode)
+
+	ok := path.sendFinal(ctx, span, strings.Repeat("overflow payload ", 500))
+	span.End()
+
+	assert.False(t, ok)
+	assert.Empty(t, path.deliveredMessageID)
+	api.AssertNumberOfCalls(t, "SendMessage", 1)
+	api.AssertNumberOfCalls(t, "EditMessageText", 2)
 	api.AssertExpectations(t)
 }
 
@@ -513,12 +694,31 @@ func TestStreamSink_PlaceholderSendFailureDegradesGracefully(t *testing.T) {
 	api.AssertExpectations(t)
 
 	// Finalize returns nil chunks (caller falls back to its own send path).
-	extra, edits := sink.Finalize(finalizeArgs{FullText: "x"}, func(string) ([]telegram.SendMessageRequest, error) {
+	extra, edits, err := sink.Finalize(finalizeArgs{FullText: "x"}, func(string) ([]telegram.SendMessageRequest, error) {
 		t.Fatal("finalizeResponse should not be called when placeholder failed")
 		return nil, nil
 	})
+	require.NoError(t, err)
 	assert.Nil(t, extra)
 	assert.Equal(t, 0, edits)
+}
+
+func TestStreamSink_MalformedPlaceholderSuccessDegradesGracefully(t *testing.T) {
+	api := new(testutil.MockBotAPI)
+	api.On("SendMessage", mock.Anything, mock.Anything).Return((*telegram.Message)(nil), nil).Once()
+
+	translator, terr := i18n.NewTranslator("en")
+	require.NoError(t, terr)
+	var sink *streamSink
+	assert.NotPanics(t, func() {
+		sink = newStreamSink(
+			context.Background(), api, translator, "en",
+			defaultStreamingCfg(), 1, 0, 7, testutil.TestLogger(),
+		)
+	})
+	require.NotNil(t, sink)
+	assert.Zero(t, sink.MessageID())
+	api.AssertExpectations(t)
 }
 
 func TestStreamSink_StatusKeyMapping(t *testing.T) {

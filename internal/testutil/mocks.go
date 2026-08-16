@@ -27,6 +27,19 @@ func (m *MockBotAPI) SendMessage(ctx context.Context, req telegram.SendMessageRe
 	return args.Get(0).(*telegram.Message), args.Error(1)
 }
 
+func (m *MockBotAPI) SendRichMessage(ctx context.Context, req telegram.SendRichMessageRequest) (*telegram.Message, error) {
+	args := m.Called(ctx, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*telegram.Message), args.Error(1)
+}
+
+func (m *MockBotAPI) SendRichMessageDraft(ctx context.Context, req telegram.SendRichMessageDraftRequest) error {
+	args := m.Called(ctx, req)
+	return args.Error(0)
+}
+
 func (m *MockBotAPI) EditMessageText(ctx context.Context, req telegram.EditMessageTextRequest) (*telegram.Message, error) {
 	args := m.Called(ctx, req)
 	if args.Get(0) == nil {
@@ -859,6 +872,14 @@ func (m *MockFileDownloader) DownloadFile(ctx context.Context, fileID string) ([
 		return nil, args.Error(1)
 	}
 	return args.Get(0).([]byte), args.Error(1)
+}
+
+func (m *MockFileDownloader) DownloadFileWithLimit(ctx context.Context, fileID string, maxBytes int64) ([]byte, error) {
+	data, err := m.DownloadFile(ctx, fileID)
+	if err == nil && int64(len(data)) > maxBytes {
+		return nil, telegram.ErrFileDownloadTooLarge
+	}
+	return data, err
 }
 
 func (m *MockFileDownloader) DownloadFileAsBase64(ctx context.Context, fileID string) (string, error) {

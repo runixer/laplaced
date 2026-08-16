@@ -18,6 +18,12 @@ func (n *noOpBotAPI) SetDownloader(d telegram.FileDownloader) { n.downloader = d
 func (n *noOpBotAPI) SendMessage(_ context.Context, _ telegram.SendMessageRequest) (*telegram.Message, error) {
 	return &telegram.Message{MessageID: 1}, nil
 }
+func (n *noOpBotAPI) SendRichMessage(_ context.Context, _ telegram.SendRichMessageRequest) (*telegram.Message, error) {
+	return &telegram.Message{MessageID: 1}, nil
+}
+func (n *noOpBotAPI) SendRichMessageDraft(_ context.Context, _ telegram.SendRichMessageDraftRequest) error {
+	return nil
+}
 func (n *noOpBotAPI) EditMessageText(_ context.Context, req telegram.EditMessageTextRequest) (*telegram.Message, error) {
 	return &telegram.Message{MessageID: req.MessageID}, nil
 }

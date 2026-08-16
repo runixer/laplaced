@@ -254,8 +254,9 @@ func TestSetWebhook_CallsAPI(t *testing.T) {
 	secretToken := "secret123"
 
 	expectedReq := telegram.SetWebhookRequest{
-		URL:         webhookURL,
-		SecretToken: secretToken,
+		URL:            webhookURL,
+		SecretToken:    secretToken,
+		AllowedUpdates: telegram.AllowedUpdateTypes(),
 	}
 
 	mockAPI.On("SetWebhook", mock.Anything, expectedReq).Return(nil)

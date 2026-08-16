@@ -31,6 +31,11 @@ type Request struct {
 	// content via OnIntermediateMessage.
 	UseStreaming bool
 
+	// RichOutput tells prompt construction that this exact turn is eligible for
+	// Telegram Rich Message delivery. It is per-turn (canary-aware), not a
+	// process-wide transport capability; shadow/off turns keep legacy guidance.
+	RichOutput bool
+
 	// Callbacks for Telegram actions
 	OnIntermediateMessage func(text string)                // Called when tool call has intermediate text
 	OnContentDelta        func(text string)                // Streaming: called for each user-visible content fragment in the final iteration

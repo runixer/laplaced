@@ -111,7 +111,7 @@ func (t *MMTransport) SendText(ctx context.Context, r OutgoingResponse) (string,
 // SendText. Markdown is passed through (MM renders it natively).
 func (t *MMTransport) SendMedia(ctx context.Context, m OutgoingMedia) (string, error) {
 	if len(m.Items) == 0 {
-		return "", nil
+		return "", fmt.Errorf("mattermost: media delivery requires at least one item")
 	}
 	rootID := m.ThreadRoot
 	if rootID == "" && m.ReplyTo != "" {
@@ -125,6 +125,10 @@ func (t *MMTransport) SendMedia(ctx context.Context, m OutgoingMedia) (string, e
 		id, err := t.client.UploadFile(ctx, m.ConversationID, it.Filename, it.MIME, it.Data)
 		if err != nil {
 			t.logger.Error("mm upload file failed", "filename", it.Filename, "error", err)
+			continue
+		}
+		if strings.TrimSpace(id) == "" {
+			t.logger.Error("mm upload file returned no stable file id", "filename", it.Filename)
 			continue
 		}
 		fileIDs = append(fileIDs, id)
@@ -158,9 +162,19 @@ func (t *MMTransport) SendMedia(ctx context.Context, m OutgoingMedia) (string, e
 			}
 			return firstPostID, err
 		}
+		if post == nil || strings.TrimSpace(post.ID) == "" {
+			err := fmt.Errorf("mattermost: media post returned no stable id")
+			if firstPostID == "" {
+				return "", err
+			}
+			return firstPostID, err
+		}
 		if firstPostID == "" {
 			firstPostID = post.ID
 		}
+	}
+	if firstPostID == "" {
+		return "", fmt.Errorf("mattermost: media delivery returned no stable post id")
 	}
 	return firstPostID, nil
 }
@@ -360,13 +374,20 @@ func (b *Bot) extractMattermostFiles(client *mattermost.Client, post mattermost.
 			continue
 		}
 		id := fi.ID
+		fileName := fi.Name
 		out = append(out, files.IncomingFile{
 			Kind:     kind,
 			SourceID: id,
-			FileName: fi.Name,
+			FileName: fileName,
 			MIME:     fi.MimeType,
 			Size:     fi.Size,
-			Fetch:    func(ctx context.Context) ([]byte, error) { return client.GetFile(ctx, id) },
+			Fetch: func(ctx context.Context, maxBytes int64) ([]byte, error) {
+				data, err := client.GetFile(ctx, id)
+				if err == nil && maxBytes > 0 && int64(len(data)) > maxBytes {
+					return nil, &files.FileTooLargeError{Size: int64(len(data)), FileName: fileName}
+				}
+				return data, err
+			},
 		})
 	}
 	return out

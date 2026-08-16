@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
+	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/markdown"
 	"github.com/runixer/laplaced/internal/telegram"
 	"github.com/runixer/laplaced/internal/testutil"
@@ -191,7 +192,7 @@ func TestTelegramTransport_SendText_TooLongFallback(t *testing.T) {
 	// First HTML send is rejected; the fallback resends as plain text pieces.
 	mockAPI.On("SendMessage", mock.Anything, mock.MatchedBy(func(req telegram.SendMessageRequest) bool {
 		return req.ParseMode == "HTML"
-	})).Return(nil, errors.New("telegram api error: Bad Request: message is too long")).Once()
+	})).Return(nil, &telegram.APIError{Code: 400, Description: "Bad Request: message is too long"}).Once()
 	mockAPI.On("SendMessage", mock.Anything, mock.MatchedBy(func(req telegram.SendMessageRequest) bool {
 		return req.ParseMode == "" && markdown.UTF16Length(req.Text) <= telegramMessageLimit
 	})).Return(&telegram.Message{MessageID: 77}, nil)
@@ -222,7 +223,7 @@ func TestTelegramTransport_SendText_ParseEntitiesRetry(t *testing.T) {
 
 	mockAPI.On("SendMessage", mock.Anything, mock.MatchedBy(func(req telegram.SendMessageRequest) bool {
 		return req.ParseMode == "HTML"
-	})).Return(nil, errors.New(`telegram api error: Bad Request: can't parse entities: Unsupported start tag "." at byte offset 10`)).Once()
+	})).Return(nil, &telegram.APIError{Code: 400, Description: `Bad Request: can't parse entities: Unsupported start tag "." at byte offset 10`}).Once()
 	mockAPI.On("SendMessage", mock.Anything, mock.MatchedBy(func(req telegram.SendMessageRequest) bool {
 		return req.ParseMode == ""
 	})).Return(&telegram.Message{MessageID: 5}, nil).Once()
@@ -231,4 +232,258 @@ func TestTelegramTransport_SendText_ParseEntitiesRetry(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "5", msgID)
 	mockAPI.AssertExpectations(t)
+}
+
+func TestTelegramTransport_SendText_AmbiguousErrorTextDoesNotRetry(t *testing.T) {
+	mockAPI := new(testutil.MockBotAPI)
+	tr := NewTelegramTransport(mockAPI, testutil.TestConfig(), testutil.TestTranslator(t), testutil.TestLogger())
+
+	mockAPI.On("SendMessage", mock.Anything, mock.Anything).
+		Return(nil, errors.New("connection reset after request write: message is too long")).Once()
+
+	msgID, err := tr.SendText(context.Background(), OutgoingResponse{
+		ConversationID: "123",
+		Text:           "unique answer",
+	})
+
+	require.Error(t, err)
+	assert.Empty(t, msgID)
+	mockAPI.AssertNumberOfCalls(t, "SendMessage", 1)
+	mockAPI.AssertExpectations(t)
+}
+
+func TestTelegramTransport_SendText_RichHTML(t *testing.T) {
+	cfg := testutil.TestConfig()
+	cfg.Telegram.RichMessages.Mode = config.TelegramRichMessagesSend
+	mockAPI := new(testutil.MockBotAPI)
+	tr := NewTelegramTransport(mockAPI, cfg, testutil.TestTranslator(t), testutil.TestLogger())
+
+	mockAPI.On("SendRichMessage", mock.Anything, mock.MatchedBy(func(req telegram.SendRichMessageRequest) bool {
+		return req.ChatID == 123 &&
+			req.MessageThreadID != nil && *req.MessageThreadID == 9 &&
+			req.ReplyParameters != nil && req.ReplyParameters.MessageID == 42 &&
+			req.RichMessage.HTML == "<h1>Heading</h1>" &&
+			req.RichMessage.SkipEntityDetection
+	})).Return(&telegram.Message{MessageID: 77}, nil).Once()
+
+	msgID, err := tr.SendText(context.Background(), OutgoingResponse{
+		ConversationID: "123",
+		ThreadRoot:     "9",
+		ReplyTo:        "42",
+		Text:           "<h1>Heading</h1>",
+		Format:         ResponseFormatRichHTML,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "77", msgID)
+	assert.True(t, tr.Capabilities().SupportsRichMessages)
+	assert.True(t, tr.Capabilities().SupportsLatex)
+	mockAPI.AssertNotCalled(t, "SendMessage", mock.Anything, mock.Anything)
+	mockAPI.AssertExpectations(t)
+}
+
+func TestTelegramTransport_SendText_RichHTMLDisabled(t *testing.T) {
+	mockAPI := new(testutil.MockBotAPI)
+	tr := NewTelegramTransport(mockAPI, testutil.TestConfig(), testutil.TestTranslator(t), testutil.TestLogger())
+
+	_, err := tr.SendText(context.Background(), OutgoingResponse{
+		ConversationID: "123",
+		Text:           "<h1>Heading</h1>",
+		Format:         ResponseFormatRichHTML,
+	})
+	require.ErrorContains(t, err, "rich messages are disabled")
+	assert.False(t, tr.Capabilities().SupportsRichMessages)
+	mockAPI.AssertNotCalled(t, "SendRichMessage", mock.Anything, mock.Anything)
+}
+
+func TestTelegramTransport_SendRichMedia_InjectsTrustedPhotoBlock(t *testing.T) {
+	cfg := testutil.TestConfig()
+	cfg.Telegram.RichMessages.Mode = config.TelegramRichMessagesSend
+	cfg.Agents.ImageGenerator.DocumentThresholdBytes = 1024
+	mockAPI := new(testutil.MockBotAPI)
+	tr := NewTelegramTransport(mockAPI, cfg, testutil.TestTranslator(t), testutil.TestLogger())
+
+	mockAPI.On("SendRichMessage", mock.Anything, mock.MatchedBy(func(req telegram.SendRichMessageRequest) bool {
+		return req.ChatID == 123 &&
+			req.MessageThreadID != nil && *req.MessageThreadID == 9 &&
+			req.ReplyParameters != nil && req.ReplyParameters.MessageID == 42 &&
+			req.RichMessage.HTML == generatedRichPhotoHTML+"<h1>Heading</h1>" &&
+			req.RichMessage.SkipEntityDetection &&
+			len(req.RichMessage.Media) == 1 &&
+			req.RichMessage.Media[0].ID == generatedRichPhotoID &&
+			req.RichMessage.Media[0].Media.Media == "attach://"+generatedRichPhotoAttachID &&
+			len(req.Attachments) == 1 &&
+			req.Attachments[0].ID == generatedRichPhotoAttachID &&
+			req.Attachments[0].Filename == "generated.png" &&
+			string(req.Attachments[0].Data) == "png"
+	})).Return(&telegram.Message{MessageID: 88}, nil).Once()
+
+	msgID, err := tr.SendRichMedia(context.Background(), OutgoingRichMedia{
+		ConversationID: "123",
+		ThreadRoot:     "9",
+		ReplyTo:        "42",
+		HTML:           "<h1>Heading</h1>",
+		Items: []OutgoingMediaItem{{
+			Data: []byte("png"), Filename: "generated.png", MIME: "image/png",
+		}},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "88", msgID)
+	mockAPI.AssertNotCalled(t, "SendPhoto", mock.Anything, mock.Anything)
+	mockAPI.AssertExpectations(t)
+}
+
+func TestTelegramTransport_SendRichMedia_RejectionClassification(t *testing.T) {
+	cfg := testutil.TestConfig()
+	cfg.Telegram.RichMessages.Mode = config.TelegramRichMessagesSend
+	cfg.Agents.ImageGenerator.DocumentThresholdBytes = 1024
+
+	for _, tt := range []struct {
+		name         string
+		err          error
+		wantFallback bool
+	}{
+		{
+			name: "confirmed rich format rejection",
+			err: &telegram.APIError{
+				Code: 400, Description: "Bad Request: RICH_MESSAGE_MEDIA_INVALID",
+			},
+			wantFallback: true,
+		},
+		{name: "ambiguous network failure", err: errors.New("connection reset after request write")},
+		{name: "server failure", err: &telegram.APIError{Code: 500, Description: "Internal Server Error"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			mockAPI := new(testutil.MockBotAPI)
+			mockAPI.On("SendRichMessage", mock.Anything, mock.Anything).Return(nil, tt.err).Once()
+			tr := NewTelegramTransport(mockAPI, cfg, testutil.TestTranslator(t), testutil.TestLogger())
+
+			_, err := tr.SendRichMedia(context.Background(), OutgoingRichMedia{
+				ConversationID: "123",
+				HTML:           "<p>answer</p>",
+				Items: []OutgoingMediaItem{{
+					Data: []byte("png"), Filename: "generated.png", MIME: "image/png",
+				}},
+			})
+
+			require.Error(t, err)
+			assert.Equal(t, tt.wantFallback, errors.Is(err, ErrRichMessageRejected))
+			mockAPI.AssertExpectations(t)
+		})
+	}
+}
+
+func TestTelegramTransport_SendText_RichRejectionClassification(t *testing.T) {
+	newTransport := func(t *testing.T, sendErr error) (*TelegramTransport, *testutil.MockBotAPI) {
+		t.Helper()
+		cfg := testutil.TestConfig()
+		cfg.Telegram.RichMessages.Mode = config.TelegramRichMessagesSend
+		mockAPI := new(testutil.MockBotAPI)
+		mockAPI.On("SendRichMessage", mock.Anything, mock.Anything).Return(nil, sendErr).Once()
+		return NewTelegramTransport(mockAPI, cfg, testutil.TestTranslator(t), testutil.TestLogger()), mockAPI
+	}
+
+	t.Run("confirmed API rejection permits legacy fallback", func(t *testing.T) {
+		tr, mockAPI := newTransport(t, &telegram.APIError{Code: 400, Description: "Bad Request: RICH_MESSAGE_INVALID"})
+		_, err := tr.SendText(context.Background(), OutgoingResponse{
+			ConversationID: "123",
+			Text:           "<p>answer</p>",
+			Format:         ResponseFormatRichHTML,
+		})
+		require.ErrorIs(t, err, ErrRichMessageRejected)
+		var apiErr *telegram.APIError
+		require.ErrorAs(t, err, &apiErr)
+		assert.Equal(t, 400, apiErr.Code)
+		mockAPI.AssertExpectations(t)
+	})
+
+	t.Run("method not found permits legacy fallback", func(t *testing.T) {
+		tr, mockAPI := newTransport(t, &telegram.APIError{Code: 404, Description: "Not Found"})
+		_, err := tr.SendText(context.Background(), OutgoingResponse{
+			ConversationID: "123",
+			Text:           "<p>answer</p>",
+			Format:         ResponseFormatRichHTML,
+		})
+		require.ErrorIs(t, err, ErrRichMessageRejected)
+		mockAPI.AssertExpectations(t)
+	})
+
+	confirmedNonFormatRejections := []struct {
+		name        string
+		code        int
+		description string
+	}{
+		{name: "chat not found", code: 400, description: "Bad Request: chat not found"},
+		{name: "invalid thread", code: 400, description: "Bad Request: message thread not found"},
+		{name: "ordinary HTML parse error", code: 400, description: "Bad Request: can't parse entities"},
+		{name: "unauthorized", code: 401, description: "Unauthorized"},
+		{name: "forbidden", code: 403, description: "Forbidden: bot was blocked by the user"},
+		{name: "generic 404", code: 404, description: "Bad Request: chat not found"},
+		{name: "rate limited", code: 429, description: "Too Many Requests"},
+		{name: "server error", code: 500, description: "Internal Server Error"},
+	}
+	for _, tt := range confirmedNonFormatRejections {
+		t.Run(tt.name+" does not permit cross-format fallback", func(t *testing.T) {
+			tr, mockAPI := newTransport(t, &telegram.APIError{Code: tt.code, Description: tt.description})
+			_, err := tr.SendText(context.Background(), OutgoingResponse{
+				ConversationID: "123",
+				Text:           "<p>answer</p>",
+				Format:         ResponseFormatRichHTML,
+			})
+			require.Error(t, err)
+			assert.NotErrorIs(t, err, ErrRichMessageRejected)
+			mockAPI.AssertExpectations(t)
+		})
+	}
+
+	t.Run("ambiguous network error forbids content resend", func(t *testing.T) {
+		tr, mockAPI := newTransport(t, errors.New("connection reset after request write"))
+		_, err := tr.SendText(context.Background(), OutgoingResponse{
+			ConversationID: "123",
+			Text:           "<p>answer</p>",
+			Format:         ResponseFormatRichHTML,
+		})
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, ErrRichMessageRejected)
+		mockAPI.AssertExpectations(t)
+	})
+}
+
+func TestTelegramTransport_SendText_RejectsMalformedSuccess(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		msg  *telegram.Message
+	}{
+		{name: "nil message", msg: nil},
+		{name: "zero message id", msg: &telegram.Message{}},
+	} {
+		t.Run("rich/"+tt.name, func(t *testing.T) {
+			cfg := testutil.TestConfig()
+			cfg.Telegram.RichMessages.Mode = config.TelegramRichMessagesSend
+			mockAPI := new(testutil.MockBotAPI)
+			mockAPI.On("SendRichMessage", mock.Anything, mock.Anything).Return(tt.msg, nil).Once()
+			tr := NewTelegramTransport(mockAPI, cfg, testutil.TestTranslator(t), testutil.TestLogger())
+
+			msgID, err := tr.SendText(context.Background(), OutgoingResponse{
+				ConversationID: "123",
+				Text:           "<p>answer</p>",
+				Format:         ResponseFormatRichHTML,
+			})
+			require.Error(t, err)
+			assert.Empty(t, msgID)
+			assert.NotErrorIs(t, err, ErrRichMessageRejected)
+			mockAPI.AssertExpectations(t)
+		})
+
+		t.Run("legacy/"+tt.name, func(t *testing.T) {
+			mockAPI := new(testutil.MockBotAPI)
+			mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(tt.msg, nil).Once()
+			tr := NewTelegramTransport(mockAPI, testutil.TestConfig(), testutil.TestTranslator(t), testutil.TestLogger())
+
+			msgID, err := tr.SendText(context.Background(), OutgoingResponse{ConversationID: "123", Text: "answer"})
+			require.Error(t, err)
+			assert.Empty(t, msgID)
+			mockAPI.AssertExpectations(t)
+		})
+	}
 }

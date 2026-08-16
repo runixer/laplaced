@@ -174,6 +174,75 @@ func TestLoadContextData_RAGDisabled(t *testing.T) {
 	_ = translator
 }
 
+func TestLoadContextData_MathPromptFollowsTransportRendering(t *testing.T) {
+	tests := []struct {
+		name        string
+		transport   string
+		richEnabled bool
+		streaming   bool
+		wantKatex   bool
+		wantRich    bool
+	}{
+		{name: "legacy telegram", transport: "telegram", wantKatex: false},
+		{name: "rich telegram", transport: "telegram", richEnabled: true, wantKatex: true, wantRich: true},
+		{name: "rich flag supersedes legacy streaming", transport: "telegram", richEnabled: true, streaming: true, wantKatex: true, wantRich: true},
+		{name: "mattermost", transport: "mattermost", wantKatex: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, _, lap, mockStore, _, _ := setupContextTest(t)
+			cfg.Transport = tt.transport
+			if tt.richEnabled {
+				cfg.Telegram.RichMessages.Mode = config.TelegramRichMessagesSend
+			}
+			cfg.Bot.Streaming.Enabled = tt.streaming
+			mockStore.On("GetUnprocessedMessages", storage.ScopeID("123")).Return([]storage.Message{}, nil)
+			mockStore.On("GetFacts", storage.ScopeID("123")).Return([]storage.Fact{}, nil)
+
+			contextData, err := lap.LoadContextData(context.Background(), storage.ScopeID("123"), "math", nil)
+			require.NoError(t, err)
+			if tt.wantKatex {
+				assert.Contains(t, contextData.BaseSystemPrompt, "This platform renders formulas with KaTeX")
+				assert.NotContains(t, contextData.BaseSystemPrompt, "does NOT render LaTeX/KaTeX")
+			} else {
+				assert.Contains(t, contextData.BaseSystemPrompt, "does NOT render LaTeX/KaTeX")
+			}
+			if tt.wantRich {
+				assert.Contains(t, contextData.BaseSystemPrompt, "strict GFM block boundaries")
+				assert.Contains(t, contextData.BaseSystemPrompt, "visually separate sections INSIDE one rich message")
+				assert.Contains(t, contextData.BaseSystemPrompt, "hard boundary between separate messages")
+				assert.Contains(t, contextData.BaseSystemPrompt, "do not use it for ordinary sections or merely because a response is long")
+			} else {
+				assert.NotContains(t, contextData.BaseSystemPrompt, "strict GFM block boundaries")
+				assert.NotContains(t, contextData.BaseSystemPrompt, "visually separate sections INSIDE one rich message")
+				assert.Contains(t, contextData.BaseSystemPrompt, "separator for multiple separate messages")
+			}
+			mockStore.AssertExpectations(t)
+		})
+	}
+}
+
+func TestLoadContextData_RichPromptIsPerTurn(t *testing.T) {
+	cfg, _, lap, mockStore, _, _ := setupContextTest(t)
+	cfg.Transport = "telegram"
+	cfg.Telegram.RichMessages.Mode = config.TelegramRichMessagesSend // global capability must not override explicit per-turn choice
+	userID := storage.ScopeID("123")
+	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil).Twice()
+	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil).Twice()
+
+	legacy, err := lap.loadContextData(context.Background(), userID, "math", nil, false)
+	require.NoError(t, err)
+	assert.Contains(t, legacy.BaseSystemPrompt, "does NOT render LaTeX/KaTeX")
+	assert.NotContains(t, legacy.BaseSystemPrompt, "strict GFM block boundaries")
+
+	rich, err := lap.loadContextData(context.Background(), userID, "math", nil, true)
+	require.NoError(t, err)
+	assert.Contains(t, rich.BaseSystemPrompt, "This platform renders formulas with KaTeX")
+	assert.Contains(t, rich.BaseSystemPrompt, "strict GFM block boundaries")
+	mockStore.AssertExpectations(t)
+}
+
 // TestLoadContextData_MessageLimiting tests MaxContextMessages limiting.
 func TestLoadContextData_MessageLimiting(t *testing.T) {
 	cfg, translator, lap, mockStore, _, _ := setupContextTest(t)

@@ -60,12 +60,28 @@ sequenceDiagram
 
 `internal/bot/transport_telegram.go`:
 
-- Картинки **меньше** `document_threshold_bytes` (по умолчанию 2 MB) уходят как
-  Photo; **больше или равно** — как Document (Telegram не пережимает Document до
+- Картинки размером **не больше** `document_threshold_bytes` (по умолчанию 2 MB)
+  уходят как Photo; **больше** — как Document (Telegram не пережимает Document до
   ~1280px, в отличие от Photo).
 - Один файл — одиночная отправка; 2–10 — сгруппированный альбом.
 - Подпись рендерится Markdown → HTML так же, как текстовые ответы; переполнение
   лимита подписи уходит отдельным сообщением.
+- Для Telegram rich-canary действует узкий нативный путь: ровно одна
+  сгенерированная картинка класса Photo и полный ответ, помещающийся в один Rich
+  Message, отправляются одним multipart `sendRichMessage`. Картинка добавляется
+  из доверенного `GeneratedArtifactID` как верхнеуровневый `<img>`, а рядом
+  сохраняются нативные заголовки, таблицы, формулы, списки и spoiler ответа.
+- Альбомы, Document, rich-ответы со split и локально невалидный rich layout
+  остаются на проверенном media + caption/follow-up пути. При сетевой ошибке,
+  5xx или неразбираемом success бот не повторяет upload в другом формате;
+  legacy fallback разрешён только после явного rich-format rejection Telegram.
+
+Это зафиксированный контракт rich v1. Общий composition planner, несколько
+изображений в collage/slideshow, media-aware split и отдельная политика
+rich-preview + оригинальный Document относятся к v2. До их реализации legacy
+ветка для этих случаев является поддерживаемым поведением, а не ошибкой.
+Rollout и stop-сигналы описаны в
+[telegram-rich-messages.md](../telegram-rich-messages.md).
 
 ## Обработка ошибок: пять режимов
 

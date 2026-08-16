@@ -76,6 +76,16 @@ func TestToHTML(t *testing.T) {
 			expected: "1. first\n2. second",
 		},
 		{
+			name:     "Ordered list preserves start",
+			input:    "3. third\n4. fourth",
+			expected: "3. third\n4. fourth",
+		},
+		{
+			name:     "Ordered list start above nine",
+			input:    "10. tenth\n11. eleventh",
+			expected: "10. tenth\n11. eleventh",
+		},
+		{
 			name:     "Nested bold italic",
 			input:    "**bold *and italic***",
 			expected: "<b>bold <i>and italic</i></b>",
@@ -777,6 +787,30 @@ func TestEscapingInLinksAndFences(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestToSafeLegacyHTMLMatchesRichContentPolicy(t *testing.T) {
+	input := "hello @alice " +
+		"[safe](https://example.com/a?x=1&y=2) " +
+		"[@bob](tg://user?id=123) " +
+		"[js](javascript:alert) " +
+		"![cat photo](https://evil.example/cat.jpg) " +
+		"bare TG://user?id=456 " +
+		"`@code tg://kept-in-code`"
+
+	got, err := ToSafeLegacyHTML(input)
+	require.NoError(t, err)
+	assert.Contains(t, got, "hello @\u2060alice")
+	assert.Contains(t, got, `<a href="https://example.com/a?x=1&amp;y=2">safe</a>`)
+	assert.Contains(t, got, "@\u2060bob")
+	assert.Contains(t, got, "js")
+	assert.Contains(t, got, "cat photo")
+	assert.Contains(t, got, "bare TG:\u2060//user?id=456")
+	assert.Contains(t, got, "<code>@code tg://kept-in-code</code>")
+	withoutCode := strings.ReplaceAll(strings.ToLower(got), "<code>@code tg://kept-in-code</code>", "")
+	assert.NotContains(t, withoutCode, "tg://")
+	assert.NotContains(t, strings.ToLower(got), "javascript:")
+	assert.NotContains(t, strings.ToLower(got), "<img")
 }
 
 func TestHardSplitUTF16(t *testing.T) {

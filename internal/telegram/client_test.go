@@ -3,15 +3,24 @@ package telegram
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 func TestNewClient(t *testing.T) {
 	t.Run("without proxy", func(t *testing.T) {
@@ -91,6 +100,531 @@ func TestSendMessage(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, msg)
 	assert.Equal(t, 1, msg.MessageID)
+}
+
+func TestSendRichMessage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/botfake-token/sendRichMessage", r.URL.Path)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{
+			"chat_id": 123,
+			"message_thread_id": 7,
+			"rich_message": {
+				"html": "<blockquote expandable>details</blockquote>",
+				"skip_entity_detection": true
+			},
+			"reply_parameters": {"message_id": 42}
+		}`, string(body))
+
+		resp := APIResponse{
+			Ok:     true,
+			Result: json.RawMessage(`{"message_id": 8, "chat": {"id": 123, "type": "private"}}`),
+		}
+		require.NoError(t, json.NewEncoder(w).Encode(resp))
+	}))
+	defer server.Close()
+
+	threadID := 7
+	msg, err := (&Client{
+		token:      "fake-token",
+		httpClient: server.Client(),
+		apiURL:     server.URL + "/botfake-token",
+	}).SendRichMessage(context.Background(), SendRichMessageRequest{
+		ChatID:          123,
+		MessageThreadID: &threadID,
+		RichMessage: InputRichMessage{
+			HTML:                "<blockquote expandable>details</blockquote>",
+			SkipEntityDetection: true,
+		},
+		ReplyParameters: &ReplyParameters{MessageID: 42},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, msg)
+	assert.Equal(t, 8, msg.MessageID)
+}
+
+func TestSendRichMessage_MultipartPhoto(t *testing.T) {
+	photoBytes := []byte("generated-png-bytes")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/botfake-token/sendRichMessage", r.URL.Path)
+		assert.True(t, strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data; boundary="))
+		require.NoError(t, r.ParseMultipartForm(1<<20))
+
+		require.NotNil(t, r.MultipartForm)
+		assert.Len(t, r.MultipartForm.Value, 4)
+		assert.Equal(t, []string{"123"}, r.MultipartForm.Value["chat_id"])
+		assert.Equal(t, []string{"7"}, r.MultipartForm.Value["message_thread_id"])
+		require.Len(t, r.MultipartForm.Value["rich_message"], 1)
+		assert.JSONEq(t, `{
+			"html": "<img src=\"tg://photo?id=hero\"/>",
+			"media": [{
+				"id": "hero",
+				"media": {"type": "photo", "media": "attach://hero_file"}
+			}],
+			"skip_entity_detection": true
+		}`, r.MultipartForm.Value["rich_message"][0])
+		require.Len(t, r.MultipartForm.Value["reply_parameters"], 1)
+		assert.JSONEq(t, `{"message_id":42}`, r.MultipartForm.Value["reply_parameters"][0])
+
+		assert.Len(t, r.MultipartForm.File, 1)
+		files := r.MultipartForm.File["hero_file"]
+		require.Len(t, files, 1)
+		assert.Equal(t, "hero.png", files[0].Filename)
+		assert.Equal(t, "application/octet-stream", files[0].Header.Get("Content-Type"))
+		file, err := files[0].Open()
+		require.NoError(t, err)
+		defer file.Close()
+		got, err := io.ReadAll(file)
+		require.NoError(t, err)
+		assert.Equal(t, photoBytes, got)
+
+		require.NoError(t, json.NewEncoder(w).Encode(APIResponse{
+			Ok:     true,
+			Result: json.RawMessage(`{"message_id": 88, "chat": {"id": 123, "type": "private"}}`),
+		}))
+	}))
+	defer server.Close()
+
+	threadID := 7
+	msg, err := (&Client{
+		token:      "fake-token",
+		httpClient: server.Client(),
+		apiURL:     server.URL + "/botfake-token",
+	}).SendRichMessage(context.Background(), SendRichMessageRequest{
+		ChatID:          123,
+		MessageThreadID: &threadID,
+		RichMessage: InputRichMessage{
+			HTML: `<img src="tg://photo?id=hero"/>`,
+			Media: []InputRichMessageMedia{{
+				ID:    "hero",
+				Media: InputRichMessagePhoto{Media: "attach://hero_file"},
+			}},
+			SkipEntityDetection: true,
+		},
+		ReplyParameters: &ReplyParameters{MessageID: 42},
+		Attachments: []RichMessageAttachment{{
+			ID: "hero_file", Filename: "hero.png", Data: photoBytes,
+		}},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, msg)
+	assert.Equal(t, 88, msg.MessageID)
+}
+
+func TestSendRichMessage_MultipartRejectsInvalidAttachmentsBeforeRequest(t *testing.T) {
+	validRequest := func() SendRichMessageRequest {
+		return SendRichMessageRequest{
+			ChatID: 123,
+			RichMessage: InputRichMessage{
+				HTML: `<img src="tg://photo?id=hero"/>`,
+				Media: []InputRichMessageMedia{{
+					ID:    "hero",
+					Media: InputRichMessagePhoto{Media: "attach://hero_file"},
+				}},
+			},
+			Attachments: []RichMessageAttachment{{
+				ID: "hero_file", Filename: "hero.png", Data: []byte("png"),
+			}},
+		}
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*SendRichMessageRequest)
+		want   string
+	}{
+		{name: "empty attachment id", mutate: func(r *SendRichMessageRequest) {
+			r.Attachments[0].ID = ""
+		}, want: "invalid id"},
+		{name: "invalid attachment id", mutate: func(r *SendRichMessageRequest) {
+			r.Attachments[0].ID = "bad id"
+		}, want: "invalid id"},
+		{name: "duplicate attachment id", mutate: func(r *SendRichMessageRequest) {
+			r.Attachments = append(r.Attachments, r.Attachments[0])
+		}, want: "duplicated"},
+		{name: "empty filename", mutate: func(r *SendRichMessageRequest) {
+			r.Attachments[0].Filename = " "
+		}, want: "empty filename"},
+		{name: "empty data", mutate: func(r *SendRichMessageRequest) {
+			r.Attachments[0].Data = nil
+		}, want: "empty data"},
+		{name: "unreferenced attachment", mutate: func(r *SendRichMessageRequest) {
+			r.Attachments[0].ID = "other_file"
+		}, want: "not referenced"},
+		{name: "missing all referenced uploads", mutate: func(r *SendRichMessageRequest) {
+			r.Attachments = nil
+		}, want: "has no uploaded file"},
+		{name: "missing referenced upload", mutate: func(r *SendRichMessageRequest) {
+			r.RichMessage.Media = append(r.RichMessage.Media, InputRichMessageMedia{
+				ID: "second", Media: InputRichMessagePhoto{Media: "attach://second_file"},
+			})
+		}, want: "has no uploaded file"},
+		{name: "duplicate media id", mutate: func(r *SendRichMessageRequest) {
+			r.RichMessage.Media = append(r.RichMessage.Media, InputRichMessageMedia{
+				ID: "hero", Media: InputRichMessagePhoto{Media: "https://example.com/other.png"},
+			})
+		}, want: "media id"},
+		{name: "duplicate local reference", mutate: func(r *SendRichMessageRequest) {
+			r.RichMessage.Media = append(r.RichMessage.Media, InputRichMessageMedia{
+				ID: "second", Media: InputRichMessagePhoto{Media: "attach://hero_file"},
+			})
+		}, want: "referenced more than once"},
+		{name: "empty photo source", mutate: func(r *SendRichMessageRequest) {
+			r.RichMessage.Media[0].Media.Media = ""
+		}, want: "empty photo source"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			client := &Client{
+				httpClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+					calls++
+					return nil, errors.New("must not be called")
+				})},
+				apiURL: "https://api.telegram.invalid/botfake-token",
+			}
+			req := validRequest()
+			tt.mutate(&req)
+
+			msg, err := client.SendRichMessage(context.Background(), req)
+
+			require.Error(t, err)
+			assert.Nil(t, msg)
+			assert.Contains(t, err.Error(), tt.want)
+			assert.Zero(t, calls)
+		})
+	}
+}
+
+func TestSendRichMessage_MultipartAPIRejectionIsStructured(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		require.NoError(t, json.NewEncoder(w).Encode(APIResponse{
+			Ok:          false,
+			ErrorCode:   400,
+			Description: "Bad Request: invalid rich media",
+			Parameters:  &ResponseParameters{RetryAfter: 3},
+		}))
+	}))
+	defer server.Close()
+
+	client := &Client{token: "fake-token", httpClient: server.Client(), apiURL: server.URL + "/botfake-token"}
+	_, err := client.SendRichMessage(context.Background(), SendRichMessageRequest{
+		ChatID: 123,
+		RichMessage: InputRichMessage{
+			HTML: `<img src="tg://photo?id=hero"/>`,
+			Media: []InputRichMessageMedia{{
+				ID: "hero", Media: InputRichMessagePhoto{Media: "attach://hero_file"},
+			}},
+		},
+		Attachments: []RichMessageAttachment{{
+			ID: "hero_file", Filename: "hero.png", Data: []byte("png"),
+		}},
+	})
+
+	require.Error(t, err)
+	var apiErr *APIError
+	require.True(t, errors.As(err, &apiErr))
+	assert.Equal(t, 400, apiErr.Code)
+	assert.Equal(t, "Bad Request: invalid rich media", apiErr.Description)
+	require.NotNil(t, apiErr.Parameters)
+	assert.Equal(t, 3, apiErr.Parameters.RetryAfter)
+}
+
+func TestSendRichMessage_MultipartAmbiguousFailureIsNotRetried(t *testing.T) {
+	calls := 0
+	client := &Client{
+		token: "fake-token",
+		httpClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			calls++
+			return nil, errors.New("connection reset after request write for fake-token")
+		})},
+		apiURL: "https://api.telegram.invalid/botfake-token",
+	}
+
+	_, err := client.SendRichMessage(context.Background(), SendRichMessageRequest{
+		ChatID: 123,
+		RichMessage: InputRichMessage{
+			HTML: `<img src="tg://photo?id=hero"/>`,
+			Media: []InputRichMessageMedia{{
+				ID: "hero", Media: InputRichMessagePhoto{Media: "attach://hero_file"},
+			}},
+		},
+		Attachments: []RichMessageAttachment{{
+			ID: "hero_file", Filename: "hero.png", Data: []byte("png"),
+		}},
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, 1, calls)
+	var apiErr *APIError
+	assert.False(t, errors.As(err, &apiErr))
+	assert.NotContains(t, err.Error(), "fake-token")
+}
+
+func TestSendRichMessageRequest_OmitsOptionalFields(t *testing.T) {
+	body, err := json.Marshal(SendRichMessageRequest{
+		ChatID:      123,
+		RichMessage: InputRichMessage{HTML: "<b>Hello</b>"},
+		Attachments: []RichMessageAttachment{{ID: "ignored", Filename: "ignored.png", Data: []byte("ignored")}},
+	})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{
+		"chat_id": 123,
+		"rich_message": {"html": "<b>Hello</b>"}
+	}`, string(body))
+}
+
+func TestSendRichMessageDraft(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/botfake-token/sendRichMessageDraft", r.URL.Path)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{
+			"chat_id": 123,
+			"message_thread_id": 7,
+			"draft_id": 987654321,
+			"rich_message": {
+				"html": "<tg-thinking>Working…</tg-thinking><p>Partial</p>",
+				"skip_entity_detection": true
+			}
+		}`, string(body))
+
+		require.NoError(t, json.NewEncoder(w).Encode(APIResponse{
+			Ok:     true,
+			Result: json.RawMessage(`true`),
+		}))
+	}))
+	defer server.Close()
+
+	threadID := 7
+	err := (&Client{
+		token:      "fake-token",
+		httpClient: server.Client(),
+		apiURL:     server.URL + "/botfake-token",
+	}).SendRichMessageDraft(context.Background(), SendRichMessageDraftRequest{
+		ChatID:          123,
+		MessageThreadID: &threadID,
+		DraftID:         987654321,
+		RichMessage: InputRichMessage{
+			HTML:                "<tg-thinking>Working…</tg-thinking><p>Partial</p>",
+			SkipEntityDetection: true,
+		},
+	})
+
+	require.NoError(t, err)
+}
+
+func TestSendRichMessageDraftRequest_OmitsOptionalFields(t *testing.T) {
+	body, err := json.Marshal(SendRichMessageDraftRequest{
+		ChatID:      123,
+		DraftID:     9,
+		RichMessage: InputRichMessage{HTML: "<p>Partial</p>"},
+	})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{
+		"chat_id": 123,
+		"draft_id": 9,
+		"rich_message": {"html": "<p>Partial</p>"}
+	}`, string(body))
+}
+
+func TestSendRichMessageDraft_RejectsInvalidDraftIDBeforeRequest(t *testing.T) {
+	for _, draftID := range []int64{0, -1, 1 << 31} {
+		calls := 0
+		client := &Client{
+			httpClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls++
+				return nil, errors.New("must not be called")
+			})},
+			apiURL: "https://api.telegram.invalid/botfake-token",
+		}
+
+		err := client.SendRichMessageDraft(context.Background(), SendRichMessageDraftRequest{
+			ChatID:      123,
+			DraftID:     draftID,
+			RichMessage: InputRichMessage{HTML: "<p>Partial</p>"},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "positive int32 draft_id")
+		assert.Zero(t, calls)
+	}
+}
+
+func TestSendRichMessageDraft_RequiresTrueResult(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "missing result", body: `{"ok":true}`},
+		{name: "null result", body: `{"ok":true,"result":null}`},
+		{name: "false result", body: `{"ok":true,"result":false}`},
+		{name: "string result", body: `{"ok":true,"result":"true"}`},
+		{name: "object result", body: `{"ok":true,"result":{}}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			err := (&Client{
+				token:      "fake-token",
+				httpClient: server.Client(),
+				apiURL:     server.URL + "/botfake-token",
+			}).SendRichMessageDraft(context.Background(), SendRichMessageDraftRequest{
+				ChatID:      123,
+				DraftID:     9,
+				RichMessage: InputRichMessage{HTML: "<p>Partial</p>"},
+			})
+
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestSendRichMessageDraft_TransportRetryReusesDraftID(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping retry test in short mode")
+	}
+
+	calls := 0
+	var bodies []string
+	client := &Client{
+		token: "fake-token",
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			calls++
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			bodies = append(bodies, string(body))
+			if calls == 1 {
+				return nil, errors.New("connection reset after request write")
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":true}`)),
+			}, nil
+		})},
+		apiURL: "https://api.telegram.invalid/botfake-token",
+	}
+
+	err := client.SendRichMessageDraft(context.Background(), SendRichMessageDraftRequest{
+		ChatID:      123,
+		DraftID:     44,
+		RichMessage: InputRichMessage{HTML: "<p>Partial</p>"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, calls)
+	require.Len(t, bodies, 2)
+	assert.JSONEq(t, bodies[0], bodies[1])
+	assert.JSONEq(t, `{
+		"chat_id": 123,
+		"draft_id": 44,
+		"rich_message": {"html": "<p>Partial</p>"}
+	}`, bodies[0])
+}
+
+func TestSendRichMessage_AmbiguousNetworkFailureIsNotRetried(t *testing.T) {
+	calls := 0
+	client := &Client{
+		token: "fake-token",
+		httpClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			calls++
+			return nil, errors.New("connection reset after request write")
+		})},
+		apiURL: "https://api.telegram.invalid/botfake-token",
+	}
+
+	_, err := client.SendRichMessage(context.Background(), SendRichMessageRequest{
+		ChatID:      123,
+		RichMessage: InputRichMessage{HTML: "<p>answer</p>"},
+	})
+	require.Error(t, err)
+	assert.Equal(t, 1, calls)
+	var apiErr *APIError
+	assert.False(t, errors.As(err, &apiErr))
+	assert.NotContains(t, err.Error(), "fake-token")
+}
+
+func TestSendMessage_AmbiguousNetworkFailureIsNotRetried(t *testing.T) {
+	calls := 0
+	client := &Client{
+		token: "fake-token",
+		httpClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			calls++
+			return nil, errors.New("connection reset after request write")
+		})},
+		apiURL: "https://api.telegram.invalid/botfake-token",
+	}
+
+	_, err := client.SendMessage(context.Background(), SendMessageRequest{ChatID: 123, Text: "unique answer"})
+	require.Error(t, err)
+	assert.Equal(t, 1, calls)
+	var apiErr *APIError
+	assert.False(t, errors.As(err, &apiErr))
+	assert.NotContains(t, err.Error(), "fake-token")
+}
+
+func TestPersistentSendRejectsMalformedSuccess(t *testing.T) {
+	results := []struct {
+		name string
+		body string
+	}{
+		{name: "missing result", body: `{"ok":true}`},
+		{name: "null result", body: `{"ok":true,"result":null}`},
+		{name: "empty message", body: `{"ok":true,"result":{}}`},
+		{name: "wrong result type", body: `{"ok":true,"result":"not a message"}`},
+	}
+	methods := []string{"sendMessage", "sendRichMessage"}
+
+	for _, method := range methods {
+		for _, result := range results {
+			t.Run(method+"/"+result.name, func(t *testing.T) {
+				calls := 0
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					calls++
+					assert.Equal(t, "/botfake-token/"+method, r.URL.Path)
+					_, _ = w.Write([]byte(result.body))
+				}))
+				defer server.Close()
+
+				client := &Client{
+					token:      "fake-token",
+					httpClient: server.Client(),
+					apiURL:     server.URL + "/botfake-token",
+				}
+				var msg *Message
+				var err error
+				if method == "sendMessage" {
+					msg, err = client.SendMessage(context.Background(), SendMessageRequest{ChatID: 123, Text: "answer"})
+				} else {
+					msg, err = client.SendRichMessage(context.Background(), SendRichMessageRequest{
+						ChatID:      123,
+						RichMessage: InputRichMessage{HTML: "<p>answer</p>"},
+					})
+				}
+				require.Error(t, err)
+				assert.Nil(t, msg)
+				assert.Equal(t, 1, calls)
+				var apiErr *APIError
+				assert.False(t, errors.As(err, &apiErr))
+			})
+		}
+	}
 }
 
 func TestEditMessageText(t *testing.T) {
@@ -217,6 +751,7 @@ func TestSetWebhook(t *testing.T) {
 		err := json.NewDecoder(r.Body).Decode(&req)
 		assert.NoError(t, err)
 		assert.Equal(t, "https://example.com", req.URL)
+		assert.Equal(t, AllowedUpdateTypes(), req.AllowedUpdates)
 
 		resp := APIResponse{
 			Ok: true,
@@ -232,7 +767,8 @@ func TestSetWebhook(t *testing.T) {
 	}
 
 	req := SetWebhookRequest{
-		URL: "https://example.com",
+		URL:            "https://example.com",
+		AllowedUpdates: AllowedUpdateTypes(),
 	}
 
 	err := client.SetWebhook(context.Background(), req)
@@ -347,6 +883,7 @@ func TestGetUpdates(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 10, req.Offset)
 		assert.Equal(t, 30, req.Timeout)
+		assert.Equal(t, AllowedUpdateTypes(), req.AllowedUpdates)
 
 		resp := APIResponse{
 			Ok:     true,
@@ -364,8 +901,9 @@ func TestGetUpdates(t *testing.T) {
 	}
 
 	req := GetUpdatesRequest{
-		Offset:  10,
-		Timeout: 30,
+		Offset:         10,
+		Timeout:        30,
+		AllowedUpdates: AllowedUpdateTypes(),
 	}
 
 	updates, err := client.GetUpdates(context.Background(), req)
@@ -547,6 +1085,8 @@ func TestMakeRequest_APIError(t *testing.T) {
 		resp := APIResponse{
 			Ok:          false,
 			Description: "Bad Request: chat not found",
+			ErrorCode:   429,
+			Parameters:  &ResponseParameters{RetryAfter: 17},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
@@ -559,9 +1099,17 @@ func TestMakeRequest_APIError(t *testing.T) {
 	}
 
 	resp, err := client.makeRequest(context.Background(), "sendMessage", map[string]string{})
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Nil(t, resp)
 	assert.Contains(t, err.Error(), "chat not found")
+	assert.NotContains(t, err.Error(), "fake-token")
+
+	var apiErr *APIError
+	require.True(t, errors.As(err, &apiErr))
+	assert.Equal(t, 429, apiErr.Code)
+	assert.Equal(t, "Bad Request: chat not found", apiErr.Description)
+	require.NotNil(t, apiErr.Parameters)
+	assert.Equal(t, 17, apiErr.Parameters.RetryAfter)
 }
 
 func TestMakeRequest_DecodeError(t *testing.T) {
@@ -599,8 +1147,10 @@ func TestMakeRequest_NetworkError(t *testing.T) {
 	}
 
 	_, err := client.makeRequest(context.Background(), "testMethod", map[string]string{})
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to perform request")
+	var apiErr *APIError
+	assert.False(t, errors.As(err, &apiErr))
 }
 
 func TestSendMessage_UnmarshalError(t *testing.T) {

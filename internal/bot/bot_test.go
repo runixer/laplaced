@@ -116,7 +116,7 @@ func TestProcessMessageGroup_ForwardedMessages(t *testing.T) {
 
 	// Mock API calls
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
-	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
+	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{MessageID: 1}, nil)
 
 	// Mock LLM call
 	var capturedRequest llm.ChatCompletionRequest
@@ -246,7 +246,7 @@ func TestProcessMessageGroup_PhotoMessage(t *testing.T) {
 	// Mock API calls - FileProcessor uses DownloadFile for all files
 	mockDownloader.On("DownloadFile", mock.Anything, photoFileID).Return([]byte("fake_image_bytes"), nil)
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
-	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
+	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{MessageID: 1}, nil)
 
 	// Mock LLM call
 	var capturedRequest llm.ChatCompletionRequest
@@ -381,7 +381,7 @@ func TestProcessMessageGroup_DocumentAsImageMessage(t *testing.T) {
 	// Mock API calls - FileProcessor uses DownloadFile for all files
 	mockDownloader.On("DownloadFile", mock.Anything, docFileID).Return([]byte("fake_doc_image_bytes"), nil)
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
-	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
+	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{MessageID: 1}, nil)
 
 	// Mock LLM call
 	var capturedRequest llm.ChatCompletionRequest
@@ -517,7 +517,7 @@ func TestProcessMessageGroup_PDFMessage(t *testing.T) {
 	// Mock API calls - FileProcessor uses DownloadFile for all files
 	mockDownloader.On("DownloadFile", mock.Anything, pdfFileID).Return([]byte("fake_pdf_bytes"), nil)
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
-	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
+	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{MessageID: 1}, nil)
 
 	// Mock LLM call
 	var capturedRequest llm.ChatCompletionRequest
@@ -665,7 +665,7 @@ func TestProcessMessageGroup_TextDocumentMessage(t *testing.T) {
 	// Mock API calls
 	mockDownloader.On("DownloadFile", mock.Anything, docFileID).Return([]byte(docData), nil)
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
-	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
+	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{MessageID: 1}, nil)
 
 	// Mock LLM call
 	var capturedRequest llm.ChatCompletionRequest
@@ -793,7 +793,7 @@ func TestProcessMessageGroup_VoiceMessage(t *testing.T) {
 	mockStore.On("AddStat", mock.Anything).Return(nil)
 
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
-	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
+	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{MessageID: 1}, nil)
 
 	var capturedRequest llm.ChatCompletionRequest
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
@@ -1081,7 +1081,7 @@ func TestProcessMessageGroup_HistoryIntegration(t *testing.T) {
 	// 4. Other mocks
 	mockStore.On("AddStat", mock.Anything).Return(nil)
 	mockAPI.On("SendChatAction", mock.Anything, mock.Anything).Return(nil)
-	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{}, nil)
+	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Return(&telegram.Message{MessageID: 1}, nil)
 
 	// --- Capture the request to the LLM API ---
 	var capturedRequest llm.ChatCompletionRequest
@@ -1153,8 +1153,8 @@ func TestSendResponses_Success(t *testing.T) {
 		{ChatID: chatID, Text: "World", ParseMode: "MarkdownV2"},
 	}
 
-	mockAPI.On("SendMessage", mock.Anything, responses[0]).Return(&telegram.Message{}, nil)
-	mockAPI.On("SendMessage", mock.Anything, responses[1]).Return(&telegram.Message{}, nil)
+	mockAPI.On("SendMessage", mock.Anything, responses[0]).Return(&telegram.Message{MessageID: 1}, nil)
+	mockAPI.On("SendMessage", mock.Anything, responses[1]).Return(&telegram.Message{MessageID: 2}, nil)
 
 	bot.sendResponses(context.Background(), chatID, responses, logger)
 
@@ -1182,18 +1182,20 @@ func TestSendResponses_ParseError_RetrySuccess(t *testing.T) {
 	}
 
 	// First call fails with parse error
-	mockAPI.On("SendMessage", mock.Anything, responses[0]).Return(nil, fmt.Errorf("can't parse entities")).Once()
+	mockAPI.On("SendMessage", mock.Anything, responses[0]).Return(nil, &telegram.APIError{
+		Code: 400, Description: "Bad Request: can't parse entities",
+	}).Once()
 
 	// Retry without ParseMode should succeed
 	retryReq := telegram.SendMessageRequest{ChatID: chatID, Text: "Hello *broken* markdown", ParseMode: ""}
-	mockAPI.On("SendMessage", mock.Anything, retryReq).Return(&telegram.Message{}, nil).Once()
+	mockAPI.On("SendMessage", mock.Anything, retryReq).Return(&telegram.Message{MessageID: 1}, nil).Once()
 
 	bot.sendResponses(context.Background(), chatID, responses, logger)
 
 	mockAPI.AssertExpectations(t)
 }
 
-func TestSendResponses_OtherError_SendGenericError(t *testing.T) {
+func TestSendResponses_AmbiguousNetworkErrorDoesNotSendGenericError(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
 	mockAPI := new(testutil.MockBotAPI)
@@ -1216,13 +1218,75 @@ func TestSendResponses_OtherError_SendGenericError(t *testing.T) {
 	// First call fails with network error
 	mockAPI.On("SendMessage", mock.Anything, responses[0]).Return(nil, fmt.Errorf("network error")).Once()
 
-	// Send generic error message
-	mockAPI.On("SendMessage", mock.Anything, mock.MatchedBy(func(req telegram.SendMessageRequest) bool {
-		return req.ChatID == chatID && req.Text == translator.Get("en", "bot.generic_error")
-	})).Return(&telegram.Message{}, nil).Once()
-
 	bot.sendResponses(context.Background(), chatID, responses, logger)
 
+	mockAPI.AssertExpectations(t)
+}
+
+func TestSendResponses_ServerErrorDoesNotRetryOrSendGenericError(t *testing.T) {
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
+	bot := &Bot{
+		api: mockAPI, cfg: &config.Config{Bot: config.BotConfig{Language: "en"}},
+		logger: logger, translator: translator,
+	}
+	response := telegram.SendMessageRequest{ChatID: 123, Text: "unique overflow", ParseMode: "HTML"}
+	mockAPI.On("SendMessage", mock.Anything, response).Return(nil, &telegram.APIError{
+		Code: 500, Description: "Internal Server Error",
+	}).Once()
+
+	ok, attempts := bot.sendResponses(context.Background(), 123, []telegram.SendMessageRequest{response}, logger)
+
+	assert.False(t, ok)
+	assert.Equal(t, 1, attempts)
+	mockAPI.AssertNumberOfCalls(t, "SendMessage", 1)
+	mockAPI.AssertExpectations(t)
+}
+
+func TestSendResponses_ParseRetryServerErrorDoesNotSendGenericError(t *testing.T) {
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
+	bot := &Bot{
+		api: mockAPI, cfg: &config.Config{Bot: config.BotConfig{Language: "en"}},
+		logger: logger, translator: translator,
+	}
+	response := telegram.SendMessageRequest{ChatID: 123, Text: "broken *markup", ParseMode: "MarkdownV2"}
+	mockAPI.On("SendMessage", mock.Anything, response).Return(nil, &telegram.APIError{
+		Code: 400, Description: "Bad Request: can't parse entities",
+	}).Once()
+	retry := response
+	retry.ParseMode = ""
+	mockAPI.On("SendMessage", mock.Anything, retry).Return(nil, &telegram.APIError{
+		Code: 500, Description: "Internal Server Error",
+	}).Once()
+
+	ok, attempts := bot.sendResponses(context.Background(), 123, []telegram.SendMessageRequest{response}, logger)
+
+	assert.False(t, ok)
+	assert.Equal(t, 2, attempts)
+	mockAPI.AssertNumberOfCalls(t, "SendMessage", 2)
+	mockAPI.AssertExpectations(t)
+}
+
+func TestSendResponses_ConfirmedRejectionMaySendGenericError(t *testing.T) {
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
+	cfg := &config.Config{Bot: config.BotConfig{Language: "en"}}
+	bot := &Bot{api: mockAPI, cfg: cfg, logger: logger, translator: translator}
+
+	chatID := int64(123)
+	response := telegram.SendMessageRequest{ChatID: chatID, Text: "Hello", ParseMode: "MarkdownV2"}
+	mockAPI.On("SendMessage", mock.Anything, response).Return(nil, &telegram.APIError{
+		Code: 400, Description: "Bad Request: reply message not found",
+	}).Once()
+	mockAPI.On("SendMessage", mock.Anything, mock.MatchedBy(func(req telegram.SendMessageRequest) bool {
+		return req.ChatID == chatID && req.Text == translator.Get("en", "bot.generic_error")
+	})).Return(&telegram.Message{MessageID: 7}, nil).Once()
+
+	bot.sendResponses(context.Background(), chatID, []telegram.SendMessageRequest{response}, logger)
 	mockAPI.AssertExpectations(t)
 }
 
@@ -1254,6 +1318,23 @@ func TestSendResponses_EmptyResponse_Skipped(t *testing.T) {
 	mockAPI.AssertExpectations(t)
 }
 
+func TestSendResponses_MalformedSuccessStopsWithoutResend(t *testing.T) {
+	translator := testutil.TestTranslator(t)
+	logger := testutil.TestLogger()
+	mockAPI := new(testutil.MockBotAPI)
+	bot := &Bot{api: mockAPI, cfg: &config.Config{}, logger: logger, translator: translator}
+	responses := []telegram.SendMessageRequest{
+		{ChatID: 123, Text: "first"},
+		{ChatID: 123, Text: "must not be sent"},
+	}
+	mockAPI.On("SendMessage", mock.Anything, responses[0]).Return((*telegram.Message)(nil), nil).Once()
+
+	ok, attempts := bot.sendResponses(context.Background(), 123, responses, logger)
+	assert.False(t, ok)
+	assert.Equal(t, 1, attempts)
+	mockAPI.AssertExpectations(t)
+}
+
 func TestSendResponses_ParseError_RetryAlsoFails(t *testing.T) {
 	translator := testutil.TestTranslator(t)
 	logger := testutil.TestLogger()
@@ -1275,16 +1356,13 @@ func TestSendResponses_ParseError_RetryAlsoFails(t *testing.T) {
 	}
 
 	// First call fails with parse error
-	mockAPI.On("SendMessage", mock.Anything, responses[0]).Return(nil, fmt.Errorf("can't parse entities")).Once()
+	mockAPI.On("SendMessage", mock.Anything, responses[0]).Return(nil, &telegram.APIError{
+		Code: 400, Description: "Bad Request: can't parse entities",
+	}).Once()
 
 	// Retry without ParseMode also fails
 	retryReq := telegram.SendMessageRequest{ChatID: chatID, Text: "Hello *broken* markdown", ParseMode: ""}
 	mockAPI.On("SendMessage", mock.Anything, retryReq).Return(nil, fmt.Errorf("network error")).Once()
-
-	// Generic error message is sent
-	mockAPI.On("SendMessage", mock.Anything, mock.MatchedBy(func(req telegram.SendMessageRequest) bool {
-		return req.ChatID == chatID && req.Text == translator.Get("en", "bot.generic_error")
-	})).Return(&telegram.Message{}, nil).Once()
 
 	bot.sendResponses(context.Background(), chatID, responses, logger)
 

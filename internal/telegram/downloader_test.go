@@ -1,7 +1,9 @@
 package telegram
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +23,14 @@ type mockBotAPI struct {
 
 func (m *mockBotAPI) SendMessage(ctx context.Context, req SendMessageRequest) (*Message, error) {
 	return nil, nil
+}
+
+func (m *mockBotAPI) SendRichMessage(ctx context.Context, req SendRichMessageRequest) (*Message, error) {
+	return nil, nil
+}
+
+func (m *mockBotAPI) SendRichMessageDraft(ctx context.Context, req SendRichMessageDraftRequest) error {
+	return nil
 }
 
 func (m *mockBotAPI) EditMessageText(ctx context.Context, req EditMessageTextRequest) (*Message, error) {
@@ -215,6 +225,108 @@ func TestDownloadFile(t *testing.T) {
 		assert.Nil(t, content)
 		// Token should be redacted from error message
 		assert.NotContains(t, err.Error(), "secret-token-12345")
+	})
+}
+
+func TestDownloadFile_SizeBound(t *testing.T) {
+	t.Run("enforces caller reservation before buffering", func(t *testing.T) {
+		payload := bytes.Repeat([]byte{'x'}, 1024)
+		fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Length", fmt.Sprint(len(payload)))
+			_, _ = w.Write(payload)
+		}))
+		defer fileServer.Close()
+
+		downloader, err := NewHTTPFileDownloader(&mockBotAPI{token: "test-token"}, fileServer.URL, "")
+		require.NoError(t, err)
+		content, err := downloader.DownloadFileWithLimit(context.Background(), "falsely-small", 8)
+
+		require.ErrorIs(t, err, ErrFileDownloadTooLarge)
+		assert.Nil(t, content)
+	})
+
+	t.Run("caller reservation accepts exact chunked body", func(t *testing.T) {
+		payload := []byte("12345678")
+		fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.(http.Flusher).Flush()
+			_, _ = w.Write(payload)
+		}))
+		defer fileServer.Close()
+
+		downloader, err := NewHTTPFileDownloader(&mockBotAPI{token: "test-token"}, fileServer.URL, "")
+		require.NoError(t, err)
+		content, err := downloader.DownloadFileWithLimit(context.Background(), "exact-reservation", int64(len(payload)))
+
+		require.NoError(t, err)
+		assert.Equal(t, payload, content)
+	})
+
+	t.Run("caller reservation rejects chunked body one byte over", func(t *testing.T) {
+		payload := []byte("123456789")
+		fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.(http.Flusher).Flush()
+			_, _ = w.Write(payload)
+		}))
+		defer fileServer.Close()
+
+		downloader, err := NewHTTPFileDownloader(&mockBotAPI{token: "test-token"}, fileServer.URL, "")
+		require.NoError(t, err)
+		content, err := downloader.DownloadFileWithLimit(context.Background(), "over-reservation", 8)
+
+		require.ErrorIs(t, err, ErrFileDownloadTooLarge)
+		assert.Nil(t, content)
+	})
+
+	t.Run("rejects oversized Content-Length before reading", func(t *testing.T) {
+		fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Length", fmt.Sprint(maxFileDownloadSize+1))
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer fileServer.Close()
+
+		downloader, err := NewHTTPFileDownloader(&mockBotAPI{token: "test-token"}, fileServer.URL, "")
+		require.NoError(t, err)
+		content, err := downloader.DownloadFile(context.Background(), "oversized")
+
+		require.ErrorIs(t, err, ErrFileDownloadTooLarge)
+		assert.Nil(t, content)
+	})
+
+	t.Run("accepts exact limit", func(t *testing.T) {
+		payload := bytes.Repeat([]byte{'x'}, int(maxFileDownloadSize))
+		fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Length", fmt.Sprint(len(payload)))
+			_, _ = w.Write(payload)
+		}))
+		defer fileServer.Close()
+
+		downloader, err := NewHTTPFileDownloader(&mockBotAPI{token: "test-token"}, fileServer.URL, "")
+		require.NoError(t, err)
+		content, err := downloader.DownloadFile(context.Background(), "exact-limit")
+
+		require.NoError(t, err)
+		assert.Len(t, content, int(maxFileDownloadSize))
+	})
+
+	t.Run("rejects chunked body one byte over limit", func(t *testing.T) {
+		payload := bytes.Repeat([]byte{'x'}, int(maxFileDownloadSize+1))
+		fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			// Flushing headers before the first write prevents net/http from
+			// synthesizing Content-Length and exercises the LimitReader guard.
+			w.WriteHeader(http.StatusOK)
+			w.(http.Flusher).Flush()
+			_, _ = w.Write(payload)
+		}))
+		defer fileServer.Close()
+
+		downloader, err := NewHTTPFileDownloader(&mockBotAPI{token: "test-token"}, fileServer.URL, "")
+		require.NoError(t, err)
+		content, err := downloader.DownloadFile(context.Background(), "chunked-over-limit")
+
+		require.True(t, errors.Is(err, ErrFileDownloadTooLarge), "got %v", err)
+		assert.Nil(t, content)
 	})
 }
 

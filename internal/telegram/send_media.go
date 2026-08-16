@@ -10,8 +10,138 @@ import (
 	"net/http"
 	"net/textproto"
 	"strconv"
+	"strings"
 	"time"
 )
+
+const richMessageAttachmentPrefix = "attach://"
+
+func richMessageHasLocalAttachmentReference(message InputRichMessage) bool {
+	for _, media := range message.Media {
+		if strings.HasPrefix(media.Media.Media, richMessageAttachmentPrefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// sendRichMessageMultipart sends one persistent rich message with local photo
+// attachments. It deliberately uses the one-shot multipart helper: a network
+// or decode failure after the request was written has an unknown outcome and
+// must never cause an automatic duplicate send.
+func (c *Client) sendRichMessageMultipart(ctx context.Context, req SendRichMessageRequest) (*Message, error) {
+	fields, files, err := buildRichMessageMultipart(req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.makeMultipartRequest(ctx, "sendRichMessage", fields, files)
+	if err != nil {
+		return nil, err
+	}
+	return decodeSentMessage(resp, "sendRichMessage")
+}
+
+// buildRichMessageMultipart validates every local attachment before any
+// network request and builds the exact multipart fields expected by Telegram.
+// Local files are one-to-one with attach:// references in rich_message.media;
+// remote/file_id media may coexist and require no multipart part.
+func buildRichMessageMultipart(req SendRichMessageRequest) (map[string]string, []multipartFile, error) {
+	mediaIDs := make(map[string]struct{}, len(req.RichMessage.Media))
+	localRefs := make(map[string]struct{}, len(req.Attachments))
+	for i, media := range req.RichMessage.Media {
+		if !validRichMessageIdentifier(media.ID) {
+			return nil, nil, fmt.Errorf("rich message media %d has invalid id %q", i, media.ID)
+		}
+		if _, exists := mediaIDs[media.ID]; exists {
+			return nil, nil, fmt.Errorf("rich message media id %q is duplicated", media.ID)
+		}
+		mediaIDs[media.ID] = struct{}{}
+
+		source := media.Media.Media
+		if strings.TrimSpace(source) == "" {
+			return nil, nil, fmt.Errorf("rich message media %q has an empty photo source", media.ID)
+		}
+		if !strings.HasPrefix(source, richMessageAttachmentPrefix) {
+			continue
+		}
+		ref := strings.TrimPrefix(source, richMessageAttachmentPrefix)
+		if !validRichMessageIdentifier(ref) {
+			return nil, nil, fmt.Errorf("rich message media %q has invalid local attachment id %q", media.ID, ref)
+		}
+		if _, exists := localRefs[ref]; exists {
+			return nil, nil, fmt.Errorf("rich message local attachment id %q is referenced more than once", ref)
+		}
+		localRefs[ref] = struct{}{}
+	}
+
+	attachments := make(map[string]struct{}, len(req.Attachments))
+	files := make([]multipartFile, 0, len(req.Attachments))
+	for i, attachment := range req.Attachments {
+		if !validRichMessageIdentifier(attachment.ID) {
+			return nil, nil, fmt.Errorf("rich message attachment %d has invalid id %q", i, attachment.ID)
+		}
+		if _, exists := attachments[attachment.ID]; exists {
+			return nil, nil, fmt.Errorf("rich message attachment id %q is duplicated", attachment.ID)
+		}
+		attachments[attachment.ID] = struct{}{}
+		if strings.TrimSpace(attachment.Filename) == "" {
+			return nil, nil, fmt.Errorf("rich message attachment %q has an empty filename", attachment.ID)
+		}
+		if len(attachment.Data) == 0 {
+			return nil, nil, fmt.Errorf("rich message attachment %q has empty data", attachment.ID)
+		}
+		if _, referenced := localRefs[attachment.ID]; !referenced {
+			return nil, nil, fmt.Errorf("rich message attachment %q is not referenced by rich_message.media", attachment.ID)
+		}
+		files = append(files, multipartFile{
+			FieldName: attachment.ID,
+			Filename:  attachment.Filename,
+			Data:      attachment.Data,
+		})
+	}
+	for ref := range localRefs {
+		if _, exists := attachments[ref]; !exists {
+			return nil, nil, fmt.Errorf("rich message local attachment %q has no uploaded file", ref)
+		}
+	}
+
+	richMessageJSON, err := json.Marshal(req.RichMessage)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to marshal rich_message: %w", err)
+	}
+	fields := map[string]string{
+		"chat_id":      strconv.FormatInt(req.ChatID, 10),
+		"rich_message": string(richMessageJSON),
+	}
+	if req.MessageThreadID != nil {
+		fields["message_thread_id"] = strconv.Itoa(*req.MessageThreadID)
+	}
+	if req.ReplyParameters != nil {
+		replyJSON, err := json.Marshal(req.ReplyParameters)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to marshal reply_parameters: %w", err)
+		}
+		fields["reply_parameters"] = string(replyJSON)
+	}
+	return fields, files, nil
+}
+
+// Telegram requires InputRichMessageMedia identifiers to be 1-64 characters
+// from this ASCII allowlist. Reusing it for multipart field identifiers keeps
+// attach:// references unambiguous and safe to serialize.
+func validRichMessageIdentifier(id string) bool {
+	if len(id) < 1 || len(id) > 64 {
+		return false
+	}
+	for _, r := range id {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') ||
+			(r >= '0' && r <= '9') || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
 
 // SendPhotoRequest represents the parameters for sendPhoto.
 // PhotoData holds the raw image bytes to upload; PhotoFilename is used as the
@@ -340,6 +470,8 @@ func (c *Client) makeMultipartRequest(ctx context.Context, method string, fields
 
 	var apiResp APIResponse
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		duration := time.Since(startTime).Seconds()
+		recordRequestDuration(method, statusError, duration)
 		recordError(method, errorTypeDecode)
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
@@ -347,7 +479,11 @@ func (c *Client) makeMultipartRequest(ctx context.Context, method string, fields
 		duration := time.Since(startTime).Seconds()
 		recordRequestDuration(method, statusError, duration)
 		recordError(method, errorTypeAPI)
-		return nil, fmt.Errorf("telegram api error: %s", apiResp.Description)
+		return nil, &APIError{
+			Code:        apiResp.ErrorCode,
+			Description: apiResp.Description,
+			Parameters:  apiResp.Parameters,
+		}
 	}
 
 	duration := time.Since(startTime).Seconds()

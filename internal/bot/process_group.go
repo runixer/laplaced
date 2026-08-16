@@ -15,10 +15,10 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/laplace"
+	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/obs"
@@ -161,6 +161,10 @@ func (b *Bot) prepareErrorText(err error) string {
 	var unsupported *files.UnsupportedFormatError
 	var tooLarge *files.FileTooLargeError
 	switch {
+	case errors.Is(err, errRichMediaUnavailable):
+		return b.translator.Get(b.cfg.Bot.Language, "bot.rich_media_unavailable")
+	case errors.Is(err, errRichMessageUnsupported):
+		return b.translator.Get(b.cfg.Bot.Language, "bot.rich_message_unsupported")
 	case errors.As(err, &unsupported):
 		msg := b.translator.Get(b.cfg.Bot.Language, "bot.file_unsupported_format")
 		ext := filepath.Ext(unsupported.FileName)
@@ -359,7 +363,8 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	// (cross-user profile injections) are refused with a fixed reply and never
 	// persisted — no LLM call, so the injected text cannot sweet-talk the model,
 	// and no history row, so background pipelines cannot archive it.
-	if DetectAssistantInjection(historyContent) {
+	if DetectAssistantInjection(historyContent) ||
+		DetectAssistantInjection(incomingInjectionDetectionText(group.Messages)) {
 		span.SetAttributes(attribute.Bool("bot.anomaly.injection_refused", true))
 		logger.Warn("assistant-instruction injection detected, refused and not persisted")
 		b.sendRendered(shutdownSafeCtx, convID, threadRoot, "", b.translator.Get(b.cfg.Bot.Language, "bot.injection_refused"), logger)
@@ -437,8 +442,14 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	// sendRendered otherwise. Error/empty paths route through it too, so the
 	// placeholder never gets orphaned. Also accumulates Telegram timing
 	// counters — deferred flush captures early returns.
-	path := b.newResponsePath(shutdownSafeCtx, userID, convID, threadRoot, lastMsg.MessageID, logger)
+	path := b.newResponsePath(shutdownSafeCtx, userID, lastMsg.SenderID, lastMsg.RichEgressEligible, convID, threadRoot, lastMsg.MessageID, logger)
 	defer path.recordTelegramMetrics()
+	if path.usesRichDraft() {
+		// Telegram accounts live drafts and sendChatAction in the same per-peer
+		// flood buckets. The native <tg-thinking> preview replaces typing once it
+		// exists, so stop the periodic action loop for the rest of this turn.
+		cancelTyping()
+	}
 
 	// Build request
 	req := &laplace.Request{
@@ -449,20 +460,27 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		ChatID:              path.tgChatID,
 		MessageThreadID:     path.tgThreadID,
 		ReplyToMsgID:        path.tgReplyID,
-		UseStreaming:        path.sink != nil,
+		UseStreaming:        path.usesStreaming(),
+		RichOutput:          path.effectiveRichMode() == config.TelegramRichMessagesSend,
 		OnIntermediateMessage: func(text string) {
+			if path.usesRichDraft() {
+				// Pre-tool model chatter is already visible in the ephemeral
+				// preview. A persistent intermediate would clear that draft and
+				// create avoidable chat clutter before the real final answer.
+				return
+			}
 			path.sendIntermediate(shutdownSafeCtx, text)
 		},
 		OnToolStart: func(toolName, arguments string) {
-			if path.sink != nil {
-				path.sink.Status(toolName, arguments)
+			path.streamStatus(toolName, arguments)
+			if !path.usesRichDraft() {
+				_ = b.transport.SendTyping(shutdownSafeCtx, convID)
 			}
-			_ = b.transport.SendTyping(shutdownSafeCtx, convID)
 		},
 	}
-	if path.sink != nil {
-		req.OnContentDelta = path.sink.Delta
-		req.OnRAGEnriched = path.sink.RAG
+	if path.usesStreaming() {
+		req.OnContentDelta = path.streamDelta
+		req.OnRAGEnriched = path.streamRAG
 	}
 
 	// Execute
@@ -473,7 +491,11 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		logger.Error("laplace execution fatal error", "error", err)
 		botHadErrors = true
 		botErrorKinds = append(botErrorKinds, "laplace_fatal")
-		if b.deliverGeneratedOnError(shutdownSafeCtx, path, userID, convID, threadRoot, lastMsg.MessageID, resp, logger) {
+		attempted, confirmed := b.deliverGeneratedOnError(shutdownSafeCtx, path, resp, logger)
+		if attempted {
+			if !confirmed {
+				botErrorKinds = append(botErrorKinds, "transport_delivery")
+			}
 			return
 		}
 		path.sendError(shutdownSafeCtx, b.errorReplyText(span, err))
@@ -491,8 +513,11 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		logger.Error("laplace execution failed", "error", resp.Error, "total_turns", resp.TotalTurns)
 		botHadErrors = true
 		botErrorKinds = append(botErrorKinds, "laplace_partial")
-		if !b.deliverGeneratedOnError(shutdownSafeCtx, path, userID, convID, threadRoot, lastMsg.MessageID, resp, logger) {
+		attempted, confirmed := b.deliverGeneratedOnError(shutdownSafeCtx, path, resp, logger)
+		if !attempted {
 			path.sendError(shutdownSafeCtx, b.errorReplyText(span, resp.Error))
+		} else if !confirmed {
+			botErrorKinds = append(botErrorKinds, "transport_delivery")
 		}
 
 		// Log partial execution for debugging. Cost stays provider-reported-
@@ -556,25 +581,36 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	// media-aware reply path. Otherwise keep the text-only path.
 	if len(resp.GeneratedArtifactIDs) > 0 {
 		path.flushSinkBeforeMedia(shutdownSafeCtx, resp.Content)
-		obs.RecordContent(span, "bot.reply_sent", resp.Content,
-			attribute.Int64Slice("generated_artifact_ids", resp.GeneratedArtifactIDs))
-		mediaDur, sentCount := b.sendResponseWithGeneratedImages(
-			shutdownSafeCtx, userID, convID, threadRoot, lastMsg.MessageID,
+		result := b.sendResponseWithGeneratedImages(
+			shutdownSafeCtx, path, chanThreadRoot,
 			resp.Content, resp.GeneratedArtifactIDs, logger,
 		)
-		path.tgDuration += mediaDur
-		path.tgCalls += sentCount
+		path.tgDuration += result.duration
+		path.tgCalls += result.attempts
+		if result.outcome != richDeliveryConfirmed {
+			botHadErrors = true
+			botErrorKinds = append(botErrorKinds, "transport_delivery")
+			if result.err != nil {
+				span.RecordError(result.err)
+			}
+			span.SetStatus(codes.Error, "generated media delivery "+string(result.outcome))
+			span.SetAttributes(attribute.Bool("bot.reply_failed", true))
+			return
+		}
+		obs.RecordContent(span, "bot.reply_sent", resp.Content,
+			attribute.Int64Slice("generated_artifact_ids", resp.GeneratedArtifactIDs))
 		success = true
 		return
 	}
 
-	b.saveAssistantReply(userID, span, resp.Content, convID, chanThreadRoot, logger)
-
 	// Deliver the final reply (streaming: bubble edit + overflow sends;
 	// buffered: rendered chunks replying to the triggering message).
-	path.sendFinal(shutdownSafeCtx, span, resp.Content)
-
-	success = true
+	success = path.sendFinalAndPersist(shutdownSafeCtx, span, resp.Content, chanThreadRoot)
+	if !success {
+		botHadErrors = true
+		botErrorKinds = append(botErrorKinds, "transport_delivery")
+		return
+	}
 }
 
 // streamFinalizeCallback returns a finalizeResponse adapter for the
@@ -625,25 +661,11 @@ func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logge
 	}
 	groupText := groupTextBuilder.String()
 
-	// 1. Download all files in parallel across messages
-	downloadedFiles := make([][]*files.ProcessedFile, len(group.Messages))
-
-	g, gCtx := errgroup.WithContext(ctx)
-	for i, msg := range group.Messages {
-		i, msg := i, msg // capture for goroutine
-		g.Go(func() error {
-			result, err := b.fileProcessor.ProcessFiles(gCtx, msg.Files, group.UserID, groupText)
-			if err != nil {
-				// Check for file validation errors (unsupported format, too large)
-				// These are user-facing errors, return them wrapped
-				return &fileProcessingError{err: err, messageIndex: i}
-			}
-			downloadedFiles[i] = result
-			return nil
-		})
-	}
-
-	if err := g.Wait(); err != nil {
+	// Legacy files retain their established validation behavior. Rich files
+	// across the grouped turn share one bounded aggregate budget and report
+	// ordered per-occurrence outcomes instead of aborting their siblings.
+	fileResults, err := b.processGroupedFiles(ctx, group.Messages, group.UserID, groupText)
+	if err != nil {
 		// Check if this is a file processing error (validation failure)
 		var fileErr *fileProcessingError
 		if errors.As(err, &fileErr) {
@@ -653,14 +675,27 @@ func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logge
 		// Other errors (like context cancellation) return as-is
 		return "", "", nil, nil, err
 	}
+	downloadedFiles := fileResults.processed
 
 	// 2. Process messages sequentially (order preserved)
 	var historyBuilder strings.Builder
 	var rawQueryBuilder strings.Builder
 	var llmParts []interface{}
 	var allProcessedFiles []*files.ProcessedFile // Collect all files for artifact linking
+	hasRichMessage := false
+	hasSemanticInput := false
+	hasUsableFile := false
+	richMediaExpected := false
 
 	for i, msg := range group.Messages {
+		if msg.Ingress != nil && msg.Ingress.Kind == "rich" {
+			hasRichMessage = true
+			hasSemanticInput = hasSemanticInput || msg.Ingress.HasVisibleText
+			richMediaExpected = richMediaExpected || msg.Ingress.MediaCount > 0
+		} else if msg.Text != "" {
+			hasSemanticInput = true
+		}
+
 		// Text content (message text or caption)
 		textContent := b.incomingContent(msg)
 		if textContent != "" {
@@ -670,6 +705,7 @@ func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logge
 
 		// Process pre-downloaded files
 		for _, f := range downloadedFiles[i] {
+			hasUsableFile = true
 			// Collect for artifact linking
 			allProcessedFiles = append(allProcessedFiles, f)
 
@@ -728,8 +764,30 @@ func (b *Bot) prepareUserMessage(ctx context.Context, group *MessageGroup, logge
 			}
 		}
 
+		// Rich multi-media failures are per occurrence. Keep them visible to the
+		// model/history without exposing file ids or raw transport errors; one bad
+		// sibling must not erase successful files or the projected text.
+		for _, issue := range fileResults.issues[i] {
+			switch issue.Status {
+			case files.ProcessFileAvailable, files.ProcessFileDuplicateRef:
+				continue
+			}
+			marker := richFileIssueMarker(issue)
+			prefixed := fmt.Sprintf("%s: %s", msg.Prefix, marker)
+			appendWithNewline(&historyBuilder, prefixed)
+			appendWithNewline(&rawQueryBuilder, marker)
+			llmParts = append(llmParts, llm.TextPart{Type: "text", Text: prefixed})
+		}
+
 		// Build RAG query from text
 		appendWithNewline(&rawQueryBuilder, msg.Text)
+	}
+
+	if hasRichMessage && !hasSemanticInput && !hasUsableFile {
+		if richMediaExpected {
+			return "", "", nil, nil, errRichMediaUnavailable
+		}
+		return "", "", nil, nil, errRichMessageUnsupported
 	}
 
 	return historyBuilder.String(), rawQueryBuilder.String(), llmParts, allProcessedFiles, nil
@@ -854,19 +912,25 @@ func fixListNumbering(parts []string) []string {
 	return result
 }
 
-// sendRendered renders canonical markdown to wire-format chunks and sends each
-// through the active transport, replying to replyTo on the first chunk and
-// keeping every chunk in threadRoot. On a send failure it emits a single
-// generic-error message and stops. Returns the count of chunks sent and the
-// transport-native id of the first chunk (the message a user would react to;
-// "" if nothing was sent).
-func (b *Bot) sendRendered(ctx context.Context, convID, threadRoot, replyTo, text string, logger *slog.Logger) (int, string) {
+// sendRenderedDelivery renders canonical markdown and keeps the terminal
+// delivery outcome explicit. A multi-chunk response is confirmed only after
+// every chunk has a stable transport id. Partial delivery therefore cannot be
+// mistaken for a complete final and persisted as such by responsePath.
+func (b *Bot) sendRenderedDelivery(ctx context.Context, convID, threadRoot, replyTo, text string, logger *slog.Logger) richDeliveryResult {
+	result := richDeliveryResult{}
 	chunks, err := b.renderer.Render(ctx, text)
 	if err != nil {
 		logger.Error("failed to render response", "error", err)
+		result.outcome = richDeliveryRejected
+		result.err = fmt.Errorf("render response: %w", err)
+		return result
 	}
-	sent := 0
-	firstMsgID := ""
+	if len(chunks) == 0 {
+		result.outcome = richDeliveryRejected
+		result.err = errors.New("render response produced no chunks")
+		return result
+	}
+
 	for i, chunk := range chunks {
 		if strings.TrimSpace(chunk) == "" {
 			logger.Warn("skipping empty response chunk", "chunk_index", i)
@@ -876,18 +940,41 @@ func (b *Bot) sendRendered(ctx context.Context, convID, threadRoot, replyTo, tex
 		if i == 0 {
 			resp.ReplyTo = replyTo
 		}
+		result.attempts++
 		msgID, serr := b.transport.SendText(ctx, resp)
 		if serr != nil {
 			logger.Error("failed to send message", "error", serr, "chunk_index", i)
-			b.sendGenericError(ctx, convID, threadRoot, logger)
-			return sent, firstMsgID
+			result.outcome = richOutcomeForError(serr)
+			result.failedChunk = deliveryIndex(i)
+			result.err = fmt.Errorf("send rendered chunk %d: %w", i, serr)
+			if result.outcome == richDeliveryRejected {
+				result.attempts += b.sendGenericError(ctx, convID, threadRoot, logger)
+			}
+			return result
 		}
-		if sent == 0 {
-			firstMsgID = msgID
+		if msgID == "" {
+			result.outcome = richDeliveryUnknown
+			result.failedChunk = deliveryIndex(i)
+			result.err = fmt.Errorf("send rendered chunk %d returned no stable message id", i)
+			return result
 		}
-		sent++
+		result.confirmMessage(msgID)
 	}
-	return sent, firstMsgID
+	if result.sent == 0 {
+		result.outcome = richDeliveryRejected
+		result.err = errors.New("render response produced only empty chunks")
+		return result
+	}
+	result.outcome = richDeliveryConfirmed
+	return result
+}
+
+// sendRendered preserves the established helper signature for non-final
+// messages. Final buffered replies use sendRenderedDelivery so partial failure
+// remains visible to their persistence decision.
+func (b *Bot) sendRendered(ctx context.Context, convID, threadRoot, replyTo, text string, logger *slog.Logger) (int, string) {
+	result := b.sendRenderedDelivery(ctx, convID, threadRoot, replyTo, text, logger)
+	return result.sent, result.firstMsgID
 }
 
 // linkReplyTrace back-fills the transport-native message id on the just-stored
@@ -904,14 +991,17 @@ func (b *Bot) linkReplyTrace(userID storage.ScopeID, transportMsgID string, logg
 }
 
 // sendGenericError sends the localized generic-error message, best-effort.
-func (b *Bot) sendGenericError(ctx context.Context, convID, threadRoot string, logger *slog.Logger) {
+func (b *Bot) sendGenericError(ctx context.Context, convID, threadRoot string, logger *slog.Logger) int {
 	chunks, _ := b.renderer.Render(ctx, b.translator.Get(b.cfg.Bot.Language, "bot.generic_error"))
+	attempts := 0
 	for _, chunk := range chunks {
+		attempts++
 		if _, err := b.transport.SendText(ctx, OutgoingResponse{ConversationID: convID, Text: chunk, ThreadRoot: threadRoot}); err != nil {
 			logger.Error("failed to send generic error message", "error", err)
-			return
+			return attempts
 		}
 	}
+	return attempts
 }
 
 // finalizeResponse renders canonical markdown for the Telegram streaming path

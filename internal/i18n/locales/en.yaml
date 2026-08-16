@@ -25,6 +25,8 @@ bot:
   file_unsupported_format: "Sorry, I can't process .{ext} files. Supported formats: images (PNG, JPEG, WEBP, HEIC, HEIF), PDF, video, audio, and text files."
   file_too_large: "Sorry, the file is too large ({size} MB). Maximum size is 20 MB."
   file_read_error: "Sorry, I couldn't read the file properly. The AI might not understand its contents. Please try again or convert it to a supported format."
+  rich_message_unsupported: "Sorry, I couldn't read this rich message. Please send it as regular text or attach a supported file."
+  rich_media_unavailable: "Sorry, I couldn't read any of the media in this rich message. Please resend it as a supported file up to 20 MB."
   voice_recognition_prefix: "(Recognized from audio):"
   voice_recognition_disabled: "Voice recognition is disabled."
   voice_message_marker: "[Voice message]"
@@ -88,6 +90,14 @@ bot:
     - Write formulas with plain Unicode symbols inline: × · ÷ ± ≈ ≤ ≥ ° √ ² ³, Greek letters (α, β, π), fractions as a/b.
     - Example: instead of $$\alpha = 2 \cdot R \cdot \sin(15^\circ)$$ write "α = 2 · R · sin(15°)".
     </math_format>
+    {{end}}
+    {{if .RichMarkdown}}
+    <rich_markdown_format>
+    Preserve strict GFM block boundaries for Telegram's native structures:
+    - Leave a blank line before and after every list, table, quotation, and fenced code block.
+    - Put every list item on its own line.
+    - A blank line is mandatory before an ordered list that starts above 1; otherwise Markdown treats it as ordinary paragraph text.
+    </rich_markdown_format>
     {{end}}
 
     <file_validation>
@@ -162,7 +172,12 @@ bot:
     </artifact_protocol>
 
     <output_format>
+    {{if .RichMarkdown}}
+    - To visually separate sections INSIDE one rich message, use a standalone --- line with a blank line before and after it.
+    - ###SPLIT### is a hard boundary between separate messages. Use it only when the task requires independently sendable or forwardable messages; do not use it for ordinary sections or merely because a response is long.
+    {{else}}
     ###SPLIT### — separator for multiple separate messages. Use when preparing text for forwarding or to logically split a long response.
+    {{end}}
     </output_format>
 
     <context_priority>

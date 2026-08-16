@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -245,7 +246,19 @@ func run() int {
 		ReplaceAttr: logTimeFormat,
 	}))
 	slog.SetDefault(logger)
-	logger.Info("Config loaded successfully", "allowed_users", len(cfg.Bot.AllowedUserIDs))
+	richMode := strings.ToLower(strings.TrimSpace(cfg.Telegram.RichMessages.Mode))
+	logger.Info("Config loaded successfully",
+		"allowed_users", len(cfg.Bot.AllowedUserIDs),
+		"telegram_rich_mode", richMode,
+		"telegram_rich_canary_count", len(cfg.Telegram.RichMessages.AllowedUserIDs),
+		"telegram_rich_draft_streaming_enabled", cfg.Telegram.RichMessages.DraftStreamingEnabled,
+	)
+	if (richMode == config.TelegramRichMessagesShadow || richMode == config.TelegramRichMessagesSend) && len(cfg.Telegram.RichMessages.AllowedUserIDs) == 0 {
+		logger.Warn("Telegram Rich Messages rollout has no canary users; outbound rich remains disabled",
+			"mode", richMode,
+			"draft_streaming_enabled", cfg.Telegram.RichMessages.DraftStreamingEnabled,
+		)
+	}
 
 	// Tracer provider lifecycle. Declared here so the shutdown defer runs
 	// LAST (LIFO) — after b.Stop / RAGService.Stop / store.Close further
@@ -536,7 +549,7 @@ func run() int {
 					updates, err := b.API().GetUpdates(ctx, telegram.GetUpdatesRequest{
 						Offset:         offset,
 						Timeout:        25, // Use 25s to avoid http client timeout (30s)
-						AllowedUpdates: []string{"message", "edited_message", "callback_query", "message_reaction"},
+						AllowedUpdates: telegram.AllowedUpdateTypes(),
 					})
 					if err != nil {
 						// Only log and retry if context is not cancelled (shutdown)

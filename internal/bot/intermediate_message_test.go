@@ -106,7 +106,7 @@ func TestProcessMessageGroup_IntermediateMessageSending(t *testing.T) {
 	mockAPI.On("SendMessage", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		req := args.Get(1).(telegram.SendMessageRequest)
 		sentMessages = append(sentMessages, req.Text)
-	}).Return(&telegram.Message{}, nil)
+	}).Return(&telegram.Message{MessageID: 1}, nil)
 
 	// Mock LLM calls
 	// First call: Model returns intermediate text + tool call

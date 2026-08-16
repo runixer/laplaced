@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -37,6 +38,32 @@ func (c *Config) Validate() error {
 // validateTransport checks transport-specific required fields.
 func (c *Config) validateTransport() []error {
 	var errs []error
+	richMode := strings.ToLower(strings.TrimSpace(c.Telegram.RichMessages.Mode))
+	if richMode != "" && richMode != TelegramRichMessagesOff && richMode != TelegramRichMessagesShadow && richMode != TelegramRichMessagesSend {
+		errs = append(errs, fmt.Errorf("telegram.rich_messages.mode must be one of off, shadow, send"))
+	}
+
+	botAllowed := make(map[int64]struct{}, len(c.Bot.AllowedUserIDs))
+	for _, id := range c.Bot.AllowedUserIDs {
+		botAllowed[id] = struct{}{}
+	}
+	richSeen := make(map[int64]struct{}, len(c.Telegram.RichMessages.AllowedUserIDs))
+	for i, id := range c.Telegram.RichMessages.AllowedUserIDs {
+		if id <= 0 {
+			errs = append(errs, fmt.Errorf("telegram.rich_messages.allowed_user_ids entry %d must be a positive Telegram user id", i))
+			continue
+		}
+		if _, duplicate := richSeen[id]; duplicate {
+			errs = append(errs, fmt.Errorf("telegram.rich_messages.allowed_user_ids contains a duplicate entry at index %d", i))
+			continue
+		}
+		richSeen[id] = struct{}{}
+		if c.Transport != "mattermost" {
+			if _, allowed := botAllowed[id]; !allowed {
+				errs = append(errs, fmt.Errorf("telegram.rich_messages.allowed_user_ids entry %d is not present in bot.allowed_user_ids", i))
+			}
+		}
+	}
 	if c.Transport == "mattermost" {
 		if c.Mattermost.ServerURL == "" {
 			errs = append(errs, errors.New("mattermost.server_url is required when transport is \"mattermost\""))

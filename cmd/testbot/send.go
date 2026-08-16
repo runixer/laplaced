@@ -179,7 +179,7 @@ func sendVoiceMessage(ctx context.Context, tb *testBot, tgID int64, voicePath st
 			FileID:   "voice_test123", // Special ID for mock downloader
 			Duration: 3,               // Will be updated if we can parse the file
 			MimeType: "audio/ogg",
-			FileSize: int(fileInfo.Size()),
+			FileSize: fileInfo.Size(),
 		},
 		Text:    messageText,
 		Caption: messageText,

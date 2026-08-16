@@ -82,6 +82,12 @@ func TestMetricsRegistration(t *testing.T) {
 	// Trigger vec metrics so they appear in the registry
 	RecordMessageProcessing("99999", 1.0, true)
 	RecordContextTokensBySource("99999", ContextSourceProfile, 100)
+	recordRichFinalDelivery(richFinalMetric{
+		contentKind: richMetricContentText, path: richMetricPathNative,
+		outcome: richDeliveryConfirmed, fallbackReason: richMetricFallbackNone,
+	})
+	recordRichShadowEvaluation(richMetricShadowNative, richMetricFallbackNone)
+	richMessageRateLimitedTotal.WithLabelValues(richMetricContentText, richMetricPathNative).Add(0)
 
 	// Verify all metrics are registered with correct names
 	metrics := []string{
@@ -90,6 +96,11 @@ func TestMetricsRegistration(t *testing.T) {
 		"laplaced_bot_messages_processed_total",
 		"laplaced_bot_context_tokens",
 		"laplaced_bot_context_tokens_by_source",
+		"laplaced_bot_rich_message_final_deliveries_total",
+		"laplaced_bot_rich_message_native_attachments",
+		"laplaced_bot_rich_message_native_attachment_bytes",
+		"laplaced_bot_rich_message_rate_limited_total",
+		"laplaced_bot_rich_message_shadow_evaluations_total",
 	}
 
 	// Collect all metric names from default registry

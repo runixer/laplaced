@@ -2,8 +2,11 @@ package markdown
 
 import (
 	"bytes"
+	"errors"
 	"html"
+	"io"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf16"
@@ -22,6 +25,10 @@ import (
 // TelegramHTMLRenderer is a custom renderer for Telegram HTML format
 type TelegramHTMLRenderer struct {
 	ghtml.Config
+	// safeLinks/preserveImageAlt are enabled only for the pre-rendered
+	// Rich-Message fallback. The ordinary legacy renderer stays byte-compatible.
+	safeLinks        bool
+	preserveImageAlt bool
 	// Table rendering state
 	tableData   [][]string
 	currentRow  []string
@@ -38,6 +45,14 @@ func NewTelegramHTMLRenderer(opts ...ghtml.Option) renderer.NodeRenderer {
 		opt.SetHTMLOption(&r.Config)
 	}
 	return r
+}
+
+func newSafeTelegramHTMLRenderer() renderer.NodeRenderer {
+	return &TelegramHTMLRenderer{
+		Config:           ghtml.NewConfig(),
+		safeLinks:        true,
+		preserveImageAlt: true,
+	}
 }
 
 // RegisterFuncs implements renderer.NodeRenderer.RegisterFuncs
@@ -184,11 +199,11 @@ func (r *TelegramHTMLRenderer) renderListItem(w util.BufWriter, source []byte, n
 			list := parent.(*ast.List)
 			if list.IsOrdered() {
 				// Get the item number
-				itemNum := 1
+				itemNum := list.Start
 				for sibling := parent.FirstChild(); sibling != nil && sibling != n; sibling = sibling.NextSibling() {
 					itemNum++
 				}
-				_, _ = w.WriteString(string(rune('0' + itemNum)))
+				_, _ = w.WriteString(strconv.Itoa(itemNum))
 				_, _ = w.WriteString(". ")
 			} else {
 				_, _ = w.WriteString("• ")
@@ -243,11 +258,19 @@ func (r *TelegramHTMLRenderer) renderThematicBreak(w util.BufWriter, source []by
 func (r *TelegramHTMLRenderer) renderAutoLink(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
 	n := node.(*ast.AutoLink)
 	if entering {
+		href := string(n.URL(source))
+		if r.safeLinks && n.AutoLinkType == ast.AutoLinkEmail && !strings.HasPrefix(strings.ToLower(href), "mailto:") {
+			href = "mailto:" + href
+		}
+		label := n.Label(source)
+		if r.safeLinks && !safeRichURL(href) {
+			_, _ = w.Write(escapeHTML(label))
+			return ast.WalkSkipChildren, nil
+		}
 		_, _ = w.WriteString("<a href=\"")
-		url := escapeHTML(n.URL(source))
-		_, _ = w.Write(url)
+		_, _ = w.Write(escapeHTML([]byte(href)))
 		_, _ = w.WriteString("\">")
-		_, _ = w.Write(url)
+		_, _ = w.Write(escapeHTML(label))
 		_, _ = w.WriteString("</a>")
 	}
 	return ast.WalkSkipChildren, nil
@@ -286,11 +309,20 @@ func (r *TelegramHTMLRenderer) renderEmphasis(w util.BufWriter, source []byte, n
 
 func (r *TelegramHTMLRenderer) renderImage(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
 	// Telegram doesn't support inline images in text, skip
+	if r.preserveImageAlt {
+		// Rich fallback must preserve harmless visible alt text while never
+		// inspecting or activating the model-authored media destination.
+		return ast.WalkContinue, nil
+	}
 	return ast.WalkSkipChildren, nil
 }
 
 func (r *TelegramHTMLRenderer) renderLink(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
 	n := node.(*ast.Link)
+	if r.safeLinks && !safeRichURL(string(n.Destination)) {
+		// Keep the visible label, discard the active wrapper/destination.
+		return ast.WalkContinue, nil
+	}
 	if entering {
 		_, _ = w.WriteString("<a href=\"")
 		_, _ = w.Write(escapeHTML(n.Destination))
@@ -513,6 +545,19 @@ func (r *TelegramHTMLRenderer) formatTableAsMonospace() string {
 
 // ToHTML converts Markdown to Telegram-compatible HTML
 func ToHTML(markdown string) (string, error) {
+	return toTelegramHTML(markdown, NewTelegramHTMLRenderer(), false)
+}
+
+// ToSafeLegacyHTML renders the policy-equivalent legacy representation used
+// only as a preflighted fallback for Rich Messages. It preserves image alt text,
+// removes unsafe/model-authored mention links and neutralizes bare @mentions so
+// legacy entity auto-detection cannot bypass the rich skip_entity_detection
+// boundary.
+func ToSafeLegacyHTML(markdown string) (string, error) {
+	return toTelegramHTML(markdown, newSafeTelegramHTMLRenderer(), true)
+}
+
+func toTelegramHTML(markdown string, nodeRenderer renderer.NodeRenderer, neutralizeMentions bool) (string, error) {
 	// Convert LaTeX to Unicode BEFORE markdown parsing
 	markdown = convertLatexToUnicode(markdown)
 
@@ -525,7 +570,7 @@ func ToHTML(markdown string) (string, error) {
 		goldmark.WithRenderer(
 			renderer.NewRenderer(
 				renderer.WithNodeRenderers(
-					util.Prioritized(NewTelegramHTMLRenderer(), 1000),
+					util.Prioritized(nodeRenderer, 1000),
 				),
 			),
 		),
@@ -565,8 +610,87 @@ func ToHTML(markdown string) (string, error) {
 	result = strings.ReplaceAll(result, `<input type="checkbox" checked="" disabled="">`, "☑")
 	result = strings.ReplaceAll(result, `<input type="checkbox" disabled="">`, "☐")
 	result = strings.ReplaceAll(result, `<input type="checkbox" disabled="" checked="">`, "☑")
+	if neutralizeMentions {
+		result = neutralizeTelegramMentionsInHTML(result)
+	}
 
 	return result, nil
+}
+
+// SafeLegacyPlainText escapes a last-resort plain-text chunk and applies the
+// same mention neutralization as ToSafeLegacyHTML.
+func SafeLegacyPlainText(text string) string {
+	return html.EscapeString(neutralizeUnsafeTelegramEntities(text))
+}
+
+func neutralizeTelegramMentionsInHTML(input string) string {
+	z := htmlparser.NewTokenizer(strings.NewReader(input))
+	var out strings.Builder
+	protectedDepth := 0
+	for {
+		typeOfToken := z.Next()
+		switch typeOfToken {
+		case htmlparser.ErrorToken:
+			if err := z.Err(); err != nil && !errors.Is(err, io.EOF) {
+				// Generated legacy HTML should always tokenize. Fail closed to
+				// escaped visible text if that invariant is ever broken.
+				return html.EscapeString(input)
+			}
+			return out.String()
+		case htmlparser.TextToken:
+			tok := z.Token()
+			if protectedDepth == 0 {
+				tok.Data = neutralizeUnsafeTelegramEntities(tok.Data)
+			}
+			out.WriteString(tok.String())
+		case htmlparser.StartTagToken:
+			tok := z.Token()
+			if tok.Data == "a" || tok.Data == "code" || tok.Data == "pre" {
+				protectedDepth++
+			}
+			out.WriteString(tok.String())
+		case htmlparser.EndTagToken:
+			tok := z.Token()
+			out.WriteString(tok.String())
+			if (tok.Data == "a" || tok.Data == "code" || tok.Data == "pre") && protectedDepth > 0 {
+				protectedDepth--
+			}
+		default:
+			out.WriteString(z.Token().String())
+		}
+	}
+}
+
+func neutralizeUnsafeTelegramEntities(text string) string {
+	text = neutralizeBareTelegramMentions(text)
+	var out strings.Builder
+	for i := 0; i < len(text); {
+		if i+5 <= len(text) && strings.EqualFold(text[i:i+5], "tg://") {
+			out.WriteString(text[i : i+3])
+			out.WriteRune('\u2060') // break Telegram deep-link auto-detection
+			out.WriteString(text[i+3 : i+5])
+			i += 5
+			continue
+		}
+		out.WriteByte(text[i])
+		i++
+	}
+	return out.String()
+}
+
+func neutralizeBareTelegramMentions(text string) string {
+	var out strings.Builder
+	for i := 0; i < len(text); i++ {
+		out.WriteByte(text[i])
+		if text[i] == '@' && i+1 < len(text) && isTelegramUsernameByte(text[i+1]) {
+			out.WriteRune('\u2060') // invisible WORD JOINER breaks entity detection
+		}
+	}
+	return out.String()
+}
+
+func isTelegramUsernameByte(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '_'
 }
 
 // formatTableVertical formats table data in vertical format (one record per block)

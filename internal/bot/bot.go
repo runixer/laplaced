@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -258,8 +259,9 @@ func (b *Bot) ForceCloseSessionWithProgress(ctx context.Context, userID storage.
 
 func (b *Bot) SetWebhook(webhookURL, secretToken string) error {
 	req := telegram.SetWebhookRequest{
-		URL:         webhookURL,
-		SecretToken: secretToken,
+		URL:            webhookURL,
+		SecretToken:    secretToken,
+		AllowedUpdates: telegram.AllowedUpdateTypes(),
 	}
 	return b.api.SetWebhook(context.Background(), req)
 }
@@ -308,14 +310,42 @@ func (b *Bot) ProcessUpdateAsync(ctx context.Context, update *telegram.Update, s
 
 func (b *Bot) ProcessUpdate(ctx context.Context, update *telegram.Update, source string) {
 	if update.MessageReaction != nil {
+		outcome := ingressDispositionProcessable
+		if update.MessageReaction.User == nil || update.MessageReaction.Chat == nil {
+			outcome = ingressDispositionInvalid
+		}
+		recordIncomingUpdate("reaction", outcome)
 		b.HandleReaction(incomingReactionFromTelegram(update.MessageReaction))
 		return
 	}
 	if update.Message == nil {
+		recordIncomingUpdate("other", ingressDispositionUnsupported)
 		return
 	}
 
+	_, ingressSpan := otel.Tracer("github.com/runixer/laplaced/internal/bot").Start(ctx, "bot.ingressUpdate")
+	defer ingressSpan.End()
+	ingressSpan.SetAttributes(attribute.Int("telegram.update_id", update.UpdateID))
+
 	msg := update.Message
+	// Telegram normally supplies both fields for user messages, but updates are
+	// external input and rich-message decoding deliberately tolerates malformed
+	// payloads. Guard the identity fields before any dereference so an invalid
+	// update is dropped instead of taking down the polling/webhook worker.
+	if msg.From == nil || msg.Chat == nil {
+		recordIncomingUpdate("other", ingressDispositionInvalid)
+		ingressSpan.SetAttributes(
+			attribute.String("telegram.inbound.format", "message"),
+			attribute.String("telegram.inbound.disposition", ingressDispositionInvalid),
+		)
+		b.logger.Warn("dropping Telegram message without sender or chat",
+			"update_id", update.UpdateID,
+			"has_from", msg.From != nil,
+			"has_chat", msg.Chat != nil,
+			"source", source,
+		)
+		return
+	}
 	user := msg.From
 	userID := user.ID
 	scope := storage.PassthroughScopeID(transportTelegram, strconv.FormatInt(userID, 10))
@@ -348,9 +378,50 @@ func (b *Bot) ProcessUpdate(ctx context.Context, update *telegram.Update, source
 		return
 	}
 
-	// Voice messages are now grouped with text messages for better context
-	if msg.Text != "" || msg.Caption != "" || msg.Photo != nil || msg.Document != nil || msg.Voice != nil || msg.Audio != nil || msg.VideoNote != nil {
-		b.HandleIncoming(b.incomingFromTelegram(msg))
+	// Voice and rich messages are grouped with text messages for better context.
+	// rich_message is a Message field, not a separate allowed_updates kind.
+	if msg.Text != "" || msg.Caption != "" || msg.Photo != nil || msg.Document != nil || msg.Voice != nil || msg.Audio != nil || msg.VideoNote != nil || msg.RichMessage != nil {
+		incoming := b.incomingFromTelegram(msg)
+		if incoming.Ingress != nil {
+			recordIncomingUpdate(incoming.Ingress.Kind, incoming.Ingress.Disposition)
+			ingressSpan.SetAttributes(
+				attribute.String("telegram.inbound.format", incoming.Ingress.Kind),
+				attribute.String("telegram.inbound.disposition", incoming.Ingress.Disposition),
+				attribute.Bool("telegram.rich.partial", incoming.Ingress.Disposition == ingressDispositionPartial),
+				attribute.Bool("telegram.rich.unknown", incoming.Ingress.Unknown),
+				attribute.Int("telegram.rich.blocks", incoming.Ingress.BlockCount),
+				attribute.Int("telegram.rich.media", incoming.Ingress.MediaCount),
+			)
+		} else {
+			kind := legacyIncomingKind(msg)
+			recordIncomingUpdate(kind, ingressDispositionProcessable)
+			ingressSpan.SetAttributes(
+				attribute.String("telegram.inbound.format", kind),
+				attribute.String("telegram.inbound.disposition", ingressDispositionProcessable),
+			)
+		}
+		b.HandleIncoming(incoming)
+		return
+	}
+	recordIncomingUpdate("other", "unsupported")
+	ingressSpan.SetAttributes(
+		attribute.String("telegram.inbound.format", "other"),
+		attribute.String("telegram.inbound.disposition", ingressDispositionUnsupported),
+	)
+}
+
+func legacyIncomingKind(msg *telegram.Message) string {
+	switch {
+	case msg == nil:
+		return "other"
+	case msg.Text != "":
+		return "text"
+	case msg.Caption != "":
+		return "caption"
+	case len(msg.Photo) > 0 || msg.Document != nil || msg.Voice != nil || msg.Audio != nil || msg.VideoNote != nil:
+		return "media"
+	default:
+		return "other"
 	}
 }
 
@@ -750,7 +821,8 @@ func (b *Bot) storePassiveChannelMessage(scopeID storage.ScopeID, im IncomingMes
 	}
 	// Passive posts skip the LLM turn entirely, so the injection gate in
 	// processMessageGroup never sees them — check here before persisting.
-	if DetectAssistantInjection(content) {
+	if DetectAssistantInjection(content) ||
+		DetectAssistantInjection(incomingInjectionDetectionText([]IncomingMessage{im})) {
 		b.logger.Warn("assistant-instruction injection in passive channel post, not persisted",
 			"scope_id", scopeID, "sender", im.SenderDisplay)
 		return
@@ -883,7 +955,8 @@ func (b *Bot) sendTypingActionLoop(ctx context.Context, conversationID string) {
 	}
 }
 
-func (b *Bot) sendResponses(ctx context.Context, chatID int64, responses []telegram.SendMessageRequest, logger *slog.Logger) {
+func (b *Bot) sendResponses(ctx context.Context, chatID int64, responses []telegram.SendMessageRequest, logger *slog.Logger) (bool, int) {
+	attempts := 0
 	for i, resp := range responses {
 		// Safety net: skip empty or whitespace-only messages to avoid Telegram API errors
 		if strings.TrimSpace(resp.Text) == "" {
@@ -891,39 +964,67 @@ func (b *Bot) sendResponses(ctx context.Context, chatID int64, responses []teleg
 			continue
 		}
 
-		logger.Debug("Sending response to user",
-			"chunk_index", i,
-			"text", resp.Text,
-			"parse_mode", resp.ParseMode,
-		)
+		logger.Debug("Sending response to user", "chunk_index", i, "parse_mode", resp.ParseMode)
 
-		if _, err := b.api.SendMessage(ctx, resp); err != nil {
+		attempts++
+		sent, err := b.api.SendMessage(ctx, resp)
+		if err == nil {
+			if sent == nil || sent.MessageID <= 0 {
+				logger.Error("sendMessage returned no stable message id", "chunk_index", i)
+				return false, attempts
+			}
+			continue
+		}
+		if err != nil {
 			logger.Error("failed to send message", "error", err, "chunk_index", i)
 
-			// Use a fresh context with timeout for retry operations
-			// This ensures retries complete even if the original context was cancelled
+			var apiErr *telegram.APIError
+			if !errors.As(err, &apiErr) || apiErr.Code < 400 || apiErr.Code >= 500 {
+				// The request may have reached Telegram. Do not create a duplicate
+				// logical response through a plain-text retry or generic follow-up.
+				return false, attempts
+			}
+
+			// A Bot API response is a confirmed rejection, so a bounded recovery
+			// attempt cannot duplicate the rejected message.
 			retryCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 
-			if strings.Contains(err.Error(), "can't parse entities") {
+			if strings.Contains(strings.ToLower(apiErr.Description), "can't parse entities") {
 				logger.Warn("retrying to send message without MarkdownV2 due to parsing error")
 				resp.ParseMode = ""
-				if _, sendErr := b.api.SendMessage(retryCtx, resp); sendErr != nil {
+				attempts++
+				retrySent, sendErr := b.api.SendMessage(retryCtx, resp)
+				if sendErr != nil {
 					logger.Error("failed to send raw text message", "error", sendErr)
-					errorMsg := telegram.SendMessageRequest{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.generic_error")}
-					if _, finalErr := b.api.SendMessage(retryCtx, errorMsg); finalErr != nil {
-						logger.Error("failed to send generic error message", "error", finalErr)
+					var retryAPIError *telegram.APIError
+					if errors.As(sendErr, &retryAPIError) && retryAPIError.Code >= 400 && retryAPIError.Code < 500 {
+						errorMsg := telegram.SendMessageRequest{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.generic_error")}
+						attempts++
+						if _, finalErr := b.api.SendMessage(retryCtx, errorMsg); finalErr != nil {
+							logger.Error("failed to send generic error message", "error", finalErr)
+						}
 					}
+					cancel()
+					return false, attempts
 				}
+				if retrySent == nil || retrySent.MessageID <= 0 {
+					logger.Error("plain-text sendMessage returned no stable message id")
+					cancel()
+					return false, attempts
+				}
+				cancel()
 			} else {
 				errorMsg := telegram.SendMessageRequest{ChatID: chatID, Text: b.translator.Get(b.cfg.Bot.Language, "bot.generic_error")}
+				attempts++
 				if _, sendErr := b.api.SendMessage(retryCtx, errorMsg); sendErr != nil {
 					logger.Error("failed to send generic error message", "error", sendErr)
 				}
+				cancel()
+				return false, attempts
 			}
-			cancel()
-			return
 		}
 	}
+	return true, attempts
 }
 
 func (b *Bot) getTieredCost(promptTokens, completionTokens int, logger *slog.Logger) float64 {

@@ -161,6 +161,24 @@ func TestHandleUpdate_NilMessage_ReturnsEarly(t *testing.T) {
 	mockStore.AssertNotCalled(t, "UpsertUser", mock.Anything)
 }
 
+func TestHandleUpdate_MissingIdentityFields_ReturnsWithoutPanic(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		msg  *telegram.Message
+	}{
+		{name: "missing sender", msg: &telegram.Message{Chat: &telegram.Chat{ID: 123}, Text: "hello"}},
+		{name: "missing chat", msg: &telegram.Message{From: &telegram.User{ID: 123}, Text: "hello"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bot, mockStore, _ := setupBotForHandlerTests(t)
+			assert.NotPanics(t, func() {
+				bot.ProcessUpdate(context.Background(), &telegram.Update{UpdateID: 1, Message: tc.msg}, "test")
+			})
+			mockStore.AssertNotCalled(t, "UpsertUser", mock.Anything)
+		})
+	}
+}
+
 // TestHandleUpdate_VoiceMessage_RoutedToGrouper verifies voice messages trigger grouping.
 func TestHandleUpdate_VoiceMessage_RoutedToGrouper(t *testing.T) {
 	bot, mockStore, _ := setupBotForHandlerTests(t)

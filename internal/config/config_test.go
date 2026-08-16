@@ -81,6 +81,85 @@ func TestLoadDefault(t *testing.T) {
 	// Check that default values are present
 	assert.Equal(t, "9081", cfg.Server.ListenPort)
 	assert.Equal(t, "info", cfg.Log.Level)
+	assert.Equal(t, TelegramRichMessagesOff, cfg.Telegram.RichMessages.Mode)
+	assert.Empty(t, cfg.Telegram.RichMessages.AllowedUserIDs)
+	assert.False(t, cfg.Telegram.RichMessages.DraftStreamingEnabled)
+}
+
+func TestLoad_TelegramRichMessagesDraftStreamingEnvOverride(t *testing.T) {
+	t.Setenv("LAPLACED_TELEGRAM_RICH_MESSAGES_MODE", "send")
+	t.Setenv("LAPLACED_TELEGRAM_RICH_MESSAGES_ALLOWED_USER_IDS", "123")
+	t.Setenv("LAPLACED_TELEGRAM_RICH_MESSAGES_DRAFT_STREAMING_ENABLED", "true")
+
+	cfg, err := LoadDefault()
+	assert.NoError(t, err)
+	assert.True(t, cfg.Telegram.RichMessages.DraftStreamingEnabled)
+	assert.Equal(t, TelegramRichMessagesSend, cfg.Telegram.RichMessages.ModeForNativeUser("123"))
+	assert.Equal(t, TelegramRichMessagesOff, cfg.Telegram.RichMessages.ModeForNativeUser("999"))
+}
+
+func TestLoad_TelegramRichMessagesRolloutEnv(t *testing.T) {
+	t.Setenv("LAPLACED_TELEGRAM_RICH_MESSAGES_MODE", "shadow")
+	t.Setenv("LAPLACED_TELEGRAM_RICH_MESSAGES_ALLOWED_USER_IDS", "123,456")
+
+	cfg, err := LoadDefault()
+	assert.NoError(t, err)
+	assert.Equal(t, TelegramRichMessagesShadow, cfg.Telegram.RichMessages.Mode)
+	assert.Equal(t, []int64{123, 456}, cfg.Telegram.RichMessages.AllowedUserIDs)
+	assert.Equal(t, TelegramRichMessagesShadow, cfg.Telegram.RichMessages.ModeForNativeUser("123"))
+	assert.Equal(t, TelegramRichMessagesOff, cfg.Telegram.RichMessages.ModeForNativeUser("999"))
+}
+
+func TestTelegramRichMessagesModeForNativeUser_FailsClosed(t *testing.T) {
+	rich := TelegramRichMessagesConfig{Mode: TelegramRichMessagesSend}
+	assert.Equal(t, TelegramRichMessagesOff, rich.ModeForNativeUser("123"), "empty canary means nobody")
+	assert.Equal(t, TelegramRichMessagesOff, rich.ModeForNativeUser("not-a-number"))
+
+	rich.AllowedUserIDs = []int64{123}
+	assert.Equal(t, TelegramRichMessagesSend, rich.ModeForNativeUser("123"))
+	rich.Mode = ""
+	assert.Equal(t, TelegramRichMessagesOff, rich.ModeForNativeUser("123"), "omitted mode fails closed")
+	rich.Mode = TelegramRichMessagesOff
+	rich.DraftStreamingEnabled = true
+	assert.Equal(t, TelegramRichMessagesOff, rich.ModeForNativeUser("123"), "mode=off remains the kill switch even with drafts configured")
+	assert.False(t, rich.AnyEnabled(), "explicit off must also disable the transport capability")
+}
+
+func TestValidateTransport_RejectsUnknownRichMessagesMode(t *testing.T) {
+	cfg := &Config{}
+	cfg.Transport = "telegram"
+	cfg.Telegram.Token = "test"
+	cfg.Telegram.RichMessages.Mode = "sometimes"
+	errs := cfg.validateTransport()
+	assert.Len(t, errs, 1)
+	assert.Contains(t, errs[0].Error(), "telegram.rich_messages.mode")
+}
+
+func TestValidateTransport_ValidatesRichMessagesCanary(t *testing.T) {
+	cfg := &Config{}
+	cfg.Transport = "telegram"
+	cfg.Telegram.Token = "test"
+	cfg.Bot.AllowedUserIDs = []int64{123}
+	cfg.Telegram.RichMessages.Mode = TelegramRichMessagesSend
+	cfg.Telegram.RichMessages.AllowedUserIDs = []int64{0, 123, 123, 999}
+
+	errs := cfg.validateTransport()
+	assert.Len(t, errs, 3)
+	assert.Contains(t, errs[0].Error(), "must be a positive Telegram user id")
+	assert.Contains(t, errs[1].Error(), "duplicate entry")
+	assert.Contains(t, errs[2].Error(), "not present in bot.allowed_user_ids")
+}
+
+func TestValidateTransport_AllowsFailClosedRichConfiguration(t *testing.T) {
+	cfg := &Config{}
+	cfg.Transport = "telegram"
+	cfg.Telegram.Token = "test"
+	cfg.Telegram.RichMessages.Mode = TelegramRichMessagesSend
+	assert.Empty(t, cfg.validateTransport(), "an empty canary is a valid fail-closed rollout")
+
+	cfg.Telegram.RichMessages.Mode = TelegramRichMessagesOff
+	cfg.Telegram.RichMessages.DraftStreamingEnabled = true
+	assert.Empty(t, cfg.validateTransport(), "mode=off must remain an unconditional operational kill switch")
 }
 
 func TestLoadDefault_ReactorAgent(t *testing.T) {

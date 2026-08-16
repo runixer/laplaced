@@ -1270,7 +1270,7 @@ func TestToHTMLWithMathbf(t *testing.T) {
 		{
 			name:     "user formula from request - bullet point",
 			input:    "3. Потенциал: 28 рядов × 6 мотков ≈ $\\mathbf{168 рядов}$",
-			expected: "1. Потенциал: 28 рядов × 6 мотков ≈ 168 рядов",
+			expected: "3. Потенциал: 28 рядов × 6 мотков ≈ 168 рядов",
 		},
 		{
 			name:     "bold in markdown with formula",
@@ -1743,12 +1743,51 @@ func TestInlineMathNumericPairs(t *testing.T) {
 		{"tight decimal pair before word", "в $1,32$ раза", "в 1,32 раза"},
 		{"tight integer pair before unit", "около $400$ км", "около 400 км"},
 		{"tight integer pair after word", "высотой $1200$ км", "высотой 1200 км"},
+		{"tight numeric subtraction", "$5-10$", "5-10"},
 		{"tight pair with degree", "угол в $15^\\circ$ тут", "угол в 15° тут"},
 		{"tight percent pair", "минимум $75\\%$ высоты", "минимум 75% высоты"},
 		// Genuine currency stays literal.
 		{"unpaired currency decimal", "Price: $3.50", "Price: $3.50"},
 		{"unpaired currency integer", "Cost: $100.00", "Cost: $100.00"},
 		{"currency conjunction", "It costs $3.50 and $2.00", "It costs $3.50 and $2.00"},
+		{
+			"currency sentence boundaries",
+			"цена $100, диапазон $5–$10, USD $20.",
+			"цена $100, диапазон $5–$10, USD $20.",
+		},
+		{
+			"currency amounts followed by Russian prose",
+			"базовая цена $100 за передачу телеметрии, диапазон $5–$10 за киловатт-час и USD $20 за грамм",
+			"базовая цена $100 за передачу телеметрии, диапазон $5–$10 за киловатт-час и USD $20 за грамм",
+		},
+		{
+			"currency amounts followed by English prose",
+			"base price $100 per transfer, range $5-$10 per kWh and USD $20 per gram",
+			"base price $100 per transfer, range $5-$10 per kWh and USD $20 per gram",
+		},
+		{
+			"currency prose before a real formula",
+			"цена $100 за пакет; формула $x^2$ верна",
+			"цена $100 за пакет; формула x² верна",
+		},
+		{
+			"currency before inline code and formula",
+			"цена $100 за пакет; код `$x_i$`; формула $y^2$ верна",
+			"цена $100 за пакет; код `$x_i$`; формула y² верна",
+		},
+		{"currency with non-breaking space", "цена $100\u00a0за пакет", "цена $100\u00a0за пакет"},
+		{"currency with space after symbol", "цена $ 100 за рейс, затем $ 20 за грамм", "цена $ 100 за рейс, затем $ 20 за грамм"},
+		{"currency with suffix symbol", "цена 100 $ за рейс и 20 $ за грамм", "цена 100 $ за рейс и 20 $ за грамм"},
+		{"currency ASCII range", "range $5-$10", "range $5-$10"},
+		{"currency spaced range", "range $5 – $10", "range $5 – $10"},
+		{"currency word range", "range $5 to $10 per kg", "range $5 to $10 per kg"},
+		// Numeric formulas with explicit syntax remain math.
+		{"numeric formula with spaces", "$5 + x$", "5 + x"},
+		{"numeric formula with latex command", `$5 \times x$`, "5 × x"},
+		{"numeric formula with spaced variable", "$5 x$", "5 x"},
+		{"numeric formula with comma", "$5, x$", "5, x"},
+		{"numeric formula with period", "$5. x$", "5. x"},
+		{"whitespace padded numeric pair", "$5 $", "5 "},
 		// Cascade containment: a stray '$' on one line must not eat the next.
 		{
 			name:     "stray dollar does not cross newline",

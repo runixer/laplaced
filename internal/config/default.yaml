@@ -19,6 +19,15 @@ telegram:
   token: ""
   webhook_url: ""
   proxy_url: ""
+  # Rich output rollout. Inbound Rich Messages are always decoded.
+  # Explicit shadow/send modes require a native Telegram user-id canary list;
+  # an empty list means nobody. mode=off is always the kill switch.
+  rich_messages:
+    mode: "off"
+    allowed_user_ids: []
+    # Ephemeral sendRichMessageDraft previews for eligible rich private turns.
+    # This is independent from bot.streaming.enabled (legacy edits only).
+    draft_streaming_enabled: false
 
 # Mattermost/Time Configuration (used when transport: "mattermost")
 # server_url/bot_token/allowed_user_ids come from an overlay config + env.
@@ -300,15 +309,15 @@ fetcher:
 bot:
   language: "en"
   turn_wait_duration: "2s"
-  # Progressive (streaming) replies via editMessageText. The bot sends a
-  # placeholder immediately, edits it with tool-execution status, and reveals
-  # LLM content as SSE deltas arrive. Telegram clients animate the edits.
-  # Set LAPLACED_BOT_STREAMING_ENABLED=false to fall back to one-shot replies.
+  # Progressive legacy Telegram replies edit one persistent placeholder.
+  # Rich private drafts are controlled separately by
+  # telegram.rich_messages.draft_streaming_enabled.
+  # Set LAPLACED_BOT_STREAMING_ENABLED=false to make legacy replies one-shot.
   streaming:
     enabled: true
-    edit_throttle_ms: 1000   # min interval between edits to the same bubble
-    edit_min_chars: 80       # earlier edit allowed once this many new chars accumulate
-    max_buffer_chars: 3400   # past this, finalize first bubble and switch to multi-message send
+    edit_throttle_ms: 1000   # min interval between progressive snapshots
+    edit_min_chars: 80       # earlier snapshot once this many new chars accumulate
+    max_buffer_chars: 3400   # legacy editMessageText preview cap; native rich drafts use their own bounded budget
 
 # Database Configuration
 database:

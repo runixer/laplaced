@@ -5,12 +5,65 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ilyakaznacheev/cleanenv"
 	"github.com/runixer/laplaced/internal/llm"
 	"gopkg.in/yaml.v3"
 )
+
+const (
+	TelegramRichMessagesOff    = "off"
+	TelegramRichMessagesShadow = "shadow"
+	TelegramRichMessagesSend   = "send"
+)
+
+// TelegramRichMessagesConfig controls the bounded rollout of model-authored
+// Rich Messages. Inbound Rich Messages are intentionally not feature-gated:
+// disabling this config only selects the outbound representation.
+type TelegramRichMessagesConfig struct {
+	Mode           string  `yaml:"mode" env:"LAPLACED_TELEGRAM_RICH_MESSAGES_MODE"`
+	AllowedUserIDs []int64 `yaml:"allowed_user_ids" env:"LAPLACED_TELEGRAM_RICH_MESSAGES_ALLOWED_USER_IDS" env-separator:","`
+
+	// DraftStreamingEnabled controls ephemeral sendRichMessageDraft previews
+	// for eligible private rich turns. It is deliberately independent from
+	// bot.streaming.enabled, which controls only legacy editMessageText output.
+	// Mode=off remains the rollout kill switch even when this flag is true.
+	DraftStreamingEnabled bool `yaml:"draft_streaming_enabled" env:"LAPLACED_TELEGRAM_RICH_MESSAGES_DRAFT_STREAMING_ENABLED"`
+}
+
+// AnyEnabled reports whether the transport must expose its Rich Message wire
+// capability. Per-turn eligibility is still enforced by ModeForNativeUser.
+func (r TelegramRichMessagesConfig) AnyEnabled() bool {
+	mode := strings.ToLower(strings.TrimSpace(r.Mode))
+	switch mode {
+	case TelegramRichMessagesShadow, TelegramRichMessagesSend:
+		return true
+	default:
+		return false
+	}
+}
+
+// ModeForNativeUser returns off/shadow/send for a Telegram-native numeric user
+// id. Explicit rollout modes fail closed: an empty canary list means nobody.
+func (r TelegramRichMessagesConfig) ModeForNativeUser(nativeUserID string) string {
+	mode := strings.ToLower(strings.TrimSpace(r.Mode))
+	if mode != TelegramRichMessagesShadow && mode != TelegramRichMessagesSend {
+		return TelegramRichMessagesOff
+	}
+	id, err := strconv.ParseInt(nativeUserID, 10, 64)
+	if err != nil {
+		return TelegramRichMessagesOff
+	}
+	for _, allowed := range r.AllowedUserIDs {
+		if allowed == id {
+			return mode
+		}
+	}
+	return TelegramRichMessagesOff
+}
 
 //go:embed default.yaml
 var defaultConfig []byte
@@ -23,14 +76,14 @@ type BotConfig struct {
 	Streaming         StreamingConfig `yaml:"streaming"`
 }
 
-// StreamingConfig controls progressive bot replies via editMessageText.
+// StreamingConfig controls progressive legacy Telegram replies and the shared
+// snapshot cadence. Enabled applies only to persistent editMessageText output;
+// rich drafts have their own TelegramRichMessagesConfig rollout flag.
 //
-// When Enabled, the bot sends a placeholder message immediately, edits it with
-// tool-execution status during the agent's tool loop, and then progressively
-// reveals the LLM's content as SSE deltas arrive. EditThrottleMs / EditMinChars
-// throttle edits to keep under Telegram's edit rate limit. MaxBufferChars caps
-// in-bubble streaming — past that the response falls back to the existing
-// finalize+sendResponses path (separate messages).
+// EditThrottleMs / EditMinChars throttle snapshots. MaxBufferChars is retained
+// as the legacy editMessageText preview cap; native Rich Message drafts use a
+// separate internal budget because Telegram gives them different limits. The
+// completed agent response remains the source of truth for final delivery.
 type StreamingConfig struct {
 	Enabled        bool `yaml:"enabled" env:"LAPLACED_BOT_STREAMING_ENABLED"`
 	EditThrottleMs int  `yaml:"edit_throttle_ms" env:"LAPLACED_BOT_STREAMING_EDIT_THROTTLE_MS"`
@@ -56,8 +109,10 @@ func (s StreamingConfig) GetEditMinChars() int {
 	return s.EditMinChars
 }
 
-// GetMaxBufferChars returns the in-bubble streaming cap. Defaults to 3400 — a
-// safety margin under Telegram's 4096 UTF-16 limit accounting for HTML expansion.
+// GetMaxBufferChars returns the legacy editMessageText in-bubble streaming
+// cap. Defaults to 3400 bytes — a safety margin under Telegram's 4096 UTF-16
+// limit accounting for HTML expansion. The key name is retained for backward
+// compatibility; native Rich Message drafts do not use it.
 func (s StreamingConfig) GetMaxBufferChars() int {
 	if s.MaxBufferChars <= 0 {
 		return 3400
@@ -813,11 +868,12 @@ type Config struct {
 	// Transport selects the chat backend: "telegram" (default) | "mattermost".
 	Transport string `yaml:"transport" env:"LAPLACED_TRANSPORT"`
 	Telegram  struct {
-		Token         string `yaml:"token" env:"LAPLACED_TELEGRAM_TOKEN"`
-		WebhookURL    string `yaml:"webhook_url" env:"LAPLACED_TELEGRAM_WEBHOOK_URL"`
-		WebhookPath   string // Auto-generated from token hash (not configurable)
-		WebhookSecret string // Auto-generated from token hash (not configurable)
-		ProxyURL      string `yaml:"proxy_url" env:"LAPLACED_TELEGRAM_PROXY_URL"`
+		Token         string                     `yaml:"token" env:"LAPLACED_TELEGRAM_TOKEN"`
+		WebhookURL    string                     `yaml:"webhook_url" env:"LAPLACED_TELEGRAM_WEBHOOK_URL"`
+		WebhookPath   string                     // Auto-generated from token hash (not configurable)
+		WebhookSecret string                     // Auto-generated from token hash (not configurable)
+		ProxyURL      string                     `yaml:"proxy_url" env:"LAPLACED_TELEGRAM_PROXY_URL"`
+		RichMessages  TelegramRichMessagesConfig `yaml:"rich_messages"`
 	} `yaml:"telegram"`
 	Mattermost MattermostConfig `yaml:"mattermost"`
 	LLM        LLMConfig        `yaml:"llm"`

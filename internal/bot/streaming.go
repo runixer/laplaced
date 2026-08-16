@@ -24,6 +24,11 @@ import (
 // log preserves enough context to be useful when several steps are stacked.
 const streamingMaxStatusArgChars = 200
 
+// errStreamSinkAlreadyFinalized makes terminal delivery single-shot. A second
+// Finalize must never edit the bubble again or hand overflow chunks back to a
+// caller that could resend them.
+var errStreamSinkAlreadyFinalized = errors.New("stream sink already finalized")
+
 // toolArgField maps a tool's function name to the JSON field name in its
 // arguments string that should be surfaced in the status line. Tools missing
 // from this map get the bare (no-arg) status. The mapping mirrors the
@@ -148,6 +153,10 @@ func newStreamSink(
 		logger.Warn("streamSink: failed to send placeholder; streaming disabled for this turn", "error", err)
 		return s
 	}
+	if msg == nil || msg.MessageID <= 0 {
+		logger.Warn("streamSink: placeholder returned no stable message id; streaming disabled for this turn")
+		return s
+	}
 	s.msgID = msg.MessageID
 	return s
 }
@@ -164,7 +173,7 @@ func newStreamSink(
 func (s *streamSink) Status(toolName, arguments string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.msgID == 0 || s.mode == streamModeOverflow {
+	if s.hadFinalize || s.msgID == 0 || s.mode == streamModeOverflow {
 		return
 	}
 	s.appendStatusLocked(s.statusTextLocked(toolName, arguments))
@@ -179,7 +188,7 @@ func (s *streamSink) RAG(enrichedQuery string) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.msgID == 0 || s.mode == streamModeOverflow {
+	if s.hadFinalize || s.msgID == 0 || s.mode == streamModeOverflow {
 		return
 	}
 	line := fmt.Sprintf(
@@ -194,7 +203,7 @@ func (s *streamSink) RAG(enrichedQuery string) {
 // status, the initial "Thinking…" placeholder is seeded as the first log
 // entry so the journey reads naturally. Caller must hold s.mu.
 func (s *streamSink) appendStatusLocked(line string) {
-	if line == "" {
+	if s.hadFinalize || line == "" {
 		return
 	}
 	if len(s.statusLog) == 0 && s.placeholderText != "" {
@@ -214,7 +223,7 @@ func (s *streamSink) appendStatusLocked(line string) {
 		s.editContentLocked()
 	default:
 		// Still in the status phase — just refresh the blockquote.
-		s.editLocked(renderStatusBlock(s.statusLog), "HTML")
+		_ = s.editLocked(renderStatusBlock(s.statusLog), "HTML")
 	}
 }
 
@@ -316,6 +325,12 @@ func (s *streamSink) Delta(text string) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.hadFinalize {
+		// The terminal edit owns the final representation. Late callbacks can
+		// race with Finalize, but they must not mutate either the bubble or the
+		// source buffer after delivery has reached an unknown/confirmed state.
+		return
+	}
 	if s.msgID == 0 || s.mode == streamModeOverflow {
 		// Always grow the buffer — Finalize uses it as the source of truth
 		// regardless of whether we keep editing the bubble.
@@ -364,18 +379,24 @@ func (s *streamSink) editContentLocked() {
 	htmlText, err := markdown.ToHTML(balanced)
 	if err != nil {
 		s.logger.Debug("streamSink: ToHTML failed mid-stream, falling back to plain", "error", err)
-		s.editLocked(prefix+htmlEscapeForFallback(raw), "HTML")
+		_ = s.editLocked(prefix+htmlEscapeForFallback(raw), "HTML")
 		return
 	}
-	s.editLocked(prefix+htmlText, "HTML")
+	_ = s.editLocked(prefix+htmlText, "HTML")
 }
 
 // editLocked sends an editMessageText with the given body and parse_mode.
-// Caller must hold s.mu. Errors are logged at debug/warn but never returned —
-// streaming is best-effort UX, not a correctness primitive.
-func (s *streamSink) editLocked(text, parseMode string) {
-	if s.msgID == 0 || strings.TrimSpace(text) == "" {
-		return
+// Caller must hold s.mu. Mid-stream callers may ignore the returned error
+// because a later edit carries the full buffer, while Finalize must propagate
+// it: history/overflow sends are allowed only after Telegram confirmed the
+// terminal representation. ErrMessageNotModified is confirmation that the
+// requested terminal representation is already visible.
+func (s *streamSink) editLocked(text, parseMode string) error {
+	if s.msgID == 0 {
+		return errors.New("streamSink edit has no placeholder message id")
+	}
+	if strings.TrimSpace(text) == "" {
+		return errors.New("streamSink edit has empty text")
 	}
 	req := telegram.EditMessageTextRequest{
 		ChatID:    s.chatID,
@@ -387,18 +408,32 @@ func (s *streamSink) editLocked(text, parseMode string) {
 	// past the rest of the turn.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, err := s.api.EditMessageText(ctx, req)
+	msg, err := s.api.EditMessageText(ctx, req)
 	s.lastEditAt = s.now()
 	s.editCount++
 	if err != nil {
 		if errors.Is(err, telegram.ErrMessageNotModified) {
 			// Same content as before — Telegram considers this a no-op.
-			return
+			return nil
 		}
 		// Don't bail: an edit can fail for transient reasons (rate limit,
 		// network). The next throttle window will retry with the latest buf.
 		s.logger.Warn("streamSink edit failed", "error", err, "chat_id", s.chatID, "message_id", s.msgID)
+		return fmt.Errorf("edit streaming message: %w", err)
 	}
+	if msg == nil || msg.MessageID <= 0 || msg.MessageID != s.msgID {
+		// The request may have reached Telegram even though the response is
+		// malformed. Treat this as unknown and never resend through another
+		// delivery path.
+		confirmedID := 0
+		if msg != nil {
+			confirmedID = msg.MessageID
+		}
+		err := fmt.Errorf("edit streaming message returned invalid message_id %d", confirmedID)
+		s.logger.Warn("streamSink edit returned malformed success", "error", err, "chat_id", s.chatID, "message_id", s.msgID)
+		return err
+	}
+	return nil
 }
 
 // MessageID returns the transport id of the streamed bubble (the placeholder
@@ -435,18 +470,23 @@ type finalizeArgs struct {
 //   - additionalResponses: [] in non-overflow paths; [chunk2, chunk3, ...] in
 //     the overflow path (caller sends these as new messages).
 //   - editCount: total number of editMessageText calls issued (for metrics).
+//   - error: terminal edit was not confirmed. Callers must not resend the
+//     answer, send overflow chunks, or persist it as delivered.
 func (s *streamSink) Finalize(
 	args finalizeArgs,
 	finalizeResponse func(text string) ([]telegram.SendMessageRequest, error),
-) ([]telegram.SendMessageRequest, int) {
+) ([]telegram.SendMessageRequest, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.hadFinalize {
+		return nil, s.editCount, errStreamSinkAlreadyFinalized
+	}
 	s.hadFinalize = true
 
 	// No placeholder — we never had a bubble to edit. Caller falls back to
 	// the existing send path entirely.
 	if s.msgID == 0 {
-		return nil, s.editCount
+		return nil, s.editCount, nil
 	}
 
 	// Compute prefix from the current statusLog. This picks up any
@@ -459,14 +499,14 @@ func (s *streamSink) Finalize(
 		if text == "" {
 			text = s.translator.Get(s.lang, "bot.api_error")
 		}
-		s.editLocked(prefix+htmlEscapeForFallback(text), "HTML")
-		return nil, s.editCount
+		err := s.editLocked(prefix+htmlEscapeForFallback(text), "HTML")
+		return nil, s.editCount, err
 	}
 
 	if strings.TrimSpace(args.FullText) == "" {
 		text := s.translator.Get(s.lang, "bot.empty_response")
-		s.editLocked(prefix+htmlEscapeForFallback(text), "HTML")
-		return nil, s.editCount
+		err := s.editLocked(prefix+htmlEscapeForFallback(text), "HTML")
+		return nil, s.editCount, err
 	}
 
 	// Build full HTML render via the existing pipeline, even if we didn't
@@ -476,8 +516,8 @@ func (s *streamSink) Finalize(
 	if err != nil || len(chunks) == 0 {
 		// Fallback: HTML-escape the raw text and ship as plain.
 		s.logger.Warn("streamSink: finalizeResponse failed; falling back to escaped plain", "error", err)
-		s.editLocked(prefix+htmlEscapeForFallback(args.FullText), "HTML")
-		return nil, s.editCount
+		editErr := s.editLocked(prefix+htmlEscapeForFallback(args.FullText), "HTML")
+		return nil, s.editCount, editErr
 	}
 
 	// Edit the placeholder with the first chunk's HTML (prefixed by the
@@ -490,8 +530,10 @@ func (s *streamSink) Finalize(
 	if markdown.UTF16Length(firstText) > telegramMessageLimit {
 		firstText = chunks[0].Text
 	}
-	s.editLocked(firstText, chunks[0].ParseMode)
-	return chunks[1:], s.editCount
+	if err := s.editLocked(firstText, chunks[0].ParseMode); err != nil {
+		return nil, s.editCount, err
+	}
+	return chunks[1:], s.editCount, nil
 }
 
 // htmlEscapeForFallback escapes raw text so it can safely be sent with

@@ -153,6 +153,16 @@ func (l *Laplace) LoadContextData(
 	rawQuery string,
 	currentMessageParts []interface{},
 ) (*ContextData, error) {
+	return l.loadContextData(ctx, userID, rawQuery, currentMessageParts, l.cfg.Telegram.RichMessages.AnyEnabled())
+}
+
+func (l *Laplace) loadContextData(
+	ctx context.Context,
+	userID storage.ScopeID,
+	rawQuery string,
+	currentMessageParts []interface{},
+	richOutput bool,
+) (*ContextData, error) {
 	data := &ContextData{
 		UserID: userID, // v0.6.0: Store userID for artifact loading
 	}
@@ -211,11 +221,12 @@ func (l *Laplace) LoadContextData(
 		botName = "Bot"
 	}
 	basePrompt, err := l.translator.GetTemplate(l.cfg.Bot.Language, "bot.system_prompt", prompts.LaplaceParams{
-		Date:      referenceTime.Format("2006-01-02"),
-		BotName:   botName,
-		Platform:  platformName(l.cfg.Transport),
-		KatexMath: l.cfg.Transport == "mattermost", // Mattermost/Time renders LaTeX via KaTeX; Telegram does not
-		IsChannel: isChannel,
+		Date:         referenceTime.Format("2006-01-02"),
+		BotName:      botName,
+		Platform:     platformName(l.cfg.Transport),
+		KatexMath:    l.cfg.Transport == "mattermost" || (l.cfg.Transport == "telegram" && richOutput),
+		RichMarkdown: l.cfg.Transport == "telegram" && richOutput,
+		IsChannel:    isChannel,
 		// The READ protocol section must track actual tool exposure: startup
 		// wiring drops read_url from cfg.Tools when its fetcher fails to
 		// initialize, and the prompt must not steer the model to a dead tool.

@@ -441,13 +441,13 @@ internal/markdown/latex.go (696 строк)
 │   └── convertSubscripts()     # H_2 → H₂, поддержка кириллицы и Unicode
 │
 ├── State machine (matchInlineMath):
-│   ├── Состояния: поиск $, проверка currency, парсинг content
-│   ├── Обрабатывает: \$, $3.50, $100 и, двойные переводы строки
+│   ├── Состояния: поиск $, валидация delimiter, парсинг content
+│   ├── Обрабатывает: \$, $3.50, цепочки валютных сумм, переводы строк
 │   └── isFormulaTerminator(), isMathContinuation() helpers
 │
 └── Утилиты:
     ├── findMatchingBrace()         # Подсчёт глубины скобок
-    ├── looksLikeCurrency()         # Currency detection (цифры + .,)
+    ├── scanNumericDollarAmount()   # Числовой префикс после $
     ├── isFormulaTerminator()       # . , ! ? : ; ) ] \n
     ├── isMathContinuation()        # \ + - * / = < > ≈ ≤ × · digits
     └── convertTypographicQuotes() # 1" → 1″
@@ -506,43 +506,28 @@ flattenBraces(content string) string {
 - `\underbrace{2 \times 25}_{зазоры}` → `2 × 25 (зазоры)`
 - Используется в формулах: `L = 1200 + \underbrace{2 \times 25}_{зазоры} = 1250`
 
-### Currency Detection (State Machine)
+### Currency-safe delimiter validation
 
-**Проблема:** `$3.50` похоже на формулу, но это валюта.
+**Проблема:** в строке `$100 за рейс, затем $20 за кг` первый знак
+`$` может ошибочно заимствовать второй как закрывающий delimiter и превратить
+обычный текст в формулу.
 
-**Старое решение (НЕ используется):** Проверка содержимого после парсинга — много string операций.
+**Решение:** opener inline-формулы не может иметь whitespace сразу после `$`.
+Для выражения, начинающегося с числа, matcher также проверяет кандидата на роль
+закрывающего `$`. Кандидат считается новым opener и текущий match отменяется,
+если он стоит непосредственно перед цифрой либо после пробела и непустого
+текстового хвоста. Токенизатор затем дойдёт до этого `$` самостоятельно.
 
-**Новое решение (State Machine в `matchInlineMath()`):** Проверка **во время** парсинга.
+Точные числовые пары и формулы сохраняют прежнюю семантику:
 
-```go
-// matchInlineMath() - state machine
-if i < len(runes) && unicode.IsDigit(runes[i]) {
-    j := i
-    // Собираем цифры, . и ,
-    for j < len(runes) && (unicode.IsDigit(runes[j]) || runes[j] == '.' || runes[j] == ',') {
-        j++
-    }
+- `$3.50` → `$3.50` (у суммы нет закрывающего delimiter)
+- `$100 за рейс, затем $20` → literal currency prose
+- `$5–$10` → literal currency range
+- `$5$`, `$5 x$`, `$5, x$` → inline math
+- `$x^2$` → `x²`
 
-    if j < len(runes) {
-        nextChar := runes[j]
-        // Валюта, если после числа идёт пунктуация:
-        if nextChar == '?' || nextChar == '!' || nextChar == '.' || nextChar == ',' {
-            return "", "", start // Не парсим как математику
-        }
-        // Валюта, если после числа идёт пробел + союз:
-        if nextChar == ' ' && hasConjunctionAfter(runes[j:]) {
-            return "", "", start
-        }
-    }
-}
-```
-
-**Примеры:**
-- `$3.50` → `$3.50` (валюта, детект на этапе парсинга) ✅
-- `$100?` → `$100?` (валюта с ?) ✅
-- `$100 или` → `$100 или` (валюта с союзом) ✅
-- `$P$` → `P` (переменная, нет цифр) ✅
-- `$x^2$` → `x²` (формула, есть оператор ^) ✅
+Тот же matcher используется legacy HTML-конвертером и Rich HTML renderer,
+поэтому правило одинаково для обычной отправки, rich preview и rich final.
 
 ### Brace Matching (для вложенности)
 

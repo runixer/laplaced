@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -17,6 +18,8 @@ import (
 // This allows for easier mocking in tests.
 type BotAPI interface {
 	SendMessage(ctx context.Context, req SendMessageRequest) (*Message, error)
+	SendRichMessage(ctx context.Context, req SendRichMessageRequest) (*Message, error)
+	SendRichMessageDraft(ctx context.Context, req SendRichMessageDraftRequest) error
 	EditMessageText(ctx context.Context, req EditMessageTextRequest) (*Message, error)
 	SendPhoto(ctx context.Context, req SendPhotoRequest) (*Message, error)
 	SendDocument(ctx context.Context, req SendDocumentRequest) (*Message, error)
@@ -50,7 +53,8 @@ var ErrMessageNotModified = errors.New("telegram: message is not modified")
 //
 // Solution:
 //  1. httpClient - for short API calls (sendMessage, sendChatAction, etc.)
-//     with a 15-second timeout and retry logic
+//     with a bounded timeout. Idempotent operations may retry; persistent
+//     message sends are one-shot because their outcome can become ambiguous.
 //  2. longPollingClient - for getUpdates with no timeout (controlled via
 //     context), isolated connection pool
 //
@@ -66,8 +70,9 @@ type Client struct {
 // NewClient creates a new Telegram API client.
 //
 // Creates two isolated HTTP clients with different settings:
-// - httpClient: 30s timeout, retry logic, for sendMessage/sendChatAction
-// - longPollingClient: no timeout (controlled via context), for getUpdates
+//   - httpClient: 30s timeout for sendMessage/sendChatAction (retry policy is
+//     selected per method)
+//   - longPollingClient: no timeout (controlled via context), for getUpdates
 func NewClient(token, proxyURL string) (*Client, error) {
 	// Transport for regular API calls (sendMessage, sendChatAction, etc.)
 	// DisableKeepAlives=true - each request creates a new connection,
@@ -120,7 +125,7 @@ func NewClient(token, proxyURL string) (*Client, error) {
 
 	return &Client{
 		token: token,
-		// 30s timeout + retry logic in makeRequest()
+		// 30s timeout; retry count is selected by the API method.
 		// DisableKeepAlives guarantees a fresh connection for each request
 		httpClient: &http.Client{
 			Timeout:   30 * time.Second,
@@ -136,7 +141,9 @@ func NewClient(token, proxyURL string) (*Client, error) {
 	}, nil
 }
 
-// makeRequest performs a request to the Telegram API with retry logic.
+// makeRequest performs a request to the Telegram API with the established
+// two-attempt retry policy. Non-idempotent methods whose success can become
+// ambiguous must call makeRequestWithAttempts with one attempt instead.
 //
 // Retry strategy: up to 2 attempts with a 2-second delay.
 // Retries happen only for network errors, NOT for Telegram API errors
@@ -149,6 +156,10 @@ func NewClient(token, proxyURL string) (*Client, error) {
 //
 // Metrics: records request duration, retry count, and errors in Prometheus.
 func (c *Client) makeRequest(ctx context.Context, method string, params interface{}) (*APIResponse, error) {
+	return c.makeRequestWithAttempts(ctx, method, params, 2)
+}
+
+func (c *Client) makeRequestWithAttempts(ctx context.Context, method string, params interface{}, maxAttempts int) (*APIResponse, error) {
 	startTime := time.Now()
 
 	jsonParams, err := json.Marshal(params)
@@ -159,10 +170,12 @@ func (c *Client) makeRequest(ctx context.Context, method string, params interfac
 	apiURL := fmt.Sprintf("%s/%s", c.apiURL, method)
 
 	var lastErr error
-	maxRetries := 2
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
 	retryDelay := 2 * time.Second
 
-	for attempt := 0; attempt < maxRetries; attempt++ {
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			// Record the retry in metrics
 			recordRetry(method)
@@ -218,7 +231,11 @@ func (c *Client) makeRequest(ctx context.Context, method string, params interfac
 			duration := time.Since(startTime).Seconds()
 			recordRequestDuration(method, statusError, duration)
 			recordError(method, errorTypeAPI)
-			return nil, fmt.Errorf("telegram api error: %s", apiResp.Description)
+			return nil, &APIError{
+				Code:        apiResp.ErrorCode,
+				Description: apiResp.Description,
+				Parameters:  apiResp.Parameters,
+			}
 		}
 
 		// Successful request
@@ -256,16 +273,71 @@ func sanitizeError(err error, token string) error {
 
 // SendMessage sends a text message.
 func (c *Client) SendMessage(ctx context.Context, req SendMessageRequest) (*Message, error) {
-	resp, err := c.makeRequest(ctx, "sendMessage", req)
+	// Persistent sends have no idempotency key. A network/decode failure after
+	// the request was written has an unknown outcome, so an automatic retry could
+	// create a duplicate message.
+	resp, err := c.makeRequestWithAttempts(ctx, "sendMessage", req, 1)
+	if err != nil {
+		return nil, err
+	}
+	return decodeSentMessage(resp, "sendMessage")
+}
+
+// SendRichMessage sends an HTML rich message.
+func (c *Client) SendRichMessage(ctx context.Context, req SendRichMessageRequest) (*Message, error) {
+	// There is no idempotency key for Bot API sends. A timeout, connection loss,
+	// or malformed success response after the request was written has an unknown
+	// outcome, so retrying could create a second persistent message.
+	if len(req.Attachments) > 0 || richMessageHasLocalAttachmentReference(req.RichMessage) {
+		return c.sendRichMessageMultipart(ctx, req)
+	}
+	resp, err := c.makeRequestWithAttempts(ctx, "sendRichMessage", req, 1)
 	if err != nil {
 		return nil, err
 	}
 
-	var msg Message
-	if err := json.Unmarshal(resp.Result, &msg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal message: %w", err)
+	return decodeSentMessage(resp, "sendRichMessage")
+}
+
+// SendRichMessageDraft streams an ephemeral rich snapshot. Repeating a call
+// with the same non-zero draft ID updates that draft instead of creating a
+// persistent message, so transient transport failures may be retried safely.
+func (c *Client) SendRichMessageDraft(ctx context.Context, req SendRichMessageDraftRequest) error {
+	if req.DraftID <= 0 || req.DraftID > math.MaxInt32 {
+		return errors.New("sendRichMessageDraft requires a positive int32 draft_id")
 	}
 
+	resp, err := c.makeRequest(ctx, "sendRichMessageDraft", req)
+	if err != nil {
+		return err
+	}
+
+	var accepted bool
+	if resp == nil || len(bytes.TrimSpace(resp.Result)) == 0 {
+		return errors.New("sendRichMessageDraft returned an empty result")
+	}
+	if err := json.Unmarshal(resp.Result, &accepted); err != nil {
+		return fmt.Errorf("failed to unmarshal result from sendRichMessageDraft: %w", err)
+	}
+	if !accepted {
+		return errors.New("sendRichMessageDraft returned false")
+	}
+	return nil
+}
+
+func decodeSentMessage(resp *APIResponse, method string) (*Message, error) {
+	if resp == nil || len(bytes.TrimSpace(resp.Result)) == 0 || bytes.Equal(bytes.TrimSpace(resp.Result), []byte("null")) {
+		return nil, fmt.Errorf("%s returned an empty message result", method)
+	}
+	var msg Message
+	if err := json.Unmarshal(resp.Result, &msg); err != nil {
+		// The request may already have been accepted; callers must treat this as
+		// unknown and must not resend the persistent payload in another format.
+		return nil, fmt.Errorf("failed to unmarshal message from %s: %w", method, err)
+	}
+	if msg.MessageID <= 0 {
+		return nil, fmt.Errorf("%s returned invalid message_id %d", method, msg.MessageID)
+	}
 	return &msg, nil
 }
 
@@ -281,7 +353,8 @@ func (c *Client) EditMessageText(ctx context.Context, req EditMessageTextRequest
 	if err != nil {
 		// Telegram returns "Bad Request: message is not modified" when the new
 		// content matches the existing message exactly. Surface as a typed error.
-		if strings.Contains(err.Error(), "message is not modified") {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && strings.Contains(apiErr.Description, "message is not modified") {
 			return nil, ErrMessageNotModified
 		}
 		return nil, err

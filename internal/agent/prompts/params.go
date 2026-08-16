@@ -99,12 +99,13 @@ type ArchivistParams struct {
 // LaplaceParams for bot.system_prompt template.
 // The main chat agent system prompt.
 type LaplaceParams struct {
-	Date      string // Current request reference date
-	BotName   string // Bot's name (e.g., "Laplaced")
-	Platform  string // Chat platform shown to the model (e.g., "Telegram", "Time")
-	KatexMath bool   // platform renders LaTeX via KaTeX → emit math-formatting rules
-	IsChannel bool   // multi-participant channel scope → emit channel-context framing (Phase 6)
-	ReadURL   bool   // read_url tool exposed in cfg.Tools → emit the READ protocol section
+	Date         string // Current request reference date
+	BotName      string // Bot's name (e.g., "Laplaced")
+	Platform     string // Chat platform shown to the model (e.g., "Telegram", "Time")
+	KatexMath    bool   // platform renders LaTeX via KaTeX → emit math-formatting rules
+	RichMarkdown bool   // Telegram Rich renderer needs explicit GFM block boundaries
+	IsChannel    bool   // multi-participant channel scope → emit channel-context framing (Phase 6)
+	ReadURL      bool   // read_url tool exposed in cfg.Tools → emit the READ protocol section
 }
 
 // ExtractorParams for extractor.system_prompt template.

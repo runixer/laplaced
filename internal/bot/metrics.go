@@ -222,6 +222,45 @@ var (
 		[]string{"user_id"},
 	)
 
+	// messageTelegramDraftCount counts ephemeral sendRichMessageDraft
+	// snapshots per rich-streamed turn. It is separate from persistent edits so
+	// canary dashboards can verify the stricter draft/action flood budget.
+	messageTelegramDraftCount = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: metricsNamespace,
+			Subsystem: "bot",
+			Name:      "message_telegram_rich_draft_count",
+			Help:      "Number of sendRichMessageDraft calls per rich-streamed message",
+			Buckets:   []float64{0, 1, 2, 3, 5, 8, 12, 20, 30, 40},
+		},
+		[]string{"user_id"},
+	)
+
+	// messageTelegramRichDraftContentSnapshotCount counts only successful
+	// draft calls that advanced the accepted content prefix. Status-only
+	// updates, heartbeats and failed attempts are deliberately excluded.
+	messageTelegramRichDraftContentSnapshotCount = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: metricsNamespace,
+			Subsystem: "bot",
+			Name:      "message_telegram_rich_draft_content_snapshot_count",
+			Help:      "Number of successful content-advancing Rich Message draft snapshots per turn",
+			Buckets:   []float64{0, 1, 2, 3, 5, 8, 12, 20, 30, 40},
+		},
+	)
+
+	// messageTelegramRichDraftOverflowTotal counts turns whose ephemeral rich
+	// preview reached its private source budget. It carries no identifiers; the
+	// full persistent response remains unaffected by this preview-only event.
+	messageTelegramRichDraftOverflowTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: metricsNamespace,
+			Subsystem: "bot",
+			Name:      "message_telegram_rich_draft_overflow_total",
+			Help:      "Total rich-streamed turns whose ephemeral draft preview was truncated at its source budget",
+		},
+	)
+
 	// responseFlagsTotal counts user-flagged bad replies (a reaction on a bot
 	// message), by emoji. Each increment corresponds to a stored response_flags
 	// row carrying the flagged reply's trace_id.
@@ -344,4 +383,22 @@ func RecordMessageLLMFirstToken(userID storage.ScopeID, durationSeconds float64)
 func RecordMessageTelegramEditCount(userID storage.ScopeID, count int) {
 	uid := formatUserID(userID)
 	messageTelegramEditCount.WithLabelValues(uid).Observe(float64(count))
+}
+
+// RecordMessageTelegramDraftCount records ephemeral Rich Message preview
+// calls. A draft count never implies persistent delivery.
+func RecordMessageTelegramDraftCount(userID storage.ScopeID, count int) {
+	uid := formatUserID(userID)
+	messageTelegramDraftCount.WithLabelValues(uid).Observe(float64(count))
+}
+
+// RecordMessageTelegramRichDraftContentSnapshotCount records successful draft
+// snapshots that advanced the accepted content prefix for one turn.
+func RecordMessageTelegramRichDraftContentSnapshotCount(count int) {
+	messageTelegramRichDraftContentSnapshotCount.Observe(float64(count))
+}
+
+// IncMessageTelegramRichDraftOverflow records one preview-only source cap hit.
+func IncMessageTelegramRichDraftOverflow() {
+	messageTelegramRichDraftOverflowTotal.Inc()
 }

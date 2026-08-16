@@ -18,6 +18,7 @@ const (
 	FileTypeVoice     FileType = "voice"
 	FileTypeAudio     FileType = "audio"      // audio files (MP3, etc.)
 	FileTypeVideo     FileType = "video"      // video files (MP4, etc.)
+	FileTypeAnimation FileType = "animation"  // rich-message animation (MP4 when supported)
 	FileTypeVideoNote FileType = "video_note" // video messages (circles)
 	FileTypeDocument  FileType = "document"   // text files
 )
@@ -52,6 +53,13 @@ type ProcessedFile struct {
 
 	// ArtifactID is the ID of the saved artifact (nil if not saved or disabled)
 	ArtifactID *int64
+
+	// Rich-ingress occurrence metadata. Legacy attachments leave these at their
+	// zero values unless their adapter supplies the corresponding identity.
+	Ordinal      int
+	BlockPath    string
+	Origin       string
+	FileUniqueID string
 }
 
 const (
@@ -173,4 +181,39 @@ type FileTooLargeError struct {
 
 func (e *FileTooLargeError) Error() string {
 	return fmt.Sprintf("file too large: %s (%d bytes, max %d bytes)", e.FileName, e.Size, maxTelegramDownloadSize)
+}
+
+// AggregateBudgetExceededError is returned for an otherwise valid occurrence
+// that does not fit into the bounded aggregate download budget for this turn.
+type AggregateBudgetExceededError struct {
+	Size      int64
+	Remaining int64
+	FileName  string
+}
+
+// DeclaredFileSizeExceededError means a transport returned more bytes than it
+// declared while the scheduler was reserving the aggregate budget. The bytes
+// are discarded so a misleading declaration cannot violate the memory bound.
+type DeclaredFileSizeExceededError struct {
+	Declared int64
+	Actual   int64
+	FileName string
+}
+
+func (e *DeclaredFileSizeExceededError) Error() string {
+	return fmt.Sprintf(
+		"download exceeded declared file size: %s declared %d bytes, received %d bytes",
+		e.FileName,
+		e.Declared,
+		e.Actual,
+	)
+}
+
+func (e *AggregateBudgetExceededError) Error() string {
+	return fmt.Sprintf(
+		"aggregate file budget exceeded: %s needs %d bytes (%d bytes remaining)",
+		e.FileName,
+		e.Size,
+		e.Remaining,
+	)
 }

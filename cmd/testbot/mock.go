@@ -30,6 +30,14 @@ func (m *mockFileDownloader) DownloadFile(ctx context.Context, fileID string) ([
 	return []byte{}, fmt.Errorf("mock file downloader: only voice files supported, got file_id: %s", fileID)
 }
 
+func (m *mockFileDownloader) DownloadFileWithLimit(ctx context.Context, fileID string, maxBytes int64) ([]byte, error) {
+	data, err := m.DownloadFile(ctx, fileID)
+	if err == nil && int64(len(data)) > maxBytes {
+		return nil, telegram.ErrFileDownloadTooLarge
+	}
+	return data, err
+}
+
 // DownloadFileAsBase64 simulates downloading and base64-encoding a file.
 func (m *mockFileDownloader) DownloadFileAsBase64(ctx context.Context, fileID string) (string, error) {
 	data, err := m.DownloadFile(ctx, fileID)
@@ -63,6 +71,16 @@ func (n *noOpBotAPI) SetDownloader(d telegram.FileDownloader) {
 // SendMessage is a no-op for testbot (returns a mock message).
 func (n *noOpBotAPI) SendMessage(ctx context.Context, req telegram.SendMessageRequest) (*telegram.Message, error) {
 	return &telegram.Message{MessageID: 1}, nil
+}
+
+// SendRichMessage is a no-op for testbot (returns a mock message).
+func (n *noOpBotAPI) SendRichMessage(ctx context.Context, req telegram.SendRichMessageRequest) (*telegram.Message, error) {
+	return &telegram.Message{MessageID: 1}, nil
+}
+
+// SendRichMessageDraft is a no-op for testbot.
+func (n *noOpBotAPI) SendRichMessageDraft(ctx context.Context, req telegram.SendRichMessageDraftRequest) error {
+	return nil
 }
 
 // EditMessageText is a no-op for testbot.

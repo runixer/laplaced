@@ -267,14 +267,17 @@ sequenceDiagram
 ### 6. Отправка ответа
 
 **Стриминг (v0.9.0, по умолчанию вкл.):** если транспорт поддерживает
-(`Capabilities.SupportsStreaming` — Telegram да, Mattermost нет), бот сразу шлёт
-плейсхолдер «💭 Думаю…», дописывает в сворачиваемый blockquote строки статуса
-(запрос RAG-обогащения, статус каждого инструмента), а затем прогрессивно
-редактирует сообщение по мере прихода SSE-дельт. Незакрытый Markdown
-автозакрывается на лету. Дросселирование — `bot.streaming.edit_throttle_ms`;
-после `max_buffer_chars` первое сообщение финализируется, продолжение уходит
-отдельными сообщениями. Подробнее — [streaming.md](./streaming.md). Выключается
-`LAPLACED_BOT_STREAMING_ENABLED=false` (тогда — один ответ целиком).
+(`Capabilities.SupportsStreaming` — Telegram да, Mattermost нет), legacy-путь
+сразу шлёт плейсхолдер «💭 Думаю…», дописывает в сворачиваемый blockquote строки
+статуса и прогрессивно редактирует его по SSE-дельтам. Eligible private rich
+turn при отдельном `telegram.rich_messages.draft_streaming_enabled=true`
+использует ephemeral `sendRichMessageDraft` с нативным `<tg-thinking>`, а
+завершённый ответ отправляет отдельным persistent `sendRichMessage`.
+`bot.streaming.enabled` управляет только legacy edit streaming и не включает
+rich drafts. Незакрытый Markdown автозакрывается на лету. Дросселирование общее;
+`max_buffer_chars` ограничивает только legacy preview, rich draft имеет
+отдельный внутренний bounded budget. Подробнее — [streaming.md](./streaming.md)
+и [telegram-rich-messages.md](../telegram-rich-messages.md).
 
 Финализация ответа (одинакова для стриминга и one-shot):
 
@@ -284,12 +287,19 @@ sequenceDiagram
    - Span attribute: `bot.anomaly.sanitized` (см. секцию Аномалии)
 
 2. **Конвертация**
-   - Markdown → HTML (Telegram) или Markdown как есть (Mattermost) — через `Renderer` транспорта
-   - Разбивка на чанки (Telegram: 4096 UTF-16; tables/captions переразбиваются при переполнении)
+   - Markdown → allowlisted Rich HTML для eligible Telegram canary, legacy HTML
+     для остальных Telegram-путей или Markdown как есть для Mattermost — через
+     `Renderer` транспорта
+   - Rich preflight ограничивает размер/структуру и при необходимости разбивает
+     текст на Rich Messages; legacy Telegram использует лимит 4096 UTF-16, а
+     tables/captions переразбиваются при переполнении
    - Fallback на plain text при ошибках
 
 3. **Отправка**
    - Reply на оригинальное сообщение
+   - Ровно одна сгенерированная Photo у eligible rich-canary может уйти вместе
+     со всем форматированным ответом одним multipart `sendRichMessage`; albums,
+     Documents и split-ответы сохраняют legacy media/caption path
    - Сохранение в историю
 
 ### 7. Асинхронная обработка

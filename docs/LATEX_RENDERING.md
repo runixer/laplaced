@@ -102,7 +102,10 @@ Cannot be rendered properly in text mode. Do NOT use in prompts.
 ### Math Delimiters
 - **Inline math**: `$...$`
 - **Display math**: `$$...$$`, `\[...\]`, `$` on separate lines
-- **Currency detection**: `$3.50` is NOT treated as math (no backslash/operators)
+- **Currency detection**: unpaired amounts and sequences such as
+  `$100 per transfer, then $20` remain literal. A later currency marker is not
+  borrowed as the closing delimiter of an earlier amount; tight pairs such as
+  `$5$` and numeric formulas such as `$5 x$` remain math.
 
 ### Code Blocks Protected
 Content inside markdown code blocks is NOT processed:

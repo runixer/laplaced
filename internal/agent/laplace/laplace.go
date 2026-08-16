@@ -136,7 +136,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 	}()
 
 	// Load context data
-	contextData, err := l.LoadContextData(ctx, req.UserID, req.RawQuery, req.CurrentMessageParts)
+	contextData, err := l.loadContextData(ctx, req.UserID, req.RawQuery, req.CurrentMessageParts, req.RichOutput)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load context: %w", err)
 	}

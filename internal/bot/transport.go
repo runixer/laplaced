@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/runixer/laplaced/internal/files"
@@ -12,10 +13,15 @@ import (
 // map their native update into this shape at the ingestion boundary; the core
 // never sees a transport-specific message type.
 type IncomingMessage struct {
-	ConversationID      string // Telegram chat.ID (stringified) | Mattermost channel_id
-	SenderID            string // Telegram From.ID (stringified) | Mattermost 26-char user id
-	MessageID           string // transport message/post id
-	Text                string // user text (Telegram Text or Caption, merged)
+	ConversationID string // Telegram chat.ID (stringified) | Mattermost channel_id
+	SenderID       string // Telegram From.ID (stringified) | Mattermost 26-char user id
+	MessageID      string // transport message/post id
+	Text           string // user text (Telegram Text or Caption, merged)
+	// DetectionText is the transport's raw visible text before typed metadata
+	// projection. It is used only by deterministic safety gates; it is never
+	// sent to the model or persisted instead of Text. Empty means Text is the
+	// appropriate detection view (for example Mattermost or rich-only input).
+	DetectionText       string
 	SenderDisplay       string // human-readable sender ("Name (@handle)") for logs
 	ConversationDisplay string // human-readable channel name (channel scopes); "" for DMs/Telegram
 	Prefix              string // pre-built display prefix ("[Name (time)]" or forwarded-from)
@@ -26,6 +32,23 @@ type IncomingMessage struct {
 	SentAt              time.Time
 	Files               []files.IncomingFile
 	Forward             *ForwardInfo // Telegram-only forwarded-sender info; nil otherwise
+	Ingress             *IngressMetadata
+	// RichEgressEligible is set only by the Telegram adapter after it has
+	// verified a plain private-chat context. Business/direct-message topics and
+	// groups stay legacy until their routing identifiers are modeled end to end.
+	RichEgressEligible bool
+}
+
+// IngressMetadata carries bounded, content-free classification from a native
+// transport decoder into the grouped-turn pipeline. It is currently populated
+// for Telegram Rich Messages; nil keeps every legacy transport byte-compatible.
+type IngressMetadata struct {
+	Kind           string // fixed metric value, currently "rich"
+	Disposition    string // processable | partial | unsupported | invalid
+	HasVisibleText bool   // excludes generated media/failure markers
+	BlockCount     int
+	MediaCount     int
+	Unknown        bool
 }
 
 // IncomingReaction is the transport-neutral envelope for a reaction a user added
@@ -54,14 +77,32 @@ type ForwardInfo struct {
 	IsUser    bool // true only when forwarded from a user (not channel/hidden)
 }
 
+// ResponseFormat identifies the wire format already present in
+// OutgoingResponse.Text. The zero value keeps the established per-transport
+// format; RichHTML is an explicit opt-in used only by Telegram Rich Messages.
+type ResponseFormat string
+
+const (
+	ResponseFormatDefault  ResponseFormat = ""
+	ResponseFormatRichHTML ResponseFormat = "telegram_rich_html"
+)
+
+// ErrRichMessageRejected marks a confirmed transport-side rejection where it
+// is safe to resend the same source through the legacy renderer. Ambiguous
+// network failures must never be wrapped with this sentinel: retrying those as
+// legacy could duplicate a message that the server actually accepted.
+var ErrRichMessageRejected = errors.New("rich message rejected")
+
 // OutgoingResponse is one rendered, ready-to-send message chunk. Text is in the
 // transport's wire format (HTML for Telegram, markdown for Mattermost) as
-// produced by the transport's Renderer.
+// produced by the transport's Renderer, unless Format selects another explicit
+// representation.
 type OutgoingResponse struct {
 	ConversationID string
 	Text           string
 	ThreadRoot     string // set on every chunk to keep replies threaded
 	ReplyTo        string // message id to reply to; set on the first chunk only
+	Format         ResponseFormat
 }
 
 // OutgoingMedia is a transport-neutral media reply: one or more files sharing a
@@ -86,14 +127,37 @@ type OutgoingMediaItem struct {
 	AsDocument bool // force document delivery (Telegram); transports without the photo/doc distinction ignore it
 }
 
+// OutgoingRichMedia is an optional, transport-native composition of trusted
+// media bytes and a fully rendered Rich HTML body. The model never constructs
+// this envelope: callers resolve generated artifact IDs through user-isolated
+// storage, and the transport injects the corresponding media references.
+//
+// RichMediaTransport is intentionally separate from Transport. Backends that
+// can't embed media in a structured message keep the established SendMedia
+// path without adding a meaningless implementation.
+type OutgoingRichMedia struct {
+	ConversationID string
+	ThreadRoot     string
+	ReplyTo        string
+	HTML           string
+	Items          []OutgoingMediaItem
+}
+
+// RichMediaTransport is implemented by transports that can atomically persist
+// trusted media and structured text as one message.
+type RichMediaTransport interface {
+	SendRichMedia(ctx context.Context, m OutgoingRichMedia) (msgID string, err error)
+}
+
 // Capabilities describes per-transport rendering and feature support. The core
 // branches on these, never on Kind(), so transport-specific behavior stays
 // declarative.
 type Capabilities struct {
 	MaxMessageLen         int    // Telegram 4096 UTF-16; Mattermost MaxPostSize (runtime)
 	ParseMode             string // "HTML" (Telegram) | "" native markdown (Mattermost)
-	SupportsLatex         bool   // Telegram false (latex->unicode) | Mattermost true (native KaTeX)
-	SupportsStreaming     bool   // Telegram true (editMessageText) | Mattermost false
+	SupportsLatex         bool   // true when the selected output path renders LaTeX natively
+	SupportsStreaming     bool   // Telegram: legacy edits or ephemeral rich drafts | Mattermost false
+	SupportsRichMessages  bool   // Telegram Bot API Rich Messages (opt-in) | Mattermost false
 	SupportsReactions     bool   // Telegram true | Mattermost true (by emoji name)
 	SupportsMedia         bool   // can SendMedia deliver files
 	MaxMediaItemsPerGroup int    // Telegram 10; Mattermost 5 (files per post)

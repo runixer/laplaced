@@ -2,6 +2,7 @@ package files
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -81,9 +82,9 @@ func (p *Processor) ProcessMessage(ctx context.Context, msg *telegram.Message, u
 // via downloadWithRetry. Returns an empty slice when the message has no file.
 // Priority matches the legacy dispatch: photo, document, voice, audio, video note.
 func (p *Processor) ExtractFiles(msg *telegram.Message, userID storage.ScopeID) []IncomingFile {
-	fetch := func(fileID string, kind FileType) func(context.Context) ([]byte, error) {
-		return func(ctx context.Context) ([]byte, error) {
-			data, _, err := p.downloadWithRetry(ctx, fileID, userID, kind)
+	fetch := func(fileID string, kind FileType) func(context.Context, int64) ([]byte, error) {
+		return func(ctx context.Context, maxBytes int64) ([]byte, error) {
+			data, _, err := p.downloadWithRetry(ctx, fileID, userID, kind, maxBytes, "telegram_legacy")
 			return data, err
 		}
 	}
@@ -92,7 +93,8 @@ func (p *Processor) ExtractFiles(msg *telegram.Message, userID storage.ScopeID) 
 	case len(msg.Photo) > 0:
 		best := msg.Photo[len(msg.Photo)-1]
 		return []IncomingFile{{
-			Kind: FileTypePhoto, SourceID: best.FileID,
+			Kind: FileTypePhoto, SourceID: best.FileID, FileUniqueID: best.FileUniqueID,
+			FetchKey: best.FileID, Origin: "telegram_legacy", Size: best.FileSize,
 			Fetch: fetch(best.FileID, FileTypePhoto),
 		}}
 
@@ -110,31 +112,35 @@ func (p *Processor) ExtractFiles(msg *telegram.Message, userID storage.ScopeID) 
 			kind = FileTypeDocument
 		}
 		return []IncomingFile{{
-			Kind: kind, SourceID: doc.FileID, FileName: doc.FileName, MIME: doc.MimeType,
-			Size: int64(doc.FileSize), Fetch: fetch(doc.FileID, kind),
+			Kind: kind, SourceID: doc.FileID, FileUniqueID: doc.FileUniqueID,
+			FetchKey: doc.FileID, Origin: "telegram_legacy", FileName: doc.FileName, MIME: doc.MimeType,
+			Size: doc.FileSize, Fetch: fetch(doc.FileID, kind),
 		}}
 
 	case msg.Voice != nil:
 		v := msg.Voice
 		return []IncomingFile{{
-			Kind: FileTypeVoice, SourceID: v.FileID, FileName: "voice.ogg", MIME: v.MimeType,
-			Size: int64(v.FileSize), Duration: v.Duration, Fetch: fetch(v.FileID, FileTypeVoice),
+			Kind: FileTypeVoice, SourceID: v.FileID, FileUniqueID: v.FileUniqueID,
+			FetchKey: v.FileID, Origin: "telegram_legacy", FileName: "voice.ogg", MIME: v.MimeType,
+			Size: v.FileSize, Duration: v.Duration, Fetch: fetch(v.FileID, FileTypeVoice),
 		}}
 
 	case msg.Audio != nil:
 		a := msg.Audio
 		return []IncomingFile{{
-			Kind: FileTypeAudio, SourceID: a.FileID,
+			Kind: FileTypeAudio, SourceID: a.FileID, FileUniqueID: a.FileUniqueID,
+			FetchKey: a.FileID, Origin: "telegram_legacy",
 			FileName: audioFilename(a.FileName, a.Title, a.Performers), MIME: a.MimeType,
-			Size: int64(a.FileSize), Fetch: fetch(a.FileID, FileTypeAudio),
+			Size: a.FileSize, Fetch: fetch(a.FileID, FileTypeAudio),
 		}}
 
 	case msg.VideoNote != nil:
 		vn := msg.VideoNote
 		return []IncomingFile{{
-			Kind: FileTypeVideoNote, SourceID: vn.FileID,
+			Kind: FileTypeVideoNote, SourceID: vn.FileID, FileUniqueID: vn.FileUniqueID,
+			FetchKey: vn.FileID, Origin: "telegram_legacy",
 			FileName: fmt.Sprintf("video_note_%s.mp4", vn.FileUniqueID),
-			Size:     int64(vn.FileSize), Fetch: fetch(vn.FileID, FileTypeVideoNote),
+			Size:     vn.FileSize, Fetch: fetch(vn.FileID, FileTypeVideoNote),
 		}}
 	}
 
@@ -142,13 +148,26 @@ func (p *Processor) ExtractFiles(msg *telegram.Message, userID storage.ScopeID) 
 }
 
 // downloadWithRetry attempts to download a file with retries and exponential backoff.
-func (p *Processor) downloadWithRetry(ctx context.Context, fileID string, userID storage.ScopeID, fileType FileType) ([]byte, time.Duration, error) {
+func (p *Processor) downloadWithRetry(
+	ctx context.Context,
+	fileID string,
+	userID storage.ScopeID,
+	fileType FileType,
+	maxBytes int64,
+	origin string,
+) ([]byte, time.Duration, error) {
 	var lastErr error
 	totalDuration := time.Duration(0)
 
 	for attempt := 1; attempt <= p.maxRetries; attempt++ {
 		start := time.Now()
-		data, err := p.downloader.DownloadFile(ctx, fileID)
+		var data []byte
+		var err error
+		if maxBytes > 0 {
+			data, err = p.downloader.DownloadFileWithLimit(ctx, fileID, maxBytes)
+		} else {
+			data, err = p.downloader.DownloadFile(ctx, fileID)
+		}
 		duration := time.Since(start)
 		totalDuration += duration
 
@@ -158,12 +177,27 @@ func (p *Processor) downloadWithRetry(ctx context.Context, fileID string, userID
 		}
 
 		lastErr = err
-		p.logger.Warn("download attempt failed",
-			"attempt", attempt,
-			"max_retries", p.maxRetries,
-			"file_id", fileID,
-			"error", err,
-		)
+		if origin == telegramRichOrigin {
+			p.logger.Warn("rich file download attempt failed",
+				"attempt", attempt,
+				"max_retries", p.maxRetries,
+				"kind", fileType,
+				"error_class", coarseIncomingFileErrorClass(err),
+			)
+		} else {
+			p.logger.Warn("download attempt failed",
+				"attempt", attempt,
+				"max_retries", p.maxRetries,
+				"file_id", fileID,
+				"error", err,
+			)
+		}
+
+		// A bounded downloader has already established that the source cannot fit
+		// the reservation. Retrying cannot change that and only repeats work.
+		if errors.Is(err, telegram.ErrFileDownloadTooLarge) {
+			break
+		}
 
 		if attempt < p.maxRetries {
 			// Exponential backoff: 500ms, 1000ms, 2000ms, ...

@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -12,9 +13,20 @@ import (
 	"time"
 )
 
+const maxFileDownloadSize int64 = 20 * 1024 * 1024
+
+// ErrFileDownloadTooLarge is returned when Telegram advertises or sends more
+// than the active caller/per-file limit. Callers can use errors.Is to
+// distinguish a permanent size rejection from a transient download failure.
+var ErrFileDownloadTooLarge = errors.New("telegram file exceeds download limit")
+
 // FileDownloader defines an interface for downloading files from Telegram.
 type FileDownloader interface {
 	DownloadFile(ctx context.Context, fileID string) ([]byte, error)
+	// DownloadFileWithLimit applies a caller-provided byte ceiling before the
+	// response is buffered. It is used by aggregate-budget schedulers, where the
+	// ordinary per-file ceiling is too coarse to bound concurrent allocations.
+	DownloadFileWithLimit(ctx context.Context, fileID string, maxBytes int64) ([]byte, error)
 	DownloadFileAsBase64(ctx context.Context, fileID string) (string, error)
 }
 
@@ -65,6 +77,23 @@ func NewHTTPFileDownloader(api BotAPI, fileBaseURL, proxyURL string) (*HTTPFileD
 
 // DownloadFile downloads a file from Telegram.
 func (d *HTTPFileDownloader) DownloadFile(ctx context.Context, fileID string) ([]byte, error) {
+	return d.downloadFile(ctx, fileID, maxFileDownloadSize)
+}
+
+// DownloadFileWithLimit downloads a file while enforcing the caller's byte
+// reservation before buffering the body. The global Telegram limit remains an
+// upper bound even if a larger value is supplied.
+func (d *HTTPFileDownloader) DownloadFileWithLimit(ctx context.Context, fileID string, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("%w: invalid byte limit %d", ErrFileDownloadTooLarge, maxBytes)
+	}
+	if maxBytes > maxFileDownloadSize {
+		maxBytes = maxFileDownloadSize
+	}
+	return d.downloadFile(ctx, fileID, maxBytes)
+}
+
+func (d *HTTPFileDownloader) downloadFile(ctx context.Context, fileID string, maxBytes int64) ([]byte, error) {
 	getFileReq := GetFileRequest{FileID: fileID}
 	fileInfo, err := d.api.GetFile(ctx, getFileReq)
 	if err != nil {
@@ -91,7 +120,36 @@ func (d *HTTPFileDownloader) DownloadFile(ctx context.Context, fileID string) ([
 		return nil, fmt.Errorf("failed to download file: status code %d", resp.StatusCode)
 	}
 
-	return io.ReadAll(resp.Body)
+	if resp.ContentLength > maxBytes {
+		return nil, fmt.Errorf(
+			"%w: content length %d bytes, max %d bytes",
+			ErrFileDownloadTooLarge,
+			resp.ContentLength,
+			maxBytes,
+		)
+	}
+
+	// Content-Length may be absent (for example for a chunked response), or it
+	// may be wrong. Buffer at most maxBytes. Probe one additional byte into a
+	// fixed stack buffer instead of appending it, so the returned allocation can
+	// never exceed the scheduler's reservation.
+	fileBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read downloaded file: %w", err)
+	}
+	var extra [1]byte
+	extraBytes, probeErr := resp.Body.Read(extra[:])
+	if extraBytes > 0 {
+		return nil, fmt.Errorf(
+			"%w: received more than %d bytes",
+			ErrFileDownloadTooLarge,
+			maxBytes,
+		)
+	}
+	if probeErr != nil && !errors.Is(probeErr, io.EOF) {
+		return nil, fmt.Errorf("failed to probe downloaded file limit: %w", probeErr)
+	}
+	return fileBytes, nil
 }
 
 // DownloadFileAsBase64 downloads a file and encodes it as a Base64 string.

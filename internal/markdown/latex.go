@@ -273,58 +273,26 @@ func matchInlineMath(runes []rune, start int) (content, raw string, end int) {
 	if start+1 < len(runes) && runes[start+1] == '$' {
 		return "", "", start
 	}
-	if start+1 < len(runes) && runes[start+1] == '\n' {
+	// Inline math openers cannot be empty or followed by whitespace. This is
+	// also what keeps spaced currency markers ("$ 100" and "100 $ per run")
+	// from borrowing a later dollar as their closer.
+	if start+1 >= len(runes) || unicode.IsSpace(runes[start+1]) {
 		return "", "", start
 	}
 
 	contentStart := start + 1
 	i := contentStart
-
-	// Check for simple currency: $digits followed by punctuation or space+conjunction
-	if i < len(runes) && unicode.IsDigit(runes[i]) {
-		j := i
-		for j < len(runes) {
-			r := runes[j]
-			// Stop at non-digit/dot/comma
-			if !unicode.IsDigit(r) && r != '.' && r != ',' {
-				break
-			}
-			j++
-		}
-
-		// j now points to first non-digit char after the number
-		if j > i { // We have some digits
-			if j < len(runes) {
-				nextChar := runes[j]
-				// Currency patterns:
-				// $100? $200! $50. $30,
-				// $100 или
-				// $100$ или (closed but followed by conjunction)
-				if nextChar == '?' || nextChar == '!' || nextChar == '.' ||
-					nextChar == ',' || nextChar == ';' || nextChar == ':' {
-					// Currency followed by punctuation - don't parse as math
-					return "", "", start
-				}
-				if nextChar == ' ' {
-					remaining := string(runes[j:])
-					lowerRemaining := strings.ToLower(remaining)
-					if strings.HasPrefix(lowerRemaining, " или") ||
-						strings.HasPrefix(lowerRemaining, " and ") ||
-						strings.HasPrefix(lowerRemaining, " or ") ||
-						strings.HasPrefix(lowerRemaining, " и ") {
-						return "", "", start
-					}
-				}
-				// A tight $N$ pair (number closed immediately by '$') is math,
-				// not currency — fall through to normal parsing so the
-				// delimiters are stripped. Unpaired currency is caught above
-				// (punctuation / conjunction) or by the no-closer bail below.
-			}
-		}
-	}
+	numericAmountEnd := scanNumericDollarAmount(runes, start)
 
 	// Normal parsing continues...
 	for i < len(runes) {
+		// A numeric currency opener must not consume a dollar from a later
+		// Markdown code span. The tokenizer will revisit the backtick at its
+		// own position and protect the complete code entity before looking for
+		// any formulas that follow it.
+		if numericAmountEnd > contentStart && runes[i] == '`' {
+			return "", "", start
+		}
 		if runes[i] == '\\' && i+1 < len(runes) && runes[i+1] == '$' {
 			if i+2 >= len(runes) {
 				return string(runes[contentStart : i+2]), string(runes[start : i+2]), i + 2
@@ -347,6 +315,13 @@ func matchInlineMath(runes []rune, start int) (content, raw string, end int) {
 		}
 
 		if runes[i] == '$' {
+			// If a numeric-looking opener encounters another dollar that has
+			// the shape of a new opener, do not borrow it as the closer. This
+			// is the common prose pattern "$100 per transfer, then $20".
+			// Returning no-match lets the tokenizer revisit the later dollar.
+			if isBorrowedNumericAmountCloser(runes, contentStart, numericAmountEnd, i) {
+				return "", "", start
+			}
 			// Closed pair on one line → math. A tight numeric pair like
 			// $1737,1$ is intentionally math (delimiters stripped); unpaired
 			// currency never reaches here (no closing '$' before the newline).
@@ -364,6 +339,58 @@ func matchInlineMath(runes []rune, start int) (content, raw string, end int) {
 	}
 
 	return "", "", start
+}
+
+func scanNumericDollarAmount(runes []rune, start int) int {
+	numberStart := start + 1
+	if numberStart >= len(runes) || !unicode.IsDigit(runes[numberStart]) {
+		return numberStart
+	}
+
+	numberEnd := numberStart
+	for numberEnd < len(runes) {
+		if unicode.IsDigit(runes[numberEnd]) {
+			numberEnd++
+			continue
+		}
+		// A dot or comma is part of the amount only when it separates
+		// digits. This leaves terminal punctuation visible to the boundary
+		// check instead of swallowing it into the numeric token.
+		if (runes[numberEnd] == '.' || runes[numberEnd] == ',') &&
+			numberEnd+1 < len(runes) && unicode.IsDigit(runes[numberEnd+1]) {
+			numberEnd++
+			continue
+		}
+		break
+	}
+	return numberEnd
+}
+
+func isBorrowedNumericAmountCloser(runes []rune, contentStart, amountEnd, closer int) bool {
+	if amountEnd <= contentStart || closer <= amountEnd {
+		// Preserve a tight numeric pair ($5$), including the historic
+		// delimiter contract when it is adjacent to other text.
+		return false
+	}
+
+	// A closer directly before a digit is much more likely the next currency
+	// opener: "$100 then $20". Inline math closers conventionally cannot be
+	// immediately followed by a digit either.
+	if closer+1 < len(runes) && unicode.IsDigit(runes[closer+1]) {
+		return true
+	}
+
+	// A whitespace-left candidate after a non-empty tail is likewise a new
+	// delimiter in prose. Allow only-whitespace padding so the pre-existing
+	// "$5 $" behavior is not changed.
+	if closer > amountEnd && unicode.IsSpace(runes[closer-1]) {
+		for i := amountEnd; i < closer; i++ {
+			if !unicode.IsSpace(runes[i]) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func isFormulaTerminator(r rune) bool {
