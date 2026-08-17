@@ -113,11 +113,6 @@ var (
 	errRichSplitEmpty = errors.New("rich split contains no message content")
 )
 
-type richSourceRange struct {
-	start int
-	end   int
-}
-
 // splitStandaloneRichSources recognizes a marker on its own physical line only
 // when its exact bytes belong to a direct Paragraph Text node. This positive
 // AST allowlist accepts ordinary soft-break prose while excluding every inline
@@ -128,40 +123,14 @@ func splitStandaloneRichSources(text string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	var markers []richSourceRange
-	for _, fragment := range document.Fragments {
-		if fragment.Kind != markdown.RichFragmentParagraph {
-			continue
-		}
-		local := fragment.LegacySource
-		for lineStart := 0; lineStart <= len(local); {
-			lineEnd := strings.IndexByte(local[lineStart:], '\n')
-			next := len(local)
-			if lineEnd >= 0 {
-				lineEnd += lineStart
-				next = lineEnd + 1
-			} else {
-				lineEnd = len(local)
-			}
-			line := strings.TrimSuffix(local[lineStart:lineEnd], "\r")
-			if strings.TrimSpace(line) == richSplitDelimiter {
-				markerOffset := strings.Index(line, richSplitDelimiter)
-				markerText := richSourceRange{
-					start: fragment.SourceStart + lineStart + markerOffset,
-					end:   fragment.SourceStart + lineStart + markerOffset + len(richSplitDelimiter),
-				}
-				marker := richSourceRange{
-					start: fragment.SourceStart + lineStart,
-					end:   fragment.SourceStart + next,
-				}
-				if richRangeCoveredByBoundaryText(markerText, fragment.BoundaryTextRanges) {
-					markers = append(markers, marker)
-				}
-			}
-			if next >= len(local) {
-				break
-			}
-			lineStart = next
+	protocol, err := scanStandaloneRichProtocolLines(document)
+	if err != nil {
+		return nil, err
+	}
+	markers := make([]markdown.RichSourceRange, 0, len(protocol))
+	for _, line := range protocol {
+		if line.kind == generatedMediaProtocolSplit {
+			markers = append(markers, line.sourceRange)
 		}
 	}
 	if len(markers) == 0 {
@@ -171,10 +140,10 @@ func splitStandaloneRichSources(text string) ([]string, error) {
 	sources := make([]string, 0, len(markers)+1)
 	start := 0
 	for _, marker := range markers {
-		if source := text[start:marker.start]; strings.TrimSpace(source) != "" {
+		if source := text[start:marker.Start]; strings.TrimSpace(source) != "" {
 			sources = append(sources, source)
 		}
-		start = marker.end
+		start = marker.End
 	}
 	if source := text[start:]; strings.TrimSpace(source) != "" {
 		sources = append(sources, source)
@@ -186,15 +155,6 @@ func splitStandaloneRichSources(text string) ([]string, error) {
 		return nil, fmt.Errorf("%w: %d parts, limit is %d", errRichPartFanout, len(sources), richMessageMaxParts)
 	}
 	return sources, nil
-}
-
-func richRangeCoveredByBoundaryText(candidate richSourceRange, eligible []markdown.RichSourceRange) bool {
-	for _, sourceRange := range eligible {
-		if sourceRange.Start <= candidate.start && candidate.end <= sourceRange.End {
-			return true
-		}
-	}
-	return false
 }
 
 // renderRichParts resolves protocol boundaries, parses each resulting source

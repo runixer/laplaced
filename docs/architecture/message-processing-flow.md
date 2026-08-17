@@ -294,6 +294,16 @@ rich drafts. Незакрытый Markdown автозакрывается на �
      блоки в Rich Messages; отдельная физическая строка `###SPLIT###` задаёт
      явную границу, но тот же текст внутри prose/code/table/list/quote не режет
      ответ
+   - После успешного `generate_image` Laplace детерминированно назначает
+     turn-local `MEDIA:n` по порядку tool calls и outputs. Отдельная top-level
+     строка `###MEDIA:n[,n...]###` может поставить одну картинку, collage или
+     slideshow между текстовыми блоками. Модель выбирает только позицию,
+     порядок и группу; artifact lookup, bytes, media IDs и HTML принадлежат
+     приложению
+   - MEDIA-layout валидируется атомарно: все доступные номера должны встретиться
+     ровно по одному разу. Ошибка, пропуск, дубль, недоступный номер или лимит
+     свыше 10 удаляет служебные строки и включает автоматическую gallery сверху
+     либо bounded legacy fallback без потери порядка
    - legacy Telegram использует лимит 4096 UTF-16, а tables/captions
      переразбиваются при переполнении
    - Fallback на plain text при ошибках
@@ -301,15 +311,18 @@ rich drafts. Незакрытый Markdown автозакрывается на �
 3. **Отправка**
    - Reply на оригинальное сообщение
    - Для eligible rich-canary единый immutable delivery plan содержит text,
-     gallery из 1–10 generated Photos, packed rich parts и при необходимости
-     high-resolution Document sidecars; одна операция плана равна одному Bot
-     API request
+     одну или несколько model-directed групп из 1–10 generated Photos, packed
+     rich parts и при необходимости high-resolution Document sidecars; одна
+     операция плана равна одному Bot API request
    - До первого persistent request создаётся content-free delivery ledger.
      Только подтверждённый rich-format rejection активирует заранее
      подготовленный legacy suffix; `unknown` останавливает план без resend
    - После подтверждения всех операций одна транзакция сохраняет assistant
      history row, все transport message ID и связи с артефактами. Поэтому reply
      reaction на любую часть/альбом/sidecar разрешается к одному ответу
+   - `MEDIA`/`SPLIT` — одноразовый delivery-протокол: его строки не попадают в
+     assistant history. Внутренние `artifact:<id>` остаются только в доверенном
+     tool/history-контексте и вычищаются из model-authored wire output
    - При старте незавершённые `sending` операции становятся `unknown`, а ещё не
      начатые — `skipped`; они не переигрываются автоматически
 

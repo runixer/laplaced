@@ -67,7 +67,7 @@ func TestPlanGeneratedRichDeliveryV2_GalleryLayoutBoundaries(t *testing.T) {
 			items := generatedV2PhotoItems(tt.count)
 
 			planned, ok, reason := bot.planGeneratedRichDelivery(
-				context.Background(), path, "# Gallery", items,
+				context.Background(), path, "# Gallery", items, len(items),
 			)
 
 			require.True(t, ok, "fallback reason: %s", reason)
@@ -120,7 +120,7 @@ func TestPlanGeneratedRichDeliveryV2_ReservesInjectedGalleryLimits(t *testing.T)
 		require.Equal(t, richMessageSafeBlockLimit-galleryBlocks, preflight.parts[0].stats.Blocks)
 
 		planned, ok, reason := bot.planGeneratedRichDelivery(
-			context.Background(), path, source, items,
+			context.Background(), path, source, items, len(items),
 		)
 		require.True(t, ok, "fallback reason: %s", reason)
 		assert.Equal(t, richMessageSafeBlockLimit,
@@ -135,7 +135,7 @@ func TestPlanGeneratedRichDeliveryV2_ReservesInjectedGalleryLimits(t *testing.T)
 		require.Len(t, preflight.parts, 1)
 
 		planned, ok, reason := bot.planGeneratedRichDelivery(
-			context.Background(), path, source, items,
+			context.Background(), path, source, items, len(items),
 		)
 		assert.False(t, ok)
 		assert.Equal(t, richMetricFallbackRenderOrLimit, reason)
@@ -159,12 +159,12 @@ func TestPlanGeneratedRichDeliveryV2_ReservesInjectedGalleryLimits(t *testing.T)
 	t.Run("rendered byte budget exact", func(t *testing.T) {
 		source := richParagraphAtRenderedBytes(richMessageMaxRenderedBytes - len(galleryHTML))
 		planned, ok, reason := bot.planGeneratedRichDelivery(
-			context.Background(), path, source, items,
+			context.Background(), path, source, items, len(items),
 		)
 		require.True(t, ok, "fallback reason: %s", reason)
 		require.Len(t, planned.plan.Operations, 1)
 		assert.Equal(t, richMessageMaxRenderedBytes,
-			len(planned.plan.Operations[0].RichMedia.HTML)+len(galleryHTML))
+			len(strings.Join(planned.plan.Operations[0].RichMedia.HTMLParts, ""))+len(galleryHTML))
 	})
 
 	t.Run("rendered byte budget plus one", func(t *testing.T) {
@@ -174,7 +174,7 @@ func TestPlanGeneratedRichDeliveryV2_ReservesInjectedGalleryLimits(t *testing.T)
 		require.Len(t, preflight.parts, 1)
 
 		planned, ok, reason := bot.planGeneratedRichDelivery(
-			context.Background(), path, source, items,
+			context.Background(), path, source, items, len(items),
 		)
 		assert.False(t, ok)
 		assert.Equal(t, richMetricFallbackRenderOrLimit, reason)
@@ -187,7 +187,7 @@ func TestPlanGeneratedRichDeliveryV2_ElevenPhotosUseBoundedLegacyBatches(t *test
 	items := generatedV2PhotoItems(11)
 
 	planned, ok, reason := bot.planGeneratedRichDelivery(
-		context.Background(), path, "# Eleven", items,
+		context.Background(), path, "# Eleven", items, len(items),
 	)
 	assert.False(t, ok)
 	assert.Equal(t, richMetricFallbackMediaIneligible, reason)
@@ -212,7 +212,7 @@ func TestPlanGeneratedRichDeliveryV2_HighResolutionUsesPreviewAndDocumentSidecar
 	items := generatedV2PhotoItems(1)
 
 	planned, ok, reason := bot.planGeneratedRichDelivery(
-		context.Background(), path, "# High resolution", items,
+		context.Background(), path, "# High resolution", items, len(items),
 	)
 
 	require.True(t, ok, "fallback reason: %s", reason)
@@ -255,7 +255,7 @@ func TestPlanGeneratedRichDeliveryV2_InvalidPhotoEnvelopeFallsBackToDocument(t *
 			}}
 
 			planned, ok, reason := bot.planGeneratedRichDelivery(
-				context.Background(), path, "# Invalid preview", items,
+				context.Background(), path, "# Invalid preview", items, len(items),
 			)
 			assert.False(t, ok)
 			assert.Equal(t, richMetricFallbackMediaIneligible, reason)
@@ -327,7 +327,7 @@ func TestExecuteGeneratedRichDeliveryV2_FirstFormatRejectionUsesFullFallback(t *
 	path := generatedPath(bot, userID)
 	path.richMode = config.TelegramRichMessagesSend
 	planned, ok, reason := bot.planGeneratedRichDelivery(
-		context.Background(), path, "# First\n###SPLIT###\n## Second", generatedV2PhotoItems(1),
+		context.Background(), path, "# First\n###SPLIT###\n## Second", generatedV2PhotoItems(1), 1,
 	)
 	require.True(t, ok, "fallback reason: %s", reason)
 	require.Len(t, planned.plan.Operations, 2)
@@ -362,7 +362,7 @@ func TestExecuteGeneratedRichDeliveryV2_LaterFormatRejectionUsesOnlySuffixFallba
 	path := generatedPath(bot, userID)
 	path.richMode = config.TelegramRichMessagesSend
 	planned, ok, reason := bot.planGeneratedRichDelivery(
-		context.Background(), path, "# First\n###SPLIT###\n## Second", generatedV2PhotoItems(1),
+		context.Background(), path, "# First\n###SPLIT###\n## Second", generatedV2PhotoItems(1), 1,
 	)
 	require.True(t, ok, "fallback reason: %s", reason)
 	require.Len(t, planned.plan.Operations, 2)
@@ -418,7 +418,7 @@ func TestExecuteGeneratedRichDeliveryV2_UnknownStopsWithoutFallback(t *testing.T
 			path := generatedPath(bot, userID)
 			path.richMode = config.TelegramRichMessagesSend
 			planned, ok, reason := bot.planGeneratedRichDelivery(
-				context.Background(), path, "# First\n###SPLIT###\n## Second", generatedV2PhotoItems(1),
+				context.Background(), path, "# First\n###SPLIT###\n## Second", generatedV2PhotoItems(1), 1,
 			)
 			require.True(t, ok, "fallback reason: %s", reason)
 

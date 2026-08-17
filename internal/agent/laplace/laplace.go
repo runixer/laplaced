@@ -27,7 +27,8 @@ import (
 )
 
 const (
-	maxEmptyRetries = 2
+	maxEmptyRetries             = 2
+	maxGeneratedMediaLayoutRefs = 10
 )
 
 // Laplace is the main chat agent that handles user conversations.
@@ -375,7 +376,11 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 			// {span.tool.iteration=2} in TraceQL.
 			tcc.Iteration = toolIterationsFinal
 			toolStart := time.Now()
-			toolMessages, toolArtifactIDs, toolCitations := l.executeToolCalls(ctx, toolHandler, tcc, outcome.toolCalls, req.OnToolStart, logger)
+			toolMessages, toolArtifactIDs, toolCitations := l.executeToolCalls(
+				ctx, toolHandler, tcc, outcome.toolCalls,
+				len(generatedArtifactIDs), req.RichOutput,
+				req.OnToolStart, logger,
+			)
 			totalToolDuration += time.Since(toolStart)
 
 			generatedArtifactIDs = append(generatedArtifactIDs, toolArtifactIDs...)
@@ -514,6 +519,8 @@ func (l *Laplace) executeToolCalls(
 	handler ToolHandler,
 	tcc ToolCallContext,
 	toolCalls []llm.ToolCall,
+	generatedOrdinalBase int,
+	advertiseMediaLayout bool,
 	onToolStart func(toolName, arguments string),
 	logger *slog.Logger,
 ) ([]llm.Message, []int64, []llm.Citation) {
@@ -525,6 +532,7 @@ func (l *Laplace) executeToolCalls(
 	// Each tool call's outcome is stored by its declared index so the assembled
 	// result preserves order regardless of execution order.
 	type execResult struct {
+		toolName    string
 		msg         llm.Message
 		artifactIDs []int64
 		citations   []llm.Citation
@@ -535,14 +543,18 @@ func (l *Laplace) executeToolCalls(
 		result, err := handler.ExecuteToolCall(ctx, tcc, tc.Function.Name, tc.Function.Arguments)
 		if err != nil {
 			logger.Error("tool execution failed", "error", err, "tool", tc.Function.Name)
-			results[i] = execResult{msg: llm.Message{
-				Role:       "tool",
-				Content:    fmt.Sprintf("Tool execution failed: %v", err),
-				ToolCallID: tc.ID,
-			}}
+			results[i] = execResult{
+				toolName: tc.Function.Name,
+				msg: llm.Message{
+					Role:       "tool",
+					Content:    fmt.Sprintf("Tool execution failed: %v", err),
+					ToolCallID: tc.ID,
+				},
+			}
 			return
 		}
 		results[i] = execResult{
+			toolName:    tc.Function.Name,
 			msg:         llm.Message{Role: "tool", Content: result.Content, ToolCallID: tc.ID},
 			artifactIDs: result.GeneratedArtifactIDs,
 			citations:   result.Citations,
@@ -579,6 +591,48 @@ func (l *Laplace) executeToolCalls(
 	}
 	wg.Wait()
 
+	// Generated-media ordinals are assigned only after every parallel call has
+	// joined. The stable order is therefore tool-loop iteration, declared
+	// tool_calls index, then provider output order inside one call; completion
+	// timing can never swap MEDIA references. The base is the number of images
+	// produced by earlier tool-loop iterations in this Execute call.
+	batchGenerated := 0
+	for i := range results {
+		if results[i].toolName != "generate_image" || len(results[i].artifactIDs) == 0 {
+			continue
+		}
+		batchGenerated += len(results[i].artifactIDs)
+	}
+	if generatedOrdinalBase < 0 {
+		generatedOrdinalBase = 0
+	}
+	nextGeneratedOrdinal := generatedOrdinalBase + 1
+	if advertiseMediaLayout {
+		for i := range results {
+			if results[i].toolName != "generate_image" || len(results[i].artifactIDs) == 0 {
+				continue
+			}
+			results[i].msg.Content = appendGeneratedMediaPlacementGuidance(
+				fmt.Sprint(results[i].msg.Content),
+				nextGeneratedOrdinal,
+				len(results[i].artifactIDs),
+			)
+			nextGeneratedOrdinal += len(results[i].artifactIDs)
+		}
+		cumulativeGenerated := generatedOrdinalBase + batchGenerated
+		// Once the turn crosses the directed-layout bound, keep the override as
+		// the final instruction in every later tool batch. Otherwise a search or
+		// memory result after image generation could make the earlier warning
+		// non-terminal and tempt the model to emit MEDIA:11 anyway.
+		if cumulativeGenerated > maxGeneratedMediaLayoutRefs && len(results) > 0 {
+			last := len(results) - 1
+			results[last].msg.Content = appendGeneratedMediaLayoutDisabled(
+				fmt.Sprint(results[last].msg.Content),
+				cumulativeGenerated,
+			)
+		}
+	}
+
 	toolMessages := make([]llm.Message, 0, n)
 	var artifactIDs []int64
 	var citations []llm.Citation
@@ -588,6 +642,38 @@ func (l *Laplace) executeToolCalls(
 		citations = append(citations, results[i].citations...)
 	}
 	return toolMessages, artifactIDs, citations
+}
+
+func appendGeneratedMediaPlacementGuidance(content string, firstOrdinal, count int) string {
+	refs := make([]string, 0, count)
+	for ordinal := firstOrdinal; ordinal < firstOrdinal+count; ordinal++ {
+		refs = append(refs, fmt.Sprintf("MEDIA:%d", ordinal))
+	}
+	guidance := fmt.Sprintf(
+		"Turn-local delivery placement references for this call, in output order: %s. "+
+			"Use them only with the standalone ###MEDIA:...### grammar in <output_format>, and only in the final user-facing reply after all tool calls. "+
+			"Artifact IDs are only for input_artifact_ids in later generate_image tool calls; MEDIA references are only for delivery layout. "+
+			"Do not mention artifact IDs, MEDIA references, or this layout protocol in visible prose.",
+		strings.Join(refs, ", "),
+	)
+	if strings.TrimSpace(content) == "" {
+		return guidance
+	}
+	return strings.TrimSpace(content) + "\n\n" + guidance
+}
+
+func appendGeneratedMediaLayoutDisabled(content string, cumulativeGenerated int) string {
+	guidance := fmt.Sprintf(
+		"There are now %d generated images queued in this turn, above the %d-image MEDIA layout limit. "+
+			"In the final user-facing reply, omit every ###MEDIA:...### directive; the app will deliver all images automatically in generation order. "+
+			"Do not mention this layout limitation or any internal references to the user.",
+		cumulativeGenerated,
+		maxGeneratedMediaLayoutRefs,
+	)
+	if strings.TrimSpace(content) == "" {
+		return guidance
+	}
+	return strings.TrimSpace(content) + "\n\n" + guidance
 }
 
 // recordMediaParts emits a laplace.media_parts span event listing every

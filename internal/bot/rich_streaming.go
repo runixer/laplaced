@@ -413,9 +413,19 @@ func (s *richDraftSink) handleSendErrorLocked(err error, retryUnchanged bool, op
 }
 
 func (s *richDraftSink) renderLocked() (string, error) {
+	visibleSource := ""
+	if s.buf.Len() > 0 {
+		var err error
+		visibleSource, err = suppressGeneratedMediaDraftSource(sanitizeModelPresentation(s.buf.String()))
+		if err != nil {
+			return "", fmt.Errorf("suppress generated-media draft directives: %w", err)
+		}
+	}
+	hasVisibleContent := strings.TrimSpace(visibleSource) != ""
+
 	var out strings.Builder
 	characters, blocks, maxDepth, maxTableColumns := 0, 0, 0, 0
-	if len(s.statusLog) > 0 || s.buf.Len() == 0 {
+	if len(s.statusLog) > 0 || !hasVisibleContent {
 		lines := s.statusLog
 		if len(lines) == 0 {
 			lines = []string{html.EscapeString(s.placeholder)}
@@ -436,8 +446,8 @@ func (s *richDraftSink) renderLocked() (string, error) {
 		maxDepth = 2 // <tg-thinking> plus an optional trusted inline style.
 	}
 
-	if s.buf.Len() > 0 {
-		balanced := markdown.BalanceOpenMarkers(s.buf.String())
+	if hasVisibleContent {
+		balanced := markdown.BalanceOpenMarkers(visibleSource)
 		rendered, stats, err := markdown.ToRichHTMLPreview(balanced)
 		if err != nil {
 			return "", err

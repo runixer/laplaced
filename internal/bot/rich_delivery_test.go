@@ -844,7 +844,7 @@ func TestResponsePath_RichIsFinalOnly(t *testing.T) {
 		convID: "123", threadRoot: "9", replyTo: "42", richMode: "send",
 	}
 
-	path.sendIntermediate(context.Background(), "**working**")
+	path.sendIntermediate(context.Background(), "**working** (artifact:42)\n\n###MEDIA:1###\n\n###SPLIT###\n\nStill working")
 	path.sendError(context.Background(), "temporary error")
 	ctx, span := otel.Tracer("test").Start(context.Background(), "final")
 	ok := path.sendFinal(ctx, span, "# Final\n\n$x^2$")
@@ -853,6 +853,12 @@ func TestResponsePath_RichIsFinalOnly(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, transport.responses, 3)
 	assert.Equal(t, ResponseFormatDefault, transport.responses[0].Format)
+	assert.NotContains(t, strings.ToLower(transport.responses[0].Text), "artifact")
+	assert.NotContains(t, transport.responses[0].Text, "42")
+	assert.NotContains(t, transport.responses[0].Text, "MEDIA")
+	assert.NotContains(t, transport.responses[0].Text, "SPLIT")
+	assert.Contains(t, transport.responses[0].Text, "working")
+	assert.Contains(t, transport.responses[0].Text, "Still working")
 	assert.Equal(t, ResponseFormatDefault, transport.responses[1].Format)
 	assert.Equal(t, ResponseFormatRichHTML, transport.responses[2].Format)
 	assert.Equal(t, "42", transport.responses[2].ReplyTo)

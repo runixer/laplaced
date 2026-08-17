@@ -1169,6 +1169,10 @@ func (b *Bot) SendTestMessage(ctx context.Context, userID storage.ScopeID, text 
 
 		return nil, fmt.Errorf("laplace execution failed: %w", resp.Error)
 	}
+	// The test endpoint returns model-authored prose just like a transport and
+	// may optionally persist it. Keep raw artifact IDs only in resp.Messages for
+	// tool-context diagnostics; never expose or store them as assistant prose.
+	resp.Content = scrubModelArtifactReferences(resp.Content)
 
 	// Extract timing breakdown from RAG info
 	if resp.RAGInfo != nil {

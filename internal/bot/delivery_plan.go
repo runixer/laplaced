@@ -121,8 +121,11 @@ func validateDeliveryOperation(op deliveryOperation, allowFallback bool) error {
 		}
 	case persistentOperationRichMedia:
 		if op.RichMedia == nil || strings.TrimSpace(op.RichMedia.ConversationID) == "" ||
-			strings.TrimSpace(op.RichMedia.HTML) == "" || len(op.RichMedia.Items) == 0 || len(op.RichMedia.Items) > generatedRichGalleryMax {
+			len(op.RichMedia.Items) == 0 || len(op.RichMedia.Items) > telegram.MaxRichMessageMedia {
 			return errors.New("rich media operation has an invalid payload")
+		}
+		if _, _, err := outgoingRichMediaLayout(*op.RichMedia); err != nil {
+			return fmt.Errorf("rich media topology: %w", err)
 		}
 		for i, item := range op.RichMedia.Items {
 			if err := validatePersistentMediaItem(item); err != nil {
@@ -245,7 +248,7 @@ func withoutReply(op deliveryOperation) deliveryOperation {
 		copy.ReplyTo = ""
 		op.Text = &copy
 	case op.RichMedia != nil:
-		copy := *op.RichMedia
+		copy := cloneOutgoingRichMedia(*op.RichMedia)
 		copy.ReplyTo = ""
 		op.RichMedia = &copy
 	case op.Media != nil:
@@ -254,6 +257,20 @@ func withoutReply(op deliveryOperation) deliveryOperation {
 		op.Media = &copy
 	}
 	return op
+}
+
+func cloneOutgoingRichMedia(media OutgoingRichMedia) OutgoingRichMedia {
+	clone := media
+	if media.HTMLParts != nil {
+		clone.HTMLParts = append(make([]string, 0, len(media.HTMLParts)), media.HTMLParts...)
+	}
+	if media.MediaGroupSizes != nil {
+		clone.MediaGroupSizes = append(make([]int, 0, len(media.MediaGroupSizes)), media.MediaGroupSizes...)
+	}
+	if media.Items != nil {
+		clone.Items = append(make([]OutgoingMediaItem, 0, len(media.Items)), media.Items...)
+	}
+	return clone
 }
 
 func (b *Bot) executePersistentOperation(ctx context.Context, op deliveryOperation) (persistentSendResult, error) {
@@ -331,10 +348,8 @@ func validateTelegramDeliveryOperation(op deliveryOperation, threshold int) erro
 		return err
 	}
 	if op.RichMedia != nil {
-		for i, item := range op.RichMedia.Items {
-			if item.AsDocument || !strings.HasPrefix(persistentMediaType(item), "image/") || !generatedPhotoCanBePreviewed(item) {
-				return fmt.Errorf("rich media item %d is not a valid Telegram photo", i)
-			}
+		if _, err := composeOutgoingRichMedia(*op.RichMedia); err != nil {
+			return err
 		}
 	}
 	if op.Media != nil {

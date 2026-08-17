@@ -28,6 +28,22 @@ func textDeliveryOp(kind persistentOperationKind, text, replyTo string) delivery
 	}
 }
 
+type recordingRichMediaDeliveryTransport struct {
+	recordingRichTransport
+	richMedia []OutgoingRichMedia
+}
+
+func (t *recordingRichMediaDeliveryTransport) SendRichMedia(_ context.Context, media OutgoingRichMedia) (string, error) {
+	t.richMedia = append(t.richMedia, media)
+	return "rich-media-1", nil
+}
+
+func validRichMediaItem() OutgoingMediaItem {
+	return OutgoingMediaItem{
+		Data: append([]byte(nil), generatedTestPNG...), Filename: "generated.png", MIME: "image/png", SourceOrdinal: 4,
+	}
+}
+
 func TestExecuteDeliveryPlan_ConfirmedIDsAndSingleReplyAnchor(t *testing.T) {
 	transport := &recordingRichTransport{}
 	bot := newRichDeliveryTestBot(t, transport)
@@ -99,6 +115,81 @@ func TestExecuteDeliveryPlan_RejectsMalformedPlanBeforeNetwork(t *testing.T) {
 	assert.Equal(t, richDeliveryRejected, result.outcome)
 	assert.Zero(t, result.attempts)
 	assert.Empty(t, transport.responses)
+}
+
+func TestExecuteDeliveryPlan_RejectsInvalidRichMediaGraphBeforeNetwork(t *testing.T) {
+	transport := &recordingRichMediaDeliveryTransport{}
+	bot := newRichDeliveryTestBot(t, transport)
+	plan := deliveryPlan{Operations: []deliveryOperation{{
+		Kind: persistentOperationRichMedia,
+		RichMedia: &OutgoingRichMedia{
+			ConversationID:  "123",
+			HTMLParts:       []string{`<img src="tg://photo?id=untrusted"/>`, ""},
+			MediaGroupSizes: []int{1},
+			Items:           []OutgoingMediaItem{validRichMediaItem()},
+		},
+	}}}
+
+	require.NoError(t, plan.validate(), "shape validation should pass so the full graph preflight is exercised")
+	result := bot.executeDeliveryPlan(context.Background(), plan)
+
+	require.ErrorContains(t, result.err, `photo id "untrusted" has no rich message media entry`)
+	assert.Equal(t, richDeliveryRejected, result.outcome)
+	assert.Zero(t, result.attempts)
+	assert.Empty(t, transport.richMedia)
+}
+
+func TestDeliveryPlanValidateRichMediaTopology(t *testing.T) {
+	t.Run("media-only explicit topology", func(t *testing.T) {
+		plan := deliveryPlan{Operations: []deliveryOperation{{
+			Kind: persistentOperationRichMedia,
+			RichMedia: &OutgoingRichMedia{
+				ConversationID:  "123",
+				HTMLParts:       []string{"", ""},
+				MediaGroupSizes: []int{1},
+				Items:           []OutgoingMediaItem{validRichMediaItem()},
+			},
+		}}}
+
+		require.NoError(t, plan.validate())
+	})
+
+	t.Run("topology must consume all items", func(t *testing.T) {
+		plan := deliveryPlan{Operations: []deliveryOperation{{
+			Kind: persistentOperationRichMedia,
+			RichMedia: &OutgoingRichMedia{
+				ConversationID:  "123",
+				HTMLParts:       []string{"", ""},
+				MediaGroupSizes: []int{1},
+				Items:           []OutgoingMediaItem{validRichMediaItem(), validRichMediaItem()},
+			},
+		}}}
+
+		require.ErrorContains(t, plan.validate(), "consumes 1 items, payload has 2")
+	})
+}
+
+func TestWithoutReply_ClonesRichMediaTopology(t *testing.T) {
+	original := &OutgoingRichMedia{
+		ConversationID:  "123",
+		ReplyTo:         "42",
+		HTMLParts:       []string{"<p>before</p>", "<p>after</p>"},
+		MediaGroupSizes: []int{1},
+		Items:           []OutgoingMediaItem{validRichMediaItem()},
+	}
+
+	clonedOp := withoutReply(deliveryOperation{Kind: persistentOperationRichMedia, RichMedia: original})
+	require.NotSame(t, original, clonedOp.RichMedia)
+	assert.Empty(t, clonedOp.RichMedia.ReplyTo)
+	assert.Equal(t, "42", original.ReplyTo)
+	assert.Equal(t, 4, clonedOp.RichMedia.Items[0].SourceOrdinal)
+
+	clonedOp.RichMedia.HTMLParts[0] = "changed"
+	clonedOp.RichMedia.MediaGroupSizes[0] = 2
+	clonedOp.RichMedia.Items[0].Filename = "changed.png"
+	assert.Equal(t, "<p>before</p>", original.HTMLParts[0])
+	assert.Equal(t, 1, original.MediaGroupSizes[0])
+	assert.Equal(t, "generated.png", original.Items[0].Filename)
 }
 
 func TestExecuteDeliveryPlan_ExplicitLedgerContextRequiresRepositoryBeforeNetwork(t *testing.T) {

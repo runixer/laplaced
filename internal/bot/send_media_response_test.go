@@ -213,6 +213,38 @@ func TestGeneratedMedia_OffModeKeepsCompatibilityMediaEnvelope(t *testing.T) {
 	store.AssertExpectations(t)
 }
 
+func TestGeneratedMedia_OffModeKeepsSplitOutOfCaptionAndHistory(t *testing.T) {
+	transport := &recordingTransport{mediaID: "legacy-media"}
+	bot, store, userID := newGeneratedDeliveryTestBot(t, transport)
+	path := generatedPath(bot, userID)
+	path.richMode = config.TelegramRichMessagesOff
+	expectGeneratedArtifact(store, userID)
+	var persisted storage.Message
+	store.On("AddMessageToHistory", userID, mock.Anything).Run(func(args mock.Arguments) {
+		persisted = args.Get(1).(storage.Message)
+	}).Return(nil).Once()
+	store.On("SetReplyTransportID", userID, "legacy-media").Return(nil).Once()
+	store.On("GetRecentHistory", userID, 1).Return([]storage.Message{{ID: 9}}, nil).Once()
+	store.On("UpdateMessageID", userID, int64(42), int64(9)).Return(nil).Once()
+
+	result := bot.sendResponseWithGeneratedImages(
+		context.Background(), path, nil,
+		"# First\n\n###SPLIT###\n\n## Second", []int64{42}, bot.logger,
+	)
+
+	require.Equal(t, richDeliveryConfirmed, result.outcome, "delivery error: %v", result.err)
+	assert.Equal(t, 2, result.attempts)
+	require.Len(t, transport.media, 1)
+	assert.Contains(t, transport.media[0].Caption, "First")
+	assert.NotContains(t, transport.media[0].Caption, "Second")
+	assert.NotContains(t, transport.media[0].Caption, richSplitDelimiter)
+	require.Len(t, transport.text, 1)
+	assert.Contains(t, transport.text[0].Text, "Second")
+	assert.NotContains(t, transport.text[0].Text, richSplitDelimiter)
+	assert.NotContains(t, persisted.Content, richSplitDelimiter)
+	store.AssertExpectations(t)
+}
+
 func TestGeneratedMedia_LocalV2RejectionNotifiesWithBoundedGenericError(t *testing.T) {
 	transport := &recordingTransport{richMediaID: "must-not-send"}
 	bot, store, userID := newGeneratedDeliveryTestBot(t, transport)
@@ -293,14 +325,15 @@ func TestGeneratedMedia_RichModeSendsOneNativeMessageWithTrustedPhoto(t *testing
 	rich := transport.richMedia[0]
 	require.Len(t, rich.Items, 1)
 	assert.Equal(t, generatedTestPNG, rich.Items[0].Data)
-	assert.Contains(t, rich.HTML, "<h1>Result</h1>")
-	assert.Contains(t, rich.HTML, "<tg-math>x^2</tg-math>")
-	assert.Contains(t, rich.HTML, "cat photo")
-	assert.Contains(t, rich.HTML, "unsafe")
-	assert.Contains(t, rich.HTML, "@alice")
-	assert.NotContains(t, strings.ToLower(rich.HTML), "tg://")
-	assert.NotContains(t, strings.ToLower(rich.HTML), "javascript:")
-	assert.NotContains(t, strings.ToLower(rich.HTML), "<img")
+	richBody := strings.Join(rich.HTMLParts, "")
+	assert.Contains(t, richBody, "<h1>Result</h1>")
+	assert.Contains(t, richBody, "<tg-math>x^2</tg-math>")
+	assert.Contains(t, richBody, "cat photo")
+	assert.Contains(t, richBody, "unsafe")
+	assert.Contains(t, richBody, "@alice")
+	assert.NotContains(t, strings.ToLower(richBody), "tg://")
+	assert.NotContains(t, strings.ToLower(richBody), "javascript:")
+	assert.NotContains(t, strings.ToLower(richBody), "<img")
 	store.AssertExpectations(t)
 }
 

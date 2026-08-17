@@ -213,10 +213,14 @@ func TestLoadContextData_MathPromptFollowsTransportRendering(t *testing.T) {
 				assert.Contains(t, contextData.BaseSystemPrompt, "visually separate sections INSIDE one rich message")
 				assert.Contains(t, contextData.BaseSystemPrompt, "hard boundary between separate messages")
 				assert.Contains(t, contextData.BaseSystemPrompt, "do not use it for ordinary sections or merely because a response is long")
+				assert.Contains(t, contextData.BaseSystemPrompt, "###MEDIA:n[,n...]###")
+				assert.Contains(t, contextData.BaseSystemPrompt, "every MEDIA reference assigned in this turn exactly once")
+				assert.Contains(t, contextData.BaseSystemPrompt, "Artifact IDs from generate_image results are only for input_artifact_ids")
 			} else {
 				assert.NotContains(t, contextData.BaseSystemPrompt, "strict GFM block boundaries")
 				assert.NotContains(t, contextData.BaseSystemPrompt, "visually separate sections INSIDE one rich message")
 				assert.Contains(t, contextData.BaseSystemPrompt, "separator for multiple separate messages")
+				assert.NotContains(t, contextData.BaseSystemPrompt, "###MEDIA:")
 			}
 			mockStore.AssertExpectations(t)
 		})
@@ -240,7 +244,54 @@ func TestLoadContextData_RichPromptIsPerTurn(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, rich.BaseSystemPrompt, "This platform renders formulas with KaTeX")
 	assert.Contains(t, rich.BaseSystemPrompt, "strict GFM block boundaries")
+	assert.Contains(t, rich.BaseSystemPrompt, "###MEDIA:n[,n...]###")
 	mockStore.AssertExpectations(t)
+}
+
+func TestLoadContextData_RichMediaLayoutPromptLocalized(t *testing.T) {
+	for _, tt := range []struct {
+		lang        string
+		mustContain []string
+	}{
+		{
+			lang: "en",
+			mustContain: []string{
+				"turn-local delivery references",
+				"###MEDIA:1### or ###MEDIA:2,3###",
+				"###SPLIT### does not restart MEDIA numbering",
+				"omit ALL MEDIA directives",
+			},
+		},
+		{
+			lang: "ru",
+			mustContain: []string{
+				"локальные для текущего хода ссылки",
+				"###MEDIA:1### или ###MEDIA:2,3###",
+				"###SPLIT### не сбрасывает MEDIA-нумерацию",
+				"не используй НИ ОДНОЙ MEDIA-директивы",
+			},
+		},
+	} {
+		t.Run(tt.lang, func(t *testing.T) {
+			cfg, _, lap, mockStore, _, _ := setupContextTest(t)
+			cfg.Bot.Language = tt.lang
+			cfg.Transport = "telegram"
+			userID := storage.ScopeID("123")
+			mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil).Twice()
+			mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil).Twice()
+
+			rich, err := lap.loadContextData(context.Background(), userID, "layout", nil, true)
+			require.NoError(t, err)
+			for _, phrase := range tt.mustContain {
+				assert.Contains(t, rich.BaseSystemPrompt, phrase)
+			}
+
+			legacy, err := lap.loadContextData(context.Background(), userID, "layout", nil, false)
+			require.NoError(t, err)
+			assert.NotContains(t, legacy.BaseSystemPrompt, "###MEDIA:")
+			mockStore.AssertExpectations(t)
+		})
+	}
 }
 
 // TestLoadContextData_MessageLimiting tests MaxContextMessages limiting.

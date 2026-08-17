@@ -328,6 +328,38 @@ func TestStreamSink_FirstDeltaImmediateEdit(t *testing.T) {
 	assert.Equal(t, streamModeContent, sink.mode)
 }
 
+func TestStreamSink_PreviewHidesTurnLocalProtocolAndArtifactReferences(t *testing.T) {
+	sink, api, _, _ := newSinkWithMockAPI(t)
+	api.On("EditMessageText", mock.Anything, mock.MatchedBy(func(req telegram.EditMessageTextRequest) bool {
+		lower := strings.ToLower(req.Text)
+		return strings.Contains(req.Text, "before") && strings.Contains(req.Text, "after") &&
+			!strings.Contains(req.Text, generatedMediaDirectiveStem) &&
+			!strings.Contains(req.Text, richSplitDelimiter) &&
+			!strings.Contains(lower, "artifact") &&
+			!strings.Contains(req.Text, "42") && req.ParseMode == "HTML"
+	})).Return(&telegram.Message{MessageID: 42}, nil).Once()
+
+	sink.Delta("before artifact:42\n###MEDIA:1###\n###SPLIT###\nafter")
+	api.AssertExpectations(t)
+}
+
+func TestStreamSink_NeverFlashesChunkedArtifactReference(t *testing.T) {
+	sink, api, clock, _ := newSinkWithMockAPI(t)
+	api.On("EditMessageText", mock.Anything, mock.MatchedBy(func(req telegram.EditMessageTextRequest) bool {
+		lower := strings.ToLower(req.Text)
+		return strings.Contains(req.Text, "visible") &&
+			!strings.Contains(lower, "artifact") && !strings.Contains(req.Text, "42")
+	})).Return(&telegram.Message{MessageID: 42}, nil).Times(3)
+
+	for i, delta := range []string{"visible artifact", ":", "42 tail"} {
+		if i > 0 {
+			clock.Advance(sink.cfg.GetEditThrottle())
+		}
+		sink.Delta(delta)
+	}
+	api.AssertExpectations(t)
+}
+
 func TestStreamSink_DeltaThrottleByTime(t *testing.T) {
 	sink, api, clock, _ := newSinkWithMockAPI(t)
 
@@ -672,6 +704,35 @@ func TestResponsePath_FailedTerminalEditDoesNotSendOverflow(t *testing.T) {
 	assert.Empty(t, path.deliveredMessageID)
 	api.AssertNumberOfCalls(t, "SendMessage", 1)
 	api.AssertNumberOfCalls(t, "EditMessageText", 2)
+	api.AssertExpectations(t)
+}
+
+func TestResponsePath_FlushSinkBeforeMediaNeverPersistsInternalProtocol(t *testing.T) {
+	transport := &recordingRichTransport{}
+	bot := newRichDeliveryTestBot(t, transport)
+	bot.cfg.Telegram.RichMessages.Mode = config.TelegramRichMessagesOff
+	bot.cfg.Bot.Streaming.Enabled = true
+	api := new(testutil.MockBotAPI)
+	api.On("SendMessage", mock.Anything, mock.Anything).
+		Return(&telegram.Message{MessageID: 42}, nil).
+		Once()
+	api.On("EditMessageText", mock.Anything, mock.MatchedBy(func(req telegram.EditMessageTextRequest) bool {
+		return strings.Contains(req.Text, "Before") && strings.Contains(req.Text, "After") &&
+			!strings.Contains(req.Text, "MEDIA") && !strings.Contains(req.Text, "SPLIT") &&
+			!strings.Contains(strings.ToLower(req.Text), "artifact") && !strings.Contains(req.Text, "99")
+	})).Return(&telegram.Message{MessageID: 42}, nil).Once()
+	bot.api = api
+
+	path := bot.newResponsePath(
+		context.Background(), storage.ScopeID("user"), "123", true,
+		"123", "", "7", bot.logger,
+	)
+	require.NotNil(t, path.sink)
+
+	path.flushSinkBeforeMedia(context.Background(), "Before\n\n###MEDIA:1###\n\n###SPLIT###\n\nAfter (artifact:99)")
+
+	assert.True(t, path.sink.hadFinalize)
+	api.AssertNumberOfCalls(t, "EditMessageText", 1)
 	api.AssertExpectations(t)
 }
 

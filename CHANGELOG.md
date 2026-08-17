@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Telegram Rich Message replies can now place generated images between rich
+  text sections: the model chooses only turn-local position, order and grouping,
+  while the application keeps artifact lookup, uploads and media identifiers
+  trusted and preserves an automatic fallback for invalid layouts.
 - The LongMemEval harness now provides stage-level evidence recall, immutable ingestion snapshots, dataset-relative dates, official judging, token-budget diagnostics, offline summaries, and paired run comparisons.
 - New privacy mode: ask the bot not to save something and the following messages are excluded from long-term memory, with an honest explanation of what is and isn't covered.
 
@@ -23,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File metadata extraction now tolerates flat, nested, or decorated `rag_hints`; on the final retry it can discard only malformed hints while preserving valid summary, keyword, entity, and embedding data.
 
 ### Security
+- Internal artifact IDs and the turn-local `MEDIA`/`SPLIT` delivery protocol
+  are removed from model-authored finals, intermediate messages and streaming
+  previews while remaining available to trusted tool chaining.
 - Forwarded "instructions for an AI assistant" blocks are refused outright and never written to memory, closing a confirmed cross-user injection path.
 
 ## [0.10.3] - 2026-07-10

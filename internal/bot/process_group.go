@@ -501,6 +501,11 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		path.sendError(shutdownSafeCtx, b.errorReplyText(span, err))
 		return
 	}
+	// Artifact IDs belong to the trusted tool/history protocol, never to the
+	// model-authored user-facing reply. Scrub before anomaly/log/preview and
+	// delivery handling; resp.Messages remains untouched so same-turn tool
+	// chaining can still use the raw IDs.
+	resp.Content = scrubModelArtifactReferences(resp.Content)
 
 	// Surface anomaly signals on the root span BEFORE branching on
 	// resp.Error — empty_response in particular fires on the retries-

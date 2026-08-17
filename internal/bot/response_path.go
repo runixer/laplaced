@@ -202,6 +202,15 @@ func (p *responsePath) finalizeCb(ctx context.Context) func(string) ([]telegram.
 
 // sendIntermediate delivers a mid-turn message emitted from the tool loop.
 func (p *responsePath) sendIntermediate(ctx context.Context, text string) {
+	text = scrubModelArtifactReferences(text)
+	cleaned, cleanErr := stripPersistentModelProtocolSource(text)
+	if cleanErr != nil {
+		p.logger.Warn("could not parse intermediate-response protocol markers; applied conservative scrub", "error", cleanErr)
+	}
+	text = cleaned
+	if strings.TrimSpace(text) == "" {
+		return
+	}
 	start := time.Now()
 	sent, _ := p.bot.sendRendered(ctx, p.convID, p.threadRoot, "", text, p.logger)
 	p.tgDuration += time.Since(start)
@@ -237,6 +246,12 @@ func (p *responsePath) sendError(ctx context.Context, errText string) {
 // bubble before the separate media delivery. The buffered path is otherwise a
 // no-op.
 func (p *responsePath) flushSinkBeforeMedia(ctx context.Context, content string) {
+	content = scrubModelArtifactReferences(content)
+	cleaned, cleanErr := stripPersistentModelProtocolSource(content)
+	if cleanErr != nil {
+		p.logger.Warn("could not parse pre-media protocol markers; applied conservative scrub", "error", cleanErr)
+	}
+	content = cleaned
 	p.finalizeRichDraft()
 	if p.sink == nil {
 		return
@@ -256,6 +271,7 @@ func (p *responsePath) flushSinkBeforeMedia(ctx context.Context, content string)
 // on the first chunk. Both variants link the message the user would react to
 // back to the stored reply and record bot.reply_sent on the root span.
 func (p *responsePath) sendFinal(ctx context.Context, span trace.Span, content string) bool {
+	content = scrubModelArtifactReferences(content)
 	// Finalizing a Rich Message draft is not delivery. Its bounded catch-up is
 	// preview-only; the buffered branch below still performs exactly one
 	// persistent final attempt and owns history.
@@ -410,14 +426,26 @@ func (p *responsePath) shadowRichRender(ctx context.Context, span trace.Span, co
 // confirmed final creates the assistant history row, and only then is the
 // confirmed transport id linked to that row.
 func (p *responsePath) sendFinalAndPersist(ctx context.Context, span trace.Span, content string, threadRoot *string) bool {
-	if !p.sendFinal(ctx, span, content) {
+	content = scrubModelArtifactReferences(content)
+	deliveryContent, historyContent := content, content
+	if layout, err := parseGeneratedMediaLayout(content, nil); err != nil {
+		p.logger.Warn("could not resolve final-response protocol markers", "error", err)
+	} else {
+		historyContent = layout.MarkerFreeSource
+		if cleaned, cleanErr := generatedMediaDeliverySource(content, layout); cleanErr != nil {
+			p.logger.Warn("could not clean final-response media markers", "error", cleanErr)
+		} else {
+			deliveryContent = cleaned
+		}
+	}
+	if !p.sendFinal(ctx, span, deliveryContent) {
 		return false
 	}
 	ids := p.deliveredMessageIDs
 	if len(ids) == 0 && p.deliveredMessageID != "" {
 		ids = []string{p.deliveredMessageID}
 	}
-	p.bot.persistConfirmedAssistantReply(p.userID, span, content, p.convID, threadRoot,
+	p.bot.persistConfirmedAssistantReply(p.userID, span, historyContent, p.convID, threadRoot,
 		p.deliveryID, ids, nil, p.logger)
 	return true
 }

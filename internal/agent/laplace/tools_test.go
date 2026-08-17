@@ -135,6 +135,28 @@ func TestBuildTools_ParameterStructure(t *testing.T) {
 	assert.Equal(t, []string{"query"}, required)
 }
 
+func TestBuildTools_ImageGenerationDescriptionKeepsMediaLayoutRichOnly(t *testing.T) {
+	translator, err := i18n.NewTranslator("en")
+	require.NoError(t, err)
+
+	for _, lang := range []string{"en", "ru"} {
+		t.Run(lang, func(t *testing.T) {
+			cfg := &config.Config{
+				Bot:   config.BotConfig{Language: lang},
+				Tools: []config.ToolConfig{{Name: "generate_image"}},
+			}
+			tools := BuildTools(cfg, translator)
+			require.Len(t, tools, 1)
+			description := tools[0].Function.Description
+			assert.Contains(t, description, "input_artifact_ids")
+			assert.NotContains(t, description, "MEDIA:n",
+				"the static tool schema is shared with legacy/Mattermost turns")
+			assert.NotContains(t, description, "###MEDIA:")
+			assert.NotContains(t, description, "1000")
+		})
+	}
+}
+
 // TestImageGenerationSchemaEnums guards the generate_image schema against
 // silently advertising values the upstream model rejects. The schema is now
 // derived from ImageGeneratorConfig.SupportedImageSizes / SupportedAspectRatios,

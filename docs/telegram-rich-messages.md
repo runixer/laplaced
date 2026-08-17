@@ -62,14 +62,28 @@ request:
   other protected structures remains content;
 - optional rich draft streaming shows ephemeral tool/RAG/content progress and
   is stopped before the persistent final owns delivery;
-- one to ten trusted generated Photos can be uploaded with the first Rich HTML
-  part in one multipart final. One photo is a bare image block, two to four use
-  a collage, and five to ten use a slideshow. Media placement and attachment
-  identifiers are application-owned; model-authored image URLs stay inert;
-- an original above `document_threshold_bytes` is included in the native
-  gallery as a validated Photo preview when Telegram's Photo envelope permits
-  it, then sent once as a Document sidecar. Telegram Rich Messages have no
-  Document block;
+- one to ten trusted generated Photos can be uploaded in one multipart final.
+  After successful image tools, the model receives turn-local `MEDIA:1`,
+  `MEDIA:2`, ... placement references. A standalone top-level physical line
+  such as `###MEDIA:1###` or `###MEDIA:2,3###` chooses the position, order and
+  grouping: one Photo is a bare image block, two to four use a collage, and
+  five to ten use a slideshow. Several groups may be interleaved with Rich
+  HTML and may cross explicit `###SPLIT###` boundaries;
+- the placement protocol is all-or-nothing. If no directive is present, all
+  Photos use the established automatic top gallery. A malformed, duplicate,
+  missing, unavailable or invented reference invalidates the complete authored
+  layout; reserved directive lines are removed and every loadable Photo is
+  delivered automatically in generation order. More than ten generated items
+  likewise disables authored placement and uses bounded legacy batches;
+- `MEDIA` references never authorize a fetch or upload. Artifact lookup,
+  bytes, media/attachment IDs, `tg://` references and Rich HTML are built only
+  by the application from user-isolated generated artifacts. Model-authored
+  image URLs and media HTML remain inert, and internal artifact references are
+  scrubbed from model-authored user-visible output;
+- an original above `document_threshold_bytes` is included as a validated Photo
+  preview when Telegram's Photo envelope permits it, then sent once as a
+  Document sidecar immediately after the Rich part that owns that preview.
+  Telegram Rich Messages have no Document block;
 - more than ten generated items, non-image/corrupt media, an invalid Photo
   envelope, or a layout that does not fit the rich limits uses a preplanned
   legacy sequence of homogeneous batches of at most ten items plus bounded
@@ -88,7 +102,7 @@ request:
 
 Groups, business messages and direct-message topics deliberately retain the
 established legacy path. Video/audio/voice producers, arbitrary Documents
-inside a Rich Message, model-controlled media placement and persistent rich
+inside a Rich Message, more than ten model-directed Photos and persistent rich
 edits are outside the v2 contract.
 
 ## Rollout runbook
@@ -174,11 +188,12 @@ Changing rollout mode does not disable or roll back rich ingress.
 
 Groups, business messages and direct-message topics fail closed to legacy.
 Errors and ordinary media captions retain their established persistent
-delivery paths. For eligible generated media the planner inserts one trusted
-gallery at the top of the first rich part and may follow it with more packed
-rich text and high-resolution Document sidecars. More than ten items and local
-rich preflight failures use the fully prepared legacy media/text plan instead.
-The model never supplies the media block or upload target.
+delivery paths. For eligible generated media the planner either follows a
+fully validated turn-local MEDIA layout or inserts one trusted gallery at the
+top automatically, then packs text and places each high-resolution Document
+sidecar immediately after its owning preview part. More than ten items and
+local rich preflight failures use the fully prepared legacy media/text plan
+instead. The model never supplies media bytes, identifiers or an upload target.
 
 Persistent sends use explicit `confirmed`, `rejected`, `partial_rejected`,
 `unknown` and `partial_unknown` outcomes. Network errors, malformed successes

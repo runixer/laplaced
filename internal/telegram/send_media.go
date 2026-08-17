@@ -213,6 +213,15 @@ func validateRichMessageRequest(req SendRichMessageRequest) ([]multipartFile, bo
 	return files, len(localRefs) > 0, nil
 }
 
+// ValidateRichMessageRequest checks the complete Rich Message media graph
+// without serializing a multipart body or issuing a network request. It is
+// intended for callers that must finish preflight before recording a
+// non-idempotent delivery attempt.
+func ValidateRichMessageRequest(req SendRichMessageRequest) error {
+	_, _, err := validateRichMessageRequest(req)
+	return err
+}
+
 func richPhotoReferences(rawHTML string) (map[string]struct{}, error) {
 	refs := make(map[string]struct{})
 	z := htmlparser.NewTokenizer(strings.NewReader(rawHTML))

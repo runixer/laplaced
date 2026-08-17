@@ -15,6 +15,11 @@ import (
 
 type generatedRichDeliveryPlan struct {
 	plan              deliveryPlan
+	legacyFallback    []deliveryOperation
+	cleanedText       string
+	cleanedTextValid  bool
+	layoutMode        generatedMediaLayoutMode
+	layoutReason      generatedMediaLayoutReason
 	nativeAttachments int
 	nativeBytes       int
 }
@@ -89,43 +94,30 @@ func generatedLegacyTextOperations(convID, threadRoot string, chunks []string) [
 }
 
 func generatedMediaOperations(path *responsePath, caption string, items []OutgoingMediaItem, threshold int) []deliveryOperation {
-	var documents, photos []OutgoingMediaItem
-	for i, raw := range items {
-		item := normalizedGeneratedPhotoItem(raw, i)
-		asDocument := raw.AsDocument ||
-			(threshold > 0 && len(item.Data) > threshold) ||
-			!strings.HasPrefix(strings.ToLower(item.MIME), "image/") ||
-			!generatedPhotoCanBePreviewed(item)
-		item.AsDocument = asDocument
-		if asDocument {
-			documents = append(documents, item)
-		} else {
-			photos = append(photos, item)
-		}
-	}
-
-	orderedBatches := make([][]OutgoingMediaItem, 0, (len(items)+9)/10)
-	for _, group := range [][]OutgoingMediaItem{documents, photos} {
-		for len(group) > 0 {
-			size := min(10, len(group))
-			orderedBatches = append(orderedBatches, append([]OutgoingMediaItem(nil), group[:size]...))
-			group = group[size:]
-		}
-	}
-	operations := make([]deliveryOperation, 0, len(orderedBatches))
-	for i, batch := range orderedBatches {
-		media := &OutgoingMedia{
-			ConversationID: path.convID,
-			ThreadRoot:     path.threadRoot,
-			Items:          batch,
-		}
-		if i == 0 {
-			media.ReplyTo = path.replyTo
-			media.Caption = caption
-		}
-		operations = append(operations, deliveryOperation{Kind: persistentOperationMedia, Media: media})
+	operations := generatedMediaOperationsStable(path, items, threshold)
+	if len(operations) > 0 {
+		operations[0].Media.ReplyTo = path.replyTo
+		operations[0].Media.Caption = caption
 	}
 	return operations
+}
+
+func generatedAutomaticFallbackOperations(
+	ctx context.Context,
+	path *responsePath,
+	renderer *TelegramRenderer,
+	responseText string,
+	items []OutgoingMediaItem,
+	threshold int,
+) ([]deliveryOperation, error) {
+	if strings.TrimSpace(responseText) == "" {
+		operations := generatedMediaOperations(path, "", items, threshold)
+		if len(operations) == 0 {
+			return nil, fmt.Errorf("generated-media fallback has no media operations")
+		}
+		return operations, nil
+	}
+	return generatedFallbackOperations(ctx, path, renderer, responseText, items, threshold)
 }
 
 func generatedFallbackOperations(
@@ -174,20 +166,117 @@ func generatedFallbackOperations(
 	return operations, nil
 }
 
-func generatedRichSuffixFallback(path *responsePath, parts []richRenderedPart, start int, sidecars []deliveryOperation) []deliveryOperation {
+func generatedRichSuffixFallback(path *responsePath, parts []richRenderedPart, start int) []deliveryOperation {
 	var operations []deliveryOperation
 	for i := start; i < len(parts); i++ {
 		operations = append(operations, generatedLegacyTextOperations(path.convID, path.threadRoot, parts[i].legacyFallback)...)
 	}
-	operations = append(operations, sidecars...)
 	return operations
 }
 
-// planGeneratedRichDelivery builds the complete native and legacy envelopes
-// before any persistent request. Generated media placement is app-owned: one
-// gallery is injected at the top of the first rich part; model-authored image
-// destinations never participate.
+// planGeneratedRichDelivery resolves the turn-local MEDIA protocol before any
+// persistent request. The model chooses only ordinal placement/grouping; the
+// application still owns artifact lookup, photo bytes, Telegram media ids and
+// the final HTML/media graph. Invalid or absent directives retain the automatic
+// top-gallery behavior.
 func (b *Bot) planGeneratedRichDelivery(
+	ctx context.Context,
+	path *responsePath,
+	responseText string,
+	items []OutgoingMediaItem,
+	totalGenerated int,
+) (generatedRichDeliveryPlan, bool, string) {
+	if totalGenerated < len(items) || totalGenerated < 1 {
+		return generatedRichDeliveryPlan{}, false, richMetricFallbackHardPreflight
+	}
+	normalizedItems := append([]OutgoingMediaItem(nil), items...)
+	availableOrdinals := make([]int, len(normalizedItems))
+	for i := range normalizedItems {
+		ordinal := normalizedItems[i].SourceOrdinal
+		if ordinal <= 0 {
+			ordinal = i + 1
+			normalizedItems[i].SourceOrdinal = ordinal
+		}
+		if ordinal > totalGenerated {
+			return generatedRichDeliveryPlan{}, false, richMetricFallbackHardPreflight
+		}
+		availableOrdinals[i] = ordinal
+	}
+	layout, err := parseGeneratedMediaLayout(responseText, availableOrdinals)
+	if err != nil {
+		return generatedRichDeliveryPlan{}, false, richMetricFallbackHardPreflight
+	}
+	if totalGenerated > generatedRichGalleryMax {
+		for _, line := range layout.ProtocolLines {
+			if line.Kind == generatedMediaProtocolMedia {
+				layout = invalidGeneratedMediaLayout(layout, generatedMediaLayoutReasonTooMany)
+				break
+			}
+		}
+	}
+	base := generatedRichDeliveryPlan{
+		cleanedText:      layout.MarkerFreeSource,
+		cleanedTextValid: true,
+		layoutMode:       layout.Mode,
+		layoutReason:     layout.Reason,
+	}
+	deliverySource, err := generatedMediaDeliverySource(responseText, layout)
+	if err != nil {
+		return base, false, richMetricFallbackHardPreflight
+	}
+	renderer, ok := b.renderer.(*TelegramRenderer)
+	if !ok || path == nil {
+		return base, false, richMetricFallbackMediaIneligible
+	}
+
+	if layout.Mode == generatedMediaLayoutDirected {
+		plan, fallback, nativeAttachments, nativeBytes, buildErr := buildGeneratedDirectedPlan(
+			ctx, path, renderer, responseText, layout, normalizedItems,
+			b.cfg.Agents.ImageGenerator.DocumentThresholdBytes,
+		)
+		base.legacyFallback = fallback
+		if buildErr != nil {
+			return base, false, richMetricFallbackRenderOrLimit
+		}
+		if len(plan.Operations) == 0 {
+			return base, false, richMetricFallbackMediaIneligible
+		}
+		if _, ok := b.transport.(RichMediaTransport); !ok {
+			return base, false, richMetricFallbackMediaIneligible
+		}
+		base.plan = plan
+		base.nativeAttachments = nativeAttachments
+		base.nativeBytes = nativeBytes
+		return base, true, richMetricFallbackNone
+	}
+
+	// Automatic placement (including atomic degradation of an invalid authored
+	// layout) keeps the established caption/fallback representation.
+	fallback, fallbackErr := generatedAutomaticFallbackOperations(
+		ctx, path, renderer, deliverySource, normalizedItems,
+		b.cfg.Agents.ImageGenerator.DocumentThresholdBytes,
+	)
+	if fallbackErr != nil {
+		return base, false, richMetricFallbackRenderOrLimit
+	}
+	base.legacyFallback = fallback
+	if totalGenerated > generatedRichGalleryMax {
+		return base, false, richMetricFallbackMediaIneligible
+	}
+	automatic, native, reason := b.planAutomaticGeneratedRichDelivery(
+		ctx, path, deliverySource, normalizedItems,
+	)
+	automatic.legacyFallback = fallback
+	automatic.cleanedText = base.cleanedText
+	automatic.cleanedTextValid = true
+	automatic.layoutMode = base.layoutMode
+	automatic.layoutReason = base.layoutReason
+	return automatic, native, reason
+}
+
+// planAutomaticGeneratedRichDelivery is the compatibility composition: one
+// gallery at the start of the first rich part, followed by the rendered body.
+func (b *Bot) planAutomaticGeneratedRichDelivery(
 	ctx context.Context,
 	path *responsePath,
 	responseText string,
@@ -203,15 +292,21 @@ func (b *Bot) planGeneratedRichDelivery(
 	if !ok {
 		return generatedRichDeliveryPlan{}, false, richMetricFallbackMediaIneligible
 	}
-	preflight, err := preflightRichDelivery(ctx, responseText, renderer)
-	if err != nil {
-		return generatedRichDeliveryPlan{}, false, richMetricFallbackHardPreflight
-	}
-	if preflight.localFallback {
-		return generatedRichDeliveryPlan{}, false, preflight.fallbackReason
-	}
-	if len(preflight.parts) == 0 {
-		return generatedRichDeliveryPlan{}, false, richMetricFallbackMediaIneligible
+	var parts []richRenderedPart
+	if strings.TrimSpace(responseText) == "" {
+		parts = []richRenderedPart{{}}
+	} else {
+		preflight, err := preflightRichDelivery(ctx, responseText, renderer)
+		if err != nil {
+			return generatedRichDeliveryPlan{}, false, richMetricFallbackHardPreflight
+		}
+		if preflight.localFallback {
+			return generatedRichDeliveryPlan{}, false, preflight.fallbackReason
+		}
+		if len(preflight.parts) == 0 {
+			return generatedRichDeliveryPlan{}, false, richMetricFallbackMediaIneligible
+		}
+		parts = preflight.parts
 	}
 
 	threshold := b.cfg.Agents.ImageGenerator.DocumentThresholdBytes
@@ -238,13 +333,13 @@ func (b *Bot) planGeneratedRichDelivery(
 	if err != nil {
 		return generatedRichDeliveryPlan{}, false, richMetricFallbackMediaIneligible
 	}
-	first := preflight.parts[0]
+	first := parts[0]
 	if first.stats.Blocks+galleryBlocks > richMessageSafeBlockLimit ||
 		len(first.html)+len(galleryHTML) > richMessageMaxRenderedBytes {
 		return generatedRichDeliveryPlan{}, false, richMetricFallbackRenderOrLimit
 	}
 
-	fullFallback, err := generatedFallbackOperations(ctx, path, renderer, responseText, items, threshold)
+	fullFallback, err := generatedAutomaticFallbackOperations(ctx, path, renderer, responseText, items, threshold)
 	if err != nil {
 		return generatedRichDeliveryPlan{}, false, richMetricFallbackRenderOrLimit
 	}
@@ -257,20 +352,25 @@ func (b *Bot) planGeneratedRichDelivery(
 		}
 	}
 
-	operations := make([]deliveryOperation, 0, len(preflight.parts)+1)
+	operations := make([]deliveryOperation, 0, len(parts)+1)
 	operations = append(operations, deliveryOperation{
 		Kind: persistentOperationRichMedia,
 		RichMedia: &OutgoingRichMedia{
-			ConversationID: path.convID,
-			ThreadRoot:     path.threadRoot,
-			ReplyTo:        path.replyTo,
-			HTML:           first.html,
-			Items:          previewItems,
+			ConversationID:  path.convID,
+			ThreadRoot:      path.threadRoot,
+			ReplyTo:         path.replyTo,
+			HTMLParts:       []string{"", first.html},
+			MediaGroupSizes: []int{len(previewItems)},
+			Items:           previewItems,
 		},
 		formatFallback: fullFallback,
 	})
-	for i := 1; i < len(preflight.parts); i++ {
-		part := preflight.parts[i]
+	// A high-resolution original belongs to the gallery that previews it, so its
+	// Document sidecar is persisted immediately after that owning rich part.
+	// If it confirms, a later text-format fallback must never resend it.
+	operations = append(operations, sidecars...)
+	for i := 1; i < len(parts); i++ {
+		part := parts[i]
 		op := deliveryOperation{
 			Kind: persistentOperationRichText,
 			Text: &OutgoingResponse{
@@ -280,10 +380,9 @@ func (b *Bot) planGeneratedRichDelivery(
 				Format:         ResponseFormatRichHTML,
 			},
 		}
-		op.formatFallback = generatedRichSuffixFallback(path, preflight.parts, i, sidecars)
+		op.formatFallback = generatedRichSuffixFallback(path, parts, i)
 		operations = append(operations, op)
 	}
-	operations = append(operations, sidecars...)
 	plan := deliveryPlan{Operations: operations}
 	if err := plan.validate(); err != nil {
 		return generatedRichDeliveryPlan{}, false, richMetricFallbackRenderOrLimit

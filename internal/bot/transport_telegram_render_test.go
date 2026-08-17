@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -319,10 +320,11 @@ func TestTelegramTransport_SendRichMedia_InjectsTrustedPhotoBlock(t *testing.T) 
 	})).Return(&telegram.Message{MessageID: 88}, nil).Once()
 
 	msgID, err := tr.SendRichMedia(context.Background(), OutgoingRichMedia{
-		ConversationID: "123",
-		ThreadRoot:     "9",
-		ReplyTo:        "42",
-		HTML:           "<h1>Heading</h1>",
+		ConversationID:  "123",
+		ThreadRoot:      "9",
+		ReplyTo:         "42",
+		HTMLParts:       []string{"", "<h1>Heading</h1>"},
+		MediaGroupSizes: []int{1},
 		Items: []OutgoingMediaItem{{
 			Data: append([]byte(nil), generatedTestPNG...), Filename: "generated.png", MIME: "image/png",
 		}},
@@ -360,8 +362,9 @@ func TestTelegramTransport_SendRichMedia_RejectionClassification(t *testing.T) {
 			tr := NewTelegramTransport(mockAPI, cfg, testutil.TestTranslator(t), testutil.TestLogger())
 
 			_, err := tr.SendRichMedia(context.Background(), OutgoingRichMedia{
-				ConversationID: "123",
-				HTML:           "<p>answer</p>",
+				ConversationID:  "123",
+				HTMLParts:       []string{"", "<p>answer</p>"},
+				MediaGroupSizes: []int{1},
 				Items: []OutgoingMediaItem{{
 					Data: append([]byte(nil), generatedTestPNG...), Filename: "generated.png", MIME: "image/png",
 				}},
@@ -370,6 +373,148 @@ func TestTelegramTransport_SendRichMedia_RejectionClassification(t *testing.T) {
 			require.Error(t, err)
 			assert.Equal(t, tt.wantFallback, errors.Is(err, ErrRichMessageRejected))
 			mockAPI.AssertExpectations(t)
+		})
+	}
+}
+
+func TestTelegramTransport_SendRichMedia_ComposesMultipleGroupsWithGlobalIDs(t *testing.T) {
+	cfg := testutil.TestConfig()
+	cfg.Telegram.RichMessages.Mode = config.TelegramRichMessagesSend
+	mockAPI := new(testutil.MockBotAPI)
+	tr := NewTelegramTransport(mockAPI, cfg, testutil.TestTranslator(t), testutil.TestLogger())
+
+	items := make([]OutgoingMediaItem, 11)
+	for i := range items {
+		items[i] = OutgoingMediaItem{
+			Data:          append([]byte(nil), generatedTestPNG...),
+			Filename:      fmt.Sprintf("generated-%d.png", i+1),
+			MIME:          "image/png",
+			SourceOrdinal: 100 + i,
+		}
+	}
+	expectedHTML := `<h1>Before</h1><img src="tg://photo?id=rich_photo_0"/>` +
+		`<p>Middle</p><tg-collage><img src="tg://photo?id=rich_photo_1"/><img src="tg://photo?id=rich_photo_2"/></tg-collage>` +
+		`<hr/><tg-slideshow><img src="tg://photo?id=rich_photo_3"/><img src="tg://photo?id=rich_photo_4"/>` +
+		`<img src="tg://photo?id=rich_photo_5"/><img src="tg://photo?id=rich_photo_6"/><img src="tg://photo?id=rich_photo_7"/>` +
+		`<img src="tg://photo?id=rich_photo_8"/><img src="tg://photo?id=rich_photo_9"/><img src="tg://photo?id=rich_photo_10"/></tg-slideshow><p>After</p>`
+	mockAPI.On("SendRichMessage", mock.Anything, mock.MatchedBy(func(req telegram.SendRichMessageRequest) bool {
+		if req.RichMessage.HTML != expectedHTML || len(req.RichMessage.Media) != len(items) || len(req.Attachments) != len(items) {
+			return false
+		}
+		for i := range items {
+			mediaID := fmt.Sprintf("rich_photo_%d", i)
+			attachmentID := mediaID + "_file"
+			if req.RichMessage.Media[i].ID != mediaID ||
+				req.RichMessage.Media[i].Media.Media != "attach://"+attachmentID ||
+				req.Attachments[i].ID != attachmentID ||
+				req.Attachments[i].Filename != items[i].Filename {
+				return false
+			}
+		}
+		return true
+	})).Return(&telegram.Message{MessageID: 89}, nil).Once()
+
+	msgID, err := tr.SendRichMedia(context.Background(), OutgoingRichMedia{
+		ConversationID:  "123",
+		HTMLParts:       []string{"<h1>Before</h1>", "<p>Middle</p>", "<hr/>", "<p>After</p>"},
+		MediaGroupSizes: []int{1, 2, 8},
+		Items:           items,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "89", msgID)
+	mockAPI.AssertExpectations(t)
+}
+
+func TestTelegramTransport_SendRichMedia_AllowsMediaOnlyTopology(t *testing.T) {
+	cfg := testutil.TestConfig()
+	cfg.Telegram.RichMessages.Mode = config.TelegramRichMessagesSend
+	mockAPI := new(testutil.MockBotAPI)
+	tr := NewTelegramTransport(mockAPI, cfg, testutil.TestTranslator(t), testutil.TestLogger())
+
+	mockAPI.On("SendRichMessage", mock.Anything, mock.MatchedBy(func(req telegram.SendRichMessageRequest) bool {
+		return req.RichMessage.HTML == generatedRichPhotoHTML && len(req.RichMessage.Media) == 1
+	})).Return(&telegram.Message{MessageID: 90}, nil).Once()
+
+	msgID, err := tr.SendRichMedia(context.Background(), OutgoingRichMedia{
+		ConversationID:  "123",
+		HTMLParts:       []string{"", ""},
+		MediaGroupSizes: []int{1},
+		Items: []OutgoingMediaItem{{
+			Data: append([]byte(nil), generatedTestPNG...), Filename: "generated.png", MIME: "image/png",
+		}},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "90", msgID)
+	mockAPI.AssertExpectations(t)
+}
+
+func TestTelegramTransport_SendRichMedia_RejectsInvalidTopologyAndGraphBeforeAPI(t *testing.T) {
+	validItem := func() OutgoingMediaItem {
+		return OutgoingMediaItem{
+			Data: append([]byte(nil), generatedTestPNG...), Filename: "generated.png", MIME: "image/png",
+		}
+	}
+	tests := []struct {
+		name      string
+		media     OutgoingRichMedia
+		wantError string
+	}{
+		{
+			name:      "implicit media-only legacy shape",
+			media:     OutgoingRichMedia{ConversationID: "123", Items: []OutgoingMediaItem{validItem()}},
+			wantError: "requires explicit topology",
+		},
+		{
+			name: "HTML part count mismatch",
+			media: OutgoingRichMedia{ConversationID: "123", HTMLParts: []string{""}, MediaGroupSizes: []int{1},
+				Items: []OutgoingMediaItem{validItem()}},
+			wantError: "want 2",
+		},
+		{
+			name: "empty media group",
+			media: OutgoingRichMedia{ConversationID: "123", HTMLParts: []string{"", ""}, MediaGroupSizes: []int{0},
+				Items: []OutgoingMediaItem{validItem()}},
+			wantError: "want 1-10",
+		},
+		{
+			name: "oversized media group",
+			media: OutgoingRichMedia{ConversationID: "123", HTMLParts: []string{"", ""}, MediaGroupSizes: []int{11},
+				Items: []OutgoingMediaItem{validItem()}},
+			wantError: "want 1-10",
+		},
+		{
+			name: "item sum mismatch",
+			media: OutgoingRichMedia{ConversationID: "123", HTMLParts: []string{"", ""}, MediaGroupSizes: []int{2},
+				Items: []OutgoingMediaItem{validItem()}},
+			wantError: "consumes 2 items, payload has 1",
+		},
+		{
+			name: "dangling model-authored photo reference",
+			media: OutgoingRichMedia{ConversationID: "123", HTMLParts: []string{`<img src="tg://photo?id=bogus"/>`, ""}, MediaGroupSizes: []int{1},
+				Items: []OutgoingMediaItem{validItem()}},
+			wantError: `photo id "bogus" has no rich message media entry`,
+		},
+		{
+			name: "duplicate generated photo reference",
+			media: OutgoingRichMedia{ConversationID: "123", HTMLParts: []string{`<img src="tg://photo?id=rich_photo_0"/>`, ""}, MediaGroupSizes: []int{1},
+				Items: []OutgoingMediaItem{validItem()}},
+			wantError: `photo id "rich_photo_0" is referenced more than once`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := testutil.TestConfig()
+			cfg.Telegram.RichMessages.Mode = config.TelegramRichMessagesSend
+			mockAPI := new(testutil.MockBotAPI)
+			tr := NewTelegramTransport(mockAPI, cfg, testutil.TestTranslator(t), testutil.TestLogger())
+
+			_, err := tr.SendRichMedia(context.Background(), tt.media)
+
+			require.ErrorContains(t, err, tt.wantError)
+			mockAPI.AssertNotCalled(t, "SendRichMessage", mock.Anything, mock.Anything)
 		})
 	}
 }

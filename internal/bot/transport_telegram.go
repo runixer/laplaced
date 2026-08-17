@@ -315,8 +315,102 @@ func generatedRichGalleryHTML(media []telegram.InputRichMessageMedia) (string, e
 	return html.String(), nil
 }
 
-// SendRichMedia atomically uploads one trusted generated-photo gallery and
-// persists it together with the complete Rich HTML response. One photo is a
+func outgoingRichMediaLayout(m OutgoingRichMedia) ([]string, []int, error) {
+	if len(m.MediaGroupSizes) == 0 {
+		return nil, nil, errors.New("rich media requires explicit topology with at least one media group")
+	}
+	if len(m.HTMLParts) != len(m.MediaGroupSizes)+1 {
+		return nil, nil, fmt.Errorf("rich media topology has %d HTML parts for %d media groups; want %d",
+			len(m.HTMLParts), len(m.MediaGroupSizes), len(m.MediaGroupSizes)+1)
+	}
+	total := 0
+	for i, size := range m.MediaGroupSizes {
+		if size < 1 || size > generatedRichGalleryMax {
+			return nil, nil, fmt.Errorf("rich media group %d has %d items; want 1-%d", i, size, generatedRichGalleryMax)
+		}
+		total += size
+	}
+	if total != len(m.Items) {
+		return nil, nil, fmt.Errorf("rich media topology consumes %d items, payload has %d", total, len(m.Items))
+	}
+	return m.HTMLParts, m.MediaGroupSizes, nil
+}
+
+type outgoingRichMediaComposition struct {
+	html        string
+	media       []telegram.InputRichMessageMedia
+	attachments []telegram.RichMessageAttachment
+}
+
+// composeOutgoingRichMedia validates the full local request graph and assigns
+// attachment/media IDs once across the flattened item list. Building each
+// visual group separately would restart the ID sequence and create collisions.
+func composeOutgoingRichMedia(m OutgoingRichMedia) (outgoingRichMediaComposition, error) {
+	if len(m.Items) == 0 || len(m.Items) > telegram.MaxRichMessageMedia {
+		return outgoingRichMediaComposition{}, fmt.Errorf("telegram rich media requires 1-%d photos, got %d",
+			telegram.MaxRichMessageMedia, len(m.Items))
+	}
+	htmlParts, groupSizes, err := outgoingRichMediaLayout(m)
+	if err != nil {
+		return outgoingRichMediaComposition{}, err
+	}
+
+	uploads := make([]telegram.RichPhotoUpload, 0, len(m.Items))
+	for i, item := range m.Items {
+		if err := validatePersistentMediaItem(item); err != nil {
+			return outgoingRichMediaComposition{}, fmt.Errorf("telegram rich media item %d: %w", i, err)
+		}
+		if item.AsDocument || !strings.HasPrefix(persistentMediaType(item), "image/") || !generatedPhotoCanBePreviewed(item) {
+			return outgoingRichMediaComposition{}, fmt.Errorf("telegram rich media item %d is outside the photo envelope", i)
+		}
+		filename := strings.TrimSpace(item.Filename)
+		if filename == "" {
+			filename = fmt.Sprintf("generated-%d.png", i+1)
+		}
+		uploads = append(uploads, telegram.RichPhotoUpload{Filename: filename, MIME: item.MIME, Data: item.Data})
+	}
+
+	media, attachments, err := telegram.BuildRichPhotoMedia(uploads)
+	if err != nil {
+		return outgoingRichMediaComposition{}, fmt.Errorf("build telegram rich photo media: %w", err)
+	}
+	var richHTML strings.Builder
+	offset := 0
+	for i, size := range groupSizes {
+		richHTML.WriteString(htmlParts[i])
+		galleryHTML, err := generatedRichGalleryHTML(media[offset : offset+size])
+		if err != nil {
+			return outgoingRichMediaComposition{}, err
+		}
+		richHTML.WriteString(galleryHTML)
+		offset += size
+	}
+	richHTML.WriteString(htmlParts[len(htmlParts)-1])
+	if richHTML.Len() > richMessageMaxRenderedBytes {
+		return outgoingRichMediaComposition{}, fmt.Errorf("telegram rich media payload has %d bytes, limit is %d",
+			richHTML.Len(), richMessageMaxRenderedBytes)
+	}
+
+	composition := outgoingRichMediaComposition{
+		html:        richHTML.String(),
+		media:       media,
+		attachments: attachments,
+	}
+	if err := telegram.ValidateRichMessageRequest(telegram.SendRichMessageRequest{
+		RichMessage: telegram.InputRichMessage{
+			HTML:                composition.html,
+			Media:               composition.media,
+			SkipEntityDetection: true,
+		},
+		Attachments: composition.attachments,
+	}); err != nil {
+		return outgoingRichMediaComposition{}, fmt.Errorf("validate telegram rich media graph: %w", err)
+	}
+	return composition, nil
+}
+
+// SendRichMedia atomically uploads trusted generated-photo groups and
+// persists them together with the complete Rich HTML response. One photo is a
 // bare image block, 2-4 photos form a collage and 5-10 form a slideshow.
 //
 // The photo block is injected after model Markdown has passed the allowlisted
@@ -326,52 +420,23 @@ func (t *TelegramTransport) SendRichMedia(ctx context.Context, m OutgoingRichMed
 	if !t.cfg.Telegram.RichMessages.AnyEnabled() {
 		return "", fmt.Errorf("telegram rich messages are disabled")
 	}
-	if len(m.Items) == 0 || len(m.Items) > generatedRichGalleryMax {
-		return "", fmt.Errorf("telegram rich media requires 1-%d photos, got %d", generatedRichGalleryMax, len(m.Items))
-	}
-	uploads := make([]telegram.RichPhotoUpload, 0, len(m.Items))
-	for i, item := range m.Items {
-		if err := validatePersistentMediaItem(item); err != nil {
-			return "", fmt.Errorf("telegram rich media item %d: %w", i, err)
-		}
-		if item.AsDocument || !strings.HasPrefix(persistentMediaType(item), "image/") || !generatedPhotoCanBePreviewed(item) {
-			return "", fmt.Errorf("telegram rich media item %d is outside the photo envelope", i)
-		}
-		filename := strings.TrimSpace(item.Filename)
-		if filename == "" {
-			filename = fmt.Sprintf("generated-%d.png", i+1)
-		}
-		uploads = append(uploads, telegram.RichPhotoUpload{Filename: filename, MIME: item.MIME, Data: item.Data})
-	}
-	if strings.TrimSpace(m.HTML) == "" {
-		return "", fmt.Errorf("telegram rich media requires a non-empty Rich HTML body")
-	}
-
 	chatID, err := strconv.ParseInt(m.ConversationID, 10, 64)
 	if err != nil {
 		return "", err
 	}
-	media, attachments, err := telegram.BuildRichPhotoMedia(uploads)
-	if err != nil {
-		return "", fmt.Errorf("build telegram rich photo gallery: %w", err)
-	}
-	galleryHTML, err := generatedRichGalleryHTML(media)
+	composition, err := composeOutgoingRichMedia(m)
 	if err != nil {
 		return "", err
 	}
-	// Media must be a top-level block. A bare img is the official no-caption
-	// form; the separately rendered body keeps headings/lists/formulas as their
-	// own blocks instead of forcing them into RichText-only figcaption content.
-	richHTML := galleryHTML + m.HTML
 	req := telegram.SendRichMessageRequest{
 		ChatID:          chatID,
 		MessageThreadID: intPtrOrNil(atoiOrZero(m.ThreadRoot)),
 		RichMessage: telegram.InputRichMessage{
-			HTML:                richHTML,
-			Media:               media,
+			HTML:                composition.html,
+			Media:               composition.media,
 			SkipEntityDetection: true,
 		},
-		Attachments: attachments,
+		Attachments: composition.attachments,
 	}
 	if replyID := atoiOrZero(m.ReplyTo); replyID != 0 {
 		req.ReplyParameters = &telegram.ReplyParameters{MessageID: replyID}

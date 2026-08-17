@@ -89,6 +89,9 @@ func TestPerformImageGeneration_HappyPath(t *testing.T) {
 	assert.Equal(t, []int64{1, 2}, result.GeneratedArtifactIDs)
 	assert.Contains(t, result.Content, "artifact:1")
 	assert.Contains(t, result.Content, "artifact:2")
+	assert.Contains(t, result.Content, "internal references for input_artifact_ids")
+	assert.Contains(t, result.Content, "never show them to the user")
+	assert.NotContains(t, result.Content, "≤1000")
 	assert.Contains(t, result.Content, "Model note: done")
 
 	// Agent was called with the right parameters

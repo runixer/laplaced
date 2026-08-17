@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -55,6 +56,7 @@ func (b *Bot) sendResponseWithGeneratedImages(
 		result.err = fmt.Errorf("generated media delivery path is nil")
 		return result
 	}
+	responseText = scrubModelArtifactReferences(responseText)
 	metricPath := richMetricPathTextFallback
 	metricFallbackReason := richMetricFallbackMediaUnavailable
 	nativeAttachmentCount, nativeAttachmentBytes := 0, 0
@@ -97,55 +99,98 @@ func (b *Bot) sendResponseWithGeneratedImages(
 		}
 	}()
 	userID := path.userID
+	// MEDIA/SPLIT are turn-local layout protocol, never assistant prose. Resolve
+	// their source views before repository access so even a missing artifact can
+	// fall back to marker-free text without persisting protocol into history.
+	deliveryText, historyText := responseText, responseText
+	if protocolLayout, protocolErr := parseGeneratedMediaLayout(responseText, nil); protocolErr != nil {
+		logger.Error("failed to resolve generated-media protocol", "error", protocolErr)
+	} else {
+		historyText = protocolLayout.MarkerFreeSource
+		if cleanDeliveryText, cleanErr := generatedMediaDeliverySource(responseText, protocolLayout); cleanErr != nil {
+			logger.Error("failed to clean generated-media delivery source", "error", cleanErr)
+		} else {
+			deliveryText = cleanDeliveryText
+		}
+	}
 	if b.artifactRepo == nil {
 		logger.Error("artifact repo not configured but generated artifacts present")
-		return b.sendTextOnlyFallback(ctx, path, historyThreadRoot, responseText, logger)
+		return b.sendTextOnlyFallback(ctx, path, historyThreadRoot, deliveryText, historyText, logger)
 	}
 
 	if b.fileStorage == nil {
 		logger.Error("file storage not configured — cannot send generated images")
-		return b.sendTextOnlyFallback(ctx, path, historyThreadRoot, responseText, logger)
+		return b.sendTextOnlyFallback(ctx, path, historyThreadRoot, deliveryText, historyText, logger)
 	}
 
 	// 1. Load artifacts in the order produced and read their bytes.
 	loaded := b.loadArtifactBytes(ctx, userID, artifactIDs, logger)
 	if len(loaded) == 0 {
 		logger.Error("no generated artifacts loadable from disk — falling back to text-only reply")
-		return b.sendTextOnlyFallback(ctx, path, historyThreadRoot, responseText, logger)
+		return b.sendTextOnlyFallback(ctx, path, historyThreadRoot, deliveryText, historyText, logger)
 	}
-
-	// 2. Compact history markers + text.
-	historyContent := buildAssistantHistoryContent(loaded, responseText)
 
 	// 3. Fit the caption to the transport's media caption budget measured on
 	// the rendered wire format; the rest is sent as follow-up text.
-	var caption, followUp string
+	var caption string
+	var followUps []string
 	if path.effectiveRichMode() == config.TelegramRichMessagesSend {
 		if telegramRenderer, ok := b.renderer.(*TelegramRenderer); ok {
-			caption, followUp = telegramRenderer.RenderSafeRichCaption(ctx, responseText)
+			var followUp string
+			caption, followUp = telegramRenderer.RenderSafeRichCaption(ctx, deliveryText)
+			if strings.TrimSpace(followUp) != "" {
+				followUps = append(followUps, followUp)
+			}
 		} else {
 			// Rich send mode is Telegram-only. If that invariant is ever broken,
 			// fail closed by keeping model content out of the media caption.
-			followUp = responseText
+			followUps = append(followUps, deliveryText)
 		}
 	} else {
-		caption, followUp = b.renderer.RenderCaption(ctx, responseText)
+		// Legacy captions do not understand the application SPLIT protocol.
+		// Resolve its AST-safe physical-line boundaries first so a short response
+		// cannot leak the marker literally inside the media caption.
+		sources, splitErr := splitStandaloneRichSources(deliveryText)
+		if splitErr != nil {
+			if !errors.Is(splitErr, errRichSplitEmpty) {
+				logger.Warn("could not preserve generated-media split boundaries in legacy caption; using marker-free text", "error", splitErr)
+			}
+			sources = nil
+			if strings.TrimSpace(historyText) != "" {
+				sources = []string{historyText}
+			}
+		}
+		if len(sources) > 0 {
+			var firstOverflow string
+			caption, firstOverflow = b.renderer.RenderCaption(ctx, sources[0])
+			if strings.TrimSpace(firstOverflow) != "" {
+				followUps = append(followUps, firstOverflow)
+			}
+			followUps = append(followUps, sources[1:]...)
+		}
 	}
 
 	items := make([]OutgoingMediaItem, 0, len(loaded))
 	for _, la := range loaded {
 		items = append(items, OutgoingMediaItem{
-			Data:     la.data,
-			Filename: la.artifact.OriginalName,
-			MIME:     la.artifact.MimeType,
+			Data:          la.data,
+			Filename:      la.artifact.OriginalName,
+			MIME:          la.artifact.MimeType,
+			SourceOrdinal: la.ordinal,
 		})
 	}
 	if richMode == config.TelegramRichMessagesShadow {
-		if _, ok, reason := b.planGeneratedRichDelivery(ctx, path, responseText, items); ok {
+		if shadowPlan, ok, reason := b.planGeneratedRichDelivery(ctx, path, responseText, items, len(artifactIDs)); ok {
 			shadowOutcome = richMetricShadowNative
 			shadowFallbackReason = richMetricFallbackNone
+			if shadowPlan.cleanedTextValid {
+				historyText = shadowPlan.cleanedText
+			}
 		} else {
 			shadowFallbackReason = reason
+			if shadowPlan.cleanedTextValid {
+				historyText = shadowPlan.cleanedText
+			}
 		}
 	}
 	metricPath = richMetricPathLegacyMedia
@@ -157,7 +202,13 @@ func (b *Bot) sendResponseWithGeneratedImages(
 	// immutable legacy suffix embedded in that plan.
 	deliveryConfirmed := false
 	if richMode == config.TelegramRichMessagesSend {
-		planned, ok, ineligibleReason := b.planGeneratedRichDelivery(ctx, path, responseText, items)
+		planned, ok, ineligibleReason := b.planGeneratedRichDelivery(ctx, path, responseText, items, len(artifactIDs))
+		if planned.cleanedTextValid {
+			historyText = planned.cleanedText
+		}
+		if planned.layoutMode == generatedMediaLayoutInvalid {
+			logger.Warn("ignored invalid generated-media layout", "reason", planned.layoutReason)
+		}
 		if ok {
 			metricPath = richMetricPathNative
 			metricFallbackReason = richMetricFallbackNone
@@ -178,20 +229,12 @@ func (b *Bot) sendResponseWithGeneratedImages(
 			deliveryConfirmed = true
 		} else {
 			metricFallbackReason = ineligibleReason
-			telegramRenderer, rendererOK := b.renderer.(*TelegramRenderer)
-			if !rendererOK {
+			if len(planned.legacyFallback) == 0 {
 				result.outcome = richDeliveryRejected
-				result.err = fmt.Errorf("rich generated-media fallback requires Telegram renderer")
+				result.err = fmt.Errorf("rich generated-media planner produced no safe fallback")
 				return result
 			}
-			fallbackOps, fallbackErr := generatedFallbackOperations(ctx, path, telegramRenderer, responseText, items,
-				b.cfg.Agents.ImageGenerator.DocumentThresholdBytes)
-			if fallbackErr != nil {
-				result.outcome = richDeliveryRejected
-				result.err = fallbackErr
-				return result
-			}
-			fallbackDelivery := b.executeDeliveryPlan(ctx, deliveryPlan{Operations: fallbackOps}, path.ledgerContext()...)
+			fallbackDelivery := b.executeDeliveryPlan(ctx, deliveryPlan{Operations: planned.legacyFallback}, path.ledgerContext()...)
 			result.attempts += fallbackDelivery.attempts
 			result.confirmedIDs = append(result.confirmedIDs, fallbackDelivery.confirmedIDs...)
 			result.primaryMessageID = fallbackDelivery.firstMsgID
@@ -248,7 +291,10 @@ func (b *Bot) sendResponseWithGeneratedImages(
 
 		// Send any remaining text as follow-up messages (no reply-to: the
 		// media already anchored to the user's message).
-		if strings.TrimSpace(followUp) != "" {
+		for followUpIndex, followUp := range followUps {
+			if strings.TrimSpace(followUp) == "" {
+				continue
+			}
 			followUpResult := b.sendGeneratedTextDelivery(ctx, path, "", followUp, logger)
 			result.attempts += followUpResult.attempts
 			result.confirmedIDs = append(result.confirmedIDs, followUpResult.confirmedIDs...)
@@ -259,7 +305,7 @@ func (b *Bot) sendResponseWithGeneratedImages(
 				default:
 					result.outcome = richDeliveryPartialUnknown
 				}
-				result.err = fmt.Errorf("send generated media follow-up: %w", followUpResult.err)
+				result.err = fmt.Errorf("send generated media follow-up %d: %w", followUpIndex, followUpResult.err)
 				return result
 			}
 		}
@@ -267,6 +313,9 @@ func (b *Bot) sendResponseWithGeneratedImages(
 
 	result.outcome = richDeliveryConfirmed
 	span := trace.SpanFromContext(ctx)
+	// 2. Compact history markers + marker-free assistant prose. Layout protocol
+	// is deliberately turn-local and must never be fed into the next prompt.
+	historyContent := buildAssistantHistoryContent(loaded, historyText)
 	loadedArtifactIDs := make([]int64, 0, len(loaded))
 	for _, artifact := range loaded {
 		loadedArtifactIDs = append(loadedArtifactIDs, artifact.artifact.ID)
@@ -316,11 +365,12 @@ func (b *Bot) sendTextOnlyFallback(
 	ctx context.Context,
 	path *responsePath,
 	historyThreadRoot *string,
-	responseText string,
+	deliveryText string,
+	historyText string,
 	logger *slog.Logger,
 ) generatedDeliveryResult {
 	start := time.Now()
-	delivery := b.sendGeneratedTextDelivery(ctx, path, path.replyTo, responseText, logger)
+	delivery := b.sendGeneratedTextDelivery(ctx, path, path.replyTo, deliveryText, logger)
 	result := generatedDeliveryResult{
 		outcome:          delivery.outcome,
 		duration:         time.Since(start),
@@ -334,7 +384,7 @@ func (b *Bot) sendTextOnlyFallback(
 		return result
 	}
 	span := trace.SpanFromContext(ctx)
-	if b.persistConfirmedAssistantReply(path.userID, span, responseText, path.convID, historyThreadRoot,
+	if b.persistConfirmedAssistantReply(path.userID, span, historyText, path.convID, historyThreadRoot,
 		result.deliveryID, result.confirmedIDs, nil, logger) {
 		result.persisted = true
 	}
@@ -352,6 +402,7 @@ func (b *Bot) sendGeneratedTextDelivery(ctx context.Context, path *responsePath,
 type loadedArtifact struct {
 	artifact *storage.Artifact
 	data     []byte
+	ordinal  int
 }
 
 // loadArtifactBytes resolves each artifact by ID (user-isolated) and reads
@@ -360,7 +411,7 @@ type loadedArtifact struct {
 func (b *Bot) loadArtifactBytes(ctx context.Context, userID storage.ScopeID, ids []int64, logger *slog.Logger) []loadedArtifact {
 	out := make([]loadedArtifact, 0, len(ids))
 	seen := make(map[int64]struct{}, len(ids))
-	for _, id := range ids {
+	for slot, id := range ids {
 		if id <= 0 {
 			logger.Warn("ignoring invalid generated artifact id", "artifact_id", id)
 			continue
@@ -391,7 +442,7 @@ func (b *Bot) loadArtifactBytes(ctx context.Context, userID storage.ScopeID, ids
 				"artifact_id", id, "key", art.FilePath, "error", err)
 			continue
 		}
-		out = append(out, loadedArtifact{artifact: art, data: data})
+		out = append(out, loadedArtifact{artifact: art, data: data, ordinal: slot + 1})
 	}
 	return out
 }

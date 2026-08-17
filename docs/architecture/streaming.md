@@ -54,6 +54,15 @@ Rich HTML схлопывается клиентами как обычный whit
   что у финала, но без активных ссылок/anchors/media. На transport включён
   `skip_entity_detection`, поэтому незавершённый URL тоже не кликабелен.
 
+Ни один preview не показывает внутренний delivery protocol. Полные standalone
+`###MEDIA:...###`/`###SPLIT###` строки, malformed reserved MEDIA-строки и
+неоднозначный незавершённый terminal prefix временно удаляются только из
+presentation view; исходный буфер остаётся неизменным для финального planner.
+Изображения в draft не загружаются: они впервые появляются в подтверждённом
+persistent Rich Message. Числовые внутренние `artifact:<id>`/`artifact id`
+также удаляются из legacy и rich preview, включая частично пришедший terminal
+prefix; tool-loop по-прежнему видит доверенный raw result для chaining.
+
 Rich draft живёт 30 секунд после принятого snapshot. Heartbeat раз в 20 секунд
 поддерживает его во время долгого LLM/tool stall. После первого draft
 `sendChatAction` прекращается, чтобы оба API не делили flood-budget.

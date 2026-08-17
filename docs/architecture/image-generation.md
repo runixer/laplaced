@@ -34,12 +34,16 @@ sequenceDiagram
     API-->>IG: images (или отказ/ошибка)
     IG-->>Tool: images | typed failure
     Tool->>ST: SaveFile + создать артефакты (state=pending)
-    Tool-->>LLM: "artifact:123,..." + подсказка описать кратко
+    Tool-->>LLM: artifact IDs для input_artifact_ids
+    LLM->>LLM: Laplace назначает rich-only MEDIA:1, MEDIA:2, ...
     Note over ST: фоновый Extractor проиндексирует картинки для RAG
 ```
 
 Несколько `generate_image` в одном ходе выполняются **параллельно** (semaphore,
 `max_concurrent`, по умолчанию 4); остальные инструменты — последовательно.
+Номера `MEDIA:n` присваиваются только после join: итерация tool-loop →
+индекс `tool_calls` → порядок outputs провайдера. Время завершения
+параллельных вызовов на нумерацию не влияет. Ошибка номер не занимает.
 
 ## JSON-схема из конфига
 
@@ -66,10 +70,15 @@ sequenceDiagram
 - Один файл — одиночная отправка; 2–10 — сгруппированный альбом.
 - Подпись рендерится Markdown → HTML так же, как текстовые ответы; переполнение
   лимита подписи уходит отдельным сообщением.
-- Для Telegram rich-canary общий v2 planner помещает 1–10 доверенных
-  сгенерированных Photo в начало первого Rich Message: одно изображение —
-  `<img>`, 2–4 — collage, 5–10 — slideshow. Остальной ответ остаётся нативным
-  Rich HTML и при необходимости пакуется по границам верхнеуровневых блоков.
+- На Telegram rich-canary модель может выбрать позицию, порядок и группировку
+  1–10 картинок только через standalone-строки `###MEDIA:n[,n...]###`.
+  Один номер — `<img>`, 2–4 — collage, 5–10 — slideshow. Несколько media-блоков
+  можно чередовать с текстом в одном Rich Message или разносить через
+  `###SPLIT###`.
+- Если MEDIA-строк нет, gallery по-прежнему автоматически ставится сверху.
+  Дубль, пропуск, недоступный номер, нарушение грамматики или более 10
+  outputs атомарно отменяют authored-layout: служебные строки удаляются,
+  все доступные картинки доставляются автоматически в исходном порядке.
 - Если оригинал больше `document_threshold_bytes`, но проходит Telegram Photo
   envelope (размер, геометрия и декодирование), он попадает в gallery как Photo
   preview и затем ровно один раз отправляется отдельным Document без сжатия.
@@ -83,9 +92,13 @@ sequenceDiagram
   delivery ledger и связываются с теми же артефактами/строкой истории.
 
 Это зафиксированный контракт rich v2. Telegram не предоставляет Rich Document
-block, поэтому Document остаётся отдельным persistent сообщением. Модель не
-может выбрать позицию gallery, media id или URL загрузки: они строятся только
-из подтверждённых `GeneratedArtifactID` приложения.
+block, поэтому Document остаётся отдельным persistent сообщением сразу после
+владеющего preview-блока. Модель выбирает только семантическое место и группу.
+Media id, attachment id, bytes и upload URL остаются application-owned и
+строятся только из подтверждённых `GeneratedArtifactID`. Числовые internal
+artifact references
+вычищаются из model-authored user-visible ответа. `MEDIA`/`SPLIT` не попадают в
+историю и не переиспользуются в следующем ходе.
 Rollout и stop-сигналы описаны в
 [telegram-rich-messages.md](../telegram-rich-messages.md).
 

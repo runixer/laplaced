@@ -104,6 +104,81 @@ func TestRichDraftSink_PartialContentUsesSafeLinklessRichHTML(t *testing.T) {
 	api.AssertExpectations(t)
 }
 
+func TestRichDraftSink_HidesGeneratedMediaDirectiveAndKeepsSurroundingContent(t *testing.T) {
+	api := new(testutil.MockBotAPI)
+	expectInitialRichDraft(api)
+	api.On("SendRichMessageDraft", mock.Anything, mock.MatchedBy(func(req telegram.SendRichMessageDraftRequest) bool {
+		html := req.RichMessage.HTML
+		return strings.Contains(html, "before") &&
+			strings.Contains(html, "after") &&
+			!strings.Contains(html, generatedMediaDirectiveStem)
+	})).Return(nil).Once()
+
+	sink := newRichDraftTestSink(t, api, 0)
+	sink.Delta("before\n###MEDIA:1###\nafter")
+	sink.Close()
+
+	api.AssertNumberOfCalls(t, "SendRichMessageDraft", 2)
+	api.AssertExpectations(t)
+}
+
+func TestRichDraftSink_HidesAllTurnLocalProtocolAndArtifactReferences(t *testing.T) {
+	api := new(testutil.MockBotAPI)
+	expectInitialRichDraft(api)
+	api.On("SendRichMessageDraft", mock.Anything, mock.MatchedBy(func(req telegram.SendRichMessageDraftRequest) bool {
+		html := req.RichMessage.HTML
+		return strings.Contains(html, "before") && strings.Contains(html, "after") &&
+			!strings.Contains(html, generatedMediaDirectiveStem) &&
+			!strings.Contains(html, richSplitDelimiter) &&
+			!strings.Contains(strings.ToLower(html), "artifact") &&
+			!strings.Contains(html, "42")
+	})).Return(nil).Once()
+
+	sink := newRichDraftTestSink(t, api, 0)
+	sink.Delta("before artifact:42\n###MEDIA:1###\n###SPLIT###\nafter")
+	sink.Close()
+
+	api.AssertNumberOfCalls(t, "SendRichMessageDraft", 2)
+	api.AssertExpectations(t)
+}
+
+func TestRichDraftSink_NeverFlashesChunkedArtifactReference(t *testing.T) {
+	api := new(testutil.MockBotAPI)
+	expectInitialRichDraft(api)
+	api.On("SendRichMessageDraft", mock.Anything, mock.MatchedBy(func(req telegram.SendRichMessageDraftRequest) bool {
+		html := strings.ToLower(req.RichMessage.HTML)
+		return strings.Contains(html, "visible") &&
+			!strings.Contains(html, "artifact") && !strings.Contains(html, "42")
+	})).Return(nil).Times(2)
+
+	sink := newRichDraftTestSink(t, api, 0)
+	clock := newFakeClock()
+	setRichDraftClock(sink, clock)
+	for i, delta := range []string{"visible artifact", ":", "42 tail"} {
+		if i > 0 {
+			clock.Advance(richDraftMinUpdateInterval)
+		}
+		sink.Delta(delta)
+	}
+	sink.Close()
+
+	api.AssertNumberOfCalls(t, "SendRichMessageDraft", 3)
+	api.AssertExpectations(t)
+}
+
+func TestRichDraftSink_MediaDirectiveOnlyKeepsExistingThinkingPreview(t *testing.T) {
+	api := new(testutil.MockBotAPI)
+	expectInitialRichDraft(api)
+
+	sink := newRichDraftTestSink(t, api, 0)
+	sink.Delta("###MEDIA:1###")
+	stats := sink.Close()
+
+	assert.Equal(t, 1, stats.updates, "hidden protocol line must not replace the thinking placeholder")
+	api.AssertNumberOfCalls(t, "SendRichMessageDraft", 1)
+	api.AssertExpectations(t)
+}
+
 func TestRichDraftSink_StatusUsesThinkingAndEscapesArguments(t *testing.T) {
 	api := new(testutil.MockBotAPI)
 	expectInitialRichDraft(api)
@@ -113,12 +188,14 @@ func TestRichDraftSink_StatusUsesThinkingAndEscapesArguments(t *testing.T) {
 			strings.Contains(html, "Thinking…<br>") &&
 			strings.Contains(html, "Searching the web:") &&
 			strings.Contains(html, "&lt;script&gt;") &&
+			!strings.Contains(strings.ToLower(html), "artifact") &&
+			!strings.Contains(html, "42") &&
 			!strings.Contains(html, "Thinking…\n") &&
 			!strings.Contains(html, "<script>")
 	})).Return(nil).Once()
 
 	sink := newRichDraftTestSink(t, api, 0)
-	sink.Status("internet_search", `{"query":"<script>alert(1)</script>"}`)
+	sink.Status("internet_search", `{"query":"<script>alert(1)</script> artifact:42"}`)
 	sink.Close()
 
 	api.AssertExpectations(t)
@@ -677,11 +754,13 @@ func TestResponsePath_RichDraftTerminalCatchupFailureDoesNotBlockSplitFinal(t *t
 	expectInitialRichDraft(api)
 	api.On("SendRichMessageDraft", mock.Anything, mock.MatchedBy(func(req telegram.SendRichMessageDraftRequest) bool {
 		return strings.Contains(req.RichMessage.HTML, "First section") &&
-			!strings.Contains(req.RichMessage.HTML, "Second section")
+			!strings.Contains(req.RichMessage.HTML, "Second section") &&
+			!strings.Contains(req.RichMessage.HTML, richSplitDelimiter)
 	})).Return(nil).Once()
 	api.On("SendRichMessageDraft", mock.Anything, mock.MatchedBy(func(req telegram.SendRichMessageDraftRequest) bool {
 		return strings.Contains(req.RichMessage.HTML, "First section") &&
-			strings.Contains(req.RichMessage.HTML, "Second section")
+			strings.Contains(req.RichMessage.HTML, "Second section") &&
+			!strings.Contains(req.RichMessage.HTML, richSplitDelimiter)
 	})).Run(func(args mock.Arguments) {
 		assert.Empty(t, transport.responses, "terminal catch-up must precede every persistent split operation")
 		ctx := args.Get(0).(context.Context)

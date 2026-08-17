@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -152,8 +153,9 @@ func TestV2GeneratedGalleryHighResolutionSidecars_PersistEveryIDAndArtifact(t *t
 	require.Equal(t, []string{"rich-gallery", "original", "original-2"}, result.confirmedIDs)
 	require.Len(t, transport.richMedia, 1)
 	require.Len(t, transport.richMedia[0].Items, 2)
-	assert.Contains(t, transport.richMedia[0].HTML, "<h1>Generated gallery</h1>")
-	assert.NotContains(t, transport.richMedia[0].HTML, "<img", "trusted gallery layout is injected at the Telegram wire boundary")
+	richBody := strings.Join(transport.richMedia[0].HTMLParts, "")
+	assert.Contains(t, richBody, "<h1>Generated gallery</h1>")
+	assert.NotContains(t, richBody, "<img", "trusted gallery layout is injected at the Telegram wire boundary")
 	require.Len(t, transport.media, 1)
 	require.Len(t, transport.media[0].Items, 2)
 	assert.True(t, transport.media[0].Items[0].AsDocument)

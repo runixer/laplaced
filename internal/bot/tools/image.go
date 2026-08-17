@@ -236,8 +236,8 @@ func buildToolReplyForLLM(artifactIDs []int64, modelText string) string {
 		}
 		sb.WriteString(").")
 	}
-	sb.WriteString(" Describe them briefly for the user in your reply; caption must be ≤1000 characters. ")
-	sb.WriteString("The images are already queued for delivery — do NOT tell the user you couldn't generate them.")
+	sb.WriteString(" The artifact IDs above are internal references for input_artifact_ids in later generate_image tool calls only; never show them to the user. ")
+	sb.WriteString("Describe what you generated naturally in your reply. The images are already queued for delivery, and the app handles attachment and text splitting — do NOT tell the user you couldn't generate them.")
 	if strings.TrimSpace(modelText) != "" {
 		sb.WriteString(" Model note: ")
 		sb.WriteString(modelText)

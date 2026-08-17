@@ -300,7 +300,7 @@ func extractToolArgText(toolName, arguments string) string {
 // boundaries) with an ellipsis, and HTML-escapes the result. Always safe
 // to feed into a "<i>%s</i>" template.
 func htmlSafeArg(s string) string {
-	s = strings.TrimSpace(s)
+	s = strings.TrimSpace(scrubModelArtifactReferences(s))
 	if s == "" {
 		return ""
 	}
@@ -373,7 +373,12 @@ func (s *streamSink) Delta(text string) {
 // to escaped plaintext so the user still sees the in-flight content. Caller
 // must hold s.mu.
 func (s *streamSink) editContentLocked() {
-	raw := s.buf.String()
+	raw := sanitizeModelPresentation(s.buf.String())
+	if visible, err := suppressGeneratedMediaDraftSource(raw); err == nil {
+		raw = visible
+	} else {
+		s.logger.Debug("streamSink: protocol preview suppression failed", "error", err)
+	}
 	prefix := renderStatusPrefix(s.statusLog)
 	balanced := markdown.BalanceOpenMarkers(raw)
 	htmlText, err := markdown.ToHTML(balanced)

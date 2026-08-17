@@ -121,26 +121,35 @@ type OutgoingMedia struct {
 
 // OutgoingMediaItem is one file in an OutgoingMedia batch.
 type OutgoingMediaItem struct {
-	Data       []byte
-	Filename   string
-	MIME       string
-	AsDocument bool // force document delivery (Telegram); transports without the photo/doc distinction ignore it
+	Data          []byte
+	Filename      string
+	MIME          string
+	AsDocument    bool // force document delivery (Telegram); transports without the photo/doc distinction ignore it
+	SourceOrdinal int  // application-only 1-based generated-artifact slot; transports ignore it (zero tells planners to use item index+1)
 }
 
 // OutgoingRichMedia is an optional, transport-native composition of trusted
-// media bytes and a fully rendered Rich HTML body. The model never constructs
-// this envelope: callers resolve generated artifact IDs through user-isolated
-// storage, and the transport injects the corresponding media references.
+// media bytes and fully rendered Rich HTML parts. HTMLParts and MediaGroupSizes
+// describe an alternating sequence:
+//
+//	HTMLParts[0], media group 0, HTMLParts[1], ... media group N, HTMLParts[N+1]
+//
+// Items is the flattened media order and each positive MediaGroupSizes entry
+// consumes that many consecutive items. Empty HTML parts are valid, including
+// a media-only message. The model never supplies bytes or media references:
+// callers resolve generated artifact IDs through user-isolated storage, and
+// the transport injects the corresponding references.
 //
 // RichMediaTransport is intentionally separate from Transport. Backends that
 // can't embed media in a structured message keep the established SendMedia
 // path without adding a meaningless implementation.
 type OutgoingRichMedia struct {
-	ConversationID string
-	ThreadRoot     string
-	ReplyTo        string
-	HTML           string
-	Items          []OutgoingMediaItem
+	ConversationID  string
+	ThreadRoot      string
+	ReplyTo         string
+	HTMLParts       []string
+	MediaGroupSizes []int
+	Items           []OutgoingMediaItem
 }
 
 // RichMediaTransport is implemented by transports that can atomically persist

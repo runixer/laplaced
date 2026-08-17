@@ -180,6 +180,8 @@ func TestExecuteToolCalls(t *testing.T) {
 				handler,
 				ToolCallContext{},
 				tt.toolCalls,
+				0,
+				false,
 				nil,
 				agent.logger,
 			)
@@ -200,6 +202,12 @@ func imgToolCall(id, args string) llm.ToolCall {
 			Arguments string `json:"arguments"`
 		}{Name: "generate_image", Arguments: args},
 	}
+}
+
+func namedToolCall(id, name, args string) llm.ToolCall {
+	call := imgToolCall(id, args)
+	call.Function.Name = name
+	return call
 }
 
 // TestExecuteToolCalls_ParallelImageGen verifies that multiple generate_image
@@ -226,20 +234,166 @@ func TestExecuteToolCalls_ParallelImageGen(t *testing.T) {
 
 	start := time.Now()
 	msgs, artifactIDs, _ := agent.executeToolCalls(
-		context.Background(), handler, ToolCallContext{}, toolCalls, nil, agent.logger,
+		context.Background(), handler, ToolCallContext{}, toolCalls, 0, true, nil, agent.logger,
 	)
 	elapsed := time.Since(start)
 
 	require.Len(t, msgs, 3)
 	assert.Equal(t, "c1", msgs[0].ToolCallID)
-	assert.Equal(t, "img cat", msgs[0].Content)
+	assert.Contains(t, msgs[0].Content, "img cat")
+	assert.Contains(t, msgs[0].Content, "MEDIA:1")
+	assert.NotContains(t, msgs[0].Content, "MEDIA:2")
 	assert.Equal(t, "c2", msgs[1].ToolCallID)
-	assert.Equal(t, "img dog", msgs[1].Content)
+	assert.Contains(t, msgs[1].Content, "img dog")
+	assert.Contains(t, msgs[1].Content, "MEDIA:2")
+	assert.NotContains(t, msgs[1].Content, "MEDIA:1,")
 	assert.Equal(t, "c3", msgs[2].ToolCallID)
-	assert.Equal(t, "img bird", msgs[2].Content)
+	assert.Contains(t, msgs[2].Content, "img bird")
+	assert.Contains(t, msgs[2].Content, "MEDIA:3")
 	assert.Equal(t, []int64{11, 22, 33}, artifactIDs)
 	// Concurrent: wall time tracks the slowest call (~60ms), not the sum (~80ms).
 	assert.Less(t, elapsed, 80*time.Millisecond, "generate_image calls should run in parallel")
+	handler.AssertExpectations(t)
+}
+
+func TestExecuteToolCalls_ImagePlacementRefsAreRichOnly(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		rich bool
+	}{
+		{name: "rich", rich: true},
+		{name: "legacy", rich: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := new(mockToolHandler)
+			handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "generate_image", `{"prompt":"pair"}`).
+				Return(&ToolResult{
+					Content:              "Generated 2 images (artifact:9001, artifact:9002).",
+					GeneratedArtifactIDs: []int64{9001, 9002},
+				}, nil)
+			agent := &Laplace{logger: testutil.TestLogger()}
+
+			messages, artifactIDs, _ := agent.executeToolCalls(
+				context.Background(), handler, ToolCallContext{},
+				[]llm.ToolCall{imgToolCall("pair", `{"prompt":"pair"}`)},
+				3, tt.rich, nil, agent.logger,
+			)
+
+			require.Len(t, messages, 1)
+			assert.Equal(t, []int64{9001, 9002}, artifactIDs)
+			assert.Contains(t, messages[0].Content, "artifact:9001",
+				"artifact IDs remain available for a later input_artifact_ids tool call")
+			if tt.rich {
+				assert.Contains(t, messages[0].Content, "MEDIA:4, MEDIA:5")
+				assert.Contains(t, messages[0].Content, "Artifact IDs are only for input_artifact_ids")
+			} else {
+				assert.NotContains(t, messages[0].Content, "MEDIA:")
+			}
+			handler.AssertExpectations(t)
+		})
+	}
+}
+
+func TestExecuteToolCalls_ImagePlacementRefsSkipFailuresAndDisableAboveTen(t *testing.T) {
+	handler := new(mockToolHandler)
+	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "generate_image", `{"prompt":"failed"}`).
+		Return(&ToolResult{Content: "IMAGE GENERATION FAILED. Do not retry."}, nil)
+	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "generate_image", `{"prompt":"ten"}`).
+		Return(&ToolResult{Content: "Generated (artifact:9010).", GeneratedArtifactIDs: []int64{9010}}, nil)
+	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "generate_image", `{"prompt":"eleven"}`).
+		Return(&ToolResult{Content: "Generated (artifact:9011).", GeneratedArtifactIDs: []int64{9011}}, nil)
+	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "search_history", `{"query":"context"}`).
+		Return(&ToolResult{Content: "Later context"}, nil)
+	agent := &Laplace{logger: testutil.TestLogger()}
+
+	messages, artifactIDs, _ := agent.executeToolCalls(
+		context.Background(), handler, ToolCallContext{},
+		[]llm.ToolCall{
+			imgToolCall("failed", `{"prompt":"failed"}`),
+			imgToolCall("ten", `{"prompt":"ten"}`),
+			imgToolCall("eleven", `{"prompt":"eleven"}`),
+			namedToolCall("context", "search_history", `{"query":"context"}`),
+		},
+		9, true, nil, agent.logger,
+	)
+
+	require.Len(t, messages, 4)
+	assert.Equal(t, []int64{9010, 9011}, artifactIDs)
+	assert.NotContains(t, messages[0].Content, "MEDIA:", "failed calls consume no ordinal")
+	assert.Contains(t, messages[1].Content, "MEDIA:10")
+	assert.Contains(t, messages[2].Content, "MEDIA:11")
+	assert.NotContains(t, messages[2].Content, "omit every",
+		"the override must remain the terminal tool result")
+	assert.Contains(t, messages[3].Content, "above the 10-image MEDIA layout limit")
+	assert.Contains(t, messages[3].Content, "omit every ###MEDIA:...### directive")
+	handler.AssertExpectations(t)
+}
+
+func TestExecuteToolCalls_ImageLayoutDisableIsStickyAcrossLaterBatches(t *testing.T) {
+	handler := new(mockToolHandler)
+	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "search_history", `{"query":"later"}`).
+		Return(&ToolResult{Content: "A later non-image result"}, nil)
+	agent := &Laplace{logger: testutil.TestLogger()}
+
+	messages, artifactIDs, _ := agent.executeToolCalls(
+		context.Background(), handler, ToolCallContext{},
+		[]llm.ToolCall{namedToolCall("later", "search_history", `{"query":"later"}`)},
+		11, true, nil, agent.logger,
+	)
+
+	require.Len(t, messages, 1)
+	assert.Empty(t, artifactIDs)
+	assert.Contains(t, messages[0].Content, "above the 10-image MEDIA layout limit")
+	assert.Contains(t, messages[0].Content, "omit every ###MEDIA:...### directive")
+	handler.AssertExpectations(t)
+}
+
+func TestExecute_ImagePlacementRefsContinueAcrossToolIterations(t *testing.T) {
+	_, _, agent, mockStore, mockORClient, handler := setupExecuteTest(t)
+	userID := storage.ScopeID("123")
+
+	mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
+	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
+		makeToolCallResponse("generate_image", `{"prompt":"first"}`, WithTokens(10, 2, 12)), nil,
+	).Once()
+	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "generate_image", `{"prompt":"first"}`).
+		Return(&ToolResult{Content: "Generated (artifact:7001).", GeneratedArtifactIDs: []int64{7001}}, nil)
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
+		makeToolCallResponse("generate_image", `{"prompt":"second"}`, WithTokens(12, 2, 14)), nil,
+	).Once()
+	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "generate_image", `{"prompt":"second"}`).
+		Return(&ToolResult{Content: "Generated (artifact:7002).", GeneratedArtifactIDs: []int64{7002}}, nil)
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
+		makeChatResponse("First\n\n###MEDIA:1###\n\nSecond\n\n###MEDIA:2###", WithTokens(15, 8, 23)), nil,
+	).Once()
+
+	resp, err := agent.Execute(context.Background(), &Request{
+		UserID:              userID,
+		RawQuery:            "draw two",
+		HistoryContent:      "draw two",
+		CurrentMessageParts: []interface{}{llm.TextPart{Type: "text", Text: "draw two"}},
+		RichOutput:          true,
+	}, handler)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{7001, 7002}, resp.GeneratedArtifactIDs)
+
+	var toolContents []string
+	for _, message := range resp.Messages {
+		if message.Role != "tool" {
+			continue
+		}
+		content, ok := message.Content.(string)
+		require.True(t, ok)
+		toolContents = append(toolContents, content)
+	}
+	require.Len(t, toolContents, 2)
+	assert.Contains(t, toolContents[0], "MEDIA:1")
+	assert.NotContains(t, toolContents[0], "MEDIA:2")
+	assert.Contains(t, toolContents[1], "MEDIA:2")
+
+	mockStore.AssertExpectations(t)
+	mockORClient.AssertExpectations(t)
 	handler.AssertExpectations(t)
 }
 
