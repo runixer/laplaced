@@ -79,6 +79,191 @@ func TestPrepareBody_StrictEvalOverridesPreserveFrozenConversation(t *testing.T)
 	require.Equal(t, "frozen result", messages[3].(map[string]any)["content"])
 }
 
+func TestPrepareBody_AppliesTraceDerivedToolChoiceTransforms(t *testing.T) {
+	t.Parallel()
+
+	appendix := "<artifact_delivery>Call send_artifacts only for an explicit delivery request.</artifact_delivery>"
+	current := "Send the second image as an original file."
+	original := `{
+      "model":"google/gemini-3.7-flash",
+      "messages":[
+        {"role":"system","content":[{"type":"text","text":"base policy"}]},
+        {"role":"user","content":[{"type":"text","text":"retrieved context"}]},
+        {"role":"assistant","content":"earlier answer"},
+        {"role":"user","content":[
+          {"type":"text","text":"captured current query"},
+          {"type":"text","text":"📷 current-media marker"},
+          {"type":"file","file":{"filename":"photo.jpg","file_data":"data:image/jpeg;base64,AA=="}}
+        ]}
+      ],
+      "tools":[{"type":"function","function":{"name":"search","description":"old search","parameters":{"type":"object"}}}]
+    }`
+	searchReplacement := replayVariantTool{
+		Type: "function",
+		Function: replayVariantToolFunction{
+			Name: "search", Description: "new search", Parameters: map[string]any{"type": "object"},
+		},
+	}
+	sendArtifacts := replayVariantTool{
+		Type: "function",
+		Function: replayVariantToolFunction{
+			Name: "send_artifacts", Description: "Deliver available artifacts.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"items": map[string]any{
+						"type": "array",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"artifact_id": map[string]any{"type": "integer"},
+								"mode":        map[string]any{"type": "string", "enum": []any{"preview", "original", "preview_and_original"}},
+							},
+							"required":             []any{"artifact_id", "mode"},
+							"additionalProperties": false,
+						},
+					},
+				},
+				"required":             []any{"items"},
+				"additionalProperties": false,
+			},
+		},
+	}
+
+	body, err := prepareBody(original, variantSpec{
+		AppendSystem:       &appendix,
+		SetCurrentUserText: &current,
+		UpsertTools:        []replayVariantTool{searchReplacement, sendArtifacts},
+	}, t.TempDir(), "", false)
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(body, &got))
+	messages := got["messages"].([]any)
+	systemParts := messages[0].(map[string]any)["content"].([]any)
+	require.Equal(t, "base policy", systemParts[0].(map[string]any)["text"])
+	require.Equal(t, appendix, systemParts[1].(map[string]any)["text"])
+	require.Equal(t, "retrieved context", messages[1].(map[string]any)["content"].([]any)[0].(map[string]any)["text"])
+	currentParts := messages[3].(map[string]any)["content"].([]any)
+	require.Equal(t, current, currentParts[0].(map[string]any)["text"])
+	require.Equal(t, "📷 current-media marker", currentParts[1].(map[string]any)["text"])
+	require.Equal(t, "photo.jpg", currentParts[2].(map[string]any)["file"].(map[string]any)["filename"])
+
+	tools := got["tools"].([]any)
+	require.Len(t, tools, 2)
+	require.Equal(t, "search", tools[0].(map[string]any)["function"].(map[string]any)["name"])
+	require.Equal(t, "new search", tools[0].(map[string]any)["function"].(map[string]any)["description"])
+	require.Equal(t, "send_artifacts", tools[1].(map[string]any)["function"].(map[string]any)["name"])
+
+	assessments, err := validateToolCalls(body, []replayToolCall{{
+		ID: "call-1", Type: "function", Name: "send_artifacts", EnvelopeValid: true,
+		Arguments: `{"items":[{"artifact_id":42,"mode":"original"}]}`,
+	}})
+	require.NoError(t, err)
+	require.Len(t, assessments, 1)
+	require.True(t, assessments[0].ArgumentsSchemaValid)
+}
+
+func TestPrepareBody_SetCurrentUserTextPreservesStringContextEnvelope(t *testing.T) {
+	t.Parallel()
+
+	current := "Пришли второй снимок в оригинале."
+	original := `{
+      "messages":[
+        {"role":"system","content":"policy"},
+        {"role":"user","content":"Текущая дата: 2026-08-18\n\n<current_messages>\n[Assistant]: earlier answer\n</current_messages>\n\n<artifact_candidates>\n[Artifact:41] first.jpg\n[Artifact:42] second.jpg\n</artifact_candidates>\n\n<user_query>\nстарый запрос\n</user_query>"}
+      ]
+    }`
+
+	body, err := prepareBody(original, variantSpec{SetCurrentUserText: &current}, t.TempDir(), "", false)
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(body, &got))
+	messages := got["messages"].([]any)
+	content := messages[1].(map[string]any)["content"].(string)
+	require.Contains(t, content, "<current_messages>\n[Assistant]: earlier answer\n</current_messages>")
+	require.Contains(t, content, "<artifact_candidates>\n[Artifact:41] first.jpg\n[Artifact:42] second.jpg\n</artifact_candidates>")
+	require.Contains(t, content, "<user_query>\n"+current+"\n</user_query>")
+	require.NotContains(t, content, "старый запрос")
+}
+
+func TestPrepareBody_RejectsInvalidTraceDerivedTransforms(t *testing.T) {
+	t.Parallel()
+
+	text := "x"
+	blank := " \n\t"
+	validTool := replayVariantTool{
+		Type: "function",
+		Function: replayVariantToolFunction{
+			Name: "send_artifacts", Description: "Deliver artifacts.", Parameters: map[string]any{"type": "object"},
+		},
+	}
+	invalidType := validTool
+	invalidType.Type = "custom"
+	invalidName := validTool
+	invalidName.Function.Name = "send artifacts"
+	missingDescription := validTool
+	missingDescription.Function.Description = ""
+	missingParameters := validTool
+	missingParameters.Function.Parameters = nil
+	nonObjectParameters := validTool
+	nonObjectParameters.Function.Parameters = map[string]any{"type": "array"}
+	base := `{"messages":[{"role":"system","content":"policy"},{"role":"user","content":"question"}],"tools":[]}`
+	tests := []struct {
+		name      string
+		body      string
+		spec      variantSpec
+		errSubstr string
+	}{
+		{name: "ambiguous user transform", body: base, spec: variantSpec{SetUserText: &text, SetCurrentUserText: &text}, errSubstr: "mutually exclusive"},
+		{name: "blank system appendix", body: base, spec: variantSpec{AppendSystem: &blank}, errSubstr: "must not be empty"},
+		{name: "disabled and upserted tools", body: base, spec: variantSpec{DisableTools: true, UpsertTools: []replayVariantTool{validTool}}, errSubstr: "mutually exclusive"},
+		{name: "invalid tool type", body: base, spec: variantSpec{UpsertTools: []replayVariantTool{invalidType}}, errSubstr: "type must be function"},
+		{name: "invalid tool name", body: base, spec: variantSpec{UpsertTools: []replayVariantTool{invalidName}}, errSubstr: "function.name"},
+		{name: "missing description", body: base, spec: variantSpec{UpsertTools: []replayVariantTool{missingDescription}}, errSubstr: "description"},
+		{name: "missing parameter schema", body: base, spec: variantSpec{UpsertTools: []replayVariantTool{missingParameters}}, errSubstr: "parameters"},
+		{name: "non-object parameter schema", body: base, spec: variantSpec{UpsertTools: []replayVariantTool{nonObjectParameters}}, errSubstr: "parameters.type"},
+		{name: "duplicate upsert", body: base, spec: variantSpec{UpsertTools: []replayVariantTool{validTool, validTool}}, errSubstr: "duplicate tool name"},
+		{name: "captured tools not array", body: `{"messages":[],"tools":{}}`, spec: variantSpec{UpsertTools: []replayVariantTool{validTool}}, errSubstr: "captured tools must be an array"},
+		{name: "malformed captured tool", body: `{"messages":[],"tools":[null]}`, spec: variantSpec{UpsertTools: []replayVariantTool{validTool}}, errSubstr: "tool must be an object"},
+		{name: "duplicate captured tool", body: `{"messages":[],"tools":[{"type":"function","function":{"name":"search"}},{"type":"function","function":{"name":"search"}}]}`, spec: variantSpec{UpsertTools: []replayVariantTool{validTool}}, errSubstr: "duplicate name"},
+		{name: "no system", body: `{"messages":[{"role":"user","content":"q"}]}`, spec: variantSpec{AppendSystem: &text}, errSubstr: "exactly one"},
+		{name: "multiple systems", body: `{"messages":[{"role":"system","content":"a"},{"role":"system","content":"b"}]}`, spec: variantSpec{AppendSystem: &text}, errSubstr: "exactly one"},
+		{name: "no current user", body: `{"messages":[{"role":"system","content":"a"}]}`, spec: variantSpec{SetCurrentUserText: &text}, errSubstr: "requires a captured user"},
+		{name: "current user without text", body: `{"messages":[{"role":"user","content":[{"type":"file","file":{}}]}]}`, spec: variantSpec{SetCurrentUserText: &text}, errSubstr: "requires a text part"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := prepareBody(tt.body, tt.spec, t.TempDir(), "", false)
+			require.ErrorContains(t, err, tt.errSubstr)
+		})
+	}
+}
+
+func TestLoadVariantSpecs_RejectsUnknownUpsertToolFields(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "variants.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{
+      "candidate": {
+        "upsert_tools": [{
+          "type": "function",
+          "function": {
+            "name": "send_artifacts",
+            "description": "Deliver artifacts.",
+            "parameters": {"type": "object"},
+            "unexpected": true
+          }
+        }]
+      }
+    }`), 0o600))
+
+	_, err := loadVariantSpecs(path)
+	require.ErrorContains(t, err, "unknown field")
+}
+
 func TestValidateReplayVariantNamesRejectsOutputCollisions(t *testing.T) {
 	t.Parallel()
 	require.NoError(t, validateReplayVariantNames([]string{"baseline", "candidate"}))

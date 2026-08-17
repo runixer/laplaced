@@ -56,6 +56,23 @@ defined in a gitignored JSON --variants-file:
       "insert_before_current_media": "<marker text>",
       "system_replace": [{"find": "<substring>", "with": "<replacement>"}]
     },
+    "tool-choice": {
+      "append_system": "Use send_artifacts only on an explicit delivery request.",
+      "set_current_user_text": "Send the second image as an original file.",
+      "upsert_tools": [{
+        "type": "function",
+        "function": {
+          "name": "send_artifacts",
+          "description": "Deliver available artifacts to the user.",
+          "parameters": {
+            "type": "object",
+            "properties": {"artifact_id": {"type": "integer"}},
+            "required": ["artifact_id"],
+            "additionalProperties": false
+          }
+        }
+      }]
+    },
     "no-raw-audio": { "drop_media_mime_types": ["audio/ogg"] }
   }
 
@@ -95,28 +112,44 @@ const memoryMarkerPrefix = "📄"
 
 var redactedMediaRe = regexp.MustCompile(`^redacted:sha256:([0-9a-f]{64}):([^:]+):(\d+)$`)
 
+var replayToolNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+type replayVariantTool struct {
+	Type     string                    `json:"type"`
+	Function replayVariantToolFunction `json:"function"`
+}
+
+type replayVariantToolFunction struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
+}
+
 type variantSpec struct {
-	Model                    string   `json:"model"`
-	ReasoningEffort          string   `json:"reasoning_effort,omitempty"`
-	ClearReasoning           bool     `json:"clear_reasoning,omitempty"`
-	StripMessageReasoning    bool     `json:"strip_message_reasoning_details,omitempty"`
-	ProviderOrder            []string `json:"provider_order,omitempty"`
-	ProviderOnly             []string `json:"provider_only,omitempty"`
-	AllowFallbacks           *bool    `json:"allow_fallbacks,omitempty"`
-	DataCollection           string   `json:"data_collection,omitempty"`
-	ZeroDataRetention        *bool    `json:"zdr,omitempty"`
-	RequireParameters        *bool    `json:"require_parameters,omitempty"`
-	ClearProvider            bool     `json:"clear_provider,omitempty"`
-	ImageInputFormat         string   `json:"image_input_format,omitempty"`
-	DisableTools             bool     `json:"disable_tools,omitempty"`
-	ForceToolChoiceNone      bool     `json:"force_tool_choice_none,omitempty"`
-	MaxTokens                int      `json:"max_tokens,omitempty"`
-	DropMedia                bool     `json:"drop_media"`
-	DropMediaMIMETypes       []string `json:"drop_media_mime_types,omitempty"`
-	StripSystemTags          []string `json:"strip_system_tags"`
-	KeepFactIDs              []string `json:"keep_fact_ids"`
-	SetUserText              *string  `json:"set_user_text"`
-	InsertBeforeCurrentMedia string   `json:"insert_before_current_media"`
+	Model                    string              `json:"model"`
+	ReasoningEffort          string              `json:"reasoning_effort,omitempty"`
+	ClearReasoning           bool                `json:"clear_reasoning,omitempty"`
+	StripMessageReasoning    bool                `json:"strip_message_reasoning_details,omitempty"`
+	ProviderOrder            []string            `json:"provider_order,omitempty"`
+	ProviderOnly             []string            `json:"provider_only,omitempty"`
+	AllowFallbacks           *bool               `json:"allow_fallbacks,omitempty"`
+	DataCollection           string              `json:"data_collection,omitempty"`
+	ZeroDataRetention        *bool               `json:"zdr,omitempty"`
+	RequireParameters        *bool               `json:"require_parameters,omitempty"`
+	ClearProvider            bool                `json:"clear_provider,omitempty"`
+	ImageInputFormat         string              `json:"image_input_format,omitempty"`
+	DisableTools             bool                `json:"disable_tools,omitempty"`
+	ForceToolChoiceNone      bool                `json:"force_tool_choice_none,omitempty"`
+	MaxTokens                int                 `json:"max_tokens,omitempty"`
+	DropMedia                bool                `json:"drop_media"`
+	DropMediaMIMETypes       []string            `json:"drop_media_mime_types,omitempty"`
+	StripSystemTags          []string            `json:"strip_system_tags"`
+	KeepFactIDs              []string            `json:"keep_fact_ids"`
+	SetUserText              *string             `json:"set_user_text"`
+	SetCurrentUserText       *string             `json:"set_current_user_text,omitempty"`
+	InsertBeforeCurrentMedia string              `json:"insert_before_current_media"`
+	AppendSystem             *string             `json:"append_system,omitempty"`
+	UpsertTools              []replayVariantTool `json:"upsert_tools,omitempty"`
 	SystemReplace            []struct {
 		Find string `json:"find"`
 		With string `json:"with"`
@@ -524,6 +557,9 @@ func prepareBody(bodyStr string, spec variantSpec, filesDir, modelOverride strin
 	if err := json.Unmarshal([]byte(bodyStr), &body); err != nil {
 		return nil, fmt.Errorf("parse captured body: %w", err)
 	}
+	if err := validateReplayVariantTransform(spec); err != nil {
+		return nil, err
+	}
 	originalModel, _ := body["model"].(string)
 	delete(body, "trace") // our outbound OTel link; irrelevant to replay
 	if !keepUser {
@@ -601,6 +637,11 @@ func prepareBody(bodyStr string, spec variantSpec, filesDir, modelOverride strin
 		delete(body, "tools")
 		delete(body, "tool_choice")
 	}
+	if len(spec.UpsertTools) > 0 {
+		if err := upsertReplayTools(body, spec.UpsertTools); err != nil {
+			return nil, err
+		}
+	}
 	if spec.ForceToolChoiceNone {
 		if !hasRole(body, "tool") {
 			return nil, fmt.Errorf("force_tool_choice_none requires at least one frozen tool result in messages")
@@ -626,11 +667,21 @@ func prepareBody(bodyStr string, spec variantSpec, filesDir, modelOverride strin
 	if spec.SetUserText != nil {
 		setUserText(body, *spec.SetUserText)
 	}
+	if spec.SetCurrentUserText != nil {
+		if err := setCurrentUserText(body, *spec.SetCurrentUserText); err != nil {
+			return nil, err
+		}
+	}
 	if spec.InsertBeforeCurrentMedia != "" {
 		insertCurrentMediaMarker(body, spec.InsertBeforeCurrentMedia)
 	}
 	for _, r := range spec.SystemReplace {
 		replaceInSystem(body, r.Find, r.With)
+	}
+	if spec.AppendSystem != nil {
+		if err := appendReplaySystem(body, *spec.AppendSystem); err != nil {
+			return nil, err
+		}
 	}
 	if err := convertReplayMediaFormat(body, spec.ImageInputFormat); err != nil {
 		return nil, err
@@ -639,6 +690,109 @@ func prepareBody(bodyStr string, spec variantSpec, filesDir, modelOverride strin
 		return nil, err
 	}
 	return json.Marshal(body)
+}
+
+func validateReplayVariantTransform(spec variantSpec) error {
+	if spec.SetUserText != nil && spec.SetCurrentUserText != nil {
+		return fmt.Errorf("set_user_text and set_current_user_text are mutually exclusive")
+	}
+	if spec.AppendSystem != nil && strings.TrimSpace(*spec.AppendSystem) == "" {
+		return fmt.Errorf("append_system must not be empty")
+	}
+	if spec.DisableTools && len(spec.UpsertTools) > 0 {
+		return fmt.Errorf("disable_tools and upsert_tools are mutually exclusive")
+	}
+	seen := make(map[string]struct{}, len(spec.UpsertTools))
+	for i, tool := range spec.UpsertTools {
+		if err := validateReplayVariantTool(tool); err != nil {
+			return fmt.Errorf("upsert_tools[%d]: %w", i, err)
+		}
+		if _, duplicate := seen[tool.Function.Name]; duplicate {
+			return fmt.Errorf("upsert_tools[%d]: duplicate tool name %q", i, tool.Function.Name)
+		}
+		seen[tool.Function.Name] = struct{}{}
+	}
+	return nil
+}
+
+func validateReplayVariantTool(tool replayVariantTool) error {
+	if tool.Type != "function" {
+		return fmt.Errorf("type must be function")
+	}
+	if !replayToolNameRe.MatchString(tool.Function.Name) {
+		return fmt.Errorf("function.name must match %s", replayToolNameRe.String())
+	}
+	if strings.TrimSpace(tool.Function.Description) == "" {
+		return fmt.Errorf("function.description must not be empty")
+	}
+	if tool.Function.Parameters == nil {
+		return fmt.Errorf("function.parameters must be an object schema")
+	}
+	if schemaType, ok := tool.Function.Parameters["type"].(string); !ok || schemaType != "object" {
+		return fmt.Errorf("function.parameters.type must be object")
+	}
+	return nil
+}
+
+func upsertReplayTools(body map[string]any, upserts []replayVariantTool) error {
+	rawTools, exists := body["tools"]
+	if !exists {
+		rawTools = []any{}
+	}
+	tools, ok := rawTools.([]any)
+	if !ok {
+		return fmt.Errorf("captured tools must be an array")
+	}
+
+	indices := make(map[string]int, len(tools))
+	for i, raw := range tools {
+		name, err := replayRequestToolName(raw)
+		if err != nil {
+			return fmt.Errorf("captured tools[%d]: %w", i, err)
+		}
+		if _, duplicate := indices[name]; duplicate {
+			return fmt.Errorf("captured tools contain duplicate name %q", name)
+		}
+		indices[name] = i
+	}
+
+	for _, tool := range upserts {
+		raw := map[string]any{
+			"type": tool.Type,
+			"function": map[string]any{
+				"name":        tool.Function.Name,
+				"description": tool.Function.Description,
+				"parameters":  tool.Function.Parameters,
+			},
+		}
+		if i, replace := indices[tool.Function.Name]; replace {
+			tools[i] = raw
+			continue
+		}
+		indices[tool.Function.Name] = len(tools)
+		tools = append(tools, raw)
+	}
+	body["tools"] = tools
+	return nil
+}
+
+func replayRequestToolName(raw any) (string, error) {
+	tool, ok := raw.(map[string]any)
+	if !ok {
+		return "", fmt.Errorf("tool must be an object")
+	}
+	if toolType, ok := tool["type"].(string); !ok || toolType != "function" {
+		return "", fmt.Errorf("type must be function")
+	}
+	function, ok := tool["function"].(map[string]any)
+	if !ok {
+		return "", fmt.Errorf("function must be an object")
+	}
+	name, ok := function["name"].(string)
+	if !ok || !replayToolNameRe.MatchString(name) {
+		return "", fmt.Errorf("function.name must match %s", replayToolNameRe.String())
+	}
+	return name, nil
 }
 
 // stripMessageReasoningDetails removes provider-specific encrypted thought
@@ -894,6 +1048,74 @@ func setUserText(body map[string]any, s string) {
 	}
 }
 
+// setCurrentUserText changes only the current query in the last user message.
+// For multipart content this is its first text part; for a string context
+// envelope this is the unique <user_query> block when present. Earlier user
+// messages, non-text parts, and later provenance-marker text parts are
+// preserved byte-for-byte.
+func setCurrentUserText(body map[string]any, s string) error {
+	msgs, ok := body["messages"].([]any)
+	if !ok {
+		return fmt.Errorf("captured messages must be an array")
+	}
+	current := -1
+	for i, raw := range msgs {
+		message, ok := raw.(map[string]any)
+		if !ok {
+			return fmt.Errorf("captured messages[%d] must be an object", i)
+		}
+		role, ok := message["role"].(string)
+		if !ok || role == "" {
+			return fmt.Errorf("captured messages[%d].role must be a non-empty string", i)
+		}
+		if role == "user" {
+			current = i
+		}
+	}
+	if current < 0 {
+		return fmt.Errorf("set_current_user_text requires a captured user message")
+	}
+
+	message := msgs[current].(map[string]any)
+	switch content := message["content"].(type) {
+	case string:
+		const openTag = "<user_query>"
+		const closeTag = "</user_query>"
+		if strings.Count(content, openTag) == 1 && strings.Count(content, closeTag) == 1 {
+			open := strings.Index(content, openTag) + len(openTag)
+			close := strings.Index(content, closeTag)
+			if open <= close {
+				message["content"] = content[:open] + "\n" + s + "\n" + content[close:]
+				return nil
+			}
+		}
+		message["content"] = s
+		return nil
+	case []any:
+		for i, raw := range content {
+			part, ok := raw.(map[string]any)
+			if !ok {
+				return fmt.Errorf("captured messages[%d].content[%d] must be an object", current, i)
+			}
+			partType, ok := part["type"].(string)
+			if !ok || partType == "" {
+				return fmt.Errorf("captured messages[%d].content[%d].type must be a non-empty string", current, i)
+			}
+			if partType != "text" {
+				continue
+			}
+			if _, ok := part["text"].(string); !ok {
+				return fmt.Errorf("captured messages[%d].content[%d].text must be a string", current, i)
+			}
+			part["text"] = s
+			return nil
+		}
+		return fmt.Errorf("set_current_user_text requires a text part in captured messages[%d]", current)
+	default:
+		return fmt.Errorf("captured messages[%d].content must be a string or array", current)
+	}
+}
+
 var factLineRe = regexp.MustCompile(`\[Fact:(\d+)\]`)
 
 // keepFactIDs drops every "[Fact:N]" line from the system message whose N is not
@@ -959,6 +1181,54 @@ func replaceInSystem(body map[string]any, find, with string) {
 				}
 			}
 		}
+	}
+}
+
+// appendReplaySystem adds a separate final paragraph to the single captured
+// system message. Requiring exactly one system message avoids silently placing
+// an experimental policy in only one of several potentially conflicting
+// instruction messages.
+func appendReplaySystem(body map[string]any, appendix string) error {
+	msgs, ok := body["messages"].([]any)
+	if !ok {
+		return fmt.Errorf("captured messages must be an array")
+	}
+	system := -1
+	for i, raw := range msgs {
+		message, ok := raw.(map[string]any)
+		if !ok {
+			return fmt.Errorf("captured messages[%d] must be an object", i)
+		}
+		role, ok := message["role"].(string)
+		if !ok || role == "" {
+			return fmt.Errorf("captured messages[%d].role must be a non-empty string", i)
+		}
+		if role != "system" {
+			continue
+		}
+		if system >= 0 {
+			return fmt.Errorf("append_system requires exactly one captured system message")
+		}
+		system = i
+	}
+	if system < 0 {
+		return fmt.Errorf("append_system requires exactly one captured system message")
+	}
+
+	message := msgs[system].(map[string]any)
+	switch content := message["content"].(type) {
+	case string:
+		if content == "" {
+			message["content"] = appendix
+		} else {
+			message["content"] = content + "\n\n" + appendix
+		}
+		return nil
+	case []any:
+		message["content"] = append(content, map[string]any{"type": "text", "text": appendix})
+		return nil
+	default:
+		return fmt.Errorf("captured system content must be a string or array")
 	}
 }
 
