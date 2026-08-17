@@ -81,9 +81,12 @@ func TestLoadDefault(t *testing.T) {
 	// Check that default values are present
 	assert.Equal(t, "9081", cfg.Server.ListenPort)
 	assert.Equal(t, "info", cfg.Log.Level)
-	assert.Equal(t, TelegramRichMessagesOff, cfg.Telegram.RichMessages.Mode)
+	assert.Equal(t, TelegramRichMessagesSend, cfg.Telegram.RichMessages.Mode)
 	assert.Empty(t, cfg.Telegram.RichMessages.AllowedUserIDs)
-	assert.False(t, cfg.Telegram.RichMessages.DraftStreamingEnabled)
+	assert.Equal(t, TelegramRichMessagesSend, cfg.Telegram.RichMessages.ModeForNativeUser("123"),
+		"an empty canary list applies the default send mode to every Telegram user")
+	assert.True(t, cfg.Telegram.RichMessages.DraftStreamingEnabled,
+		"rich drafts keep progressive previews on the default rich send path")
 }
 
 func TestLoad_TelegramRichMessagesDraftStreamingEnvOverride(t *testing.T) {
@@ -110,13 +113,17 @@ func TestLoad_TelegramRichMessagesRolloutEnv(t *testing.T) {
 	assert.Equal(t, TelegramRichMessagesOff, cfg.Telegram.RichMessages.ModeForNativeUser("999"))
 }
 
-func TestTelegramRichMessagesModeForNativeUser_FailsClosed(t *testing.T) {
+func TestTelegramRichMessagesModeForNativeUser_Audience(t *testing.T) {
 	rich := TelegramRichMessagesConfig{Mode: TelegramRichMessagesSend}
-	assert.Equal(t, TelegramRichMessagesOff, rich.ModeForNativeUser("123"), "empty canary means nobody")
-	assert.Equal(t, TelegramRichMessagesOff, rich.ModeForNativeUser("not-a-number"))
+	assert.Equal(t, TelegramRichMessagesSend, rich.ModeForNativeUser("123"), "empty canary means everyone")
+	assert.Equal(t, TelegramRichMessagesOff, rich.ModeForNativeUser("not-a-number"),
+		"a non-Telegram principal never reaches the Telegram-only rich path")
 
 	rich.AllowedUserIDs = []int64{123}
 	assert.Equal(t, TelegramRichMessagesSend, rich.ModeForNativeUser("123"))
+	assert.Equal(t, TelegramRichMessagesOff, rich.ModeForNativeUser("999"),
+		"a configured canary still narrows the audience")
+
 	rich.Mode = ""
 	assert.Equal(t, TelegramRichMessagesOff, rich.ModeForNativeUser("123"), "omitted mode fails closed")
 	rich.Mode = TelegramRichMessagesOff
@@ -150,12 +157,12 @@ func TestValidateTransport_ValidatesRichMessagesCanary(t *testing.T) {
 	assert.Contains(t, errs[2].Error(), "not present in bot.allowed_user_ids")
 }
 
-func TestValidateTransport_AllowsFailClosedRichConfiguration(t *testing.T) {
+func TestValidateTransport_AllowsDefaultRichConfiguration(t *testing.T) {
 	cfg := &Config{}
 	cfg.Transport = "telegram"
 	cfg.Telegram.Token = "test"
 	cfg.Telegram.RichMessages.Mode = TelegramRichMessagesSend
-	assert.Empty(t, cfg.validateTransport(), "an empty canary is a valid fail-closed rollout")
+	assert.Empty(t, cfg.validateTransport(), "an empty canary is the valid all-users default")
 
 	cfg.Telegram.RichMessages.Mode = TelegramRichMessagesOff
 	cfg.Telegram.RichMessages.DraftStreamingEnabled = true

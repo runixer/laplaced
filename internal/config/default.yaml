@@ -19,15 +19,18 @@ telegram:
   token: ""
   webhook_url: ""
   proxy_url: ""
-  # Rich output rollout. Inbound Rich Messages are always decoded.
-  # Explicit shadow/send modes require a native Telegram user-id canary list;
-  # an empty list means nobody. mode=off is always the kill switch.
+  # Outbound Rich Messages. Inbound Rich Messages are always decoded.
+  # send = native rich replies (headings, lists, tables, quotes, code,
+  # spoilers, LaTeX) plus artifact delivery in private chats; shadow = render
+  # and measure without sending; off = the kill switch.
+  # allowed_user_ids optionally narrows the mode to a canary of native
+  # Telegram user ids; an empty list applies it to everyone.
   rich_messages:
-    mode: "off"
+    mode: "send"
     allowed_user_ids: []
     # Ephemeral sendRichMessageDraft previews for eligible rich private turns.
-    # This is independent from bot.streaming.enabled (legacy edits only).
-    draft_streaming_enabled: false
+    # Independent from bot.streaming.enabled (that flag is legacy edits only).
+    draft_streaming_enabled: true
 
 # Mattermost/Time Configuration (used when transport: "mattermost")
 # server_url/bot_token/allowed_user_ids come from an overlay config + env.

@@ -36,7 +36,8 @@ keep the established byte-identical text/caption path. Captions retain their
 existing media association, and ingress diagnostics do not log message content,
 URLs or user identifiers.
 
-Outgoing Rich Messages are a separate, opt-in concern. Model Markdown is parsed
+Outgoing Rich Messages are a separate concern, enabled by default (`mode:
+"send"`) and disabled with `mode: "off"`. Model Markdown is parsed
 with Goldmark and serialized as allowlisted Rich HTML. Raw HTML, active Markdown
 images/media, direct `tg://user` mentions and unsafe URL schemes cannot become
 Telegram entities. A policy-equivalent legacy HTML representation is prepared
@@ -58,9 +59,10 @@ The release contract is:
 
 - incoming `rich_message`, classic text entities and caption entities are
   always decoded through the bounded projection described above;
-- an eligible private-chat canary receives complete text replies as persistent
-  Rich Messages, including safe links, headings, lists, tables, quotes, code,
-  spoilers and LaTeX;
+- eligible private chats receive complete text replies as persistent Rich
+  Messages, including safe links, headings, lists, tables, quotes, code,
+  spoilers and LaTeX. An optional `allowed_user_ids` canary narrows this to
+  listed users; an empty list applies the mode to everyone;
 - rich text is packed only at top-level block boundaries. A physical line whose
   complete trimmed value is `###SPLIT###` creates an explicit part boundary;
   the same token inside prose, inline/fenced code, tables, lists, quotes or
@@ -145,9 +147,10 @@ Environment equivalents:
 - `LAPLACED_TELEGRAM_RICH_MESSAGES_DRAFT_STREAMING_ENABLED`
 
 `shadow` performs the same bounded rich preflight and records its decision, but
-still sends the legacy representation. `send` uses `sendRichMessage` only for
-listed users in eligible private chats. Rich draft streaming has its own
-default-off switch and does not inherit `bot.streaming.enabled`, which remains
+still sends the legacy representation. `send` — the default — uses
+`sendRichMessage` in eligible private chats, for every user unless
+`allowed_user_ids` narrows it to a canary. Rich draft streaming has its own
+default-on switch and does not inherit `bot.streaming.enabled`, which remains
 the legacy edit-streaming switch. The persistent final is always a separate
 confirmed send. Neither `rich_message` decoding nor classic entity projection
 is gated by any rollout setting.

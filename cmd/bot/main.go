@@ -247,18 +247,19 @@ func run() int {
 	}))
 	slog.SetDefault(logger)
 	richMode := strings.ToLower(strings.TrimSpace(cfg.Telegram.RichMessages.Mode))
+	richDraftStreaming := cfg.Telegram.RichMessages.DraftStreamingEnabled
+	richCanary := len(cfg.Telegram.RichMessages.AllowedUserIDs)
+	richAudience := "all users"
+	if richCanary > 0 {
+		richAudience = "canary"
+	}
 	logger.Info("Config loaded successfully",
 		"allowed_users", len(cfg.Bot.AllowedUserIDs),
 		"telegram_rich_mode", richMode,
-		"telegram_rich_canary_count", len(cfg.Telegram.RichMessages.AllowedUserIDs),
-		"telegram_rich_draft_streaming_enabled", cfg.Telegram.RichMessages.DraftStreamingEnabled,
+		"telegram_rich_audience", richAudience,
+		"telegram_rich_canary_count", richCanary,
+		"telegram_rich_draft_streaming_enabled", richDraftStreaming,
 	)
-	if (richMode == config.TelegramRichMessagesShadow || richMode == config.TelegramRichMessagesSend) && len(cfg.Telegram.RichMessages.AllowedUserIDs) == 0 {
-		logger.Warn("Telegram Rich Messages rollout has no canary users; outbound rich remains disabled",
-			"mode", richMode,
-			"draft_streaming_enabled", cfg.Telegram.RichMessages.DraftStreamingEnabled,
-		)
-	}
 
 	// Tracer provider lifecycle. Declared here so the shutdown defer runs
 	// LAST (LIFO) — after b.Stop / RAGService.Stop / store.Close further

@@ -20,17 +20,22 @@ const (
 	TelegramRichMessagesSend   = "send"
 )
 
-// TelegramRichMessagesConfig controls the bounded rollout of model-authored
-// Rich Messages. Inbound Rich Messages are intentionally not feature-gated:
-// disabling this config only selects the outbound representation.
+// TelegramRichMessagesConfig controls outbound model-authored Rich Messages.
+// Inbound Rich Messages are intentionally not feature-gated: disabling this
+// config only selects the outbound representation.
 type TelegramRichMessagesConfig struct {
-	Mode           string  `yaml:"mode" env:"LAPLACED_TELEGRAM_RICH_MESSAGES_MODE"`
+	Mode string `yaml:"mode" env:"LAPLACED_TELEGRAM_RICH_MESSAGES_MODE"`
+
+	// AllowedUserIDs optionally narrows an explicit shadow/send mode to a
+	// canary. An empty list means the mode applies to every Telegram-native
+	// user; mode=off remains the kill switch either way.
 	AllowedUserIDs []int64 `yaml:"allowed_user_ids" env:"LAPLACED_TELEGRAM_RICH_MESSAGES_ALLOWED_USER_IDS" env-separator:","`
 
 	// DraftStreamingEnabled controls ephemeral sendRichMessageDraft previews
-	// for eligible private rich turns. It is deliberately independent from
-	// bot.streaming.enabled, which controls only legacy editMessageText output.
-	// Mode=off remains the rollout kill switch even when this flag is true.
+	// for eligible private rich turns. It stays deliberately independent from
+	// bot.streaming.enabled: the two paths have different terminal ownership
+	// and fallback semantics, so neither should silently imply the other.
+	// Mode=off remains the kill switch even when this flag is true.
 	DraftStreamingEnabled bool `yaml:"draft_streaming_enabled" env:"LAPLACED_TELEGRAM_RICH_MESSAGES_DRAFT_STREAMING_ENABLED"`
 }
 
@@ -47,7 +52,10 @@ func (r TelegramRichMessagesConfig) AnyEnabled() bool {
 }
 
 // ModeForNativeUser returns off/shadow/send for a Telegram-native numeric user
-// id. Explicit rollout modes fail closed: an empty canary list means nobody.
+// id. An unrecognized or absent mode still fails closed, and a non-numeric id
+// (any non-Telegram principal) never reaches the Telegram-only rich path. When
+// a canary list is configured the mode is narrowed to it; an empty list applies
+// the configured mode to every Telegram-native user.
 func (r TelegramRichMessagesConfig) ModeForNativeUser(nativeUserID string) string {
 	mode := strings.ToLower(strings.TrimSpace(r.Mode))
 	if mode != TelegramRichMessagesShadow && mode != TelegramRichMessagesSend {
@@ -56,6 +64,9 @@ func (r TelegramRichMessagesConfig) ModeForNativeUser(nativeUserID string) strin
 	id, err := strconv.ParseInt(nativeUserID, 10, 64)
 	if err != nil {
 		return TelegramRichMessagesOff
+	}
+	if len(r.AllowedUserIDs) == 0 {
+		return mode
 	}
 	for _, allowed := range r.AllowedUserIDs {
 		if allowed == id {

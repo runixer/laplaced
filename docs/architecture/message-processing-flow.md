@@ -293,7 +293,7 @@ rich drafts. Незакрытый Markdown автозакрывается на �
    - Span attribute: `bot.anomaly.sanitized` (см. секцию Аномалии)
 
 2. **Конвертация**
-   - Markdown → allowlisted Rich HTML для eligible Telegram canary, legacy HTML
+   - Markdown → allowlisted Rich HTML для eligible приватных Telegram-чатов, legacy HTML
      для остальных Telegram-путей или Markdown как есть для Mattermost — через
      `Renderer` транспорта
    - Rich preflight ограничивает размер/структуру и пакует верхнеуровневые

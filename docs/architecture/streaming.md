@@ -12,7 +12,7 @@ rollout switch. В Telegram есть два изолированных пути:
 
 - legacy output — постоянный плейсхолдер и `editMessageText`
   (`internal/bot/streaming.go`, `streamSink`);
-- rich private canary — эфемерный `sendRichMessageDraft`, затем отдельный
+- приватный rich-чат — эфемерный `sendRichMessageDraft`, затем отдельный
   постоянный `sendRichMessage` (`internal/bot/rich_streaming.go`,
   `richDraftSink`); этот путь требует `mode=send`, eligible native user и
   `telegram.rich_messages.draft_streaming_enabled=true`.
@@ -139,8 +139,8 @@ telegram:
 
 `LAPLACED_BOT_STREAMING_ENABLED=false` выключает только legacy edit streaming.
 `LAPLACED_TELEGRAM_RICH_MESSAGES_DRAFT_STREAMING_ENABLED=false` независимо
-выключает ephemeral rich preview; persistent rich final остаётся включённым для
-canary, если `mode=send`.
+выключает ephemeral rich preview; persistent rich final остаётся включённым,
+пока `mode=send` (значение по умолчанию).
 
 ## Связанные документы
 
