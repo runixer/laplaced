@@ -217,9 +217,9 @@ Telegram's purpose-built `sendRichMessageDraft` primitive:
    `skip_entity_detection=true`; links become active only in the completed,
    policy-checked final.
 5. Snapshots use the configured throttle plus a shared 1.2-second peer floor.
-   A 20-second
-   heartbeat keeps the 30-second ephemeral preview alive during long stalls,
-   and periodic `sendChatAction` stops once the draft exists.
+   A one-shot heartbeat scheduled 15 seconds from the latest accepted snapshot
+   keeps the 30-second ephemeral preview alive during long stalls, and periodic
+   `sendChatAction` stops once the draft exists.
 6. Before a persistent-final attempt the sink first becomes callback-terminal,
    then an unseen coalesced content tail gets at most one best-effort catch-up
    attempt within a two-second total budget. Error/cleanup close remains

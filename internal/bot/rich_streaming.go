@@ -20,9 +20,10 @@ import (
 
 const (
 	// Telegram removes a live draft 30 seconds after its last accepted update.
-	// Refreshing at 20 seconds leaves room for a transient request failure while
-	// staying far below the documented per-peer draft/action flood limits.
-	richDraftHeartbeatInterval = 20 * time.Second
+	// Refreshing 15 seconds after the latest accepted snapshot leaves room for a
+	// transient request failure while staying far below the documented per-peer
+	// draft/action flood limits.
+	richDraftHeartbeatInterval = 15 * time.Second
 	// All draft/status/RAG snapshots share Telegram's 20/5s and 40/30s peer
 	// budget. One call per 1.2 seconds leaves headroom for typing actions emitted
 	// before the draft exists and idempotent retries with the same draft id.
@@ -94,9 +95,10 @@ type richDraftSink struct {
 	cooldownTill   time.Time
 	stats          richDraftStats
 
-	cancelHeartbeat context.CancelFunc
-	refreshTimer    *time.Timer
-	refreshForce    bool
+	cancelHeartbeat        context.CancelFunc
+	refreshTimer           *time.Timer
+	refreshTimerGeneration uint64
+	refreshForce           bool
 }
 
 func newRichDraftSink(
@@ -352,7 +354,7 @@ func (s *richDraftSink) nextSendDelayLocked() time.Duration {
 
 // scheduleRefreshLocked coalesces arbitrarily many callbacks into one latest
 // snapshot. It also gives a tool status that arrived just after another update
-// a bounded delayed send instead of losing it until the 20s heartbeat.
+// a bounded delayed send instead of losing it until the 15s heartbeat.
 func (s *richDraftSink) scheduleRefreshLocked(delay time.Duration, force bool) {
 	if !s.callbackAllowedLocked() {
 		return
@@ -364,17 +366,31 @@ func (s *richDraftSink) scheduleRefreshLocked(delay time.Duration, force bool) {
 	if delay < 0 {
 		delay = 0
 	}
+	s.refreshTimerGeneration++
+	generation := s.refreshTimerGeneration
 	s.refreshTimer = time.AfterFunc(delay, func() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		force := s.refreshForce
-		s.refreshForce = false
-		s.refreshTimer = nil
-		s.refreshLocked(force)
+		s.runRefreshTimer(generation)
 	})
 }
 
+func (s *richDraftSink) runRefreshTimer(generation uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.refreshTimer == nil || s.refreshTimerGeneration != generation {
+		// Stop cannot retract a callback that has already started and is waiting
+		// for s.mu. Such a stale callback must not clear or run a replacement.
+		return
+	}
+	force := s.refreshForce
+	s.refreshForce = false
+	s.refreshTimer = nil
+	s.refreshLocked(force)
+}
+
 func (s *richDraftSink) cancelRefreshLocked() {
+	// Invalidate callbacks that already started before Stop and are blocked on
+	// s.mu, including callbacks for a timer whose pointer is about to be cleared.
+	s.refreshTimerGeneration++
 	if s.refreshTimer != nil {
 		s.refreshTimer.Stop()
 		s.refreshTimer = nil
@@ -516,26 +532,62 @@ func (s *richDraftSink) sendWithContextLocked(ctx context.Context, payload strin
 }
 
 func (s *richDraftSink) heartbeat(ctx context.Context) {
-	ticker := time.NewTicker(richDraftHeartbeatInterval)
-	defer ticker.Stop()
+	s.mu.Lock()
+	delay := s.nextHeartbeatDelayLocked()
+	active := s.callbackAllowedLocked()
+	s.mu.Unlock()
+	if !active {
+		return
+	}
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			s.mu.Lock()
 			s.heartbeatLocked()
-			active := s.callbackAllowedLocked()
+			active = s.callbackAllowedLocked()
+			delay = s.nextHeartbeatDelayLocked()
 			s.mu.Unlock()
 			if !active {
 				return
 			}
+			timer.Reset(delay)
 		}
 	}
 }
 
+// nextHeartbeatDelayLocked schedules from accepted/attempt timestamps instead
+// of a fixed ticker phase. A fixed 15-second ticker can skip the tick following
+// an API round trip (the accepted timestamp is slightly later than the tick),
+// stretching the next accepted heartbeat to 30 seconds and racing Telegram's
+// 30-second draft TTL. Caller must hold s.mu.
+func (s *richDraftSink) nextHeartbeatDelayLocked() time.Duration {
+	now := s.now()
+	next := s.lastDraftAt.Add(richDraftHeartbeatInterval)
+	if floor := s.lastAttemptAt.Add(richDraftMinUpdateInterval); floor.After(next) {
+		next = floor
+	}
+	if s.cooldownTill.After(next) {
+		next = s.cooldownTill
+	}
+	if next.After(now) {
+		return next.Sub(now)
+	}
+	if s.refreshTimer != nil {
+		// A coalesced snapshot/retry already owns this due wake. Avoid a zero-delay
+		// heartbeat loop while its callback is waiting to acquire s.mu.
+		return richDraftMinUpdateInterval
+	}
+	return 0
+}
+
 func (s *richDraftSink) heartbeatLocked() {
-	if !s.callbackAllowedLocked() || s.now().Sub(s.lastDraftAt) < richDraftHeartbeatInterval {
+	if !s.callbackAllowedLocked() || s.refreshTimer != nil ||
+		s.now().Sub(s.lastDraftAt) < richDraftHeartbeatInterval {
 		return
 	}
 	if delay := s.nextSendDelayLocked(); delay > 0 {

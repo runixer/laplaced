@@ -280,6 +280,43 @@ func TestRichDraftSink_ScheduledRefreshSendsLatestSnapshot(t *testing.T) {
 	api.AssertExpectations(t)
 }
 
+func TestRichDraftSink_StaleRefreshCallbackCannotConsumeReplacementTimer(t *testing.T) {
+	api := new(testutil.MockBotAPI)
+	expectInitialRichDraft(api)
+	api.On("SendRichMessageDraft", mock.Anything, mock.Anything).Return(nil).Once()
+
+	sink := newRichDraftTestSink(t, api, 0)
+	replacement := time.NewTimer(time.Hour)
+	t.Cleanup(func() {
+		replacement.Stop()
+	})
+
+	sink.mu.Lock()
+	sink.refreshTimer = replacement
+	sink.refreshTimerGeneration = 2
+	sink.refreshForce = true
+	sink.mu.Unlock()
+
+	// Model a canceled AfterFunc callback that had already started and was
+	// waiting for the sink mutex when a replacement timer was installed.
+	sink.runRefreshTimer(1)
+	sink.mu.Lock()
+	assert.Same(t, replacement, sink.refreshTimer)
+	assert.True(t, sink.refreshForce)
+	sink.mu.Unlock()
+	api.AssertNumberOfCalls(t, "SendRichMessageDraft", 1)
+
+	// Only the callback belonging to the installed timer may consume its force
+	// bit and send the pending snapshot.
+	sink.runRefreshTimer(2)
+	sink.mu.Lock()
+	assert.Nil(t, sink.refreshTimer)
+	assert.False(t, sink.refreshForce)
+	sink.mu.Unlock()
+	api.AssertNumberOfCalls(t, "SendRichMessageDraft", 2)
+	api.AssertExpectations(t)
+}
+
 func TestRichDraftSink_TransientFailureBacksOffAndCoalescesLatestSnapshot(t *testing.T) {
 	api := new(testutil.MockBotAPI)
 	expectInitialRichDraft(api)
@@ -331,16 +368,121 @@ func TestRichDraftSink_HeartbeatHonorsRetryAfterAndRetriesSamePayload(t *testing
 	sink.mu.Lock()
 	sink.heartbeatLocked()
 	assert.Equal(t, clock.Now().Add(7*time.Second), sink.cooldownTill)
+	assert.Equal(t, 7*time.Second, sink.nextHeartbeatDelayLocked(), "cooldown must become the next one-shot deadline")
 	sink.mu.Unlock()
 	api.AssertNumberOfCalls(t, "SendRichMessageDraft", 2)
 
 	clock.Advance(7 * time.Second)
+	sink.mu.Lock()
+	sink.heartbeatLocked()
+	assert.Equal(t, richDraftMinUpdateInterval, sink.nextHeartbeatDelayLocked(), "pending retry must own the due wake without a zero-delay heartbeat loop")
+	sink.mu.Unlock()
+	api.AssertNumberOfCalls(t, "SendRichMessageDraft", 2)
+
 	sink.mu.Lock()
 	sink.refreshLocked(true)
 	sink.mu.Unlock()
 	sink.Close()
 
 	api.AssertNumberOfCalls(t, "SendRichMessageDraft", 3)
+	api.AssertExpectations(t)
+}
+
+func TestRichDraftSink_HeartbeatDeadlineTracksLatestAcceptedSnapshotAcrossTickerPhase(t *testing.T) {
+	api := new(testutil.MockBotAPI)
+	expectInitialRichDraft(api)
+
+	sink := newRichDraftTestSink(t, api, 0)
+	clock := newFakeClock()
+	setRichDraftClock(sink, clock)
+
+	// Simulate a status snapshot accepted just before the old fixed ticker
+	// would have fired. The next wake must move with that accepted snapshot;
+	// waiting for another fixed tick would stretch the accepted-update gap.
+	clock.Advance(richDraftHeartbeatInterval - time.Second)
+	sink.mu.Lock()
+	sink.lastDraftAt = clock.Now()
+	sink.lastAttemptAt = clock.Now()
+	sink.mu.Unlock()
+	clock.Advance(time.Second)
+
+	sink.mu.Lock()
+	delay := sink.nextHeartbeatDelayLocked()
+	sink.heartbeatLocked()
+	sink.mu.Unlock()
+
+	assert.Equal(t, richDraftHeartbeatInterval-time.Second, delay)
+	api.AssertNumberOfCalls(t, "SendRichMessageDraft", 1)
+	api.AssertExpectations(t)
+}
+
+func TestRichDraftSink_IdleHeartbeatRearmsFromAPIAcceptanceTime(t *testing.T) {
+	api := new(testutil.MockBotAPI)
+	expectInitialRichDraft(api)
+	clock := newFakeClock()
+	api.On("SendRichMessageDraft", mock.Anything, mock.MatchedBy(func(req telegram.SendRichMessageDraftRequest) bool {
+		return req.DraftID == 42 && strings.Contains(req.RichMessage.HTML, "Thinking")
+	})).Run(func(mock.Arguments) {
+		// The API completes after the timer wake. The next heartbeat must be
+		// measured from this accepted time, not from the old timer phase.
+		clock.Advance(350 * time.Millisecond)
+	}).Return(nil).Once()
+
+	sink := newRichDraftTestSink(t, api, 0)
+	setRichDraftClock(sink, clock)
+	clock.Advance(richDraftHeartbeatInterval)
+
+	sink.mu.Lock()
+	sink.heartbeatLocked()
+	delay := sink.nextHeartbeatDelayLocked()
+	lastDraftAt := sink.lastDraftAt
+	lastAttemptAt := sink.lastAttemptAt
+	sink.mu.Unlock()
+
+	assert.Equal(t, clock.Now(), lastDraftAt)
+	assert.Equal(t, lastDraftAt, lastAttemptAt)
+	assert.Equal(t, richDraftHeartbeatInterval, delay, "successful heartbeat must always leave a positive one-shot delay")
+	api.AssertNumberOfCalls(t, "SendRichMessageDraft", 2)
+	api.AssertExpectations(t)
+}
+
+func TestRichDraftSink_HeartbeatDeadlineHonorsRecentAttemptFloorWithoutSpinning(t *testing.T) {
+	api := new(testutil.MockBotAPI)
+	expectInitialRichDraft(api)
+
+	sink := newRichDraftTestSink(t, api, 0)
+	clock := newFakeClock()
+	setRichDraftClock(sink, clock)
+	clock.Advance(richDraftHeartbeatInterval)
+
+	sink.mu.Lock()
+	sink.lastAttemptAt = clock.Now().Add(-500 * time.Millisecond)
+	delay := sink.nextHeartbeatDelayLocked()
+	sink.mu.Unlock()
+
+	assert.Equal(t, richDraftMinUpdateInterval-500*time.Millisecond, delay)
+	assert.Positive(t, delay, "a due heartbeat behind the peer floor must re-arm instead of busy-looping")
+	api.AssertExpectations(t)
+}
+
+func TestRichDraftSink_FinalizePreventsDueHeartbeatRevival(t *testing.T) {
+	api := new(testutil.MockBotAPI)
+	expectInitialRichDraft(api)
+
+	sink := newRichDraftTestSink(t, api, 0)
+	clock := newFakeClock()
+	setRichDraftClock(sink, clock)
+	stats := sink.FinalizePreview()
+	clock.Advance(2 * richDraftHeartbeatInterval)
+
+	sink.mu.Lock()
+	sink.heartbeatLocked()
+	active := sink.callbackAllowedLocked()
+	sink.mu.Unlock()
+
+	assert.False(t, active)
+	assert.Equal(t, 1, stats.updates)
+	api.AssertNumberOfCalls(t, "SendRichMessageDraft", 1)
 	api.AssertExpectations(t)
 }
 

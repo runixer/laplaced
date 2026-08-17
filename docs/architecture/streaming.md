@@ -63,8 +63,9 @@ persistent Rich Message. Числовые внутренние `artifact:<id>`/`
 также удаляются из legacy и rich preview, включая частично пришедший terminal
 prefix; tool-loop по-прежнему видит доверенный raw result для chaining.
 
-Rich draft живёт 30 секунд после принятого snapshot. Heartbeat раз в 20 секунд
-поддерживает его во время долгого LLM/tool stall. После первого draft
+Rich draft живёт 30 секунд после принятого snapshot. Heartbeat через 15 секунд
+от последнего принятого snapshot поддерживает его во время долгого
+LLM/tool stall. После первого draft
 `sendChatAction` прекращается, чтобы оба API не делили flood-budget.
 Все draft/status/RAG/heartbeat updates дополнительно проходят общий минимум 1.2s
 и coalescing latest snapshot: это оставляет запас под Telegram peer limits
