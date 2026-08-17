@@ -159,7 +159,20 @@ func (p *responsePath) closeRichDraft() {
 	if p.richDraft == nil || p.richDraftClosed {
 		return
 	}
-	stats := p.richDraft.Close()
+	p.accountClosedRichDraft(p.richDraft.Close())
+}
+
+// finalizeRichDraft closes the callback/heartbeat lifecycle first, then lets a
+// buffered content tail use one bounded preview-only catch-up attempt. Its
+// result never changes whether the persistent final is attempted.
+func (p *responsePath) finalizeRichDraft() {
+	if p.richDraft == nil || p.richDraftClosed {
+		return
+	}
+	p.accountClosedRichDraft(p.richDraft.FinalizePreview())
+}
+
+func (p *responsePath) accountClosedRichDraft(stats richDraftStats) {
 	p.richDraftClosed = true
 	p.tgCalls += stats.updates
 	p.tgDuration += stats.duration
@@ -168,6 +181,7 @@ func (p *responsePath) closeRichDraft() {
 	if stats.overflow {
 		IncMessageTelegramRichDraftOverflow()
 	}
+	IncMessageTelegramRichDraftTerminalCatchup(stats.terminalCatchup)
 }
 
 // recordTelegramMetrics flushes the accumulated Telegram counters. Deferred
@@ -223,7 +237,7 @@ func (p *responsePath) sendError(ctx context.Context, errText string) {
 // bubble before the separate media delivery. The buffered path is otherwise a
 // no-op.
 func (p *responsePath) flushSinkBeforeMedia(ctx context.Context, content string) {
-	p.closeRichDraft()
+	p.finalizeRichDraft()
 	if p.sink == nil {
 		return
 	}
@@ -242,9 +256,10 @@ func (p *responsePath) flushSinkBeforeMedia(ctx context.Context, content string)
 // on the first chunk. Both variants link the message the user would react to
 // back to the stored reply and record bot.reply_sent on the root span.
 func (p *responsePath) sendFinal(ctx context.Context, span trace.Span, content string) bool {
-	// Closing a Rich Message draft is not delivery. The buffered branch below
-	// still performs exactly one persistent final attempt and owns history.
-	p.closeRichDraft()
+	// Finalizing a Rich Message draft is not delivery. Its bounded catch-up is
+	// preview-only; the buffered branch below still performs exactly one
+	// persistent final attempt and owns history.
+	p.finalizeRichDraft()
 	p.shadowRichRender(ctx, span, content)
 	if p.sink != nil {
 		extra, edits, finalErr := p.sink.Finalize(

@@ -151,14 +151,17 @@ error logs/traces:
   `laplaced_bot_rich_message_native_attachment_bytes`;
 - `laplaced_bot_message_telegram_rich_draft_count`,
   `laplaced_bot_message_telegram_rich_draft_content_snapshot_count` and
-  `laplaced_bot_message_telegram_rich_draft_overflow_total`.
+  `laplaced_bot_message_telegram_rich_draft_overflow_total`;
+- `laplaced_bot_message_telegram_rich_draft_terminal_catchup_total{outcome}`.
 
 Stop expansion immediately on a duplicate durable final, a history/reaction
 link without confirmed delivery, any model-authored media fetch, an increasing
 `outcome="unknown"`, a new sustained rich rejection/API-fallback class, or any
 increase in the rate-limit counter. Draft-specific 429s or unexpectedly high
-draft-call counts first require disabling `draft_streaming_enabled`; persistent
-delivery can remain in operator `send` while it is rechecked. For persistent
+draft-call counts first require disabling `draft_streaming_enabled`; likewise,
+disable it if terminal catch-up `outcome="failed"` is sustained or a client ever
+shows a draft revival after the persistent final. Persistent delivery can
+remain in operator `send` while it is rechecked. For persistent
 send regressions return the affected allowlist to `shadow`; use `mode=off` for
 an immediate global rich-egress stop. Do not retry an `unknown` turn manually
 until Telegram/client state has been checked, because the request may already
@@ -198,15 +201,25 @@ Telegram's purpose-built `sendRichMessageDraft` primitive:
 4. Preview rendering suppresses every active link/anchor and sets
    `skip_entity_detection=true`; links become active only in the completed,
    policy-checked final.
-5. Snapshots use the configured one-second/character throttle. A 20-second
+5. Snapshots use the configured throttle plus a shared 1.2-second peer floor.
+   A 20-second
    heartbeat keeps the 30-second ephemeral preview alive during long stalls,
    and periodic `sendChatAction` stops once the draft exists.
-6. Closing the sink performs no Telegram finalization call. The ordinary
+6. Before a persistent-final attempt the sink first becomes callback-terminal,
+   then an unseen coalesced content tail gets at most one best-effort catch-up
+   attempt within a two-second total budget. Error/cleanup close remains
+   network-free. The ordinary
    buffered `sendRichMessage` path sends the completed answer and alone owns
    confirmed/rejected/unknown classification, history and reaction linkage.
    For an eligible generated photo, the draft heartbeat is stopped before one
    multipart final uploads the photo and Rich HTML together; the draft never
    becomes a second durable message.
+
+There is one draft per logical turn. A standalone `###SPLIT###` still creates
+multiple persistent Rich Messages: the first persistent send removes the live
+draft, so later parts are expected to appear atomically rather than stream as
+separate bubbles. Multiple concurrent draft IDs are deliberately not used
+because Telegram clients do not handle them uniformly.
 
 The draft source has its own 24 KiB internal budget, independent of the legacy
 `max_buffer_chars` setting. A crossing delta contributes its largest valid

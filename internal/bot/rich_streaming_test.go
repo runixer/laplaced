@@ -313,6 +313,78 @@ func TestRichDraftSink_CloseWaitsForHeartbeatAndBlocksLateCallbacks(t *testing.T
 	api.AssertExpectations(t)
 }
 
+func TestRichDraftSink_FinalizePreviewFlushesUnsentCoalescedTail(t *testing.T) {
+	api := new(testutil.MockBotAPI)
+	expectInitialRichDraft(api)
+	api.On("SendRichMessageDraft", mock.Anything, mock.MatchedBy(func(req telegram.SendRichMessageDraftRequest) bool {
+		return strings.Contains(req.RichMessage.HTML, "prefix") &&
+			!strings.Contains(req.RichMessage.HTML, "TERMINAL_TAIL")
+	})).Return(nil).Once()
+	api.On("SendRichMessageDraft", mock.Anything, mock.MatchedBy(func(req telegram.SendRichMessageDraftRequest) bool {
+		return strings.Contains(req.RichMessage.HTML, "prefix") &&
+			strings.Contains(req.RichMessage.HTML, "TERMINAL_TAIL")
+	})).Return(nil).Once()
+
+	sink := newRichDraftTestSink(t, api, 0)
+	clock := newFakeClock()
+	setRichDraftClock(sink, clock)
+
+	sink.Delta("prefix")
+	sink.Delta(strings.Repeat("x", 80) + " TERMINAL_TAIL")
+	sink.mu.Lock()
+	require.NotNil(t, sink.refreshTimer, "tail should be waiting behind the peer-rate floor")
+	sink.mu.Unlock()
+
+	stats := sink.FinalizePreview()
+	statsAgain := sink.FinalizePreview()
+	statsClosed := sink.Close()
+	sink.Delta(" late")
+	sink.Status("internet_search", `{"query":"late"}`)
+	sink.RAG("late")
+
+	assert.Equal(t, 3, stats.updates, "initial, prefix, terminal catch-up")
+	assert.Equal(t, 2, stats.contentSnapshots)
+	assert.Equal(t, richDraftCatchupSent, stats.terminalCatchup)
+	assert.Equal(t, stats, statsAgain, "terminal finalization must be idempotent")
+	assert.Equal(t, stats, statsClosed, "cleanup close must not double-send or change accounting")
+	sink.mu.Lock()
+	assert.True(t, sink.finalized)
+	assert.False(t, sink.active)
+	assert.Nil(t, sink.refreshTimer)
+	sink.mu.Unlock()
+	api.AssertNumberOfCalls(t, "SendRichMessageDraft", 3)
+	api.AssertExpectations(t)
+}
+
+func TestRichDraftSink_FinalizePreviewSkipsTailWhenCooldownExceedsBudget(t *testing.T) {
+	api := new(testutil.MockBotAPI)
+	expectInitialRichDraft(api)
+	api.On("SendRichMessageDraft", mock.Anything, mock.Anything).
+		Return(&telegram.APIError{
+			Code:        429,
+			Description: "Too Many Requests",
+			Parameters:  &telegram.ResponseParameters{RetryAfter: 7},
+		}).Once()
+
+	sink := newRichDraftTestSink(t, api, 0)
+	clock := newFakeClock()
+	setRichDraftClock(sink, clock)
+	sink.Delta("prefix")
+	sink.Delta(strings.Repeat("x", 80) + " TERMINAL_TAIL")
+
+	stats := sink.FinalizePreview()
+
+	assert.Equal(t, 2, stats.updates, "initial plus the throttled attempt; no terminal retry")
+	assert.Zero(t, stats.contentSnapshots)
+	assert.Equal(t, richDraftCatchupSkippedCooldown, stats.terminalCatchup)
+	sink.mu.Lock()
+	assert.Nil(t, sink.refreshTimer)
+	assert.True(t, sink.finalized)
+	sink.mu.Unlock()
+	api.AssertNumberOfCalls(t, "SendRichMessageDraft", 2)
+	api.AssertExpectations(t)
+}
+
 func TestRichDraftSink_DoesNotReuseLegacyMaxBufferChars(t *testing.T) {
 	api := new(testutil.MockBotAPI)
 	expectInitialRichDraft(api)
@@ -545,6 +617,7 @@ func TestResponsePath_RichDraftIsPreviewOnlyAndFinalOwnsHistory(t *testing.T) {
 	assert.Equal(t, ResponseFormatRichHTML, transport.responses[0].Format)
 	assert.Equal(t, "telegram-final-77", path.deliveredMessageID)
 	assert.Equal(t, 3, path.tgCalls, "two draft snapshots plus one persistent final")
+	assert.Equal(t, richDraftCatchupSkippedNoTail, path.richDraft.stats.terminalCatchup)
 	store.AssertExpectations(t)
 	api.AssertExpectations(t)
 }
@@ -590,6 +663,66 @@ func TestResponsePath_RichDraftOverflowStillDeliversAndPersistsFullFinal(t *test
 	assert.Equal(t, "telegram-final-88", path.deliveredMessageID)
 	assert.True(t, path.richDraft.Close().overflow)
 	store.AssertExpectations(t)
+	api.AssertExpectations(t)
+}
+
+func TestResponsePath_RichDraftTerminalCatchupFailureDoesNotBlockSplitFinal(t *testing.T) {
+	transport := &recordingRichTransport{ids: map[int]string{
+		0: "telegram-final-1",
+		1: "telegram-final-2",
+	}}
+	bot := newRichDeliveryTestBot(t, transport)
+	bot.cfg.Telegram.RichMessages.DraftStreamingEnabled = true
+	api := new(testutil.MockBotAPI)
+	expectInitialRichDraft(api)
+	api.On("SendRichMessageDraft", mock.Anything, mock.MatchedBy(func(req telegram.SendRichMessageDraftRequest) bool {
+		return strings.Contains(req.RichMessage.HTML, "First section") &&
+			!strings.Contains(req.RichMessage.HTML, "Second section")
+	})).Return(nil).Once()
+	api.On("SendRichMessageDraft", mock.Anything, mock.MatchedBy(func(req telegram.SendRichMessageDraftRequest) bool {
+		return strings.Contains(req.RichMessage.HTML, "First section") &&
+			strings.Contains(req.RichMessage.HTML, "Second section")
+	})).Run(func(args mock.Arguments) {
+		assert.Empty(t, transport.responses, "terminal catch-up must precede every persistent split operation")
+		ctx := args.Get(0).(context.Context)
+		deadline, ok := ctx.Deadline()
+		require.True(t, ok, "terminal catch-up must carry a hard request deadline")
+		remaining := time.Until(deadline)
+		assert.Positive(t, remaining)
+		assert.LessOrEqual(t, remaining, richDraftTerminalCatchupBudget)
+	}).Return(errors.New("terminal preview timeout with unknown outcome")).Once()
+	bot.api = api
+
+	path := bot.newResponsePath(
+		context.Background(), storage.ScopeID("user"), "123", true,
+		"123", "", "42", bot.logger,
+	)
+	require.True(t, path.usesRichDraft())
+	clock := newFakeClock()
+	setRichDraftClock(path.richDraft, clock)
+
+	first := "# First section\n\nVisible prefix.\n"
+	second := "\n###SPLIT###\n\n# Second section\n\n" + strings.Repeat("tail ", 20)
+	full := first + second
+	path.streamDelta(first)
+	path.streamDelta(second)
+
+	ctx, span := otel.Tracer("test").Start(context.Background(), "final")
+	ok := path.sendFinal(ctx, span, full)
+	span.End()
+
+	require.True(t, ok, "ephemeral catch-up failure must not affect persistent delivery")
+	require.Len(t, transport.responses, 2, "standalone split marker must still produce two persistent operations")
+	assert.Contains(t, transport.responses[0].Text, "First section")
+	assert.Contains(t, transport.responses[1].Text, "Second section")
+	assert.Equal(t, []string{"telegram-final-1", "telegram-final-2"}, path.deliveredMessageIDs)
+	assert.Equal(t, 5, path.tgCalls, "initial, prefix, catch-up and two persistent operations")
+	assert.Equal(t, richDraftCatchupFailed, path.richDraft.stats.terminalCatchup)
+
+	path.streamDelta(" late")
+	path.streamStatus("internet_search", `{"query":"late"}`)
+	path.streamRAG("late")
+	api.AssertNumberOfCalls(t, "SendRichMessageDraft", 3)
 	api.AssertExpectations(t)
 }
 

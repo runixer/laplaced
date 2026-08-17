@@ -84,9 +84,17 @@ bounded `<tg-thinking>`; перед каждым draft также проверя
 semantic characters/blocks/depth, размер rendered HTML и table width.
 
 Rich draft эфемерен и не имеет `message_id`, reply, history или реакции. Его
-`Close()` только блокирует поздние callbacks и heartbeat. Финальный send остаётся
-one-shot: network/5xx/malformed success имеет outcome `unknown`, не повторяется
-и не записывается в историю.
+`Close()` на error/cleanup-путях только блокирует поздние callbacks и heartbeat.
+Перед попыткой persistent text/media-финала `FinalizePreview()` сначала делает
+callbacks терминальными, затем даёт ещё не показанному content-хвосту
+ровно одну best-effort catch-up попытку. Активный cooldown после
+`retry_after` или transient-ошибки её отменяет;
+локальный 1.2s sustained-rate floor этот единичный terminal burst может
+обойти, так как обычная частота оставляет запас ниже Telegram peer limits.
+Весь API request ограничен двумя секундами.
+Ошибка catch-up не повторяется и не меняет судьбу persistent delivery.
+Финальный send остаётся one-shot: network/5xx/malformed success имеет outcome
+`unknown`, не повторяется и не записывается в историю.
 
 ## Метрики
 
@@ -98,6 +106,9 @@ one-shot: network/5xx/malformed success имеет outcome `unknown`, не по�
   принятые snapshots, продвинувшие content prefix;
 - `laplaced_bot_message_telegram_rich_draft_overflow_total` — число turns, в
   которых только ephemeral preview достиг внутреннего budget.
+- `laplaced_bot_message_telegram_rich_draft_terminal_catchup_total{outcome}` —
+  исход одной terminal preview-попытки (`sent`, `skipped_no_tail`,
+  `skipped_cooldown`, `skipped_render` или `failed`).
 
 Draft count считает логические вызовы Bot API client. Физические HTTP retry с
 тем же idempotent draft ID видны в общих Telegram request/retry metrics.

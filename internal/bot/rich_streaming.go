@@ -31,7 +31,11 @@ const (
 	// callback for the persistent final's full request timeout.
 	richDraftRequestTimeout   = 5 * time.Second
 	richDraftTransientBackoff = 5 * time.Second
-	richDraftMaxStatusLines   = 24
+	// A terminal catch-up is preview-only and must never appreciably delay the
+	// separately confirmed persistent final. It never waits out a server
+	// cooldown; this is the total budget for its one best-effort API attempt.
+	richDraftTerminalCatchupBudget = 2 * time.Second
+	richDraftMaxStatusLines        = 24
 	// Rich drafts have a 32,768 semantic-character limit rather than the
 	// legacy editMessageText 4096 UTF-16 limit. Keeping the Markdown source at
 	// 24 KiB leaves room for the bounded <tg-thinking> journey and HTML
@@ -44,7 +48,18 @@ type richDraftStats struct {
 	contentSnapshots int
 	overflow         bool
 	duration         time.Duration
+	terminalCatchup  richDraftTerminalCatchupOutcome
 }
+
+type richDraftTerminalCatchupOutcome string
+
+const (
+	richDraftCatchupSent            richDraftTerminalCatchupOutcome = "sent"
+	richDraftCatchupSkippedNoTail   richDraftTerminalCatchupOutcome = "skipped_no_tail"
+	richDraftCatchupSkippedCooldown richDraftTerminalCatchupOutcome = "skipped_cooldown"
+	richDraftCatchupSkippedRender   richDraftTerminalCatchupOutcome = "skipped_render"
+	richDraftCatchupFailed          richDraftTerminalCatchupOutcome = "failed"
+)
 
 // richDraftSink owns an ephemeral Telegram Rich Message preview. Unlike
 // streamSink it never owns persistent delivery: Close only stops callbacks and
@@ -458,7 +473,10 @@ func (s *richDraftSink) renderLocked() (string, error) {
 func (s *richDraftSink) sendLocked(payload string) error {
 	ctx, cancel := context.WithTimeout(s.baseCtx, richDraftRequestTimeout)
 	defer cancel()
+	return s.sendWithContextLocked(ctx, payload)
+}
 
+func (s *richDraftSink) sendWithContextLocked(ctx context.Context, payload string) error {
 	start := time.Now()
 	err := s.api.SendRichMessageDraft(ctx, telegram.SendRichMessageDraftRequest{
 		ChatID:          s.chatID,
@@ -522,6 +540,62 @@ func (s *richDraftSink) heartbeatLocked() {
 	if err := s.sendLocked(payload); err != nil {
 		s.handleSendErrorLocked(err, true, "heartbeat")
 	}
+}
+
+// FinalizePreview makes callbacks terminal, then gives a buffered content tail
+// one bounded best-effort chance to become visible before the persistent final
+// replaces this ephemeral draft. Failure is deliberately preview-only: there
+// is no retry, fallback, or coupling to the persistent delivery outcome. An
+// active server cooldown suppresses the attempt; the single terminal burst may
+// bypass the local sustained-rate floor because the regular cadence leaves
+// bounded headroom below Telegram's documented peer limits.
+func (s *richDraftSink) FinalizePreview() richDraftStats {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.finalized {
+		return s.stats
+	}
+	wasActive := s.active
+	s.finalized = true
+	s.disableLocked()
+	if !wasActive || s.buf.Len() <= s.lastDraftLen {
+		s.stats.terminalCatchup = richDraftCatchupSkippedNoTail
+		return s.stats
+	}
+	// A server-provided cooldown is authoritative: do not wait it out on the
+	// terminal path. The local 1.2s sustained-rate floor is intentionally not
+	// applied to this single terminal burst. Regular snapshots can produce at
+	// most ~25 calls per 30 seconds, leaving ample room below Telegram's 40/30s
+	// and 20/5s peer budgets while preserving the full bounded request timeout.
+	if s.cooldownTill.After(s.now()) {
+		s.stats.terminalCatchup = richDraftCatchupSkippedCooldown
+		s.logger.Debug("rich draft terminal catch-up skipped: active cooldown", "until", s.cooldownTill)
+		return s.stats
+	}
+
+	payload := s.frozenPayload
+	if !s.overflow {
+		var err error
+		payload, err = s.renderLocked()
+		if err != nil {
+			s.stats.terminalCatchup = richDraftCatchupSkippedRender
+			s.logger.Debug("rich draft terminal catch-up render skipped", "error", err)
+			return s.stats
+		}
+	}
+	if payload == "" || payload == s.lastPayload {
+		s.stats.terminalCatchup = richDraftCatchupSkippedNoTail
+		return s.stats
+	}
+	ctx, cancel := context.WithTimeout(s.baseCtx, richDraftTerminalCatchupBudget)
+	defer cancel()
+	if err := s.sendWithContextLocked(ctx, payload); err != nil {
+		s.stats.terminalCatchup = richDraftCatchupFailed
+		s.logger.Warn("rich draft terminal catch-up failed; continuing persistent final", "error", err)
+		return s.stats
+	}
+	s.stats.terminalCatchup = richDraftCatchupSent
+	return s.stats
 }
 
 // Close makes draft callbacks terminal and waits for any in-flight heartbeat

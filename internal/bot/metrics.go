@@ -261,6 +261,19 @@ var (
 		},
 	)
 
+	// messageTelegramRichDraftTerminalCatchupTotal records the bounded
+	// preview-only attempt made immediately before a successful persistent
+	// final. Outcomes are a closed enum and carry no user or draft identifier.
+	messageTelegramRichDraftTerminalCatchupTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metricsNamespace,
+			Subsystem: "bot",
+			Name:      "message_telegram_rich_draft_terminal_catchup_total",
+			Help:      "Terminal Rich Message draft catch-up outcomes before persistent delivery",
+		},
+		[]string{"outcome"},
+	)
+
 	// responseFlagsTotal counts user-flagged bad replies (a reaction on a bot
 	// message), by emoji. Each increment corresponds to a stored response_flags
 	// row carrying the flagged reply's trace_id.
@@ -401,4 +414,13 @@ func RecordMessageTelegramRichDraftContentSnapshotCount(count int) {
 // IncMessageTelegramRichDraftOverflow records one preview-only source cap hit.
 func IncMessageTelegramRichDraftOverflow() {
 	messageTelegramRichDraftOverflowTotal.Inc()
+}
+
+// IncMessageTelegramRichDraftTerminalCatchup records one terminal preview
+// outcome. Callers pass only the package's closed outcome constants.
+func IncMessageTelegramRichDraftTerminalCatchup(outcome richDraftTerminalCatchupOutcome) {
+	if outcome == "" {
+		return
+	}
+	messageTelegramRichDraftTerminalCatchupTotal.WithLabelValues(string(outcome)).Inc()
 }

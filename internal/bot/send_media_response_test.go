@@ -321,6 +321,13 @@ func TestGeneratedMedia_RichDraftClosesBeforeNativeFinalAndCannotRevive(t *testi
 	api.On("SendRichMessageDraft", mock.Anything, mock.MatchedBy(func(req telegram.SendRichMessageDraftRequest) bool {
 		return strings.Contains(req.RichMessage.HTML, "partial")
 	})).Return(nil).Once()
+	tailCaughtUp := false
+	api.On("SendRichMessageDraft", mock.Anything, mock.MatchedBy(func(req telegram.SendRichMessageDraftRequest) bool {
+		return strings.Contains(req.RichMessage.HTML, "partial") &&
+			strings.Contains(req.RichMessage.HTML, "TERMINAL_MEDIA_TAIL")
+	})).Run(func(mock.Arguments) {
+		tailCaughtUp = true
+	}).Return(nil).Once()
 	bot.api = api
 
 	expectGeneratedArtifact(store, userID)
@@ -334,10 +341,13 @@ func TestGeneratedMedia_RichDraftClosesBeforeNativeFinalAndCannotRevive(t *testi
 		"123", "", "42", bot.logger,
 	)
 	require.True(t, path.usesRichDraft())
-	allowNextRichDraftUpdate(path.richDraft)
+	clock := newFakeClock()
+	setRichDraftClock(path.richDraft, clock)
 	path.streamDelta("partial")
+	path.streamDelta(strings.Repeat("x", 80) + " TERMINAL_MEDIA_TAIL")
 
 	recorded.beforeRichMedia = func() {
+		assert.True(t, tailCaughtUp, "terminal catch-up must precede persistent multipart send")
 		assert.False(t, path.usesRichDraft(), "draft must be terminal before persistent multipart send")
 		assert.True(t, path.richDraftClosed)
 		// A late SSE/tool callback racing with final delivery must not recreate
@@ -345,7 +355,7 @@ func TestGeneratedMedia_RichDraftClosesBeforeNativeFinalAndCannotRevive(t *testi
 		path.streamDelta(" late-delta")
 		path.streamStatus("generate_image", `{"prompt":"late-status"}`)
 		path.streamRAG("late-rag")
-		api.AssertNumberOfCalls(t, "SendRichMessageDraft", 2)
+		api.AssertNumberOfCalls(t, "SendRichMessageDraft", 3)
 	}
 
 	path.flushSinkBeforeMedia(context.Background(), "# Final")
@@ -357,9 +367,10 @@ func TestGeneratedMedia_RichDraftClosesBeforeNativeFinalAndCannotRevive(t *testi
 	assert.Equal(t, 1, result.attempts)
 	require.Len(t, recorded.richMedia, 1)
 	assert.Empty(t, recorded.media)
+	assert.Equal(t, richDraftCatchupSent, path.richDraft.stats.terminalCatchup)
 	path.streamDelta(" post-final")
 	path.recordTelegramMetrics()
-	api.AssertNumberOfCalls(t, "SendRichMessageDraft", 2)
+	api.AssertNumberOfCalls(t, "SendRichMessageDraft", 3)
 	api.AssertExpectations(t)
 	store.AssertExpectations(t)
 }

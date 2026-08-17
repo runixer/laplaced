@@ -88,6 +88,7 @@ func TestMetricsRegistration(t *testing.T) {
 	})
 	recordRichShadowEvaluation(richMetricShadowNative, richMetricFallbackNone)
 	richMessageRateLimitedTotal.WithLabelValues(richMetricContentText, richMetricPathNative).Add(0)
+	IncMessageTelegramRichDraftTerminalCatchup(richDraftCatchupSent)
 
 	// Verify all metrics are registered with correct names
 	metrics := []string{
@@ -101,6 +102,7 @@ func TestMetricsRegistration(t *testing.T) {
 		"laplaced_bot_rich_message_native_attachment_bytes",
 		"laplaced_bot_rich_message_rate_limited_total",
 		"laplaced_bot_rich_message_shadow_evaluations_total",
+		"laplaced_bot_message_telegram_rich_draft_terminal_catchup_total",
 	}
 
 	// Collect all metric names from default registry
