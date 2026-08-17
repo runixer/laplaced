@@ -5,50 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.11.0] - 2026-08-18
 
 ### Added
-- Telegram Rich Message replies can now place generated images between rich
-  text sections: the model chooses only turn-local position, order and grouping,
-  while the application keeps artifact lookup, uploads and media identifiers
-  trusted and preserves an automatic fallback for invalid layouts.
-- Private Telegram rich chats can now send existing user-owned artifacts on
-  request. Images support compressed Photo preview, byte-exact Document
-  original, or both; PDFs and other non-image files are sent as Documents.
-  Selection is declarative and restricted to an app-authored per-turn artifact
-  inventory, with ownership revalidated before delivery.
-- Artifact-bearing replies now persist ordered M:N provenance alongside one
-  durable delivery ledger. Re-sending a stored artifact links it to the new
-  logical reply without moving its original creator-history association, and
-  reactions on any confirmed rich part, album or Document resolve that reply.
-- The LongMemEval harness now provides stage-level evidence recall, immutable ingestion snapshots, dataset-relative dates, official judging, token-budget diagnostics, offline summaries, and paired run comparisons.
+- Replies in private Telegram chats are now sent as native Rich Messages — real headings, lists, tables, quotes, code blocks, spoilers, links and LaTeX instead of the old limited HTML. Disable with `telegram.rich_messages.mode: "off"`.
+- Formatting you type is now understood: Telegram rich messages and classic entities are decoded, so bold, links, code spans and quotes survive into the bot's context instead of arriving as flat text.
+- The bot can place generated images between sections of a reply rather than always stacking them on top, choosing single images, collages or slideshows to fit the text.
+- The bot can now send you files it already has on request — images as a compressed preview, a byte-exact original, or both; PDFs and other documents as files. It only ever offers files you sent it yourself.
+- Reactions now work on every part of a multi-message reply — any rich part, album or document resolves to the same answer.
 - New privacy mode: ask the bot not to save something and the following messages are excluded from long-term memory, with an honest explanation of what is and isn't covered.
 
 ### Changed
-- Generated images now default to Telegram Photo previews regardless of file
-  size or requested 2K/4K resolution. An explicit original request sends a
-  byte-exact Document *instead* of the preview; both are sent only when the user
-  explicitly requests both. Originals are emitted after the complete rich post,
-  and the old size-triggered automatic Document sidecar is no longer used in the
-  private rich V1 path.
+- Generated images now arrive as a normal Telegram photo by default, whatever their size or 2K/4K resolution. Ask for the original and you get the uncompressed file instead; ask for both and you get both.
 - The default chat model is now `google/gemini-3.7-flash` (was `google/gemini-3.5-flash`). Replaying ten captured production traces showed shorter, denser replies at roughly a third of the cost and unchanged latency.
 - The assistant no longer retracts risk warnings under emotional pushback, avoids verdicts about people it only knows one-sidedly, keeps crisis replies short with real-help referrals, and refuses forwarded "assistant instructions", loyalty vows, and promises not to remember things.
 - Memory now records where each fact came from: judgments about other people are stored and re-read as the user's opinion rather than established truth, and stored "don't analyze/don't be harsh" instructions never override honesty on health, money, or safety.
 
 ### Fixed
-- Telegram Rich Message draft heartbeats are now scheduled from the latest
-  accepted snapshot, preventing long image-generation statuses from expiring
-  and repeatedly reappearing before the final reply.
-- The memory reranker now performs one bounded final synthesis after exhausting its topic-inspection budget, using the last tool result instead of abandoning the model's work and falling back immediately.
-- Topic IDs copied from reranker prompts as `Topic:N` are accepted in tool arguments, and malformed or unknown tool calls receive paired error results instead of leaving an invalid provider transcript.
-- Transient `EOF` and `unexpected EOF` failures from the LLM transport are retried, including wrapped connection errors and responses whose body ends before the declared content length.
-- File metadata extraction now tolerates flat, nested, or decorated `rag_hints`; on the final retry it can discard only malformed hints while preserving valid summary, keyword, entity, and embedding data.
+- Progress previews no longer flicker back to a stale "generating image" status before a long reply lands.
+- The memory reranker now performs one bounded final synthesis after exhausting its topic-inspection budget, instead of discarding its work and falling back immediately.
+- Topic IDs copied from reranker prompts as `Topic:N` are accepted in tool arguments, and malformed tool calls no longer break the reranker for that turn.
+- Transient `EOF` failures from the LLM transport are retried instead of failing the reply.
+- File analysis no longer loses a file's summary and keywords when the model returns malformed hints alongside them.
 
 ### Security
-- Internal artifact IDs and the turn-local `MEDIA`/`SPLIT` delivery protocol
-  are removed from model-authored finals, intermediate messages and streaming
-  previews while remaining available to trusted tool chaining.
-- Forwarded "instructions for an AI assistant" blocks are refused outright and never written to memory, closing a confirmed cross-user injection path.
+- Internal artifact IDs and the delivery protocol the model uses to place images are stripped from everything the user sees, while staying available to trusted tool chaining.
+- Forwarded "instructions for an AI assistant" blocks are refused and never written to memory, blocking the phrasing behind an observed cross-user injection attempt.
 
 ## [0.10.3] - 2026-07-10
 
@@ -686,7 +668,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-language support (en, ru)
 - Docker deployment
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.10.3...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/runixer/laplaced/compare/v0.10.3...v0.11.0
 [0.10.3]: https://github.com/runixer/laplaced/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/runixer/laplaced/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/runixer/laplaced/compare/v0.10.0...v0.10.1
