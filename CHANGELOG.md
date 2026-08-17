@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The assistant no longer retracts risk warnings under emotional pushback, avoids verdicts about people it only knows one-sidedly, keeps crisis replies short with real-help referrals, and refuses forwarded "assistant instructions", loyalty vows, and promises not to remember things.
 - Memory now records where each fact came from: judgments about other people are stored and re-read as the user's opinion rather than established truth, and stored "don't analyze/don't be harsh" instructions never override honesty on health, money, or safety.
 
+### Fixed
+- The memory reranker now performs one bounded final synthesis after exhausting its topic-inspection budget, using the last tool result instead of abandoning the model's work and falling back immediately.
+- Topic IDs copied from reranker prompts as `Topic:N` are accepted in tool arguments, and malformed or unknown tool calls receive paired error results instead of leaving an invalid provider transcript.
+- Transient `EOF` and `unexpected EOF` failures from the LLM transport are retried, including wrapped connection errors and responses whose body ends before the declared content length.
+- File metadata extraction now tolerates flat, nested, or decorated `rag_hints`; on the final retry it can discard only malformed hints while preserving valid summary, keyword, entity, and embedding data.
+
 ### Security
 - Forwarded "instructions for an AI assistant" blocks are refused outright and never written to memory, closing a confirmed cross-user injection path.
 

@@ -238,13 +238,72 @@ func TestParseToolCallIDs(t *testing.T) {
 			wantErr:   false,
 		},
 		{
+			name:      "numeric strings",
+			arguments: `{"topic_ids": ["42", "18"]}`,
+			wantIDs:   []int64{42, 18},
+			wantErr:   false,
+		},
+		{
+			name:      "prefixed topic IDs",
+			arguments: `{"topic_ids": ["Topic:6523", "Topic:6000"]}`,
+			wantIDs:   []int64{6523, 6000},
+			wantErr:   false,
+		},
+		{
+			name:      "mixed compatible forms",
+			arguments: `{"topic_ids": [1, "2", "Topic:3"]}`,
+			wantIDs:   []int64{1, 2, 3},
+			wantErr:   false,
+		},
+		{
 			name:      "invalid JSON",
 			arguments: `{not valid}`,
 			wantErr:   true,
 		},
 		{
+			name:      "wrong ID namespace",
+			arguments: `{"topic_ids": ["Person:1"]}`,
+			wantErr:   true,
+		},
+		{
+			name:      "float ID",
+			arguments: `{"topic_ids": [1.5]}`,
+			wantErr:   true,
+		},
+		{
+			name:      "null element",
+			arguments: `{"topic_ids": [null]}`,
+			wantErr:   true,
+		},
+		{
+			name:      "boolean element",
+			arguments: `{"topic_ids": [true]}`,
+			wantErr:   true,
+		},
+		{
+			name:      "object element",
+			arguments: `{"topic_ids": [{"id": 1}]}`,
+			wantErr:   true,
+		},
+		{
+			name:      "overflow",
+			arguments: `{"topic_ids": [9223372036854775808]}`,
+			wantErr:   true,
+		},
+		{
+			name:      "mixed valid and invalid is all or nothing",
+			arguments: `{"topic_ids": [1, "Person:2", 3]}`,
+			wantErr:   true,
+		},
+		{
 			name:      "missing field returns empty",
 			arguments: `{"other_field": [1, 2]}`,
+			wantIDs:   nil,
+			wantErr:   false,
+		},
+		{
+			name:      "null field returns nil",
+			arguments: `{"topic_ids": null}`,
 			wantIDs:   nil,
 			wantErr:   false,
 		},

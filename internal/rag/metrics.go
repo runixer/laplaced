@@ -437,7 +437,8 @@ func RecordRerankerCost(userID storage.ScopeID, cost float64) {
 }
 
 // RecordRerankerFallback records a fallback activation.
-// reason: "timeout", "error", "max_tool_calls", "invalid_json", "requested_ids", "vector_top", "all_hallucinated"
+// reason: "timeout", "turn_timeout", "llm_error", "empty_response",
+// "parse_error", "protocol_violation", "model_empty", "all_hallucinated".
 func RecordRerankerFallback(userID storage.ScopeID, reason string) {
 	uid := formatUserID(userID)
 	rerankerFallbackTotal.WithLabelValues(uid, reason).Inc()

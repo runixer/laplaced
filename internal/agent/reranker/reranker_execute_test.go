@@ -3,6 +3,7 @@ package reranker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -644,12 +645,116 @@ func TestRerank_MultipleToolCalls(t *testing.T) {
 	assert.Equal(t, []int64{1, 3}, result.TopicIDs())
 }
 
-// TestRerank_MaxToolCallsReached verifies behavior when max tool calls is reached.
-// Also serves as the regression test for the fallback no-leak invariant:
-// when reranker fails to produce a model selection, people and artifacts
-// must NOT be added by vector-top — the model never chose them and dumping
-// 10 unrelated files by cosine into the chat prompt is what we're fixing.
-func TestRerank_MaxToolCallsReached(t *testing.T) {
+func TestRerank_PrefixedToolArgsPreserveTranscript(t *testing.T) {
+	mockClient := &testutil.MockLLMClient{}
+	mockStorage := &testutil.MockStorage{}
+	cfg := testConfig()
+	cfg.Agents.Reranker.MaxToolCalls = 1
+	reranker := New(mockClient, cfg, testutil.TestLogger(), testutil.TestTranslator(t), mockStorage, nil)
+
+	candidates := []Candidate{
+		{TopicID: 6523, Score: 0.9, Topic: mockTopic(6523, "First prefixed topic")},
+		{TopicID: 6000, Score: 0.8, Topic: mockTopic(6000, "Second prefixed topic")},
+	}
+
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(makeToolCallsResponse(makeToolCall("prefix_call", "get_topics_content", `{"topic_ids":["Topic:6523","Topic:6000"]}`)), nil).Once()
+	mockStorage.On("GetMessagesByTopicID", mock.Anything, int64(6523)).
+		Return(mockMessagesForTopic(6523), nil).Once()
+	mockStorage.On("GetMessagesByTopicID", mock.Anything, int64(6000)).
+		Return(mockMessagesForTopic(6000), nil).Once()
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
+		if req.Tools != nil || req.ToolChoice != nil || len(req.Messages) != 4 {
+			return false
+		}
+		format, ok := req.ResponseFormat.(llm.ResponseFormat)
+		if !ok || format.Type != "json_object" {
+			return false
+		}
+		assistantMsg := req.Messages[2]
+		toolMsg := req.Messages[3]
+		content, _ := toolMsg.Content.(string)
+		return len(assistantMsg.ToolCalls) == 1 && assistantMsg.ToolCalls[0].ID == "prefix_call" &&
+			toolMsg.Role == "tool" && toolMsg.ToolCallID == "prefix_call" &&
+			strings.Contains(content, "Topic 6523") && strings.Contains(content, "Topic 6000")
+	})).Return(makeFinalJSONResponse(`{"topic_ids":[{"id":"Topic:6523","reason":"best match"}]}`), nil).Once()
+
+	resp, err := reranker.Execute(context.Background(), &agent.Request{
+		Params: map[string]any{
+			ParamCandidates:          candidates,
+			ParamContextualizedQuery: "test query",
+			ParamOriginalQuery:       "original",
+			ParamCurrentMessages:     "recent messages",
+		},
+		Shared: &agent.SharedContext{UserID: "123"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []int64{6523}, resp.Structured.(*Result).TopicIDs())
+	assert.Empty(t, resp.Metadata["fallback_reason"])
+	mockClient.AssertExpectations(t)
+	mockStorage.AssertExpectations(t)
+}
+
+func TestRerank_ToolResultsPairEveryCall(t *testing.T) {
+	mockClient := &testutil.MockLLMClient{}
+	mockStorage := &testutil.MockStorage{}
+	cfg := testConfig()
+	cfg.Agents.Reranker.MaxToolCalls = 1
+	reranker := New(mockClient, cfg, testutil.TestLogger(), testutil.TestTranslator(t), mockStorage, nil)
+
+	candidates := []Candidate{{TopicID: 1, Score: 0.9, Topic: mockTopic(1, "Topic 1")}}
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(makeToolCallsResponse(
+		makeToolCall("valid_call", "get_topics_content", `{"topic_ids":[1]}`),
+		makeToolCall("malformed_call", "get_topics_content", `{"topic_ids":["Person:2"]}`),
+		makeToolCall("unknown_call", "invented_tool", `{}`),
+	), nil).Once()
+	mockStorage.On("GetMessagesByTopicID", mock.Anything, int64(1)).
+		Return(mockMessagesForTopic(1), nil).Once()
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
+		if req.Tools != nil || len(req.Messages) != 6 {
+			return false
+		}
+		assistantMsg := req.Messages[2]
+		if len(assistantMsg.ToolCalls) != 3 {
+			return false
+		}
+		wantIDs := []string{"valid_call", "malformed_call", "unknown_call"}
+		for i, wantID := range wantIDs {
+			result := req.Messages[3+i]
+			content, ok := result.Content.(string)
+			if !ok || content == "" || result.Role != "tool" || result.ToolCallID != wantID ||
+				assistantMsg.ToolCalls[i].ID != wantID {
+				return false
+			}
+			if i > 0 && !strings.Contains(content, "Error:") {
+				return false
+			}
+		}
+		return true
+	})).Return(makeFinalJSONResponse(`{"topic_ids":[{"id":"Topic:1","reason":"valid"}]}`), nil).Once()
+
+	resp, err := reranker.Execute(context.Background(), &agent.Request{
+		Params: map[string]any{
+			ParamCandidates:          candidates,
+			ParamContextualizedQuery: "test query",
+			ParamOriginalQuery:       "original",
+			ParamCurrentMessages:     "recent messages",
+		},
+		Shared: &agent.SharedContext{UserID: "123"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []int64{1}, resp.Structured.(*Result).TopicIDs())
+	assert.Empty(t, resp.Metadata["fallback_reason"])
+	mockClient.AssertExpectations(t)
+	mockStorage.AssertExpectations(t)
+}
+
+// TestRerank_MaxToolCallsForcesFinalization verifies that MaxToolCalls limits
+// exploration only: after the last tool result the model gets one no-tools
+// JSON turn to select topics, people, and artifacts.
+func TestRerank_MaxToolCallsForcesFinalization(t *testing.T) {
 	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
@@ -661,23 +766,47 @@ func TestRerank_MaxToolCallsReached(t *testing.T) {
 	candidates := []Candidate{
 		{TopicID: 1, Score: 0.9, Topic: mockTopic(1, "Topic 1")},
 	}
-	// Provide people and artifact candidates with high cosine scores — these
-	// are precisely the values the old fallback would have dumped (top-N by
-	// score) into the result. The new fallback must drop them entirely.
 	personCandidates := []PersonCandidate{
-		{PersonID: 10, Score: 0.9},
-		{PersonID: 11, Score: 0.8},
+		{PersonID: 10, Score: 0.9, Person: mockPerson(10, "Alice", "alice")},
+		{PersonID: 11, Score: 0.8, Person: mockPerson(11, "Bob", "bob")},
 	}
 	artifactCandidates := []ArtifactCandidate{
-		{ArtifactID: 100, Score: 0.9},
-		{ArtifactID: 101, Score: 0.8},
+		mockArtifactCandidate(100, "pdf", "one.pdf"),
+		mockArtifactCandidate(101, "image", "two.png"),
 	}
 
 	// Tool call
+	toolResponse := makeToolCallResponse("get_topics_content", `{"topic_ids": [1]}`)
+	toolCost := 0.01
+	toolResponse.Usage.Cost = &toolCost
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(makeToolCallResponse("get_topics_content", `{"topic_ids": [1]}`), nil).Once()
+		Return(toolResponse, nil).Once()
 	mockStorage.On("GetMessagesByTopicID", mock.Anything, int64(1)).
 		Return(mockMessagesForTopic(1), nil).Once()
+
+	// Forced final turn: the Nth result is present, while tools and
+	// tool_choice are omitted and JSON mode is enabled.
+	finalResponse := makeFinalJSONResponse(`{
+		"topic_ids": [{"id": "Topic:1", "reason": "relevant topic"}],
+		"people": [{"id": "Person:10", "reason": "relevant person"}],
+		"artifacts": [{"id": "Artifact:100", "reason": "relevant artifact"}]
+	}`)
+	finalCost := 0.02
+	finalResponse.Usage.Cost = &finalCost
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
+		if req.Tools != nil || req.ToolChoice != nil || len(req.Messages) != 4 {
+			return false
+		}
+		format, ok := req.ResponseFormat.(llm.ResponseFormat)
+		if !ok || format.Type != "json_object" {
+			return false
+		}
+		assistantMsg := req.Messages[len(req.Messages)-2]
+		toolMsg := req.Messages[len(req.Messages)-1]
+		return assistantMsg.Role == "assistant" && len(assistantMsg.ToolCalls) == 1 &&
+			toolMsg.Role == "tool" && toolMsg.ToolCallID == assistantMsg.ToolCalls[0].ID &&
+			toolMsg.Content != ""
+	})).Return(finalResponse, nil).Once()
 
 	req := &agent.Request{
 		Params: map[string]any{
@@ -695,9 +824,314 @@ func TestRerank_MaxToolCallsReached(t *testing.T) {
 
 	require.NoError(t, err)
 	result := resp.Structured.(*Result)
-	assert.Equal(t, []int64{1}, result.TopicIDs(), "topics from requestedIDs are the model's interest signal — keep them")
-	assert.Empty(t, result.People, "people must NOT leak in via vector-top fallback")
-	assert.Empty(t, result.Artifacts, "artifacts must NOT leak in via vector-top fallback")
+	assert.Equal(t, []int64{1}, result.TopicIDs())
+	assert.Equal(t, []int64{10}, result.PeopleIDs())
+	assert.Equal(t, []int64{100}, result.ArtifactIDs())
+	assert.Empty(t, resp.Metadata["fallback_reason"])
+	assert.Equal(t, true, resp.Metadata["forced_finalization"])
+	assert.Equal(t, 1, resp.Metadata["tool_call_rounds"])
+	assert.Equal(t, 2, resp.Metadata["llm_calls"])
+	assert.Equal(t, 2, resp.Metadata["llm_attempts"])
+	assert.Equal(t, 300, resp.Tokens.TotalTokens())
+	require.NotNil(t, resp.Tokens.Cost)
+	assert.InDelta(t, 0.03, *resp.Tokens.Cost, 1e-9)
+	assert.Positive(t, resp.Duration)
+	mockClient.AssertExpectations(t)
+	mockStorage.AssertExpectations(t)
+}
+
+func TestRerank_ForcedFinalizationAfterThreeExplorationRounds(t *testing.T) {
+	mockClient := &testutil.MockLLMClient{}
+	mockStorage := &testutil.MockStorage{}
+	cfg := testConfig()
+	cfg.Agents.Reranker.MaxToolCalls = 3
+	reranker := New(mockClient, cfg, testutil.TestLogger(), testutil.TestTranslator(t), mockStorage, nil)
+
+	candidates := []Candidate{
+		{TopicID: 1, Score: 0.9, Topic: mockTopic(1, "Topic 1")},
+		{TopicID: 2, Score: 0.8, Topic: mockTopic(2, "Topic 2")},
+		{TopicID: 3, Score: 0.7, Topic: mockTopic(3, "Topic 3")},
+	}
+	for i := 1; i <= 3; i++ {
+		id := int64(i)
+		callID := fmt.Sprintf("round_%d", i)
+		mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+			Return(makeToolCallsResponse(makeToolCall(callID, "get_topics_content", fmt.Sprintf(`{"topic_ids":[%d]}`, i))), nil).Once()
+		mockStorage.On("GetMessagesByTopicID", mock.Anything, id).
+			Return(mockMessagesForTopic(id), nil).Once()
+	}
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
+		if req.Tools != nil || req.ToolChoice != nil || len(req.Messages) != 8 {
+			return false
+		}
+		for round := 0; round < 3; round++ {
+			assistantMsg := req.Messages[2+round*2]
+			toolMsg := req.Messages[3+round*2]
+			wantID := fmt.Sprintf("round_%d", round+1)
+			if len(assistantMsg.ToolCalls) != 1 || assistantMsg.ToolCalls[0].ID != wantID ||
+				toolMsg.Role != "tool" || toolMsg.ToolCallID != wantID {
+				return false
+			}
+		}
+		return true
+	})).Return(makeFinalJSONResponse(`{"topic_ids":[{"id":"Topic:3","reason":"best after all rounds"}]}`), nil).Once()
+
+	resp, err := reranker.Execute(context.Background(), &agent.Request{
+		Params: map[string]any{
+			ParamCandidates:          candidates,
+			ParamContextualizedQuery: "test query",
+			ParamOriginalQuery:       "original",
+			ParamCurrentMessages:     "recent messages",
+		},
+		Shared: &agent.SharedContext{UserID: "123"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []int64{3}, resp.Structured.(*Result).TopicIDs())
+	assert.Empty(t, resp.Metadata["fallback_reason"])
+	mockClient.AssertNumberOfCalls(t, "CreateChatCompletion", 4)
+	mockClient.AssertExpectations(t)
+	mockStorage.AssertExpectations(t)
+}
+
+// TestRerank_ForcedFinalizationFailurePreservesSafeFallback verifies the
+// no-leak invariant when the one synthesis request fails: requested topics
+// remain useful, but vector-top people/artifacts are not injected.
+func TestRerank_ForcedFinalizationFailurePreservesSafeFallback(t *testing.T) {
+	tests := []struct {
+		name           string
+		response       llm.ChatCompletionResponse
+		err            error
+		fallbackReason string
+		llmCalls       int
+	}{
+		{
+			name:           "LLM error",
+			err:            errors.New("finalization failed"),
+			fallbackReason: "llm_error",
+			llmCalls:       1,
+		},
+		{
+			name:           "no choices",
+			response:       makeEmptyResponse(),
+			fallbackReason: "empty_response",
+			llmCalls:       2,
+		},
+		{
+			name:           "invalid JSON",
+			response:       makeFinalJSONResponse(`{not valid json}`),
+			fallbackReason: "parse_error",
+			llmCalls:       2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockClient := &testutil.MockLLMClient{}
+			mockStorage := &testutil.MockStorage{}
+			cfg := testConfig()
+			cfg.Agents.Reranker.MaxToolCalls = 1
+			reranker := New(mockClient, cfg, testutil.TestLogger(), testutil.TestTranslator(t), mockStorage, nil)
+
+			candidates := []Candidate{{TopicID: 1, Score: 0.9, Topic: mockTopic(1, "Topic 1")}}
+			people := []PersonCandidate{{PersonID: 10, Score: 0.9, Person: mockPerson(10, "Alice", "alice")}}
+			artifacts := []ArtifactCandidate{mockArtifactCandidate(100, "pdf", "one.pdf")}
+
+			mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+				Return(makeToolCallResponse("get_topics_content", `{"topic_ids": [1]}`), nil).Once()
+			mockStorage.On("GetMessagesByTopicID", mock.Anything, int64(1)).
+				Return(mockMessagesForTopic(1), nil).Once()
+			mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
+				return req.Tools == nil
+			})).Return(tt.response, tt.err).Once()
+
+			resp, err := reranker.Execute(context.Background(), &agent.Request{
+				Params: map[string]any{
+					ParamCandidates:          candidates,
+					ParamPersonCandidates:    people,
+					ParamArtifactCandidates:  artifacts,
+					ParamContextualizedQuery: "test query",
+					ParamOriginalQuery:       "original",
+					ParamCurrentMessages:     "recent messages",
+				},
+				Shared: &agent.SharedContext{UserID: "123"},
+			})
+
+			require.NoError(t, err)
+			result := resp.Structured.(*Result)
+			assert.Equal(t, []int64{1}, result.TopicIDs())
+			assert.Empty(t, result.People)
+			assert.Empty(t, result.Artifacts)
+			assert.Equal(t, tt.fallbackReason, resp.Metadata["fallback_reason"])
+			assert.Equal(t, true, resp.Metadata["forced_finalization"])
+			assert.Equal(t, tt.llmCalls, resp.Metadata["llm_calls"])
+			assert.Equal(t, 2, resp.Metadata["llm_attempts"])
+			mockClient.AssertExpectations(t)
+			mockStorage.AssertExpectations(t)
+		})
+	}
+}
+
+func TestRerank_ForcedFinalizationRespectsTimeouts(t *testing.T) {
+	tests := []struct {
+		name           string
+		totalTimeout   string
+		turnTimeout    string
+		fallbackReason string
+	}{
+		{name: "turn timeout", totalTimeout: "1s", turnTimeout: "10ms", fallbackReason: "turn_timeout"},
+		{name: "global timeout", totalTimeout: "100ms", turnTimeout: "1s", fallbackReason: "timeout"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockClient := &testutil.MockLLMClient{}
+			mockStorage := &testutil.MockStorage{}
+			cfg := testConfig()
+			cfg.Agents.Reranker.MaxToolCalls = 1
+			cfg.Agents.Reranker.Timeout = tt.totalTimeout
+			cfg.Agents.Reranker.TurnTimeout = tt.turnTimeout
+			reranker := New(mockClient, cfg, testutil.TestLogger(), testutil.TestTranslator(t), mockStorage, nil)
+
+			candidates := []Candidate{{TopicID: 1, Score: 0.9, Topic: mockTopic(1, "Topic 1")}}
+			mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+				Return(makeToolCallResponse("get_topics_content", `{"topic_ids":[1]}`), nil).Once()
+			mockStorage.On("GetMessagesByTopicID", mock.Anything, int64(1)).
+				Return(mockMessagesForTopic(1), nil).Once()
+			mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+				Run(func(args mock.Arguments) {
+					<-args.Get(0).(context.Context).Done()
+				}).
+				Return(llm.ChatCompletionResponse{}, context.DeadlineExceeded).Once()
+
+			resp, err := reranker.Execute(context.Background(), &agent.Request{
+				Params: map[string]any{
+					ParamCandidates:          candidates,
+					ParamContextualizedQuery: "test query",
+					ParamOriginalQuery:       "original",
+					ParamCurrentMessages:     "recent messages",
+				},
+				Shared: &agent.SharedContext{UserID: "123"},
+			})
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.fallbackReason, resp.Metadata["fallback_reason"])
+			assert.Equal(t, true, resp.Metadata["forced_finalization"])
+			assert.Equal(t, 2, resp.Metadata["llm_attempts"])
+			mockClient.AssertExpectations(t)
+			mockStorage.AssertExpectations(t)
+		})
+	}
+}
+
+func TestRerank_ForcedFinalizationDoesNotExecuteUnexpectedTool(t *testing.T) {
+	mockClient := &testutil.MockLLMClient{}
+	mockStorage := &testutil.MockStorage{}
+	cfg := testConfig()
+	cfg.Agents.Reranker.MaxToolCalls = 1
+	reranker := New(mockClient, cfg, testutil.TestLogger(), testutil.TestTranslator(t), mockStorage, nil)
+
+	candidates := []Candidate{{TopicID: 1, Score: 0.9, Topic: mockTopic(1, "Topic 1")}}
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(makeToolCallsResponse(makeToolCall("explore", "get_topics_content", `{"topic_ids":[1]}`)), nil).Once()
+	mockStorage.On("GetMessagesByTopicID", mock.Anything, int64(1)).
+		Return(mockMessagesForTopic(1), nil).Once()
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
+		return req.Tools == nil
+	})).Return(makeToolCallsResponse(makeToolCall("must_not_run", "get_topics_content", `{"topic_ids":[1]}`)), nil).Once()
+
+	resp, err := reranker.Execute(context.Background(), &agent.Request{
+		Params: map[string]any{
+			ParamCandidates:          candidates,
+			ParamContextualizedQuery: "test query",
+			ParamOriginalQuery:       "original",
+			ParamCurrentMessages:     "recent messages",
+		},
+		Shared: &agent.SharedContext{UserID: "123"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []int64{1}, resp.Structured.(*Result).TopicIDs())
+	assert.Equal(t, "protocol_violation", resp.Metadata["fallback_reason"])
+	mockClient.AssertExpectations(t)
+	mockStorage.AssertExpectations(t)
+}
+
+func TestRerank_ForcedFailureIgnoresRequestedIDsOutsideCandidates(t *testing.T) {
+	mockClient := &testutil.MockLLMClient{}
+	mockStorage := &testutil.MockStorage{}
+	cfg := testConfig()
+	cfg.Agents.Reranker.MaxToolCalls = 1
+	reranker := New(mockClient, cfg, testutil.TestLogger(), testutil.TestTranslator(t), mockStorage, nil)
+
+	candidates := []Candidate{{TopicID: 1, Score: 0.9, Topic: mockTopic(1, "real candidate")}}
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(makeToolCallsResponse(makeToolCall("hallucinated", "get_topics_content", `{"topic_ids":[999]}`)), nil).Once()
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(llm.ChatCompletionResponse{}, errors.New("finalization failed")).Once()
+
+	resp, err := reranker.Execute(context.Background(), &agent.Request{
+		Params: map[string]any{
+			ParamCandidates:          candidates,
+			ParamContextualizedQuery: "test query",
+			ParamOriginalQuery:       "original",
+			ParamCurrentMessages:     "recent messages",
+		},
+		Shared: &agent.SharedContext{UserID: "123"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []int64{1}, resp.Structured.(*Result).TopicIDs())
+	assert.Equal(t, "llm_error", resp.Metadata["fallback_reason"])
+	mockStorage.AssertNotCalled(t, "GetMessagesByTopicID", mock.Anything, mock.Anything)
+	mockClient.AssertExpectations(t)
+}
+
+func TestRerank_InvalidProviderToolCallIDsStopBeforeTranscriptReuse(t *testing.T) {
+	tests := []struct {
+		name  string
+		calls []llm.ToolCall
+	}{
+		{
+			name:  "empty ID",
+			calls: []llm.ToolCall{makeToolCall("", "get_topics_content", `{"topic_ids":[1]}`)},
+		},
+		{
+			name: "duplicate ID",
+			calls: []llm.ToolCall{
+				makeToolCall("duplicate", "get_topics_content", `{"topic_ids":[1]}`),
+				makeToolCall("duplicate", "get_topics_content", `{"topic_ids":[1]}`),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockClient := &testutil.MockLLMClient{}
+			mockStorage := &testutil.MockStorage{}
+			reranker := New(mockClient, testConfig(), testutil.TestLogger(), testutil.TestTranslator(t), mockStorage, nil)
+			candidates := []Candidate{{TopicID: 1, Score: 0.9, Topic: mockTopic(1, "Topic 1")}}
+
+			mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+				Return(makeToolCallsResponse(tt.calls...), nil).Once()
+			resp, err := reranker.Execute(context.Background(), &agent.Request{
+				Params: map[string]any{
+					ParamCandidates:          candidates,
+					ParamContextualizedQuery: "test query",
+					ParamOriginalQuery:       "original",
+					ParamCurrentMessages:     "recent messages",
+				},
+				Shared: &agent.SharedContext{UserID: "123"},
+			})
+
+			require.NoError(t, err)
+			assert.Equal(t, []int64{1}, resp.Structured.(*Result).TopicIDs())
+			assert.Equal(t, "protocol_violation", resp.Metadata["fallback_reason"])
+			mockClient.AssertNumberOfCalls(t, "CreateChatCompletion", 1)
+			mockStorage.AssertNotCalled(t, "GetMessagesByTopicID", mock.Anything, mock.Anything)
+			mockClient.AssertExpectations(t)
+		})
+	}
 }
 
 // Fallback Scenarios Tests

@@ -32,6 +32,16 @@ type Reranker struct {
 	agentLogger *agentlog.Logger
 }
 
+type rerankRunStats struct {
+	toolCallRounds int
+	llmCalls       int
+	// llmAttempts counts agent-level CreateChatCompletion invocations. The LLM
+	// client's transport retries are reported separately as llm.attempts.
+	llmAttempts        int
+	forcedFinalization bool
+	tokens             agent.TokenUsage
+}
+
 // New creates a new Reranker agent.
 func New(
 	client llm.Client,
@@ -98,22 +108,31 @@ func (r *Reranker) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 	if referenceTime.IsZero() {
 		referenceTime = time.Now()
 	}
-	result, fallbackReason, inputTokensEstimated, err := r.rerank(ctx, userID, candidates, personCandidates, artifactCandidates, contextualizedQuery, originalQuery, currentMessages, userProfile, recentTopics, mediaParts, referenceTime)
+	startedAt := time.Now()
+	runStats := &rerankRunStats{}
+	result, fallbackReason, inputTokensEstimated, err := r.rerank(ctx, userID, candidates, personCandidates, artifactCandidates, contextualizedQuery, originalQuery, currentMessages, userProfile, recentTopics, mediaParts, referenceTime, runStats)
 	if err != nil {
 		return nil, err
 	}
 
 	return &agent.Response{
 		Structured: result,
+		Duration:   time.Since(startedAt),
+		Tokens:     runStats.tokens,
 		Metadata: map[string]any{
 			"topics_count":    len(result.Topics),
 			"people_count":    len(result.People),
 			"artifacts_count": len(result.Artifacts),
 			// Non-empty when the result came from a fallback path (model_empty,
-			// max_tool_calls, ...). Matches the reranker.fallback_reason span
+			// llm_error, ...). Matches the reranker.fallback_reason span
 			// attribute; the rag layer turns it into a Prometheus counter.
 			"fallback_reason":        fallbackReason,
 			"input_tokens_estimated": inputTokensEstimated,
+			"forced_finalization":    runStats.forcedFinalization,
+			"tool_calls":             runStats.toolCallRounds,
+			"tool_call_rounds":       runStats.toolCallRounds,
+			"llm_calls":              runStats.llmCalls,
+			"llm_attempts":           runStats.llmAttempts,
 		},
 	}, nil
 }
@@ -141,6 +160,7 @@ func (r *Reranker) rerank(
 	recentTopics string,
 	mediaParts []interface{},
 	referenceTime time.Time,
+	runStats *rerankRunStats,
 ) (*Result, string, int, error) {
 	ctx = agent.WithAgentType(ctx, agent.TypeReranker)
 	cfg := r.cfg.Agents.Reranker
@@ -149,8 +169,10 @@ func (r *Reranker) rerank(
 	// right values regardless of which internal return fires. tr stays nil
 	// if we bail out via the "disabled or empty candidates" shortcut.
 	var (
-		iterations int
-		tr         *trace
+		iterations         int
+		llmAttempts        int
+		forcedFinalization bool
+		tr                 *trace
 	)
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/reranker").Start(
 		ctx, "reranker.Execute",
@@ -175,6 +197,8 @@ func (r *Reranker) rerank(
 		var (
 			llmCalls                              int
 			costUSD                               float64
+			promptTokens, completionTokens        int
+			totalCost                             *float64
 			rawTopics, rawPeople, rawArtifacts    int
 			keptTopics, keptPeople, keptArtifacts int
 			keptArtifactsSession                  int
@@ -193,11 +217,31 @@ func (r *Reranker) rerank(
 			if tr.tracker != nil {
 				llmCalls = tr.tracker.TurnCount()
 				costUSD = tr.tracker.TotalCostValue()
+				promptTokens, completionTokens = tr.tracker.TotalTokens()
+				totalCost = tr.tracker.TotalCost()
+			}
+		}
+		if runStats != nil {
+			runStats.toolCallRounds = iterations
+			runStats.llmCalls = llmCalls
+			runStats.llmAttempts = llmAttempts
+			runStats.forcedFinalization = forcedFinalization
+			runStats.tokens = agent.TokenUsage{
+				Prompt:     promptTokens,
+				Completion: completionTokens,
+				Total:      promptTokens + completionTokens,
+			}
+			if totalCost != nil {
+				cost := *totalCost
+				runStats.tokens.Cost = &cost
 			}
 		}
 		span.SetAttributes(
 			attribute.Int("reranker.tool_calls", iterations),
+			attribute.Int("reranker.tool_call_rounds", iterations),
 			attribute.Int("reranker.llm_calls", llmCalls),
+			attribute.Int("reranker.llm_attempts", llmAttempts),
+			attribute.Bool("reranker.forced_finalization", forcedFinalization),
 			attribute.String("reranker.fallback_reason", reason),
 			attribute.Int("reranker.candidates_in.topics", len(candidates)),
 			attribute.Int("reranker.candidates_in.people", len(personCandidates)),
@@ -407,20 +451,30 @@ func (r *Reranker) rerank(
 	// Agentic loop
 	iterations = 0
 
-	for iterations < cfg.MaxToolCalls {
+	for {
 		var toolChoice any
 		var responseFormat interface{}
+		requestTools := tools
+		forcedFinal := iterations >= cfg.MaxToolCalls
 
 		// v0.6.0: If no topic candidates (only artifacts/people), skip tool call and go directly to JSON.
 		// Phase 1: tool_choice "auto" instead of forcing get_topics_content — forced selection
 		// (named/required) is flaky through litellm+thinking; "auto" reliably calls the tool given
 		// an explicit prompt, and the existing fallback (no tool call → vector top-5) covers the rest.
-		if iterations == 0 && len(candidates) > 0 {
+		switch {
+		case forcedFinal:
+			// MaxToolCalls limits exploration, not synthesis. The final request
+			// sees the last tool result but cannot start another tool round.
+			forcedFinalization = true
+			requestTools = nil
+			responseFormat = llm.ResponseFormat{Type: "json_object"}
+		case iterations == 0 && len(candidates) > 0:
 			toolChoice = "auto"
-		} else {
+		default:
 			responseFormat = llm.ResponseFormat{Type: "json_object"}
 		}
 
+		llmAttempts++
 		tr.tracker.StartTurn()
 
 		turnCtx, turnCancel := context.WithTimeout(ctx, turnTimeout)
@@ -430,7 +484,7 @@ func (r *Reranker) rerank(
 		resp, err := r.client.CreateChatCompletion(turnCtx, llm.ChatCompletionRequest{
 			Model:      cfg.GetModel(r.cfg.Agents.Default.Model),
 			Messages:   messages,
-			Tools:      tools,
+			Tools:      requestTools,
 			ToolChoice: toolChoice,
 			// NOTE: response-healing plugin breaks reasoning visibility when combined with json_object format.
 			// Reasoning works correctly without plugins.
@@ -500,50 +554,96 @@ func (r *Reranker) rerank(
 
 		// Check for tool calls
 		if len(choice.Message.ToolCalls) > 0 {
+			if forcedFinal {
+				logger.Warn("reranker forced finalization returned tool calls",
+					"tool_calls", len(choice.Message.ToolCalls),
+				)
+				tr.fallbackReason = "protocol_violation"
+				result := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger)
+				tr.selectedTopics = result.Topics
+				tr.selectedPeople = result.People
+				tr.selectedArtifacts = result.Artifacts
+				saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
+				return result, tr.fallbackReason, inputTokensEstimated, nil
+			}
+			if err := validateToolCallIDs(choice.Message.ToolCalls); err != nil {
+				logger.Warn("reranker received invalid tool call IDs", "error", err)
+				tr.fallbackReason = "protocol_violation"
+				result := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger)
+				tr.selectedTopics = result.Topics
+				tr.selectedPeople = result.People
+				tr.selectedArtifacts = result.Artifacts
+				saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
+				return result, tr.fallbackReason, inputTokensEstimated, nil
+			}
+
 			iterations++
 
 			var toolResults []llm.Message
 			toolCall := storage.RerankerToolCall{Iteration: iterations}
 
 			for _, tc := range choice.Message.ToolCalls {
-				if tc.Function.Name == "get_topics_content" {
+				toolResult := llm.Message{
+					Role:       "tool",
+					ToolCallID: tc.ID,
+				}
+
+				switch tc.Function.Name {
+				case "get_topics_content":
 					ids, err := parseToolCallIDs(tc.Function.Arguments)
 					if err != nil {
-						logger.Warn("failed to parse tool call arguments", "error", err)
-						continue
-					}
-
-					// Track requested IDs for fallback
-					for _, id := range ids {
-						isDuplicate := false
-						for _, existing := range st.requestedIDs {
-							if existing == id {
-								isDuplicate = true
-								break
+						logger.Warn("failed to parse tool call arguments",
+							"tool", tc.Function.Name,
+							"tool_call_id", tc.ID,
+							"error", err,
+						)
+						toolResult.Content = "Error: topic_ids must contain only integer IDs or Topic:N IDs."
+					} else {
+						// Keep only real candidates in fallback state. Raw requested
+						// IDs still remain in toolCall.TopicIDs for diagnostics.
+						for _, id := range ids {
+							if _, ok := candidateMap[id]; !ok {
+								continue
+							}
+							isDuplicate := false
+							for _, existing := range st.requestedIDs {
+								if existing == id {
+									isDuplicate = true
+									break
+								}
+							}
+							if !isDuplicate {
+								st.requestedIDs = append(st.requestedIDs, id)
 							}
 						}
-						if !isDuplicate {
-							st.requestedIDs = append(st.requestedIDs, id)
+
+						toolCall.TopicIDs = append(toolCall.TopicIDs, ids...)
+						for _, id := range ids {
+							if c, ok := candidateMap[id]; ok {
+								toolCall.Topics = append(toolCall.Topics, storage.RerankerToolCallTopic{
+									ID:      id,
+									Summary: c.Topic.Summary,
+								})
+							}
+						}
+
+						toolResult.Content = loadTopicsContent(ctx, userID, ids, candidateMap, r.msgRepo, logger, tr)
+						if toolResult.Content == "" {
+							toolResult.Content = "No requested topic content was available."
 						}
 					}
-
-					toolCall.TopicIDs = append(toolCall.TopicIDs, ids...)
-					for _, id := range ids {
-						if c, ok := candidateMap[id]; ok {
-							toolCall.Topics = append(toolCall.Topics, storage.RerankerToolCallTopic{
-								ID:      id,
-								Summary: c.Topic.Summary,
-							})
-						}
-					}
-
-					content := loadTopicsContent(ctx, userID, ids, candidateMap, r.msgRepo, logger, tr)
-					toolResults = append(toolResults, llm.Message{
-						Role:       "tool",
-						Content:    content,
-						ToolCallID: tc.ID,
-					})
+				default:
+					logger.Warn("reranker received unknown tool call",
+						"tool", tc.Function.Name,
+						"tool_call_id", tc.ID,
+					)
+					toolResult.Content = "Error: unknown reranker tool; use get_topics_content."
 				}
+
+				// Keep the transcript valid for every provider: each assistant
+				// tool call is followed by exactly one result with the same ID,
+				// even when dispatch or argument parsing fails.
+				toolResults = append(toolResults, toolResult)
 			}
 
 			tr.toolCalls = append(tr.toolCalls, toolCall)
@@ -680,16 +780,6 @@ func (r *Reranker) rerank(
 
 		return result, tr.fallbackReason, inputTokensEstimated, nil
 	}
-
-	// Max tool calls reached
-	logger.Warn("reranker max tool calls reached", "max", cfg.MaxToolCalls)
-	tr.fallbackReason = "max_tool_calls"
-	result := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger)
-	tr.selectedTopics = result.Topics
-	tr.selectedPeople = result.People
-	tr.selectedArtifacts = result.Artifacts
-	saveTrace(ctx, r.agentLogger, logger, userID, originalQuery, contextualizedQuery, tr, startTime, cfg.GetModel(r.cfg.Agents.Default.Model))
-	return result, tr.fallbackReason, inputTokensEstimated, nil
 }
 
 func estimateRerankerInputTokens(systemPrompt, userPrompt string, mediaParts []interface{}, mediaInstruction string) int {

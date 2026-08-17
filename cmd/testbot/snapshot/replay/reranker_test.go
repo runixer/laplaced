@@ -222,6 +222,13 @@ func TestExtractRerankerOutput_HappyPath(t *testing.T) {
 			},
 		},
 		Tokens: agent.TokenUsage{Cost: &cost},
+		Metadata: map[string]any{
+			"fallback_reason":     "model_empty",
+			"forced_finalization": true,
+			"tool_calls":          3,
+			"llm_calls":           4,
+			"llm_attempts":        4,
+		},
 	}
 
 	out := ExtractRerankerOutput(resp)
@@ -233,6 +240,11 @@ func TestExtractRerankerOutput_HappyPath(t *testing.T) {
 	assert.Equal(t, []int{99}, out.SelectedPeople)
 	assert.Equal(t, []int{7}, out.SelectedArtifacts)
 	assert.Equal(t, 0.05, out.CostUSD)
+	assert.Equal(t, "model_empty", out.FallbackReason)
+	assert.True(t, out.ForcedFinal)
+	assert.Equal(t, 3, out.ToolCalls)
+	assert.Equal(t, 4, out.LLMCalls)
+	assert.Equal(t, 4, out.LLMAttempts)
 }
 
 func TestExtractRerankerOutput_InvalidIDsCollected(t *testing.T) {

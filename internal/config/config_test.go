@@ -499,6 +499,12 @@ func TestExtractorAgentConfig_GetModel(t *testing.T) {
 	assert.Equal(t, "default", cfg2.GetModel("default"))
 }
 
+func TestExtractorAgentConfig_GetMaxRetries(t *testing.T) {
+	assert.Equal(t, 5, (&ExtractorAgentConfig{MaxRetries: 5}).GetMaxRetries())
+	assert.Equal(t, 3, (&ExtractorAgentConfig{}).GetMaxRetries())
+	assert.Equal(t, 3, (&ExtractorAgentConfig{MaxRetries: -1}).GetMaxRetries())
+}
+
 func TestExtractorAgentConfig_GetTimeout(t *testing.T) {
 	tests := []struct {
 		name     string

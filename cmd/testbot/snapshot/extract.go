@@ -40,7 +40,9 @@ type RerankerSpanData struct {
 	FallbackReason string
 	CostUSD        float64
 	LLMCalls       int
+	LLMAttempts    int
 	ToolCalls      int
+	ForcedFinal    bool
 
 	RawQuery                string
 	EnrichedQuery           string
@@ -135,6 +137,10 @@ func (v rawAttrValue) asFloat() float64 {
 	return 0
 }
 
+func (v rawAttrValue) asBool() bool {
+	return v.BoolValue != nil && *v.BoolValue
+}
+
 // ExtractRerankerSpan parses the Tempo trace JSON and pulls the first
 // `reranker.Execute` span into a RerankerSpanData. Returns ErrNoRerankerSpan
 // if the trace contains no such span.
@@ -198,8 +204,12 @@ func buildRerankerSpan(traceID string, sp rawSpan) *RerankerSpanData {
 			out.CostUSD = a.Value.asFloat()
 		case "reranker.llm_calls":
 			out.LLMCalls = int(a.Value.asInt())
+		case "reranker.llm_attempts":
+			out.LLMAttempts = int(a.Value.asInt())
 		case "reranker.tool_calls":
 			out.ToolCalls = int(a.Value.asInt())
+		case "reranker.forced_finalization":
+			out.ForcedFinal = a.Value.asBool()
 		}
 	}
 

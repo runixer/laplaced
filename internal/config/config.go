@@ -250,6 +250,15 @@ func (e *ExtractorAgentConfig) GetModel(defaultModel string) string {
 	return defaultModel
 }
 
+// GetMaxRetries returns the shared retry limit used both when scheduling
+// artifacts and when deciding whether extractor output is on its final attempt.
+func (e *ExtractorAgentConfig) GetMaxRetries() int {
+	if e.MaxRetries > 0 {
+		return e.MaxRetries
+	}
+	return 3
+}
+
 // GetTimeout returns the timeout for artifact processing.
 // Defaults to 2 minutes if not configured.
 func (e *ExtractorAgentConfig) GetTimeout() time.Duration {

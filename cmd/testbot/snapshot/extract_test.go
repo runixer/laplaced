@@ -28,9 +28,11 @@ const sampleTrace = `{
                 {"key": "reranker.model_kept.topics", "value": {"intValue": "2"}},
                 {"key": "reranker.model_raw_count.topics", "value": {"intValue": "2"}},
                 {"key": "reranker.fallback_reason", "value": {"stringValue": ""}},
-                {"key": "reranker.cost_usd", "value": {"doubleValue": 0.0112}},
-                {"key": "reranker.llm_calls", "value": {"intValue": "2"}},
-                {"key": "reranker.tool_calls", "value": {"intValue": "1"}}
+				{"key": "reranker.cost_usd", "value": {"doubleValue": 0.0112}},
+				{"key": "reranker.llm_calls", "value": {"intValue": "2"}},
+				{"key": "reranker.llm_attempts", "value": {"intValue": "2"}},
+				{"key": "reranker.tool_calls", "value": {"intValue": "1"}},
+				{"key": "reranker.forced_finalization", "value": {"boolValue": true}}
               ],
               "events": [
                 {
@@ -84,7 +86,9 @@ func TestExtractRerankerSpan_HappyPath(t *testing.T) {
 	assert.Equal(t, "", sp.FallbackReason)
 	assert.InDelta(t, 0.0112, sp.CostUSD, 1e-9)
 	assert.Equal(t, 2, sp.LLMCalls)
+	assert.Equal(t, 2, sp.LLMAttempts)
 	assert.Equal(t, 1, sp.ToolCalls)
+	assert.True(t, sp.ForcedFinal)
 
 	assert.Equal(t, "what about Qwen MoE swap?", sp.RawQuery)
 	assert.Equal(t, "Qwen 3.6 35B-A3B MoE migration", sp.EnrichedQuery)

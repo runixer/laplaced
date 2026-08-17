@@ -35,6 +35,10 @@ type AgentOutput struct {
 	// numeric parsing (e.g. "Artifact:session") and were therefore dropped.
 	InvalidIDs     []string          `json:"invalid_ids,omitempty"`
 	FallbackReason string            `json:"fallback_reason,omitempty"`
+	ForcedFinal    bool              `json:"forced_finalization,omitempty"`
+	ToolCalls      int               `json:"tool_calls,omitempty"`
+	LLMCalls       int               `json:"llm_calls,omitempty"`
+	LLMAttempts    int               `json:"llm_attempts,omitempty"`
 	CostUSD        float64           `json:"cost_usd,omitempty"`
 	LatencyMs      int64             `json:"latency_ms,omitempty"`
 	Extra          map[string]string `json:"extra,omitempty"`

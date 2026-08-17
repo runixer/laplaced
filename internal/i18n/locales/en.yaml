@@ -807,7 +807,8 @@ extractor:
     - summary: 2-4 sentences, 200-500 characters, descriptive and comprehensive
     - keywords: 5-10 tags, lowercase_with_underscores, relevant for search
     - entities: All named entities (people names, organizations, technologies, products, locations)
-    - rag_hints: 3-5 specific questions the file could answer
+    - rag_hints: a flat JSON array of 3-5 quoted question strings the file could answer
+    - rag_hints must contain only strings: no bullets (- or *), numbering, pseudo-keys, or nested arrays
     - For images: describe visual elements, text content, scene, context
     - For audio: describe topics discussed, speakers, key points (not full transcript)
     - For PDFs: describe document purpose, main topics, key sections (not full text)

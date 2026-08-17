@@ -135,6 +135,7 @@ agents:
     enabled: true
     timeout: "60s"
     turn_timeout: "30s"
+    # Maximum exploration rounds; reaching it triggers one final JSON turn without tools.
     max_tool_calls: 3
     thinking_level: "minimal"
     input_token_budget: 12000

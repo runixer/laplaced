@@ -192,6 +192,13 @@ func ExtractRerankerOutput(resp *agent.Response) AgentOutput {
 		out.CostUSD = *resp.Tokens.Cost
 	}
 	out.LatencyMs = resp.Duration.Milliseconds()
+	if resp.Metadata != nil {
+		out.FallbackReason, _ = resp.Metadata["fallback_reason"].(string)
+		out.ForcedFinal, _ = resp.Metadata["forced_finalization"].(bool)
+		out.ToolCalls, _ = resp.Metadata["tool_calls"].(int)
+		out.LLMCalls, _ = resp.Metadata["llm_calls"].(int)
+		out.LLMAttempts, _ = resp.Metadata["llm_attempts"].(int)
+	}
 
 	r, ok := resp.Structured.(*reranker.Result)
 	if !ok || r == nil {
@@ -230,10 +237,6 @@ func ExtractRerankerOutput(resp *agent.Response) AgentOutput {
 			out.ArtifactReasons[int(id)] = as.Reason
 		}
 	}
-	// reranker.Result doesn't surface the fallback_reason in agent.Response;
-	// it lives only on the OTel trace span. Replay diffs comparing IDs work
-	// fine without it; the Original.FallbackReason (from the captured span)
-	// is the only side that can observe it.
 	return out
 }
 
@@ -246,6 +249,10 @@ func rerankerOriginal(span *snapshot.RerankerSpanData) AgentOutput {
 		PersonReasons:     span.SelectedReasonsP,
 		ArtifactReasons:   span.SelectedReasonsA,
 		FallbackReason:    span.FallbackReason,
+		ForcedFinal:       span.ForcedFinal,
+		ToolCalls:         span.ToolCalls,
+		LLMCalls:          span.LLMCalls,
+		LLMAttempts:       span.LLMAttempts,
 		CostUSD:           span.CostUSD,
 		LatencyMs:         span.DurationMs,
 	}

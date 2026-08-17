@@ -260,7 +260,8 @@ Reranker:
 | Flash вернул валидный JSON после tools | Финальный выбор | Принять |
 | Tool call сделан, JSON невалидный | requestedIDs | Top-5 из requestedIDs |
 | Timeout после tool call | requestedIDs | Top-5 из requestedIDs |
-| 3+ tool calls (лимит) | requestedIDs | Top-5 из requestedIDs |
+| Достигнут лимит exploration | Последний tool result | Один финальный JSON-запрос без tools |
+| Ошибка финального запроса после лимита | requestedIDs | Top-5 из requestedIDs |
 | Timeout до tool call | Ничего | Vector top-5 |
 | Ошибка API | Ничего | Vector top-5 |
 
@@ -314,6 +315,12 @@ Flash обычно ставит более релевантные первыми
 | `laplaced_reranker_cost_usd_total` | counter | user_id | Стоимость reranker |
 | `laplaced_reranker_fallback_total` | counter | user_id, reason | Fallback срабатывания |
 
+На span `reranker.Execute` также записываются `reranker.tool_call_rounds`,
+`reranker.forced_finalization`, `reranker.llm_calls` и
+`reranker.llm_attempts`. Последний атрибут считает вызовы
+`CreateChatCompletion` на уровне reranker; внутренние HTTP-retry клиента
+отдельно отражаются в `llm.attempts`.
+
 ## Конфигурация
 
 Reranker настраивается в секции `agents.reranker` (см. `internal/config/default.yaml`):
@@ -325,7 +332,8 @@ agents:
     model: "google/gemini-3.1-flash-lite"
     timeout: "60s"              # timeout на весь reranker flow
     turn_timeout: "30s"         # timeout на каждый LLM вызов
-    max_tool_calls: 3           # максимум tool calls
+    # Максимум exploration-раундов; затем ровно один JSON-запрос без tools.
+    max_tool_calls: 3
     thinking_level: "minimal"   # reasoning effort: minimal/low/medium/high
 
     # Per-type limits (v0.6.0)
@@ -382,22 +390,21 @@ vector search** — с маркером приоритета `(session)`. Rerank
 - **Context reduction:** Для гигантских топиков (>25K chars) контекст сократится ещё больше
 - **Quality monitoring:** Можно анализировать reasons для улучшения промптов
 
-### v0.4.3 Protocol Enforcement
+### Tool protocol и финализация
 
-**Forced Tool Calling:**
-- На первой итерации используется `tool_choice: {type: "function", function: {name: "get_topics_content"}}`
-- Flash ОБЯЗАН вызвать tool перед возвратом результата — это гарантия изучения контента
-- Gemini API ограничение: `tool_choice` несовместим с `response_format: json_object`
-- Решение: `response_format` включается только после первого tool call
+**Tool Calling:**
+- На первой итерации используется `tool_choice: "auto"`; валидный прямой JSON-ответ тоже принимается.
+- Каждый assistant `tool_call` немедленно получает ровно один ordered `tool` result с тем же ID, включая ошибки аргументов и неизвестные tools.
+- `max_tool_calls` ограничивает exploration-раунды. После последнего результата выполняется ровно один запрос с `response_format: json_object`, без `tools` и `tool_choice`.
+- Неожиданный tool call в этом финальном запросе не исполняется и завершает flow через bounded `protocol_violation` fallback.
 
 **Reasoning Mode:**
 - Включён `reasoning.effort: "low"` для улучшения качества tool calls
 - Gemini 2.5+ модели используют internal thinking перед ответом
 
 **Protocol Violation Detection:**
-- Если Flash возвращает ответ без tool calls → fallback на vector top
-- Метрика: `laplaced_reranker_fallback_total{reason="protocol_violation"}`
-- Safety net на случай если `tool_choice` не сработает
+- Пустые/повторяющиеся provider tool-call IDs не переиспользуются в следующем запросе.
+- Метрика: `laplaced_reranker_fallback_total{reason="protocol_violation"}`.
 
 **Query Enrichment Fix:**
 - Добавлено правило "НЕ УГАДЫВАЙ" в enrichment prompt

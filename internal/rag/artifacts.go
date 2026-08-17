@@ -113,10 +113,7 @@ func (s *Service) processArtifactExtraction(ctx context.Context) {
 		}
 
 		// Get pending artifacts including retriable failed ones (v0.6.0 - CRIT-3)
-		maxRetries := s.cfg.Agents.Extractor.MaxRetries
-		if maxRetries <= 0 {
-			maxRetries = 3
-		}
+		maxRetries := s.cfg.Agents.Extractor.GetMaxRetries()
 		artifacts, err := s.artifactRepo.GetPendingArtifacts(userID, maxRetries)
 		if err != nil {
 			s.logger.Error("failed to get pending artifacts", "user_id", userID, "error", err)

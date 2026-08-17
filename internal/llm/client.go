@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand/v2"
 	"net"
@@ -245,6 +246,15 @@ func isRetryableStatusCode(statusCode int) bool {
 func isRetryableError(err error) bool {
 	if err == nil {
 		return false
+	}
+
+	// A peer can close an HTTP/1 response before the declared body length or
+	// tear down an HTTP/2 connection while a request is awaiting headers. The
+	// latter is surfaced by http.Client as a *url.Error, so use errors.Is to
+	// follow the wrapper chain instead of comparing either the concrete type or
+	// error text.
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+		return true
 	}
 
 	// Check for timeout errors

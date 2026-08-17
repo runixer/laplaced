@@ -76,24 +76,23 @@ func makeChatResponse(content string) llm.ChatCompletionResponse {
 
 // makeToolCallResponse creates a response with a tool call.
 func makeToolCallResponse(toolName, arguments string) llm.ChatCompletionResponse {
+	return makeToolCallsResponse(makeToolCall("call_123", toolName, arguments))
+}
+
+func makeToolCall(id, toolName, arguments string) llm.ToolCall {
+	call := llm.ToolCall{ID: id, Type: "function"}
+	call.Function.Name = toolName
+	call.Function.Arguments = arguments
+	return call
+}
+
+func makeToolCallsResponse(calls ...llm.ToolCall) llm.ChatCompletionResponse {
 	return llm.ChatCompletionResponse{
 		Choices: []llm.ResponseChoice{
 			{
 				Message: llm.ResponseMessage{
-					Role: "assistant",
-					ToolCalls: []llm.ToolCall{
-						{
-							ID:   "call_123",
-							Type: "function",
-							Function: struct {
-								Name      string `json:"name"`
-								Arguments string `json:"arguments"`
-							}{
-								Name:      toolName,
-								Arguments: arguments,
-							},
-						},
-					},
+					Role:      "assistant",
+					ToolCalls: calls,
 				},
 			},
 		},

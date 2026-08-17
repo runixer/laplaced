@@ -135,6 +135,7 @@ func (ex *Extractor) Execute(ctx context.Context, req *agent.Request) (response 
 		parseError      bool
 		embeddingFailed bool
 		jsonRepaired    bool
+		ragHintsDropped bool
 		emptyRetry      bool
 	)
 	defer func() {
@@ -142,6 +143,7 @@ func (ex *Extractor) Execute(ctx context.Context, req *agent.Request) (response 
 			attribute.Bool("extractor.parse_error", parseError),
 			attribute.Bool("extractor.embedding_failed", embeddingFailed),
 			attribute.Bool("extractor.json_repaired", jsonRepaired),
+			attribute.Bool("extractor.rag_hints_dropped", ragHintsDropped),
 			attribute.Bool("extractor.empty_retry", emptyRetry),
 		)
 		_ = obs.ObserveErr(span, err)
@@ -192,11 +194,12 @@ func (ex *Extractor) Execute(ctx context.Context, req *agent.Request) (response 
 	model := ex.cfg.Agents.Extractor.GetModel("google/gemini-3-flash-preview")
 
 	llmReq := agent.SingleShotRequest{
-		AgentType: agent.TypeExtractor,
-		UserID:    userID,
-		Model:     model,
-		Messages:  messages,
-		JSONMode:  true,
+		AgentType:  agent.TypeExtractor,
+		UserID:     userID,
+		Model:      model,
+		Messages:   messages,
+		JSONMode:   true,
+		JSONSchema: ex.buildJSONSchema(),
 	}
 
 	llmResp, err := ex.executor.ExecuteSingleShot(ctx, llmReq)
@@ -209,7 +212,10 @@ func (ex *Extractor) Execute(ctx context.Context, req *agent.Request) (response 
 	// Step 6: Parse extraction result (metadata only)
 	emptyRetry, _ = llmResp.Metadata["empty_retry"].(bool)
 	var extraction ExtractionResult
-	jsonRepaired, err = agent.UnmarshalLenient(llmResp.Content, &extraction)
+	extraction, jsonRepaired, ragHintsDropped, err = parseExtractionResult(
+		llmResp.Content,
+		ex.isTerminalAttempt(artifact),
+	)
 	if err != nil {
 		parseError = true
 		err = fmt.Errorf("failed to parse extraction JSON: %w", err)
@@ -283,6 +289,46 @@ func (ex *Extractor) Execute(ctx context.Context, req *agent.Request) (response 
 			"artifact_id": artifactID,
 		},
 	}, nil
+}
+
+// buildJSONSchema constrains the model to the canonical flat metadata shape.
+// Runtime parsing remains tolerant because providers can occasionally return a
+// response that was generated without enforcing the advertised schema.
+func (ex *Extractor) buildJSONSchema() *llm.JSONSchema {
+	stringArray := func(description string) map[string]interface{} {
+		return map[string]interface{}{
+			"type":        "array",
+			"description": description,
+			"items": map[string]interface{}{
+				"type": "string",
+			},
+		}
+	}
+
+	return &llm.JSONSchema{
+		Name:   "artifact_metadata",
+		Strict: true,
+		Schema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"summary": map[string]interface{}{
+					"type":        "string",
+					"description": "Detailed description of the file for semantic search.",
+				},
+				"keywords": stringArray("Discovery keywords for the file."),
+				"entities": stringArray("Named entities mentioned in the file."),
+				"rag_hints": stringArray(
+					"Questions the file can answer, as plain strings without list decoration.",
+				),
+			},
+			"required":             []string{"summary", "keywords", "entities", "rag_hints"},
+			"additionalProperties": false,
+		},
+	}
+}
+
+func (ex *Extractor) isTerminalAttempt(artifact *storage.Artifact) bool {
+	return artifact.RetryCount+1 >= ex.cfg.Agents.Extractor.GetMaxRetries()
 }
 
 // generateSummaryEmbedding creates embedding for summary text for vector search.

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -374,6 +375,12 @@ func (e *timeoutError) Error() string   { return "timeout" }
 func (e *timeoutError) Timeout() bool   { return true }
 func (e *timeoutError) Temporary() bool { return true }
 
+type llmRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f llmRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func TestIsRetryableError(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -388,6 +395,48 @@ func TestIsRetryableError(t *testing.T) {
 		{
 			name:     "generic error",
 			err:      errors.New("some error"),
+			expected: false,
+		},
+		{
+			name:     "unexpected EOF",
+			err:      io.ErrUnexpectedEOF,
+			expected: true,
+		},
+		{
+			name: "url-wrapped unexpected EOF",
+			err: &url.Error{
+				Op:  "Post",
+				URL: "https://openrouter.ai/api/v1/embeddings",
+				Err: io.ErrUnexpectedEOF,
+			},
+			expected: true,
+		},
+		{
+			name: "multiply wrapped unexpected EOF",
+			err: fmt.Errorf("request failed: %w", &url.Error{
+				Op:  "Post",
+				URL: "https://openrouter.ai/api/v1/embeddings",
+				Err: io.ErrUnexpectedEOF,
+			}),
+			expected: true,
+		},
+		{
+			name:     "EOF",
+			err:      io.EOF,
+			expected: true,
+		},
+		{
+			name: "url-wrapped EOF",
+			err: &url.Error{
+				Op:  "Post",
+				URL: "https://openrouter.ai/api/v1/embeddings",
+				Err: io.EOF,
+			},
+			expected: true,
+		},
+		{
+			name:     "same text without sentinel",
+			err:      errors.New("unexpected EOF"),
 			expected: false,
 		},
 		{
@@ -599,6 +648,87 @@ func TestCreateEmbeddingsRetry(t *testing.T) {
 	resp, err := client.CreateEmbeddings(context.Background(), req)
 	assert.NoError(t, err)
 	assert.Equal(t, 3, attempts)
+	assert.Len(t, resp.Data, 1)
+}
+
+func TestCreateEmbeddingsRetriesURLWrappedUnexpectedEOF(t *testing.T) {
+	attempts := 0
+	transport := llmRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		assert.Equal(t, http.MethodPost, req.Method)
+		assert.Equal(t, "/api/v1/embeddings", req.URL.Path)
+		if attempts == 1 {
+			return nil, io.ErrUnexpectedEOF
+		}
+
+		body := `{"object":"list","data":[{"object":"embedding","embedding":[0.1,0.2],"index":0}],"model":"text-embedding-model"}`
+		return &http.Response{
+			Status:        "200 OK",
+			StatusCode:    http.StatusOK,
+			Header:        make(http.Header),
+			Body:          io.NopCloser(bytes.NewBufferString(body)),
+			ContentLength: int64(len(body)),
+			Request:       req,
+		}, nil
+	})
+
+	client := &clientImpl{
+		httpClient:    &http.Client{Transport: transport},
+		apiKey:        "test_api_key",
+		apiEndpoint:   "https://openrouter.test/api/v1",
+		logger:        slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		genAISystem:   "openai",
+		serverAddress: "openrouter.test",
+	}
+
+	resp, err := client.CreateEmbeddings(context.Background(), EmbeddingRequest{
+		Model: "text-embedding-model",
+		Input: []string{"test"},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, 2, attempts, "the *url.Error produced by http.Client.Do must consume one retry")
+	assert.Len(t, resp.Data, 1)
+}
+
+func TestCreateEmbeddingsRetriesShortResponseBody(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		w.Header().Set("Content-Type", "application/json")
+		if attempts == 1 {
+			// Declaring more bytes than are written makes net/http surface
+			// io.ErrUnexpectedEOF from io.ReadAll(resp.Body).
+			w.Header().Set("Content-Length", "256")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, `{"object":"list","data":[`)
+			return
+		}
+
+		_ = json.NewEncoder(w).Encode(EmbeddingResponse{
+			Object: "list",
+			Data: []EmbeddingObject{
+				{Object: "embedding", Embedding: []float32{0.1, 0.2}, Index: 0},
+			},
+			Model: "text-embedding-model",
+		})
+	}))
+	defer server.Close()
+
+	client, err := NewClient(
+		slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		"test_api_key",
+		"",
+		server.URL+"/api/v1",
+		nil,
+	)
+	assert.NoError(t, err)
+
+	resp, err := client.CreateEmbeddings(context.Background(), EmbeddingRequest{
+		Model: "text-embedding-model",
+		Input: []string{"test"},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, 2, attempts, "a short response body must consume one retry")
 	assert.Len(t, resp.Data, 1)
 }
 

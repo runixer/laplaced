@@ -552,7 +552,7 @@ func (s *Service) rerankViaAgent(
 	duration := time.Since(startTime).Seconds()
 	RecordRerankerDuration(userID, duration)
 	RecordRerankerCandidatesOutput(userID, len(result.Topics))
-	// Internal fallbacks (model_empty, max_tool_calls, ...) return a valid
+	// Internal fallbacks (model_empty, llm_error, ...) return a valid
 	// result, not an error — without this only hard agent errors were counted
 	// and the documented per-reason metric never materialized.
 	fallbackReason, _ := resp.Metadata["fallback_reason"].(string)

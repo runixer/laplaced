@@ -10,7 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agentlog"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 )
 
@@ -19,16 +21,43 @@ type MessageRepository interface {
 	GetMessagesByTopicID(ctx context.Context, topicID int64) ([]storage.Message, error)
 }
 
+func validateToolCallIDs(calls []llm.ToolCall) error {
+	seen := make(map[string]struct{}, len(calls))
+	for i, call := range calls {
+		if call.ID == "" {
+			return fmt.Errorf("tool call %d has an empty ID", i)
+		}
+		if _, duplicate := seen[call.ID]; duplicate {
+			return fmt.Errorf("tool call %d repeats a previous ID", i)
+		}
+		seen[call.ID] = struct{}{}
+	}
+	return nil
+}
+
 // parseToolCallIDs extracts topic IDs from tool call arguments.
-// Expected JSON format: {"topic_ids": [42, 18, 5]}
+// The schema advertises integer IDs, but the tolerant decoder also accepts the
+// prefixed IDs the model sees in the prompt (for example "Topic:42").
 func parseToolCallIDs(arguments string) ([]int64, error) {
 	var args struct {
-		TopicIDs []int64 `json:"topic_ids"`
+		TopicIDs []agent.FlexID `json:"topic_ids"`
 	}
 	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
 		return nil, fmt.Errorf("failed to parse tool call arguments: %w", err)
 	}
-	return args.TopicIDs, nil
+	if args.TopicIDs == nil {
+		return nil, nil
+	}
+
+	ids := make([]int64, len(args.TopicIDs))
+	for i, rawID := range args.TopicIDs {
+		id, err := parseTopicID(string(rawID))
+		if err != nil {
+			return nil, fmt.Errorf("invalid topic_ids[%d]: %w", i, err)
+		}
+		ids[i] = id
+	}
+	return ids, nil
 }
 
 // loadTopicsContent loads full topic content for tool call response.

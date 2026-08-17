@@ -16,6 +16,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/config"
+	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/testutil"
 )
 
@@ -78,7 +79,10 @@ func TestReranker_RecordsSpan_EarlyFallback(t *testing.T) {
 	assert.Equal(t, "7777", attrs["user.id"].AsString())
 	assert.Equal(t, int64(0), attrs["reranker.tool_calls"].AsInt64(),
 		"no tool calls in early-fallback path")
+	assert.Equal(t, int64(0), attrs["reranker.tool_call_rounds"].AsInt64())
 	assert.Equal(t, int64(0), attrs["reranker.llm_calls"].AsInt64())
+	assert.Equal(t, int64(0), attrs["reranker.llm_attempts"].AsInt64())
+	assert.False(t, attrs["reranker.forced_finalization"].AsBool())
 	assert.Equal(t, float64(0), attrs["reranker.cost_usd"].AsFloat64())
 	assert.Equal(t, int64(0), attrs["reranker.candidates_in.topics"].AsInt64())
 	assert.Equal(t, int64(0), attrs["reranker.model_raw_count.topics"].AsInt64())
@@ -101,6 +105,7 @@ func TestReranker_RecordsModelRawCounts_EmptyResponse(t *testing.T) {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	cfg := testConfig()
+	cfg.Agents.Reranker.MaxToolCalls = 1
 	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	translator := testutil.TestTranslator(t)
@@ -150,8 +155,12 @@ func TestReranker_RecordsModelRawCounts_EmptyResponse(t *testing.T) {
 
 	assert.Equal(t, int64(1), attrs["reranker.tool_calls"].AsInt64(),
 		"one tool round-trip happened")
+	assert.Equal(t, int64(1), attrs["reranker.tool_call_rounds"].AsInt64())
 	assert.Equal(t, int64(2), attrs["reranker.llm_calls"].AsInt64(),
 		"two LLM calls: tool round-trip + final response")
+	assert.Equal(t, int64(2), attrs["reranker.llm_attempts"].AsInt64())
+	assert.True(t, attrs["reranker.forced_finalization"].AsBool(),
+		"the final response was requested after exhausting the exploration budget")
 	assert.Equal(t, int64(0), attrs["reranker.model_raw_count.topics"].AsInt64(),
 		"model returned empty topic_ids — this is the signal to distinguish refusal from hallucination")
 	assert.Equal(t, int64(0), attrs["reranker.model_raw_count.people"].AsInt64())
@@ -189,6 +198,48 @@ func TestReranker_RecordsModelRawCounts_EmptyResponse(t *testing.T) {
 	assert.True(t, foundModelResponseEvent, "reranker.model_response event must surface raw/kept/hallucinated IDs")
 
 	mockClient.AssertExpectations(t)
+}
+
+func TestReranker_RecordsFailedForcedFinalAttempt(t *testing.T) {
+	getSpans := testutil.WithTracingCapture(t)
+	cfg := testConfig()
+	cfg.Agents.Reranker.MaxToolCalls = 1
+	mockClient := &testutil.MockLLMClient{}
+	mockStorage := &testutil.MockStorage{}
+	r := New(mockClient, cfg, testutil.TestLogger(), testutil.TestTranslator(t), mockStorage, nil)
+
+	candidates := []Candidate{{TopicID: 1, Score: 0.9, Topic: mockTopic(1, "Topic 1")}}
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(makeToolCallResponse("get_topics_content", `{"topic_ids":[1]}`), nil).Once()
+	mockStorage.On("GetMessagesByTopicID", mock.Anything, int64(1)).
+		Return(mockMessagesForTopic(1), nil).Once()
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(llm.ChatCompletionResponse{}, assert.AnError).Once()
+
+	resp, err := r.Execute(context.Background(), &agent.Request{
+		Params: map[string]any{
+			ParamCandidates:          candidates,
+			ParamContextualizedQuery: "ctx",
+			ParamOriginalQuery:       "orig",
+			ParamCurrentMessages:     "msgs",
+		},
+		Shared: &agent.SharedContext{UserID: "123"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "llm_error", resp.Metadata["fallback_reason"])
+
+	spans := getSpans()
+	require.Len(t, spans, 1)
+	attrs := map[attribute.Key]attribute.Value{}
+	for _, kv := range spans[0].Attributes {
+		attrs[kv.Key] = kv.Value
+	}
+	assert.True(t, attrs["reranker.forced_finalization"].AsBool())
+	assert.Equal(t, int64(1), attrs["reranker.tool_call_rounds"].AsInt64())
+	assert.Equal(t, int64(1), attrs["reranker.llm_calls"].AsInt64(),
+		"completed calls exclude the failed final request")
+	assert.Equal(t, int64(2), attrs["reranker.llm_attempts"].AsInt64(),
+		"attempts include the failed forced-final request")
 }
 
 // TestReranker_RecordsModelResponseEvent_Hallucination verifies that when the
