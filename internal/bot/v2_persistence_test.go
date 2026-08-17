@@ -98,7 +98,7 @@ func TestV2SplitRichDelivery_PersistsEveryIDAndResolvesSecondaryReaction(t *test
 	assert.Equal(t, historyID, *flags[0].HistoryID)
 }
 
-func TestV2GeneratedGalleryHighResolutionSidecars_PersistEveryIDAndArtifact(t *testing.T) {
+func TestV2GeneratedGallerySizeAlonePersistsPreviewAndArtifacts(t *testing.T) {
 	const conversationID = "123"
 	userID := storage.PassthroughScopeID(transportTelegram, conversationID)
 	store := newV2PersistenceStore(t)
@@ -109,8 +109,7 @@ func TestV2GeneratedGalleryHighResolutionSidecars_PersistEveryIDAndArtifact(t *t
 	cfg := testutil.TestConfig()
 	cfg.Transport = transportTelegram
 	cfg.Telegram.RichMessages.Mode = config.TelegramRichMessagesSend
-	// The fixture remains a valid Telegram Photo, but this threshold also asks
-	// V2 to preserve each byte-identical original as a Document sidecar.
+	// The legacy threshold must not infer an original-file request.
 	cfg.Agents.ImageGenerator.DocumentThresholdBytes = len(generatedTestPNG) - 1
 	bot := &Bot{
 		cfg:        cfg,
@@ -150,27 +149,22 @@ func TestV2GeneratedGalleryHighResolutionSidecars_PersistEveryIDAndArtifact(t *t
 	require.Equal(t, richDeliveryConfirmed, result.outcome)
 	require.True(t, result.persisted)
 	require.Positive(t, result.deliveryID)
-	require.Equal(t, []string{"rich-gallery", "original", "original-2"}, result.confirmedIDs)
+	require.Equal(t, []string{"rich-gallery"}, result.confirmedIDs)
 	require.Len(t, transport.richMedia, 1)
 	require.Len(t, transport.richMedia[0].Items, 2)
 	richBody := strings.Join(transport.richMedia[0].HTMLParts, "")
 	assert.Contains(t, richBody, "<h1>Generated gallery</h1>")
 	assert.NotContains(t, richBody, "<img", "trusted gallery layout is injected at the Telegram wire boundary")
-	require.Len(t, transport.media, 1)
-	require.Len(t, transport.media[0].Items, 2)
-	assert.True(t, transport.media[0].Items[0].AsDocument)
-	assert.True(t, transport.media[0].Items[1].AsDocument)
+	assert.Empty(t, transport.media)
 
 	delivery, operations, err := store.GetOutboundDelivery(result.deliveryID)
 	require.NoError(t, err)
 	require.NotNil(t, delivery)
 	require.NotNil(t, delivery.HistoryID)
 	assert.Equal(t, storage.DeliveryStatusConfirmed, delivery.Status)
-	require.Len(t, operations, 2)
+	require.Len(t, operations, 1)
 	assert.Equal(t, storage.DeliveryOperationRichMedia, operations[0].Kind)
 	assert.Equal(t, []string{"rich-gallery"}, operations[0].TransportMessageIDs)
-	assert.Equal(t, storage.DeliveryOperationMedia, operations[1].Kind)
-	assert.Equal(t, []string{"original", "original-2"}, operations[1].TransportMessageIDs)
 
 	historyID := *delivery.HistoryID
 	for _, messageID := range result.confirmedIDs {

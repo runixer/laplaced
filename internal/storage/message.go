@@ -163,6 +163,7 @@ func (s *Store) ClearHistory(userID ScopeID) error {
 			(SELECT id FROM outbound_deliveries WHERE user_id = ?)`,
 		`DELETE FROM outbound_deliveries WHERE user_id = ?`,
 		`DELETE FROM history_transport_messages WHERE user_id = ?`,
+		`DELETE FROM history_artifact_refs WHERE user_id = ?`,
 		`DELETE FROM history WHERE user_id = ?`,
 	}
 	for _, query := range queries {

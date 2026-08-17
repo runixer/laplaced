@@ -18,7 +18,6 @@ import (
 
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agent/laplace"
-	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/obs"
@@ -451,17 +450,30 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		cancelTyping()
 	}
 
-	// Build request
+	// Build request. Only the private rich-send capability receives the
+	// application-authored current-artifact inventory; current attachment bytes
+	// remain automatic generate_image inputs, while their IDs may be selected by
+	// send_artifacts without ever trusting user-authored numeric text.
+	richOutput := path.artifactDeliveryEligible()
+	requestParts := append([]interface{}(nil), currentUserMessageContent...)
+	var trustedArtifactIDs []int64
+	if richOutput {
+		if inventory, ids := currentArtifactInventory(allProcessedFiles); inventory != "" {
+			requestParts = append(requestParts, llm.TextPart{Type: "text", Text: inventory})
+			trustedArtifactIDs = ids
+		}
+	}
 	req := &laplace.Request{
 		UserID:              userID,
 		HistoryContent:      historyContent,
 		RawQuery:            rawQuery,
-		CurrentMessageParts: currentUserMessageContent,
+		CurrentMessageParts: requestParts,
 		ChatID:              path.tgChatID,
 		MessageThreadID:     path.tgThreadID,
 		ReplyToMsgID:        path.tgReplyID,
 		UseStreaming:        path.usesStreaming(),
-		RichOutput:          path.effectiveRichMode() == config.TelegramRichMessagesSend,
+		RichOutput:          richOutput,
+		TrustedArtifactIDs:  trustedArtifactIDs,
 		OnIntermediateMessage: func(text string) {
 			if path.usesRichDraft() {
 				// Pre-tool model chatter is already visible in the ephemeral
@@ -582,8 +594,36 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		)
 	}
 
-	// Branch: if the turn produced generated images, route through the
-	// media-aware reply path. Otherwise keep the text-only path.
+	// Typed artifact intent (new generated outputs and/or stored selections)
+	// shares one immutable private-chat delivery plan and one ledger. The legacy
+	// generated-ID branch remains only as backward compatibility for old handlers.
+	if path.artifactDeliveryEligible() && (len(resp.GeneratedArtifacts) > 0 || len(resp.SelectedArtifacts) > 0) {
+		path.flushSinkBeforeMedia(shutdownSafeCtx, resp.Content)
+		result := b.sendResponseWithArtifacts(
+			shutdownSafeCtx, path, chanThreadRoot, resp.Content,
+			resp.GeneratedArtifacts, resp.SelectedArtifacts, resp.GeneratedArtifactIDs, logger,
+		)
+		path.tgDuration += result.duration
+		path.tgCalls += result.attempts
+		if result.outcome != richDeliveryConfirmed || !result.persisted {
+			botHadErrors = true
+			botErrorKinds = append(botErrorKinds, "transport_delivery")
+			if result.err != nil {
+				span.RecordError(result.err)
+			}
+			span.SetStatus(codes.Error, "artifact delivery "+string(result.outcome))
+			span.SetAttributes(attribute.Bool("bot.reply_failed", true))
+			return
+		}
+		obs.RecordContent(span, "bot.reply_sent", resp.Content,
+			attribute.Int("generated_artifacts", len(resp.GeneratedArtifacts)),
+			attribute.Int("selected_artifacts", len(resp.SelectedArtifacts)))
+		success = true
+		return
+	}
+
+	// Backward-compatible media path for a custom/older ToolHandler that only
+	// supplies raw generated IDs and no typed delivery intent.
 	if len(resp.GeneratedArtifactIDs) > 0 {
 		path.flushSinkBeforeMedia(shutdownSafeCtx, resp.Content)
 		result := b.sendResponseWithGeneratedImages(

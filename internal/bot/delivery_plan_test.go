@@ -40,7 +40,8 @@ func (t *recordingRichMediaDeliveryTransport) SendRichMedia(_ context.Context, m
 
 func validRichMediaItem() OutgoingMediaItem {
 	return OutgoingMediaItem{
-		Data: append([]byte(nil), generatedTestPNG...), Filename: "generated.png", MIME: "image/png", SourceOrdinal: 4,
+		Data: append([]byte(nil), generatedTestPNG...), Filename: "generated.png", MIME: "image/png",
+		WireKind: OutgoingMediaWireKindPhoto, SourceOrdinal: 4,
 	}
 }
 

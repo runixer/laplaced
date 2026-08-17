@@ -10,6 +10,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/runixer/laplaced/internal/artifactdelivery"
 )
 
 // Postgres integration tests. Skipped unless LAPLACED_TEST_PG_DSN is set:
@@ -40,6 +42,7 @@ func openTestPG(t *testing.T) *Store {
 	}
 	// Clean slate: drop every table this schema creates, then re-init.
 	for _, tbl := range []string{
+		"history_artifact_refs",
 		"outbound_delivery_messages", "outbound_delivery_ops", "outbound_deliveries",
 		"history_transport_messages", "response_flags",
 		"users", "history", "stats", "rag_logs", "topics", "memory_bank",
@@ -133,6 +136,25 @@ func TestPostgresRoundTrip(t *testing.T) {
 func TestPostgresRichDeliveryRoundTrip(t *testing.T) {
 	store := openTestPG(t)
 	scope := PassthroughScopeID("telegram", "rich-delivery-user")
+	creatorHistoryID, err := store.AddMessageToHistoryReturningID(scope,
+		Message{Role: "user", Content: "stored artifact creator"})
+	if err != nil {
+		t.Fatalf("AddMessageToHistoryReturningID: %v", err)
+	}
+	storedArtifactID, err := store.AddArtifact(Artifact{
+		UserID: scope, MessageID: creatorHistoryID, FileType: "pdf", FilePath: "stored/report.pdf",
+		FileSize: 100, MimeType: "application/pdf", OriginalName: "report.pdf", ContentHash: "pg-stored", State: "ready",
+	})
+	if err != nil {
+		t.Fatalf("AddArtifact(stored): %v", err)
+	}
+	generatedArtifactID, err := store.AddArtifact(Artifact{
+		UserID: scope, MessageID: 0, FileType: "image", FilePath: "generated/image.png",
+		FileSize: 200, MimeType: "image/png", OriginalName: "image.png", ContentHash: "pg-generated", State: "ready",
+	})
+	if err != nil {
+		t.Fatalf("AddArtifact(generated): %v", err)
+	}
 
 	deliveryID, err := store.CreateOutboundDelivery(OutboundDelivery{
 		UserID: scope, Transport: "telegram", ConversationID: "chat-42",
@@ -158,8 +180,14 @@ func TestPostgresRichDeliveryRoundTrip(t *testing.T) {
 		t.Fatalf("CompleteOutboundDeliveryOperation(1): %v", err)
 	}
 
-	historyID, err := store.PersistOutboundDeliveryReply(scope, deliveryID,
-		Message{Role: "assistant", Content: "postgres rich reply"}, nil)
+	historyID, err := store.PersistOutboundDeliveryReplyWithArtifacts(scope, deliveryID,
+		Message{Role: "assistant", Content: "postgres rich reply"}, PersistOutboundArtifacts{
+			OwnedArtifactIDs: []int64{generatedArtifactID},
+			References: []OutboundArtifactReference{
+				{ArtifactID: generatedArtifactID, Ordinal: 0, Mode: artifactdelivery.ModePreview, Source: ArtifactReferenceSourceGenerated},
+				{ArtifactID: storedArtifactID, Ordinal: 1, Mode: artifactdelivery.ModeOriginal, Source: ArtifactReferenceSourceStored},
+			},
+		})
 	if err != nil {
 		t.Fatalf("PersistOutboundDeliveryReply: %v", err)
 	}
@@ -178,6 +206,18 @@ func TestPostgresRichDeliveryRoundTrip(t *testing.T) {
 	}
 	if delivery.Status != DeliveryStatusConfirmed || delivery.ConfirmedCount != 2 || len(operations) != 2 {
 		t.Fatalf("delivery round trip mismatch: delivery=%+v operations=%+v", delivery, operations)
+	}
+	generatedArtifact, err := store.GetArtifact(scope, generatedArtifactID)
+	if err != nil || generatedArtifact.MessageID != historyID {
+		t.Fatalf("generated artifact owner = %+v, err=%v; want history %d", generatedArtifact, err, historyID)
+	}
+	storedArtifact, err := store.GetArtifact(scope, storedArtifactID)
+	if err != nil || storedArtifact.MessageID != creatorHistoryID {
+		t.Fatalf("stored artifact provenance = %+v, err=%v; want history %d", storedArtifact, err, creatorHistoryID)
+	}
+	references, err := store.GetHistoryArtifactReferences(scope, historyID)
+	if err != nil || len(references) != 2 || references[0].ArtifactID != generatedArtifactID || references[1].ArtifactID != storedArtifactID {
+		t.Fatalf("artifact references = %+v, err=%v", references, err)
 	}
 }
 

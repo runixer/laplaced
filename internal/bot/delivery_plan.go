@@ -177,6 +177,11 @@ func validatePersistentMediaItem(item OutgoingMediaItem) error {
 	if _, _, err := mime.ParseMediaType(strings.TrimSpace(item.MIME)); err != nil {
 		return fmt.Errorf("invalid MIME type: %w", err)
 	}
+	switch item.WireKind {
+	case OutgoingMediaWireKindLegacy, OutgoingMediaWireKindPhoto, OutgoingMediaWireKindDocument:
+	default:
+		return fmt.Errorf("unsupported media wire kind %q", item.WireKind)
+	}
 	return nil
 }
 
@@ -186,6 +191,63 @@ func persistentMediaType(item OutgoingMediaItem) string {
 		return ""
 	}
 	return strings.ToLower(mediaType)
+}
+
+// resolvedTelegramMediaWireKind gives an explicit wire choice precedence over
+// every legacy heuristic. This is the compatibility boundary that lets V2
+// delivery plans promise Photo even when the payload exceeds the historical
+// document threshold, while old callers with a zero WireKind remain unchanged.
+func resolvedTelegramMediaWireKind(item OutgoingMediaItem, threshold int) OutgoingMediaWireKind {
+	if item.WireKind != OutgoingMediaWireKindLegacy {
+		return item.WireKind
+	}
+	if item.AsDocument || (threshold > 0 && len(item.Data) > threshold) {
+		return OutgoingMediaWireKindDocument
+	}
+	return OutgoingMediaWireKindPhoto
+}
+
+func validateTelegramDocumentSize(size int) error {
+	if size > telegramDocumentMaxBytes {
+		return fmt.Errorf("has %d bytes, limit is %d", size, telegramDocumentMaxBytes)
+	}
+	return nil
+}
+
+// validateTelegramPersistentMediaBatch validates the complete one-call media
+// operation before the delivery ledger can enter its non-idempotent sending
+// state. Telegram albums cannot mix InputMediaPhoto and InputMediaDocument.
+func validateTelegramPersistentMediaBatch(items []OutgoingMediaItem, threshold int) (OutgoingMediaWireKind, error) {
+	if len(items) == 0 || len(items) > 10 {
+		return OutgoingMediaWireKindLegacy, fmt.Errorf("requires 1-10 items, got %d", len(items))
+	}
+
+	var batchKind OutgoingMediaWireKind
+	for i, item := range items {
+		if err := validatePersistentMediaItem(item); err != nil {
+			return OutgoingMediaWireKindLegacy, fmt.Errorf("item %d: %w", i, err)
+		}
+		kind := resolvedTelegramMediaWireKind(item, threshold)
+		if i == 0 {
+			batchKind = kind
+		} else if kind != batchKind {
+			return OutgoingMediaWireKindLegacy, fmt.Errorf("mixes photo and document at index %d", i)
+		}
+
+		switch kind {
+		case OutgoingMediaWireKindDocument:
+			if err := validateTelegramDocumentSize(len(item.Data)); err != nil {
+				return OutgoingMediaWireKindLegacy, fmt.Errorf("document item %d %w", i, err)
+			}
+		case OutgoingMediaWireKindPhoto:
+			if !strings.HasPrefix(persistentMediaType(item), "image/") || !generatedPhotoCanBePreviewed(item) {
+				return OutgoingMediaWireKindLegacy, fmt.Errorf("photo item %d is outside the Telegram photo envelope", i)
+			}
+		default:
+			return OutgoingMediaWireKindLegacy, fmt.Errorf("item %d has unsupported media wire kind %q", i, kind)
+		}
+	}
+	return batchKind, nil
 }
 
 func outcomeAfterFailure(confirmed int, err error) richDeliveryOutcome {
@@ -353,19 +415,8 @@ func validateTelegramDeliveryOperation(op deliveryOperation, threshold int) erro
 		}
 	}
 	if op.Media != nil {
-		firstDocument := op.Media.Items[0].AsDocument || (threshold > 0 && len(op.Media.Items[0].Data) > threshold)
-		for i, item := range op.Media.Items {
-			asDocument := item.AsDocument || (threshold > 0 && len(item.Data) > threshold)
-			if asDocument != firstDocument {
-				return fmt.Errorf("media operation mixes photo and document at index %d", i)
-			}
-			if asDocument {
-				if len(item.Data) > telegramDocumentMaxBytes {
-					return fmt.Errorf("document item %d has %d bytes, limit is %d", i, len(item.Data), telegramDocumentMaxBytes)
-				}
-			} else if !strings.HasPrefix(persistentMediaType(item), "image/") || !generatedPhotoCanBePreviewed(item) {
-				return fmt.Errorf("photo item %d is outside the Telegram photo envelope", i)
-			}
+		if _, err := validateTelegramPersistentMediaBatch(op.Media.Items, threshold); err != nil {
+			return fmt.Errorf("media operation %w", err)
 		}
 	}
 	return nil

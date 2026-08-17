@@ -21,8 +21,8 @@ func TestTelegramTransport_SendMediaPersistentReturnsEveryAlbumID(t *testing.T) 
 	result, err := transport.SendMediaPersistent(context.Background(), OutgoingMedia{
 		ConversationID: "123",
 		Items: []OutgoingMediaItem{
-			{Data: append([]byte(nil), generatedTestPNG...), Filename: "one.png", MIME: "image/png"},
-			{Data: append([]byte(nil), generatedTestPNG...), Filename: "two.png", MIME: "image/png"},
+			{Data: append([]byte(nil), generatedTestPNG...), Filename: "one.png", MIME: "image/png", WireKind: OutgoingMediaWireKindPhoto},
+			{Data: append([]byte(nil), generatedTestPNG...), Filename: "two.png", MIME: "image/png", WireKind: OutgoingMediaWireKindPhoto},
 		},
 	})
 
@@ -40,8 +40,8 @@ func TestTelegramTransport_SendMediaPersistentRejectsDuplicateAlbumID(t *testing
 	result, err := transport.SendMediaPersistent(context.Background(), OutgoingMedia{
 		ConversationID: "123",
 		Items: []OutgoingMediaItem{
-			{Data: append([]byte(nil), generatedTestPNG...), Filename: "one.png", MIME: "image/png"},
-			{Data: append([]byte(nil), generatedTestPNG...), Filename: "two.png", MIME: "image/png"},
+			{Data: append([]byte(nil), generatedTestPNG...), Filename: "one.png", MIME: "image/png", WireKind: OutgoingMediaWireKindPhoto},
+			{Data: append([]byte(nil), generatedTestPNG...), Filename: "two.png", MIME: "image/png", WireKind: OutgoingMediaWireKindPhoto},
 		},
 	})
 

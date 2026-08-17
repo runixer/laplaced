@@ -12,10 +12,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   text sections: the model chooses only turn-local position, order and grouping,
   while the application keeps artifact lookup, uploads and media identifiers
   trusted and preserves an automatic fallback for invalid layouts.
+- Private Telegram rich chats can now send existing user-owned artifacts on
+  request. Images support compressed Photo preview, byte-exact Document
+  original, or both; PDFs and other non-image files are sent as Documents.
+  Selection is declarative and restricted to an app-authored per-turn artifact
+  inventory, with ownership revalidated before delivery.
+- Artifact-bearing replies now persist ordered M:N provenance alongside one
+  durable delivery ledger. Re-sending a stored artifact links it to the new
+  logical reply without moving its original creator-history association, and
+  reactions on any confirmed rich part, album or Document resolve that reply.
 - The LongMemEval harness now provides stage-level evidence recall, immutable ingestion snapshots, dataset-relative dates, official judging, token-budget diagnostics, offline summaries, and paired run comparisons.
 - New privacy mode: ask the bot not to save something and the following messages are excluded from long-term memory, with an honest explanation of what is and isn't covered.
 
 ### Changed
+- Generated images now default to Telegram Photo previews regardless of file
+  size or requested 2K/4K resolution. An explicit original request sends a
+  byte-exact Document *instead* of the preview; both are sent only when the user
+  explicitly requests both. Originals are emitted after the complete rich post,
+  and the old size-triggered automatic Document sidecar is no longer used in the
+  private rich V1 path.
 - The default chat model is now `google/gemini-3.7-flash` (was `google/gemini-3.5-flash`). Replaying ten captured production traces showed shorter, denser replies at roughly a third of the cost and unchanged latency.
 - The assistant no longer retracts risk warnings under emotional pushback, avoids verdicts about people it only knows one-sidedly, keeps crisis replies short with real-help referrals, and refuses forwarded "assistant instructions", loyalty vows, and promises not to remember things.
 - Memory now records where each fact came from: judgments about other people are stored and re-read as the user's opinion rather than established truth, and stored "don't analyze/don't be harsh" instructions never override honesty on health, money, or safety.

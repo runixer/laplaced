@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/runixer/laplaced/internal/artifactdelivery"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/llm"
@@ -87,6 +88,10 @@ func TestPerformImageGeneration_HappyPath(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, []int64{1, 2}, result.GeneratedArtifactIDs)
+	assert.Equal(t, []artifactdelivery.Generated{
+		{ArtifactID: 1, Mode: artifactdelivery.ModePreview},
+		{ArtifactID: 2, Mode: artifactdelivery.ModePreview},
+	}, result.GeneratedArtifacts)
 	assert.Contains(t, result.Content, "artifact:1")
 	assert.Contains(t, result.Content, "artifact:2")
 	assert.Contains(t, result.Content, "internal references for input_artifact_ids")
@@ -105,6 +110,43 @@ func TestPerformImageGeneration_HappyPath(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, entries, 1, "should create one user directory")
 	assert.True(t, strings.HasPrefix(entries[0].Name(), "user_100"))
+}
+
+func TestPerformImageGenerationOutsidePrivateCapabilityForcesPreview(t *testing.T) {
+	exec, gen, mockStore, _ := newImageTestExecutor(t)
+	gen.response = &ImageGenResponse{Images: []ImageGenImage{{MimeType: "image/png", Data: []byte("png")}}}
+	mockStore.On("GetByHash", storage.ScopeID("100"), mock.Anything).Return(nil, nil)
+	mockStore.On("AddArtifact", mock.Anything).Return(int64(44), nil)
+
+	result, err := exec.performImageGeneration(context.Background(), CallContext{UserID: "100"}, map[string]interface{}{
+		"prompt": "poster", "image_size": "4K", "delivery_mode": "original",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []artifactdelivery.Generated{{ArtifactID: 44, Mode: artifactdelivery.ModePreview}}, result.GeneratedArtifacts)
+	assert.Equal(t, "4K", gen.lastRequest.ImageSize)
+}
+
+func TestPerformImageGenerationCarriesExplicitDeliveryModeInPrivateCapability(t *testing.T) {
+	exec, gen, mockStore, _ := newImageTestExecutor(t)
+	gen.response = &ImageGenResponse{Images: []ImageGenImage{{MimeType: "image/png", Data: []byte("png")}}}
+	mockStore.On("GetByHash", storage.ScopeID("100"), mock.Anything).Return(nil, nil)
+	mockStore.On("AddArtifact", mock.Anything).Return(int64(44), nil)
+
+	result, err := exec.performImageGeneration(context.Background(), CallContext{UserID: "100", ArtifactDeliveryEnabled: true}, map[string]interface{}{
+		"prompt": "poster", "image_size": "4K", "delivery_mode": "original",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []artifactdelivery.Generated{{ArtifactID: 44, Mode: artifactdelivery.ModeOriginal}}, result.GeneratedArtifacts)
+	assert.Equal(t, "4K", gen.lastRequest.ImageSize)
+}
+
+func TestPerformImageGenerationRejectsAutoDeliveryMode(t *testing.T) {
+	exec, _, _, _ := newImageTestExecutor(t)
+	_, err := exec.performImageGeneration(context.Background(), CallContext{UserID: "100"}, map[string]interface{}{
+		"prompt": "poster", "delivery_mode": "auto",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported generated artifact delivery mode")
 }
 
 func TestPerformImageGeneration_EmptyPromptRejected(t *testing.T) {
@@ -184,7 +226,7 @@ func TestPerformImageGeneration_ArtifactIDsResolvedAndUserIsolated(t *testing.T)
 	mockStore.On("AddArtifact", mock.Anything).Return(int64(100), nil)
 
 	_, err := exec.performImageGeneration(context.Background(),
-		CallContext{UserID: "1"},
+		CallContext{UserID: "1", TrustedArtifactIDs: []int64{77, 999}},
 		map[string]interface{}{
 			"prompt":             "edit",
 			"input_artifact_ids": []interface{}{float64(77), float64(999)}, // JSON number decoding
@@ -285,6 +327,9 @@ func TestPerformImageGeneration_FailureKindWording(t *testing.T) {
 			require.NoError(t, err, "tool must not return error — that triggers LLM retry storm")
 			require.NotNil(t, result)
 			assert.Empty(t, result.GeneratedArtifactIDs)
+			assert.NotContains(t, result.Content, "Internal detail")
+			assert.NotContains(t, result.Content, "502 bad gateway",
+				"transport causes must remain in logs rather than model-visible tool content")
 
 			for _, s := range tt.mustContain {
 				assert.Contains(t, result.Content, s, "wording for %s should contain %q", tt.name, s)
@@ -327,7 +372,7 @@ func TestPerformImageGeneration_MergesCurrentMessageAndArtifactIDs(t *testing.T)
 	}
 
 	_, err := exec.performImageGeneration(context.Background(),
-		CallContext{UserID: "1", CurrentMessageImages: []llm.FilePart{currentAttached}},
+		CallContext{UserID: "1", CurrentMessageImages: []llm.FilePart{currentAttached}, TrustedArtifactIDs: []int64{42}},
 		map[string]interface{}{
 			"prompt":             "mix these",
 			"input_artifact_ids": []interface{}{float64(42)},
@@ -338,6 +383,34 @@ func TestPerformImageGeneration_MergesCurrentMessageAndArtifactIDs(t *testing.T)
 	// Order: current-message images first, then referenced artifacts.
 	assert.Equal(t, "new.jpg", gen.lastRequest.InputImages[0].File.FileName)
 	assert.Equal(t, "old.png", gen.lastRequest.InputImages[1].File.FileName)
+}
+
+func TestPerformImageGeneration_RejectsUntrustedInputArtifactBeforeLookup(t *testing.T) {
+	exec, _, mockStore, _ := newImageTestExecutor(t)
+
+	_, err := exec.resolveInputImages(context.Background(),
+		CallContext{UserID: "1", TrustedArtifactIDs: []int64{7}, GeneratedInputArtifactIDs: []int64{8}},
+		map[string]interface{}{"input_artifact_ids": []interface{}{float64(9)}})
+	require.ErrorContains(t, err, "not in the trusted inventory")
+	mockStore.AssertNotCalled(t, "GetArtifact", mock.Anything, mock.Anything)
+}
+
+func TestPerformImageGeneration_AllowsPriorIterationGeneratedInput(t *testing.T) {
+	exec, _, mockStore, tmp := newImageTestExecutor(t)
+	refPath := "user_1/2026-01/generated.png"
+	require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(tmp, refPath)), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(tmp, refPath), []byte("generated-bytes"), 0o644))
+	mockStore.On("GetArtifact", storage.ScopeID("1"), int64(8)).Return(&storage.Artifact{
+		ID: 8, UserID: "1", FileType: "image", FilePath: refPath,
+		MimeType: "image/png", OriginalName: "generated.png",
+	}, nil)
+
+	parts, err := exec.resolveInputImages(context.Background(),
+		CallContext{UserID: "1", GeneratedInputArtifactIDs: []int64{8}},
+		map[string]interface{}{"input_artifact_ids": []interface{}{float64(8)}})
+	require.NoError(t, err)
+	require.Len(t, parts, 1)
+	assert.Equal(t, "generated.png", parts[0].File.FileName)
 }
 
 func TestPerformImageGeneration_MaxOutputImagesCap(t *testing.T) {

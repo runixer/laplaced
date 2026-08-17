@@ -26,6 +26,7 @@ type generatedRichDeliveryPlan struct {
 
 func normalizedGeneratedPhotoItem(item OutgoingMediaItem, index int) OutgoingMediaItem {
 	item.AsDocument = false
+	item.WireKind = OutgoingMediaWireKindPhoto
 	if strings.TrimSpace(item.Filename) == "" {
 		item.Filename = fmt.Sprintf("generated-%d.png", index+1)
 	}
@@ -39,8 +40,22 @@ func generatedPhotoCanBePreviewed(item OutgoingMediaItem) bool {
 	if len(item.Data) == 0 || len(item.Data) > telegramRichPhotoMaxBytes {
 		return false
 	}
-	config, _, err := image.DecodeConfig(bytes.NewReader(item.Data))
+	config, format, err := image.DecodeConfig(bytes.NewReader(item.Data))
 	if err != nil || config.Width <= 0 || config.Height <= 0 {
+		return false
+	}
+	switch format {
+	case "png":
+		if persistentMediaType(item) != "image/png" {
+			return false
+		}
+	case "jpeg":
+		if persistentMediaType(item) != "image/jpeg" {
+			return false
+		}
+	default:
+		// GIF/WebP/SVG/HEIC and unknown image containers stay byte-exact
+		// Documents until an explicit preview converter exists.
 		return false
 	}
 	if int64(config.Width)+int64(config.Height) > 10_000 {
@@ -231,8 +246,7 @@ func (b *Bot) planGeneratedRichDelivery(
 
 	if layout.Mode == generatedMediaLayoutDirected {
 		plan, fallback, nativeAttachments, nativeBytes, buildErr := buildGeneratedDirectedPlan(
-			ctx, path, renderer, responseText, layout, normalizedItems,
-			b.cfg.Agents.ImageGenerator.DocumentThresholdBytes,
+			ctx, path, renderer, responseText, layout, normalizedItems, 0,
 		)
 		base.legacyFallback = fallback
 		if buildErr != nil {
@@ -253,8 +267,7 @@ func (b *Bot) planGeneratedRichDelivery(
 	// Automatic placement (including atomic degradation of an invalid authored
 	// layout) keeps the established caption/fallback representation.
 	fallback, fallbackErr := generatedAutomaticFallbackOperations(
-		ctx, path, renderer, deliverySource, normalizedItems,
-		b.cfg.Agents.ImageGenerator.DocumentThresholdBytes,
+		ctx, path, renderer, deliverySource, normalizedItems, 0,
 	)
 	if fallbackErr != nil {
 		return base, false, richMetricFallbackRenderOrLimit
@@ -309,24 +322,16 @@ func (b *Bot) planAutomaticGeneratedRichDelivery(
 		parts = preflight.parts
 	}
 
-	threshold := b.cfg.Agents.ImageGenerator.DocumentThresholdBytes
 	previewItems := make([]OutgoingMediaItem, 0, len(items))
-	documentItems := make([]OutgoingMediaItem, 0, len(items))
 	for i, raw := range items {
 		if len(raw.Data) == 0 || raw.AsDocument || !strings.HasPrefix(strings.ToLower(raw.MIME), "image/") {
 			return generatedRichDeliveryPlan{}, false, richMetricFallbackMediaIneligible
 		}
 		preview := normalizedGeneratedPhotoItem(raw, i)
-		isHighResolution := threshold > 0 && len(raw.Data) > threshold
 		if !generatedPhotoCanBePreviewed(preview) {
 			return generatedRichDeliveryPlan{}, false, richMetricFallbackMediaIneligible
 		}
 		previewItems = append(previewItems, preview)
-		if isHighResolution {
-			original := preview
-			original.AsDocument = true
-			documentItems = append(documentItems, original)
-		}
 	}
 
 	galleryHTML, galleryBlocks, err := generatedGalleryLayout(previewItems)
@@ -339,17 +344,9 @@ func (b *Bot) planAutomaticGeneratedRichDelivery(
 		return generatedRichDeliveryPlan{}, false, richMetricFallbackRenderOrLimit
 	}
 
-	fullFallback, err := generatedAutomaticFallbackOperations(ctx, path, renderer, responseText, items, threshold)
+	fullFallback, err := generatedAutomaticFallbackOperations(ctx, path, renderer, responseText, items, 0)
 	if err != nil {
 		return generatedRichDeliveryPlan{}, false, richMetricFallbackRenderOrLimit
-	}
-
-	var sidecars []deliveryOperation
-	if len(documentItems) > 0 {
-		sidecars = generatedMediaOperations(path, "", documentItems, threshold)
-		for i := range sidecars {
-			sidecars[i].Media.ReplyTo = ""
-		}
 	}
 
 	operations := make([]deliveryOperation, 0, len(parts)+1)
@@ -365,10 +362,6 @@ func (b *Bot) planAutomaticGeneratedRichDelivery(
 		},
 		formatFallback: fullFallback,
 	})
-	// A high-resolution original belongs to the gallery that previews it, so its
-	// Document sidecar is persisted immediately after that owning rich part.
-	// If it confirms, a later text-format fallback must never resend it.
-	operations = append(operations, sidecars...)
 	for i := 1; i < len(parts); i++ {
 		part := parts[i]
 		op := deliveryOperation{

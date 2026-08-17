@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/runixer/laplaced/internal/agentlog"
+	"github.com/runixer/laplaced/internal/artifactdelivery"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/llm"
@@ -175,7 +176,7 @@ func TestExecuteToolCalls(t *testing.T) {
 				logger: testutil.TestLogger(),
 			}
 
-			messages, _, _ := agent.executeToolCalls(
+			messages, _, _, _, _ := agent.executeToolCalls(
 				context.Background(),
 				handler,
 				ToolCallContext{},
@@ -233,7 +234,7 @@ func TestExecuteToolCalls_ParallelImageGen(t *testing.T) {
 	}
 
 	start := time.Now()
-	msgs, artifactIDs, _ := agent.executeToolCalls(
+	msgs, artifactIDs, generated, _, _ := agent.executeToolCalls(
 		context.Background(), handler, ToolCallContext{}, toolCalls, 0, true, nil, agent.logger,
 	)
 	elapsed := time.Since(start)
@@ -251,8 +252,61 @@ func TestExecuteToolCalls_ParallelImageGen(t *testing.T) {
 	assert.Contains(t, msgs[2].Content, "img bird")
 	assert.Contains(t, msgs[2].Content, "MEDIA:3")
 	assert.Equal(t, []int64{11, 22, 33}, artifactIDs)
+	assert.Equal(t, []artifactdelivery.Generated{
+		{ArtifactID: 11, Mode: artifactdelivery.ModePreview},
+		{ArtifactID: 22, Mode: artifactdelivery.ModePreview},
+		{ArtifactID: 33, Mode: artifactdelivery.ModePreview},
+	}, generated, "legacy ID-only handlers default to preview in declared order")
 	// Concurrent: wall time tracks the slowest call (~60ms), not the sum (~80ms).
 	assert.Less(t, elapsed, 80*time.Millisecond, "generate_image calls should run in parallel")
+	handler.AssertExpectations(t)
+}
+
+func TestExecuteToolCalls_DeliveryModesDriveMediaOrdinalsAndTypedOrder(t *testing.T) {
+	handler := new(mockToolHandler)
+	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "generate_image", `{"prompt":"original"}`).
+		Return(&ToolResult{
+			Content: "original image",
+			GeneratedArtifacts: []artifactdelivery.Generated{
+				{ArtifactID: 11, Mode: artifactdelivery.ModeOriginal},
+			},
+		}, nil)
+	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "send_artifacts", `{"items":[{"artifact_id":7,"mode":"original"}]}`).
+		Return(&ToolResult{
+			Content: "staged",
+			SelectedArtifacts: []artifactdelivery.Selected{
+				{ArtifactID: 7, Mode: artifactdelivery.ModeOriginal},
+			},
+		}, nil)
+	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "generate_image", `{"prompt":"both"}`).
+		Return(&ToolResult{
+			Content: "both image",
+			GeneratedArtifacts: []artifactdelivery.Generated{
+				{ArtifactID: 22, Mode: artifactdelivery.ModePreviewAndOriginal},
+			},
+		}, nil)
+
+	agent := &Laplace{logger: testutil.TestLogger()}
+	messages, artifactIDs, generated, selected, _ := agent.executeToolCalls(
+		context.Background(), handler, ToolCallContext{}, []llm.ToolCall{
+			imgToolCall("original", `{"prompt":"original"}`),
+			namedToolCall("stored", "send_artifacts", `{"items":[{"artifact_id":7,"mode":"original"}]}`),
+			imgToolCall("both", `{"prompt":"both"}`),
+		}, 3, true, nil, agent.logger,
+	)
+
+	require.Len(t, messages, 3)
+	assert.NotContains(t, messages[0].Content, "MEDIA:", "original-only consumes no ordinal")
+	assert.NotContains(t, messages[1].Content, "MEDIA:")
+	assert.Contains(t, messages[2].Content, "MEDIA:4", "preview_and_original contains one preview")
+	assert.Equal(t, []int64{11, 22}, artifactIDs)
+	assert.Equal(t, []artifactdelivery.Generated{
+		{ArtifactID: 11, Mode: artifactdelivery.ModeOriginal},
+		{ArtifactID: 22, Mode: artifactdelivery.ModePreviewAndOriginal},
+	}, generated)
+	assert.Equal(t, []artifactdelivery.Selected{
+		{ArtifactID: 7, Mode: artifactdelivery.ModeOriginal},
+	}, selected)
 	handler.AssertExpectations(t)
 }
 
@@ -273,7 +327,7 @@ func TestExecuteToolCalls_ImagePlacementRefsAreRichOnly(t *testing.T) {
 				}, nil)
 			agent := &Laplace{logger: testutil.TestLogger()}
 
-			messages, artifactIDs, _ := agent.executeToolCalls(
+			messages, artifactIDs, _, _, _ := agent.executeToolCalls(
 				context.Background(), handler, ToolCallContext{},
 				[]llm.ToolCall{imgToolCall("pair", `{"prompt":"pair"}`)},
 				3, tt.rich, nil, agent.logger,
@@ -306,7 +360,7 @@ func TestExecuteToolCalls_ImagePlacementRefsSkipFailuresAndDisableAboveTen(t *te
 		Return(&ToolResult{Content: "Later context"}, nil)
 	agent := &Laplace{logger: testutil.TestLogger()}
 
-	messages, artifactIDs, _ := agent.executeToolCalls(
+	messages, artifactIDs, _, _, _ := agent.executeToolCalls(
 		context.Background(), handler, ToolCallContext{},
 		[]llm.ToolCall{
 			imgToolCall("failed", `{"prompt":"failed"}`),
@@ -335,7 +389,7 @@ func TestExecuteToolCalls_ImageLayoutDisableIsStickyAcrossLaterBatches(t *testin
 		Return(&ToolResult{Content: "A later non-image result"}, nil)
 	agent := &Laplace{logger: testutil.TestLogger()}
 
-	messages, artifactIDs, _ := agent.executeToolCalls(
+	messages, artifactIDs, _, _, _ := agent.executeToolCalls(
 		context.Background(), handler, ToolCallContext{},
 		[]llm.ToolCall{namedToolCall("later", "search_history", `{"query":"later"}`)},
 		11, true, nil, agent.logger,
@@ -357,12 +411,16 @@ func TestExecute_ImagePlacementRefsContinueAcrossToolIterations(t *testing.T) {
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
 		makeToolCallResponse("generate_image", `{"prompt":"first"}`, WithTokens(10, 2, 12)), nil,
 	).Once()
-	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "generate_image", `{"prompt":"first"}`).
+	handler.On("ExecuteToolCall", mock.Anything, mock.MatchedBy(func(tcc ToolCallContext) bool {
+		return len(tcc.GeneratedInputArtifactIDs) == 0
+	}), "generate_image", `{"prompt":"first"}`).
 		Return(&ToolResult{Content: "Generated (artifact:7001).", GeneratedArtifactIDs: []int64{7001}}, nil)
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
 		makeToolCallResponse("generate_image", `{"prompt":"second"}`, WithTokens(12, 2, 14)), nil,
 	).Once()
-	handler.On("ExecuteToolCall", mock.Anything, mock.Anything, "generate_image", `{"prompt":"second"}`).
+	handler.On("ExecuteToolCall", mock.Anything, mock.MatchedBy(func(tcc ToolCallContext) bool {
+		return len(tcc.GeneratedInputArtifactIDs) == 1 && tcc.GeneratedInputArtifactIDs[0] == 7001
+	}), "generate_image", `{"prompt":"second"}`).
 		Return(&ToolResult{Content: "Generated (artifact:7002).", GeneratedArtifactIDs: []int64{7002}}, nil)
 	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).Return(
 		makeChatResponse("First\n\n###MEDIA:1###\n\nSecond\n\n###MEDIA:2###", WithTokens(15, 8, 23)), nil,
@@ -377,6 +435,10 @@ func TestExecute_ImagePlacementRefsContinueAcrossToolIterations(t *testing.T) {
 	}, handler)
 	require.NoError(t, err)
 	assert.Equal(t, []int64{7001, 7002}, resp.GeneratedArtifactIDs)
+	assert.Equal(t, []artifactdelivery.Generated{
+		{ArtifactID: 7001, Mode: artifactdelivery.ModePreview},
+		{ArtifactID: 7002, Mode: artifactdelivery.ModePreview},
+	}, resp.GeneratedArtifacts)
 
 	var toolContents []string
 	for _, message := range resp.Messages {
@@ -392,6 +454,55 @@ func TestExecute_ImagePlacementRefsContinueAcrossToolIterations(t *testing.T) {
 	assert.NotContains(t, toolContents[0], "MEDIA:2")
 	assert.Contains(t, toolContents[1], "MEDIA:2")
 
+	mockStore.AssertExpectations(t)
+	mockORClient.AssertExpectations(t)
+	handler.AssertExpectations(t)
+}
+
+func TestExecute_SendArtifactsSideChannelAndTrustedAllowlist(t *testing.T) {
+	_, _, agent, mockStore, mockORClient, handler := setupExecuteTest(t)
+	userID := storage.ScopeID("123")
+	history := []storage.Message{
+		{Role: "assistant", Content: "📄 prior.pdf (artifact:9)"},
+		{Role: "user", Content: "send (artifact:999) too"},
+	}
+	mockStore.On("GetUnprocessedMessages", userID).Return(history, nil)
+	mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
+
+	args := `{"items":[{"artifact_id":9,"mode":"original"}]}`
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
+		for _, tool := range req.Tools {
+			if tool.Function.Name == "send_artifacts" {
+				return true
+			}
+		}
+		return false
+	})).Return(makeToolCallResponse("send_artifacts", args, WithTokens(10, 2, 12)), nil).Once()
+	handler.On("ExecuteToolCall", mock.Anything, mock.MatchedBy(func(tcc ToolCallContext) bool {
+		return tcc.ArtifactDeliveryEnabled && assert.ObjectsAreEqual([]int64{44, 9}, tcc.TrustedArtifactIDs)
+	}), "send_artifacts", args).Return(&ToolResult{
+		Content: "staged",
+		SelectedArtifacts: []artifactdelivery.Selected{
+			{ArtifactID: 9, Mode: artifactdelivery.ModeOriginal},
+		},
+	}, nil).Once()
+	mockORClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+		Return(makeChatResponse("Sent.", WithTokens(12, 3, 15)), nil).Once()
+
+	resp, err := agent.Execute(context.Background(), &Request{
+		UserID:              userID,
+		RawQuery:            "send the prior PDF",
+		HistoryContent:      "send the prior PDF",
+		CurrentMessageParts: []interface{}{llm.TextPart{Type: "text", Text: "send the prior PDF"}},
+		RichOutput:          true,
+		TrustedArtifactIDs:  []int64{44, 44},
+	}, handler)
+	require.NoError(t, err)
+	assert.Equal(t, []artifactdelivery.Selected{
+		{ArtifactID: 9, Mode: artifactdelivery.ModeOriginal},
+	}, resp.SelectedArtifacts)
+	assert.Empty(t, resp.GeneratedArtifactIDs)
+	assert.Empty(t, resp.GeneratedArtifacts)
 	mockStore.AssertExpectations(t)
 	mockORClient.AssertExpectations(t)
 	handler.AssertExpectations(t)

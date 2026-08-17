@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/runixer/laplaced/internal/agentlog"
+	"github.com/runixer/laplaced/internal/artifactdelivery"
 	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
@@ -36,6 +37,12 @@ type Request struct {
 	// process-wide transport capability; shadow/off turns keep legacy guidance.
 	RichOutput bool
 
+	// TrustedArtifactIDs are app-resolved artifacts attached to the current
+	// message. They are never inferred from user-authored text. Execute combines
+	// them with app-owned artifact context before exposing the allowlist to tool
+	// handlers; send_artifacts must still re-check ownership at execution time.
+	TrustedArtifactIDs []int64
+
 	// Callbacks for Telegram actions
 	OnIntermediateMessage func(text string)                // Called when tool call has intermediate text
 	OnContentDelta        func(text string)                // Streaming: called for each user-visible content fragment in the final iteration
@@ -56,10 +63,17 @@ type Response struct {
 	// Main response
 	Content string
 
-	// GeneratedArtifactIDs accumulates artifact IDs produced by tools during
-	// this Execute call (e.g. generate_image). The orchestrator uses them to
-	// attach photos to the Telegram reply. Empty for text-only responses.
+	// GeneratedArtifactIDs is the backward-compatible ordered ID projection for
+	// artifacts produced during this Execute call. New delivery code should use
+	// GeneratedArtifacts because not every generated image is sent as a preview.
 	GeneratedArtifactIDs []int64
+
+	// GeneratedArtifacts and SelectedArtifacts carry transport-neutral delivery
+	// intent out of the tool loop. Their order is tool-loop iteration, declared
+	// tool-call order, then provider output order. They are side channels and are
+	// never rendered into model-authored prose.
+	GeneratedArtifacts []artifactdelivery.Generated
+	SelectedArtifacts  []artifactdelivery.Selected
 
 	// Error (non-nil if execution failed after partial completion)
 	// When set, Content may be empty or partial, but other fields (tokens, timing, turns) are valid
@@ -112,6 +126,19 @@ type Response struct {
 type ToolCallContext struct {
 	UserID               storage.ScopeID
 	CurrentMessageImages []llm.FilePart
+	// TrustedArtifactIDs is the stable, deduplicated allowlist assembled by the
+	// application and Laplace context. It excludes IDs mentioned only in the
+	// current user's free text and excludes artifacts generated in this turn.
+	TrustedArtifactIDs []int64
+	// GeneratedInputArtifactIDs contains outputs confirmed by earlier tool-loop
+	// iterations in this Execute call. They may be used as generate_image edit
+	// inputs, but are deliberately separate from TrustedArtifactIDs so
+	// send_artifacts cannot override their already-declared delivery_mode.
+	GeneratedInputArtifactIDs []int64
+	// ArtifactDeliveryEnabled is the runtime authorization bit for
+	// send_artifacts. Tool visibility guides the model; handlers must fail
+	// closed on this independent per-turn capability as defense in depth.
+	ArtifactDeliveryEnabled bool
 	// Iteration is the 1-based tool-loop iteration this dispatch belongs
 	// to. Recorded on the tool_executor span as tool.iteration so traces
 	// can answer "which turn dispatched this tool" without matching by
@@ -119,13 +146,15 @@ type ToolCallContext struct {
 	Iteration int
 }
 
-// ToolResult is the richer return type for tool execution. Content is what
-// gets fed back to the LLM; GeneratedArtifactIDs is a side-channel carrying
-// artifact IDs produced during the call (e.g. generated images), which the
-// orchestrator collects to attach to the final user reply.
+// ToolResult is the richer return type for tool execution. Content is fed back
+// to the LLM; artifact fields are typed side channels collected for delivery
+// after the final model response. GeneratedArtifactIDs remains for adapters
+// built before the transport-neutral delivery contract.
 type ToolResult struct {
 	Content              string
 	GeneratedArtifactIDs []int64
+	GeneratedArtifacts   []artifactdelivery.Generated
+	SelectedArtifacts    []artifactdelivery.Selected
 	// Citations are source URLs returned by web-search tools, used by the
 	// citation guard to strip links the model invented. Nil for other tools.
 	Citations []llm.Citation

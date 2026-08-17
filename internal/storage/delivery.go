@@ -8,11 +8,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/runixer/laplaced/internal/artifactdelivery"
 )
 
 var (
-	_ ExactMessageRepository = (*Store)(nil)
-	_ DeliveryRepository     = (*Store)(nil)
+	_ ExactMessageRepository      = (*Store)(nil)
+	_ DeliveryRepository          = (*Store)(nil)
+	_ ArtifactReferenceRepository = (*Store)(nil)
 )
 
 // TransportMessage is one persistent transport message belonging to a logical
@@ -888,8 +891,37 @@ func (s *Store) linkOutboundDeliveryHistoryTx(tx *sql.Tx, userID ScopeID, delive
 }
 
 func (s *Store) PersistOutboundDeliveryReply(userID ScopeID, deliveryID int64, message Message, artifactIDs []int64) (int64, error) {
+	references := make([]OutboundArtifactReference, len(artifactIDs))
+	for i, artifactID := range artifactIDs {
+		references[i] = OutboundArtifactReference{
+			ArtifactID: artifactID,
+			Ordinal:    i,
+			Mode:       artifactdelivery.ModePreview,
+			Source:     ArtifactReferenceSourceGenerated,
+		}
+	}
+	return s.persistOutboundDeliveryReply(userID, deliveryID, message, PersistOutboundArtifacts{
+		OwnedArtifactIDs: artifactIDs,
+		References:       references,
+	}, true)
+}
+
+// PersistOutboundDeliveryReplyWithArtifacts is the provenance-preserving V2
+// persistence path. It atomically creates the assistant history row, links the
+// confirmed transport messages and delivery, assigns only in-flight
+// (message_id=0) artifacts to their creator reply, and records ordered M:N
+// references for every delivered generated or stored artifact.
+func (s *Store) PersistOutboundDeliveryReplyWithArtifacts(userID ScopeID, deliveryID int64, message Message, artifacts PersistOutboundArtifacts) (int64, error) {
+	return s.persistOutboundDeliveryReply(userID, deliveryID, message, artifacts, false)
+}
+
+func (s *Store) persistOutboundDeliveryReply(userID ScopeID, deliveryID int64, message Message, artifacts PersistOutboundArtifacts, allowOwnerRebind bool) (int64, error) {
 	if message.Role != "assistant" {
 		return 0, errors.New("persist outbound delivery reply: message role must be assistant")
+	}
+	normalized, err := normalizePersistOutboundArtifacts(artifacts)
+	if err != nil {
+		return 0, fmt.Errorf("persist outbound delivery reply: %w", err)
 	}
 	if message.CreatedAt.IsZero() {
 		message.CreatedAt = time.Now()
@@ -912,21 +944,18 @@ func (s *Store) PersistOutboundDeliveryReply(userID ScopeID, deliveryID int64, m
 	if err := s.linkOutboundDeliveryHistoryTx(tx, userID, deliveryID, historyID); err != nil {
 		return 0, err
 	}
-	seenArtifacts := make(map[int64]struct{}, len(artifactIDs))
-	for _, artifactID := range artifactIDs {
-		if artifactID <= 0 {
-			return 0, fmt.Errorf("persist outbound delivery reply: invalid artifact id %d", artifactID)
-		}
-		if _, exists := seenArtifacts[artifactID]; exists {
-			return 0, fmt.Errorf("persist outbound delivery reply: duplicate artifact id %d", artifactID)
-		}
-		seenArtifacts[artifactID] = struct{}{}
+	verifiedArtifacts := make(map[int64]struct{}, len(normalized.OwnedArtifactIDs)+len(normalized.References))
+	for _, artifactID := range normalized.OwnedArtifactIDs {
 		// Artifact rows are deduplicated by (user_id, content_hash), so an image
-		// generated again may already belong to an older history row. Preserve the
-		// repository's established single-owner semantics: the newest confirmed
-		// use atomically becomes the artifact's message_id, just like UpdateMessageID.
+		// generated again may already belong to an older history row. The legacy
+		// API preserves its historical rebind behavior; the V2 API accepts only a
+		// genuinely in-flight row here and requires reused artifacts as references.
+		ownerPredicate := ""
+		if !allowOwnerRebind {
+			ownerPredicate = " AND message_id = 0"
+		}
 		result, err := tx.Exec(s.rebind(`UPDATE artifacts SET message_id = ?
-			WHERE user_id = ? AND id = ?`), historyID, userID, artifactID)
+			WHERE user_id = ? AND id = ?`+ownerPredicate), historyID, userID, artifactID)
 		if err != nil {
 			return 0, fmt.Errorf("persist outbound delivery reply: link artifact %d: %w", artifactID, err)
 		}
@@ -935,11 +964,138 @@ func (s *Store) PersistOutboundDeliveryReply(userID ScopeID, deliveryID int64, m
 			return 0, fmt.Errorf("persist outbound delivery reply: count artifact %d: %w", artifactID, err)
 		}
 		if updated != 1 {
+			if !allowOwnerRebind {
+				var existingMessageID int64
+				lookupErr := tx.QueryRow(s.rebind(`SELECT message_id FROM artifacts WHERE user_id = ? AND id = ?`), userID, artifactID).Scan(&existingMessageID)
+				if lookupErr == nil {
+					return 0, fmt.Errorf("persist outbound delivery reply: artifact %d already has creator history %d; persist it as a reference", artifactID, existingMessageID)
+				}
+				if lookupErr != sql.ErrNoRows {
+					return 0, fmt.Errorf("persist outbound delivery reply: inspect artifact %d: %w", artifactID, lookupErr)
+				}
+			}
 			return 0, fmt.Errorf("persist outbound delivery reply: artifact %d not found or owned by another user", artifactID)
+		}
+		verifiedArtifacts[artifactID] = struct{}{}
+	}
+	for _, reference := range normalized.References {
+		if _, verified := verifiedArtifacts[reference.ArtifactID]; !verified {
+			var one int
+			err := tx.QueryRow(s.rebind(`SELECT 1 FROM artifacts WHERE user_id = ? AND id = ?`), userID, reference.ArtifactID).Scan(&one)
+			if err == sql.ErrNoRows {
+				return 0, fmt.Errorf("persist outbound delivery reply: artifact reference %d not found or owned by another user", reference.ArtifactID)
+			}
+			if err != nil {
+				return 0, fmt.Errorf("persist outbound delivery reply: inspect artifact reference %d: %w", reference.ArtifactID, err)
+			}
+			verifiedArtifacts[reference.ArtifactID] = struct{}{}
+		}
+		if _, err := tx.Exec(s.rebind(`INSERT INTO history_artifact_refs
+			(history_id, user_id, artifact_id, ordinal, mode, source_kind)
+			VALUES (?, ?, ?, ?, ?, ?)`), historyID, userID, reference.ArtifactID,
+			reference.Ordinal, reference.Mode, reference.Source); err != nil {
+			return 0, fmt.Errorf("persist outbound delivery reply: insert artifact reference %d at ordinal %d: %w", reference.ArtifactID, reference.Ordinal, err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("persist outbound delivery reply: commit: %w", err)
 	}
 	return historyID, nil
+}
+
+func normalizePersistOutboundArtifacts(artifacts PersistOutboundArtifacts) (PersistOutboundArtifacts, error) {
+	normalized := PersistOutboundArtifacts{
+		OwnedArtifactIDs: append([]int64(nil), artifacts.OwnedArtifactIDs...),
+		References:       append([]OutboundArtifactReference(nil), artifacts.References...),
+	}
+	owned := make(map[int64]struct{}, len(normalized.OwnedArtifactIDs))
+	for _, artifactID := range normalized.OwnedArtifactIDs {
+		if artifactID <= 0 {
+			return PersistOutboundArtifacts{}, fmt.Errorf("invalid owned artifact id %d", artifactID)
+		}
+		if _, exists := owned[artifactID]; exists {
+			return PersistOutboundArtifacts{}, fmt.Errorf("duplicate owned artifact id %d", artifactID)
+		}
+		owned[artifactID] = struct{}{}
+	}
+	ordinals := make(map[int]struct{}, len(normalized.References))
+	referenced := make(map[int64]struct{}, len(normalized.References))
+	for i := range normalized.References {
+		reference := &normalized.References[i]
+		if reference.ArtifactID <= 0 {
+			return PersistOutboundArtifacts{}, fmt.Errorf("invalid artifact reference id %d", reference.ArtifactID)
+		}
+		if reference.Ordinal < 0 {
+			return PersistOutboundArtifacts{}, fmt.Errorf("invalid artifact reference ordinal %d", reference.Ordinal)
+		}
+		if _, exists := ordinals[reference.Ordinal]; exists {
+			return PersistOutboundArtifacts{}, fmt.Errorf("duplicate artifact reference ordinal %d", reference.Ordinal)
+		}
+		ordinals[reference.Ordinal] = struct{}{}
+
+		var (
+			mode artifactdelivery.Mode
+			err  error
+		)
+		switch reference.Source {
+		case ArtifactReferenceSourceGenerated:
+			mode, err = artifactdelivery.ParseGeneratedMode(string(reference.Mode))
+		case ArtifactReferenceSourceStored:
+			mode, err = artifactdelivery.ParseStoredMode(string(reference.Mode))
+		default:
+			return PersistOutboundArtifacts{}, fmt.Errorf("unsupported artifact reference source %q", reference.Source)
+		}
+		if err != nil {
+			return PersistOutboundArtifacts{}, fmt.Errorf("artifact reference %d: %w", reference.ArtifactID, err)
+		}
+		reference.Mode = mode
+		referenced[reference.ArtifactID] = struct{}{}
+	}
+	for artifactID := range owned {
+		if _, exists := referenced[artifactID]; !exists {
+			return PersistOutboundArtifacts{}, fmt.Errorf("owned artifact %d has no delivery reference", artifactID)
+		}
+	}
+	return normalized, nil
+}
+
+// GetHistoryArtifactReferences returns the provenance-preserving associations
+// for one logical reply. Ordering is explicit and independent of insert order.
+func (s *Store) GetHistoryArtifactReferences(userID ScopeID, historyID int64) ([]HistoryArtifactReference, error) {
+	if userID == "" {
+		return nil, errors.New("get history artifact references: user id is required")
+	}
+	if historyID <= 0 {
+		return nil, fmt.Errorf("get history artifact references: invalid history id %d", historyID)
+	}
+	rows, err := s.query(`SELECT r.history_id, r.user_id, r.artifact_id, r.ordinal, r.mode, r.source_kind, r.created_at
+		FROM history_artifact_refs r
+		JOIN history h ON h.id = r.history_id
+		JOIN artifacts a ON a.id = r.artifact_id
+		WHERE r.user_id = ? AND h.user_id = ? AND a.user_id = ? AND r.history_id = ?
+		ORDER BY r.ordinal, r.id`, userID, userID, userID, historyID)
+	if err != nil {
+		return nil, fmt.Errorf("get history artifact references: query: %w", err)
+	}
+	defer rows.Close()
+
+	var references []HistoryArtifactReference
+	for rows.Next() {
+		var (
+			reference HistoryArtifactReference
+			mode      string
+			source    string
+		)
+		if err := rows.Scan(&reference.HistoryID, &reference.UserID, &reference.ArtifactID,
+			&reference.Ordinal, &mode, &source, &reference.CreatedAt); err != nil {
+			return nil, fmt.Errorf("get history artifact references: scan: %w", err)
+		}
+		reference.Mode = artifactdelivery.Mode(mode)
+		reference.Source = ArtifactReferenceSource(source)
+		references = append(references, reference)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("get history artifact references: iterate: %w", err)
+	}
+	return references, nil
 }

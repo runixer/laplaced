@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/runixer/laplaced/internal/artifactdelivery"
 	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/textutil"
@@ -42,6 +43,16 @@ func (e *ToolExecutor) performImageGeneration(ctx context.Context, cc CallContex
 
 	aspectRatio, _ := args["aspect_ratio"].(string)
 	imageSize, _ := args["image_size"].(string)
+	deliveryMode, err := artifactdelivery.ParseGeneratedMode(stringArg(args, "delivery_mode"))
+	if err != nil {
+		return nil, fmt.Errorf("generate_image: %w", err)
+	}
+	if !cc.ArtifactDeliveryEnabled {
+		// Private rich delivery is the only runtime authorized to emit original
+		// Documents. The per-request schema already narrows this enum to preview;
+		// normalize again here so a hallucinated/manual tool call cannot widen it.
+		deliveryMode = artifactdelivery.ModePreview
+	}
 
 	// Resolve input images:
 	//   1. If input_artifact_ids is non-empty, load them from storage.
@@ -140,10 +151,20 @@ func (e *ToolExecutor) performImageGeneration(ctx context.Context, cc CallContex
 			"", fmt.Errorf("saved zero of %d output images", len(outputs))), nil
 	}
 
+	generated := make([]artifactdelivery.Generated, 0, len(artifactIDs))
+	for _, artifactID := range artifactIDs {
+		generated = append(generated, artifactdelivery.Generated{ArtifactID: artifactID, Mode: deliveryMode})
+	}
 	return &Result{
 		Content:              buildToolReplyForLLM(artifactIDs, genResp.TextContent),
 		GeneratedArtifactIDs: artifactIDs,
+		GeneratedArtifacts:   generated,
 	}, nil
+}
+
+func stringArg(args map[string]interface{}, key string) string {
+	value, _ := args[key].(string)
+	return value
 }
 
 // resolveInputImages collects the full set of input reference images for a
@@ -167,9 +188,25 @@ func (e *ToolExecutor) resolveInputImages(ctx context.Context, cc CallContext, a
 	if len(ids) == 0 {
 		return parts, nil
 	}
+	allowed := make(map[int64]struct{}, len(cc.TrustedArtifactIDs)+len(cc.GeneratedInputArtifactIDs))
+	for _, id := range cc.TrustedArtifactIDs {
+		if id > 0 {
+			allowed[id] = struct{}{}
+		}
+	}
+	for _, id := range cc.GeneratedInputArtifactIDs {
+		if id > 0 {
+			allowed[id] = struct{}{}
+		}
+	}
 
-	// Load each artifact (user-isolated) and convert to a FilePart.
+	// Load each artifact only after both the turn-scoped allowlist and the
+	// repository's user scope agree. A numeric ID echoed or guessed by the
+	// model is never sufficient authority, even within the same user account.
 	for _, id := range ids {
+		if _, trusted := allowed[id]; !trusted {
+			return nil, fmt.Errorf("input artifact %d is not in the trusted inventory for this turn", id)
+		}
 		art, err := e.artifactRepo.GetArtifact(cc.UserID, id)
 		if err != nil {
 			return nil, fmt.Errorf("load artifact %d: %w", id, err)
@@ -325,9 +362,6 @@ func stopRetryResultForFailure(f *ImageGenFailure) *Result {
 	sb.WriteString("IMAGE GENERATION FAILED. ")
 	sb.WriteString(reason)
 	sb.WriteString(". ")
-	if f.Cause != nil {
-		fmt.Fprintf(&sb, "Internal detail: %v. ", f.Cause)
-	}
 	sb.WriteString("IMPORTANT INSTRUCTIONS FOR YOU: ")
 	sb.WriteString("(1) Do NOT call generate_image again in this turn — further attempts will almost certainly fail the same way. ")
 	sb.WriteString("(2) ")
@@ -345,22 +379,20 @@ func stopRetryResultForFailure(f *ImageGenFailure) *Result {
 //
 // reason is a short plain-English explanation of what went wrong; modelText
 // is optional text the model itself emitted (e.g. a safety-policy message);
-// underlying is the Go error, stringified for debugging. All three are
-// optional and any subset may be empty.
+// underlying is accepted so callers can retain their existing classified
+// logging flow, but is deliberately never copied into model-visible content:
+// it may contain storage paths, endpoints or internal identifiers.
 //
 // Used for non-imagegen-failure cases (config not present, all output images
 // failed to persist) and as the defensive fallback when the imagegen agent
 // returns an untyped error (legacy mocks). Kind-aware imagegen failures go
 // through stopRetryResultForFailure.
-func stopRetryResult(reason, modelText string, underlying error) *Result {
+func stopRetryResult(reason, modelText string, _ error) *Result {
 	var sb strings.Builder
 	sb.WriteString("IMAGE GENERATION FAILED. ")
 	if reason != "" {
 		sb.WriteString(reason)
 		sb.WriteString(". ")
-	}
-	if underlying != nil {
-		fmt.Fprintf(&sb, "Internal detail: %v. ", underlying)
 	}
 	if strings.TrimSpace(modelText) != "" {
 		fmt.Fprintf(&sb, "Model note: %s ", textutil.TruncateRunes(strings.TrimSpace(modelText), 300, "..."))

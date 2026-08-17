@@ -124,6 +124,7 @@ func generatedPath(bot *Bot, userID storage.ScopeID) *responsePath {
 	return &responsePath{
 		bot: bot, logger: bot.logger, userID: userID,
 		convID: "123", replyTo: "1", richMode: config.TelegramRichMessagesOff,
+		richContextEligible: true,
 	}
 }
 
@@ -511,7 +512,7 @@ func TestGeneratedMedia_RichModeUsesNativePhotoAtDocumentThreshold(t *testing.T)
 	store.AssertExpectations(t)
 }
 
-func TestGeneratedMedia_V2GallerySplitAndHighResolutionSidecar(t *testing.T) {
+func TestGeneratedMedia_V2GallerySplitAndSizePolicy(t *testing.T) {
 	tests := []struct {
 		name         string
 		response     string
@@ -538,13 +539,12 @@ func TestGeneratedMedia_V2GallerySplitAndHighResolutionSidecar(t *testing.T) {
 			wantText:     1,
 		},
 		{
-			name:         "document quality image",
+			name:         "size alone stays preview",
 			response:     "# Document",
 			artifactIDs:  []int64{42},
 			threshold:    4,
-			wantAttempts: 2,
+			wantAttempts: 1,
 			wantGallery:  1,
-			wantSidecar:  1,
 		},
 	}
 

@@ -119,13 +119,26 @@ type OutgoingMedia struct {
 	Items          []OutgoingMediaItem
 }
 
+// OutgoingMediaWireKind selects the exact Telegram upload method for a media
+// item. The zero value preserves the legacy size-threshold/AsDocument policy;
+// durable delivery plans should always select Photo or Document explicitly.
+// Transports without a photo/document distinction may ignore it.
+type OutgoingMediaWireKind string
+
+const (
+	OutgoingMediaWireKindLegacy   OutgoingMediaWireKind = ""
+	OutgoingMediaWireKindPhoto    OutgoingMediaWireKind = "photo"
+	OutgoingMediaWireKindDocument OutgoingMediaWireKind = "document"
+)
+
 // OutgoingMediaItem is one file in an OutgoingMedia batch.
 type OutgoingMediaItem struct {
 	Data          []byte
 	Filename      string
 	MIME          string
-	AsDocument    bool // force document delivery (Telegram); transports without the photo/doc distinction ignore it
-	SourceOrdinal int  // application-only 1-based generated-artifact slot; transports ignore it (zero tells planners to use item index+1)
+	WireKind      OutgoingMediaWireKind // exact photo/document presentation; zero keeps legacy behavior
+	AsDocument    bool                  // legacy document override, consulted only when WireKind is zero
+	SourceOrdinal int                   // application-only 1-based generated-artifact slot; transports ignore it (zero tells planners to use item index+1)
 }
 
 // OutgoingRichMedia is an optional, transport-native composition of trusted

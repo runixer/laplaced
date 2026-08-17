@@ -133,6 +133,7 @@ func prepareGeneratedNativeMedia(items []OutgoingMediaItem, threshold int) ([]ge
 		highResolution := threshold > 0 && len(raw.Data) > threshold
 		if highResolution {
 			original.AsDocument = true
+			original.WireKind = OutgoingMediaWireKindDocument
 		}
 		prepared[i] = generatedPreparedMedia{
 			preview:        preview,
@@ -274,11 +275,16 @@ func generatedMediaOperationsStable(path *responsePath, items []OutgoingMediaIte
 	}
 	for i, raw := range items {
 		item := normalizedGeneratedPhotoItem(raw, i)
-		asDocument := raw.AsDocument ||
+		asDocument := raw.WireKind == OutgoingMediaWireKindDocument || raw.AsDocument ||
 			(threshold > 0 && len(item.Data) > threshold) ||
 			!strings.HasPrefix(strings.ToLower(item.MIME), "image/") ||
 			!generatedPhotoCanBePreviewed(item)
 		item.AsDocument = asDocument
+		if asDocument {
+			item.WireKind = OutgoingMediaWireKindDocument
+		} else {
+			item.WireKind = OutgoingMediaWireKindPhoto
+		}
 		if len(batch) > 0 && (asDocument != batchDocument || len(batch) == 10) {
 			flush()
 		}

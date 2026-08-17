@@ -360,7 +360,10 @@ func composeOutgoingRichMedia(m OutgoingRichMedia) (outgoingRichMediaComposition
 		if err := validatePersistentMediaItem(item); err != nil {
 			return outgoingRichMediaComposition{}, fmt.Errorf("telegram rich media item %d: %w", i, err)
 		}
-		if item.AsDocument || !strings.HasPrefix(persistentMediaType(item), "image/") || !generatedPhotoCanBePreviewed(item) {
+		if item.WireKind != OutgoingMediaWireKindPhoto {
+			return outgoingRichMediaComposition{}, fmt.Errorf("telegram rich media item %d must explicitly select photo wire kind", i)
+		}
+		if !strings.HasPrefix(persistentMediaType(item), "image/") || !generatedPhotoCanBePreviewed(item) {
 			return outgoingRichMediaComposition{}, fmt.Errorf("telegram rich media item %d is outside the photo envelope", i)
 		}
 		filename := strings.TrimSpace(item.Filename)
@@ -458,8 +461,9 @@ func (t *TelegramTransport) SendRichMedia(ctx context.Context, m OutgoingRichMed
 
 // SendMedia delivers a batch of files as Telegram photos and/or documents. It
 // preserves the legacy send_media_response.go classification and caption
-// policy: items over the configured document threshold (or forced via
-// AsDocument) go as documents preserving resolution, the rest as photos; both
+// policy for zero-kind items: payloads over the configured document threshold
+// (or forced via AsDocument) go as documents preserving resolution. An
+// explicit WireKind always wins over those heuristics. Photo and document
 // kinds can't share a media group, so they're sent as separate batches. Each
 // homogeneous batch is additionally capped at Telegram's ten-item limit. The
 // caption (rendered to HTML) rides the first batch; the reply-to anchors that
@@ -478,30 +482,10 @@ func (t *TelegramTransport) SendMediaPersistent(ctx context.Context, m OutgoingM
 	if err != nil {
 		return persistentSendResult{}, err
 	}
-	if len(m.Items) == 0 || len(m.Items) > 10 {
-		return persistentSendResult{}, fmt.Errorf("persistent Telegram media operation requires 1-10 items, got %d", len(m.Items))
-	}
 	threshold := t.cfg.Agents.ImageGenerator.DocumentThresholdBytes
-	for i, item := range m.Items {
-		if err := validatePersistentMediaItem(item); err != nil {
-			return persistentSendResult{}, fmt.Errorf("persistent Telegram media item %d: %w", i, err)
-		}
-	}
-	asDocument := m.Items[0].AsDocument || (threshold > 0 && len(m.Items[0].Data) > threshold)
-	for i, item := range m.Items[1:] {
-		itemAsDocument := item.AsDocument || (threshold > 0 && len(item.Data) > threshold)
-		if itemAsDocument != asDocument {
-			return persistentSendResult{}, fmt.Errorf("persistent Telegram media operation mixes photo and document at index %d", i+1)
-		}
-	}
-	for i, item := range m.Items {
-		if asDocument {
-			if len(item.Data) > telegramDocumentMaxBytes {
-				return persistentSendResult{}, fmt.Errorf("persistent Telegram document %d exceeds %d bytes", i, telegramDocumentMaxBytes)
-			}
-		} else if !strings.HasPrefix(persistentMediaType(item), "image/") || !generatedPhotoCanBePreviewed(item) {
-			return persistentSendResult{}, fmt.Errorf("persistent Telegram photo %d is outside the photo envelope", i)
-		}
+	wireKind, err := validateTelegramPersistentMediaBatch(m.Items, threshold)
+	if err != nil {
+		return persistentSendResult{}, fmt.Errorf("persistent Telegram media operation %w", err)
 	}
 	thread := intPtrOrNil(atoiOrZero(m.ThreadRoot))
 	replyTo := atoiOrZero(m.ReplyTo)
@@ -510,7 +494,7 @@ func (t *TelegramTransport) SendMediaPersistent(ctx context.Context, m OutgoingM
 		parseMode = "HTML"
 	}
 	var ids []string
-	if asDocument {
+	if wireKind == OutgoingMediaWireKindDocument {
 		ids, err = t.sendItemsAsDocuments(ctx, chatID, thread, replyTo, m.Items, m.Caption, parseMode)
 	} else {
 		ids, err = t.sendItemsAsPhotos(ctx, chatID, thread, replyTo, m.Items, m.Caption, parseMode)
@@ -547,10 +531,13 @@ func (t *TelegramTransport) sendMediaCompatibility(ctx context.Context, m Outgoi
 	threshold := t.cfg.Agents.ImageGenerator.DocumentThresholdBytes
 	var photoBatch, docBatch []OutgoingMediaItem
 	for _, it := range m.Items {
-		if it.AsDocument || (threshold > 0 && len(it.Data) > threshold) {
+		switch resolvedTelegramMediaWireKind(it, threshold) {
+		case OutgoingMediaWireKindDocument:
 			docBatch = append(docBatch, it)
-		} else {
+		case OutgoingMediaWireKindPhoto:
 			photoBatch = append(photoBatch, it)
+		default:
+			return persistentSendResult{}, fmt.Errorf("telegram media item has unsupported wire kind %q", it.WireKind)
 		}
 	}
 

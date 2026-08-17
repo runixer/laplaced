@@ -304,6 +304,22 @@ func (m *MockStorage) PersistOutboundDeliveryReply(userID storage.ScopeID, deliv
 	return args.Get(0).(int64), args.Error(1)
 }
 
+func (m *MockStorage) PersistOutboundDeliveryReplyWithArtifacts(userID storage.ScopeID, deliveryID int64, message storage.Message, artifacts storage.PersistOutboundArtifacts) (int64, error) {
+	args := m.Called(userID, deliveryID, message, artifacts)
+	if args.Get(0) == nil {
+		return 0, args.Error(1)
+	}
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockStorage) GetHistoryArtifactReferences(userID storage.ScopeID, historyID int64) ([]storage.HistoryArtifactReference, error) {
+	args := m.Called(userID, historyID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]storage.HistoryArtifactReference), args.Error(1)
+}
+
 // FlagRepository methods
 
 func (m *MockStorage) AddFlag(flag storage.Flag) error {

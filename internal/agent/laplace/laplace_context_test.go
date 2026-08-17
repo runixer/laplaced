@@ -294,6 +294,55 @@ func TestLoadContextData_RichMediaLayoutPromptLocalized(t *testing.T) {
 	}
 }
 
+func TestLoadContextData_ArtifactDeliveryPolicyLocalizedAndCapabilityScoped(t *testing.T) {
+	for _, tt := range []struct {
+		lang        string
+		mustContain []string
+	}{
+		{
+			lang: "en",
+			mustContain: []string{
+				"Every generate_image call must set delivery_mode",
+				"2K or 4K changes generation resolution only",
+				"A \"beautiful/rich post\" by itself still means preview",
+				"MUST NOT be copied into generate_image.input_artifact_ids",
+				"Use send_artifacts only when the user asks to receive an existing trusted artifact",
+			},
+		},
+		{
+			lang: "ru",
+			mustContain: []string{
+				"В каждом вызове generate_image обязательно указывай delivery_mode",
+				"2K или 4K меняет только разрешение генерации",
+				"Красивый/богато оформленный пост",
+				"НЕЛЬЗЯ копировать в generate_image.input_artifact_ids",
+				"Используй send_artifacts только когда пользователь просит получить существующий доверенный артефакт",
+			},
+		},
+	} {
+		t.Run(tt.lang, func(t *testing.T) {
+			cfg, _, lap, mockStore, _, _ := setupContextTest(t)
+			cfg.Bot.Language = tt.lang
+			cfg.Transport = "telegram"
+			userID := storage.ScopeID("123")
+			mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil).Twice()
+			mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil).Twice()
+
+			rich, err := lap.loadContextData(context.Background(), userID, "delivery", nil, true)
+			require.NoError(t, err)
+			for _, phrase := range tt.mustContain {
+				assert.Contains(t, rich.BaseSystemPrompt, phrase)
+			}
+
+			legacy, err := lap.loadContextData(context.Background(), userID, "delivery", nil, false)
+			require.NoError(t, err)
+			assert.Contains(t, legacy.BaseSystemPrompt, "generate_image")
+			assert.NotContains(t, legacy.BaseSystemPrompt, "send_artifacts")
+			mockStore.AssertExpectations(t)
+		})
+	}
+}
+
 // TestLoadContextData_MessageLimiting tests MaxContextMessages limiting.
 func TestLoadContextData_MessageLimiting(t *testing.T) {
 	cfg, translator, lap, mockStore, _, _ := setupContextTest(t)

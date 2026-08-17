@@ -403,7 +403,7 @@ func TestExecuteGeneratedMediaLayout_FormatFallbackKeepsTextMediaTextOrder(t *te
 	}
 }
 
-func TestPlanGeneratedMediaLayout_HighResolutionSidecarFollowsOwningPart(t *testing.T) {
+func TestPlanGeneratedMediaLayout_SizeAloneKeepsOnlyDirectedPreviews(t *testing.T) {
 	bot, path := generatedV2Planner(t)
 	bot.cfg.Agents.ImageGenerator.DocumentThresholdBytes = len(generatedTestPNG) - 1
 	items := generatedV2PhotoItems(2)
@@ -412,34 +412,24 @@ func TestPlanGeneratedMediaLayout_HighResolutionSidecarFollowsOwningPart(t *test
 	planned, ok, reason := bot.planGeneratedRichDelivery(context.Background(), path, source, items, len(items))
 
 	require.True(t, ok, "fallback reason: %s", reason)
-	require.Len(t, planned.plan.Operations, 4)
+	require.Len(t, planned.plan.Operations, 2)
 	wantKinds := []persistentOperationKind{
 		persistentOperationRichMedia,
-		persistentOperationMedia,
 		persistentOperationRichMedia,
-		persistentOperationMedia,
 	}
 	for i, want := range wantKinds {
 		assert.Equal(t, want, planned.plan.Operations[i].Kind, "operation %d", i)
 	}
 	firstRich := planned.plan.Operations[0].RichMedia
-	firstSidecar := planned.plan.Operations[1].Media
-	secondRich := planned.plan.Operations[2].RichMedia
-	secondSidecar := planned.plan.Operations[3].Media
+	secondRich := planned.plan.Operations[1].RichMedia
 	require.NotNil(t, firstRich)
-	require.NotNil(t, firstSidecar)
 	require.NotNil(t, secondRich)
-	require.NotNil(t, secondSidecar)
 	assert.Equal(t, []string{items[1].Filename}, generatedLayoutFilenames(firstRich.Items))
-	assert.Equal(t, []string{items[1].Filename}, generatedLayoutFilenames(firstSidecar.Items))
-	assert.True(t, firstSidecar.Items[0].AsDocument)
 	assert.Equal(t, []string{items[0].Filename}, generatedLayoutFilenames(secondRich.Items))
-	assert.Equal(t, []string{items[0].Filename}, generatedLayoutFilenames(secondSidecar.Items))
-	assert.True(t, secondSidecar.Items[0].AsDocument)
+	assert.Equal(t, OutgoingMediaWireKindPhoto, firstRich.Items[0].WireKind)
+	assert.Equal(t, OutgoingMediaWireKindPhoto, secondRich.Items[0].WireKind)
 	assert.Equal(t, path.replyTo, firstRich.ReplyTo)
-	assert.Empty(t, firstSidecar.ReplyTo)
 	assert.Empty(t, secondRich.ReplyTo)
-	assert.Empty(t, secondSidecar.ReplyTo)
 	require.NoError(t, planned.plan.validate())
 }
 

@@ -249,7 +249,8 @@ sequenceDiagram
     end
 ```
 
-**Доступные инструменты** (набор задаётся в секции `tools` конфига):
+**Доступные инструменты** (основной набор задаётся в секции `tools` конфига;
+`send_artifacts` добавляется динамически только в eligible private rich turn):
 
 | Tool | Назначение |
 |------|------------|
@@ -259,10 +260,15 @@ sequenceDiagram
 | `manage_people` | Управление профилями людей (v0.5.1) |
 | `internet_search` | Веб-поиск (по умолчанию `perplexity/sonar-pro`) |
 | `generate_image` | Генерация/редактирование изображений (v0.8.0; см. [image-generation.md](./image-generation.md)) |
+| `send_artifacts` | Декларативная отправка user-owned артефактов из trusted inventory; private rich V1 |
 
 Вызовы `generate_image` выполняются **параллельно** (с ограничением
 `max_concurrent`), остальные инструменты — последовательно, т.к. могут менять
-общее состояние (память, люди).
+общее состояние (память, люди). `send_artifacts` не вызывает транспорт: он
+валидирует user ownership и turn-local allowlist, затем возвращает typed
+selection в единый финальный delivery plan. Помимо ограничения видимости tool,
+executor проверяет независимый runtime capability bit и fail-closed вне private
+rich-send turn.
 
 ### 6. Отправка ответа
 
@@ -294,32 +300,53 @@ rich drafts. Незакрытый Markdown автозакрывается на �
      блоки в Rich Messages; отдельная физическая строка `###SPLIT###` задаёт
      явную границу, но тот же текст внутри prose/code/table/list/quote не режет
      ответ
+   - Каждый `generate_image` задаёт typed `delivery_mode`: `preview` по
+     умолчанию, `original` только по явной просьбе об оригинале/файле/отправке
+     без сжатия, `preview_and_original` только по явной просьбе об обоих
+     вариантах. 2K/4K меняет разрешение, но не presentation; размер файла не
+     создаёт автоматический Document sidecar
    - После успешного `generate_image` Laplace детерминированно назначает
-     turn-local `MEDIA:n` по порядку tool calls и outputs. Отдельная top-level
-     строка `###MEDIA:n[,n...]###` может поставить одну картинку, collage или
-     slideshow между текстовыми блоками. Модель выбирает только позицию,
-     порядок и группу; artifact lookup, bytes, media IDs и HTML принадлежат
-     приложению
+     turn-local `MEDIA:n` только generated preview, по порядку tool calls и
+     outputs. `original` номера не занимает. Отдельная top-level строка
+     `###MEDIA:n[,n...]###` может поставить одну картинку, collage или slideshow
+     между текстовыми блоками. Модель выбирает только позицию, порядок и группу;
+     artifact lookup, bytes, media IDs и HTML принадлежат приложению
    - MEDIA-layout валидируется атомарно: все доступные номера должны встретиться
      ровно по одному разу. Ошибка, пропуск, дубль, недоступный номер или лимит
      свыше 10 удаляет служебные строки и включает автоматическую gallery сверху
      либо bounded legacy fallback без потери порядка
+   - В текущем сообщении app-authored `<current_artifacts>` отделяет IDs для
+     `send_artifacts` от automatic bytes для `generate_image`; пользовательский
+     текст не может добавить ID в allowlist. Исторические IDs принимаются только
+     из доверенного artifact context/canonical app markers. Fresh generated IDs
+     этого хода доставляются своим `delivery_mode`, а не повторным
+     `send_artifacts`; после завершения tool batch их отдельный allowlist можно
+     использовать только как `generate_image` input следующей итерации
    - legacy Telegram использует лимит 4096 UTF-16, а tables/captions
      переразбиваются при переполнении
    - Fallback на plain text при ошибках
 
 3. **Отправка**
    - Reply на оригинальное сообщение
-   - Для eligible rich-canary единый immutable delivery plan содержит text,
-     одну или несколько model-directed групп из 1–10 generated Photos, packed
-     rich parts и при необходимости high-resolution Document sidecars; одна
-     операция плана равна одному Bot API request
+   - Для eligible private rich-send turn единый immutable delivery plan содержит
+     packed text, одну или несколько model-directed групп из 1–10 generated
+     Photo previews и explicit artifact operations. Generated `original`
+     заменяет preview; `preview_and_original` оставляет preview и добавляет
+     byte-exact Document. Stored images поддерживают auto/preview/original/both,
+     неизобразительные файлы — только auto/original (Document)
+   - Rich-пост с preview завершается первым. Все явно запрошенные originals и
+     stored selections идут после него в стабильном порядке, потому что
+     Telegram Rich Message не имеет Document block. Одна операция плана равна
+     одному Bot API request; никакой size threshold не добавляет sidecar
    - До первого persistent request создаётся content-free delivery ledger.
      Только подтверждённый rich-format rejection активирует заранее
      подготовленный legacy suffix; `unknown` останавливает план без resend
    - После подтверждения всех операций одна транзакция сохраняет assistant
-     history row, все transport message ID и связи с артефактами. Поэтому reply
-     reaction на любую часть/альбом/sidecar разрешается к одному ответу
+     history row, все transport message ID и ordered M:N
+     `history_artifact_refs`. Новые generated artifacts получают creator
+     history, а повторная отправка stored artifact не меняет его исходный
+     `artifacts.message_id`. Поэтому reply reaction на любую часть, альбом или
+     Document разрешается к одному logical reply
    - `MEDIA`/`SPLIT` — одноразовый delivery-протокол: его строки не попадают в
      assistant history. Внутренние `artifact:<id>` остаются только в доверенном
      tool/history-контексте и вычищаются из model-authored wire output

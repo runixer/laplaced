@@ -143,7 +143,7 @@ func TestRunner(t *testing.T) {
 	})
 }
 
-func TestMigration019_RichDelivery(t *testing.T) {
+func TestMigration020_RichDeliveryArtifactRefs(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -158,12 +158,12 @@ func TestMigration019_RichDelivery(t *testing.T) {
 	if err := db.QueryRow("SELECT MAX(version) FROM schema_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 19 {
-		t.Fatalf("schema version = %d, want 19", version)
+	if version != 20 {
+		t.Fatalf("schema version = %d, want 20", version)
 	}
 	for _, table := range []string{
 		"history_transport_messages", "outbound_deliveries",
-		"outbound_delivery_ops", "outbound_delivery_messages",
+		"outbound_delivery_ops", "outbound_delivery_messages", "history_artifact_refs",
 	} {
 		var count int
 		if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&count); err != nil {

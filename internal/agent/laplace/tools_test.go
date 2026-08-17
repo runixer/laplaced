@@ -1,6 +1,7 @@
 package laplace
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/runixer/laplaced/internal/config"
@@ -247,6 +248,100 @@ func TestImageGenerationSchemaEnums(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestImageGenerationSchemaRequiresDeliveryMode(t *testing.T) {
+	schema := buildImageGenerationSchema(&config.ImageGeneratorConfig{})
+	props := schema["properties"].(map[string]interface{})
+	delivery := props["delivery_mode"].(map[string]interface{})
+	assert.Equal(t, "string", delivery["type"])
+	assert.Equal(t, []string{"preview", "original", "preview_and_original"}, delivery["enum"])
+	assert.Equal(t, []string{"prompt", "delivery_mode"}, schema["required"])
+}
+
+func TestToolsForRequest_SendArtifactsIsPrivateRichOnly(t *testing.T) {
+	translator, err := i18n.NewTranslator("en")
+	require.NoError(t, err)
+	cfg := &config.Config{
+		Bot: config.BotConfig{Language: "en"},
+		Tools: []config.ToolConfig{
+			{Name: "generate_image"},
+			// Even an accidental config entry must not put this capability in
+			// the process-wide base slice.
+			{Name: "send_artifacts"},
+		},
+	}
+	agent := &Laplace{cfg: cfg, translator: translator, tools: BuildTools(cfg, translator)}
+
+	require.Len(t, agent.tools, 1)
+	assert.Equal(t, "generate_image", agent.tools[0].Function.Name)
+
+	legacy := agent.toolsForRequest(false)
+	require.Len(t, legacy, 1)
+	assert.Equal(t, "generate_image", legacy[0].Function.Name)
+	legacyParams := legacy[0].Function.Parameters.(map[string]interface{})
+	legacyDelivery := legacyParams["properties"].(map[string]interface{})["delivery_mode"].(map[string]interface{})
+	assert.Equal(t, []string{"preview"}, legacyDelivery["enum"])
+
+	rich := agent.toolsForRequest(true)
+	require.Len(t, rich, 2)
+	assert.Equal(t, "generate_image", rich[0].Function.Name)
+	richParams := rich[0].Function.Parameters.(map[string]interface{})
+	richDelivery := richParams["properties"].(map[string]interface{})["delivery_mode"].(map[string]interface{})
+	assert.Equal(t, []string{"preview", "original", "preview_and_original"}, richDelivery["enum"])
+	tool := rich[1]
+	assert.Equal(t, "send_artifacts", tool.Function.Name)
+	params := tool.Function.Parameters.(map[string]interface{})
+	assert.Equal(t, []string{"items"}, params["required"])
+	items := params["properties"].(map[string]interface{})["items"].(map[string]interface{})
+	assert.Equal(t, 1, items["minItems"])
+	assert.Equal(t, 10, items["maxItems"])
+	item := items["items"].(map[string]interface{})
+	assert.Equal(t, []string{"artifact_id", "mode"}, item["required"])
+	mode := item["properties"].(map[string]interface{})["mode"].(map[string]interface{})
+	assert.Equal(t, []string{"auto", "preview", "original", "preview_and_original"}, mode["enum"])
+}
+
+func TestToolsForRequest_DoesNotMutateSharedSlice(t *testing.T) {
+	translator, err := i18n.NewTranslator("en")
+	require.NoError(t, err)
+	cfg := &config.Config{
+		Bot:   config.BotConfig{Language: "en"},
+		Tools: []config.ToolConfig{{Name: "generate_image"}},
+	}
+	agent := &Laplace{cfg: cfg, translator: translator, tools: BuildTools(cfg, translator)}
+
+	const workers = 64
+	var wg sync.WaitGroup
+	lengths := make(chan int, workers)
+	for i := 0; i < workers; i++ {
+		rich := i%2 == 0
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			requestTools := agent.toolsForRequest(rich)
+			lengths <- len(requestTools)
+			// A caller changing its request-local slice must not touch l.tools
+			// or another concurrent request's slice.
+			requestTools[0].Function.Name = "request-local-mutation"
+		}()
+	}
+	wg.Wait()
+	close(lengths)
+
+	var one, two int
+	for length := range lengths {
+		switch length {
+		case 1:
+			one++
+		case 2:
+			two++
+		}
+	}
+	assert.Equal(t, workers/2, one)
+	assert.Equal(t, workers/2, two)
+	assert.Equal(t, "generate_image", agent.tools[0].Function.Name)
+	assert.Len(t, agent.tools, 1)
 }
 
 func TestBuildTools_ReadURLSchema(t *testing.T) {

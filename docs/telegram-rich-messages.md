@@ -49,7 +49,12 @@ is never resent in another format.
 v2 uses one preflighted delivery plan for every persistent reply in the
 eligible private-chat rich path. The plan is immutable before its first network
 call and consists of operations where one operation is exactly one Bot API
-request:
+request. Within that path, artifact delivery V1 is deliberately private-only:
+the model gets `send_artifacts` and explicit image presentation modes only for
+an eligible private rich-send turn; runtime authorization independently fails
+closed everywhere else.
+
+The release contract is:
 
 - incoming `rich_message`, classic text entities and caption entities are
   always decoded through the bounded projection described above;
@@ -62,13 +67,14 @@ request:
   other protected structures remains content;
 - optional rich draft streaming shows ephemeral tool/RAG/content progress and
   is stopped before the persistent final owns delivery;
-- one to ten trusted generated Photos can be uploaded in one multipart final.
-  After successful image tools, the model receives turn-local `MEDIA:1`,
-  `MEDIA:2`, ... placement references. A standalone top-level physical line
-  such as `###MEDIA:1###` or `###MEDIA:2,3###` chooses the position, order and
-  grouping: one Photo is a bare image block, two to four use a collage, and
-  five to ten use a slideshow. Several groups may be interleaved with Rich
-  HTML and may cross explicit `###SPLIT###` boundaries;
+- one to ten trusted generated Photo previews can be uploaded in one multipart
+  final. After successful image tools, the model receives turn-local `MEDIA:1`,
+  `MEDIA:2`, ... placement references only for generated delivery modes that
+  contain a preview. `original` consumes no MEDIA ordinal. A standalone
+  top-level physical line such as `###MEDIA:1###` or `###MEDIA:2,3###` chooses
+  the position, order and grouping: one Photo is a bare image block, two to four
+  use a collage, and five to ten use a slideshow. Several groups may be
+  interleaved with Rich HTML and may cross explicit `###SPLIT###` boundaries;
 - the placement protocol is all-or-nothing. If no directive is present, all
   Photos use the established automatic top gallery. A malformed, duplicate,
   missing, unavailable or invented reference invalidates the complete authored
@@ -80,18 +86,33 @@ request:
   by the application from user-isolated generated artifacts. Model-authored
   image URLs and media HTML remain inert, and internal artifact references are
   scrubbed from model-authored user-visible output;
-- an original above `document_threshold_bytes` is included as a validated Photo
-  preview when Telegram's Photo envelope permits it, then sent once as a
-  Document sidecar immediately after the Rich part that owns that preview.
-  Telegram Rich Messages have no Document block;
+- generated images use an explicit delivery policy: `preview` is the default;
+  `original` replaces the Photo with a byte-exact Document; and
+  `preview_and_original` is used only when the user explicitly asks for both.
+  A requested 2K/4K resolution never implies `original`, and file size never
+  creates an automatic Document sidecar. A rich/beautiful post alone remains
+  `preview`; rich presentation plus explicitly requested originals means
+  `preview_and_original`;
+- the private-only `send_artifacts` tool stages existing user-owned artifacts
+  from the app-authored trusted inventory without performing a network call.
+  Stored images support `auto`, `preview`, `original` and
+  `preview_and_original`; non-images support only `auto`/`original` and are
+  Documents. Current-message images remain automatic `generate_image` inputs,
+  while their inventory IDs may be used for `send_artifacts`;
+- Telegram Rich Messages have no Document block. Every explicitly requested
+  original is therefore a separate Document operation after the complete rich
+  post, in stable request/generation order. A preview that cannot satisfy the
+  Telegram Photo envelope deterministically degrades to one Document during
+  preflight, before the ledger or any network call;
 - more than ten generated items, non-image/corrupt media, an invalid Photo
   envelope, or a layout that does not fit the rich limits uses a preplanned
   legacy sequence of homogeneous batches of at most ten items plus bounded
   text parts;
-- every logical delivery has a content-free durable ledger. All confirmed
+- every logical delivery has one content-free durable ledger. All confirmed
   transport message IDs are atomically associated with one assistant history
-  row and its artifacts, so a reaction to any album, split or sidecar message
-  resolves the same reply;
+  row and ordered M:N `history_artifact_refs`, so a reaction to any rich part,
+  album or Document resolves the same reply. Re-sending a stored artifact adds
+  a reference and never moves its creator provenance/`artifacts.message_id`;
 - if a later operation is rejected/unknown, or the process stops after a
   confirmation but before history persistence, reactions to the confirmed
   prefix still resolve through the content-free ledger. Such a flag keeps the
@@ -101,9 +122,11 @@ request:
   guesses whether Telegram persisted an in-flight request and never replays it.
 
 Groups, business messages and direct-message topics deliberately retain the
-established legacy path. Video/audio/voice producers, arbitrary Documents
-inside a Rich Message, more than ten model-directed Photos and persistent rich
-edits are outside the v2 contract.
+established legacy path and are not offered `send_artifacts`. Video/audio/voice
+producers, Documents embedded *inside* a Rich Message, more than ten
+model-directed Photos and persistent rich edits are outside the v2 contract;
+explicit artifact originals remain supported as separate private-chat Document
+operations.
 
 ## Rollout runbook
 
@@ -144,9 +167,10 @@ the named feature switches:
    album above ten items is now delivered as bounded `10 + remainder` batches.
 3. **Operator send:** select `mode=send` for those same IDs, still with drafts
    disabled. Check text, 1/2/4/5/10 generated Photos, an 11-photo legacy
-   fallback, a high-resolution Photo + Document sidecar, standalone and inline
-   split markers, copy/forward, reply and reactions on the first and a later
-   persistent part on Desktop and Android.
+   fallback, 4K staying preview-only, explicit `original` replacing preview,
+   explicit `preview_and_original`, stored image preview/original/both, stored
+   PDF original, standalone and inline split markers, copy/forward, reply and
+   reactions on the first and a later persistent part on Desktop and Android.
 4. **Operator draft:** enable `draft_streaming_enabled` only after persistent
    sends are clean. Exercise a short answer, a long answer, a slow tool and a
    slow image generation; each turn must end with exactly one durable logical
@@ -188,10 +212,11 @@ Changing rollout mode does not disable or roll back rich ingress.
 
 Groups, business messages and direct-message topics fail closed to legacy.
 Errors and ordinary media captions retain their established persistent
-delivery paths. For eligible generated media the planner either follows a
+delivery paths. For eligible generated previews the planner either follows a
 fully validated turn-local MEDIA layout or inserts one trusted gallery at the
-top automatically, then packs text and places each high-resolution Document
-sidecar immediately after its owning preview part. More than ten items and
+top automatically, then completes the rich post before sending explicitly
+requested originals/stored artifacts as separate Photo or Document operations.
+No byte threshold adds a sidecar. More than ten model-directed previews and
 local rich preflight failures use the fully prepared legacy media/text plan
 instead. The model never supplies media bytes, identifiers or an upload target.
 
@@ -202,7 +227,8 @@ format or followed by a generic message. This rule also applies to multipart
 rich-media uploads: only a named rich-format rejection can atomically activate
 the already prepared legacy suffix. The complete assistant history row and
 reaction/artifact links are created only after every operation of the logical
-reply is confirmed, including packed text and generated-media sidecars.
+reply is confirmed, including packed rich text, previews and explicit artifact
+operations.
 
 ## Rich streaming
 

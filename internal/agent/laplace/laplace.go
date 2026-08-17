@@ -17,6 +17,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/agent"
 	"github.com/runixer/laplaced/internal/agentlog"
+	"github.com/runixer/laplaced/internal/artifactdelivery"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
 	"github.com/runixer/laplaced/internal/i18n"
@@ -166,9 +167,12 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 	// on attached photos (generate_image without explicit artifact IDs).
 	currentMessageImages := extractImageFileParts(req.CurrentMessageParts)
 	tcc := ToolCallContext{
-		UserID:               req.UserID,
-		CurrentMessageImages: currentMessageImages,
+		UserID:                  req.UserID,
+		CurrentMessageImages:    currentMessageImages,
+		TrustedArtifactIDs:      trustedArtifactIDs(req, contextData),
+		ArtifactDeliveryEnabled: req.RichOutput,
 	}
+	requestTools := l.toolsForRequest(req.RichOutput)
 
 	// Prepare plugins
 	var plugins []llm.Plugin
@@ -191,6 +195,8 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 	tracker := agentlog.NewTurnTracker()
 	var finalResponse string
 	var generatedArtifactIDs []int64
+	var generatedArtifacts []artifactdelivery.Generated
+	var selectedArtifacts []artifactdelivery.Selected
 	// seenURLs collects every source URL returned by search tools this turn,
 	// so the citation guard can strip links the model invented or altered.
 	seenURLs := make(map[string]bool)
@@ -228,7 +234,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 			Model:     l.cfg.Agents.GetChatModel(),
 			Messages:  orMessages,
 			Plugins:   plugins,
-			Tools:     l.tools,
+			Tools:     requestTools,
 			Reasoning: reasoning,
 			UserID:    string(req.UserID),
 		}
@@ -259,6 +265,8 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 			promptTokens, completionTokens := tracker.TotalTokens()
 			resp = &Response{
 				GeneratedArtifactIDs: generatedArtifactIDs,
+				GeneratedArtifacts:   generatedArtifacts,
+				SelectedArtifacts:    selectedArtifacts,
 				PromptTokens:         promptTokens,
 				CompletionTokens:     completionTokens,
 				TotalCost:            tracker.TotalCost(),
@@ -321,6 +329,8 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 				Content:              "", // Empty due to error
 				Error:                errors.New("max empty response retries reached"),
 				GeneratedArtifactIDs: generatedArtifactIDs,
+				GeneratedArtifacts:   generatedArtifacts,
+				SelectedArtifacts:    selectedArtifacts,
 				PromptTokens:         promptTokens,
 				CompletionTokens:     completionTokens,
 				TotalCost:            tracker.TotalCost(),
@@ -376,14 +386,22 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 			// {span.tool.iteration=2} in TraceQL.
 			tcc.Iteration = toolIterationsFinal
 			toolStart := time.Now()
-			toolMessages, toolArtifactIDs, toolCitations := l.executeToolCalls(
+			previewOrdinalBase := countGeneratedPreviews(generatedArtifacts)
+			toolMessages, toolArtifactIDs, toolGenerated, toolSelected, toolCitations := l.executeToolCalls(
 				ctx, toolHandler, tcc, outcome.toolCalls,
-				len(generatedArtifactIDs), req.RichOutput,
+				previewOrdinalBase, req.RichOutput,
 				req.OnToolStart, logger,
 			)
 			totalToolDuration += time.Since(toolStart)
 
 			generatedArtifactIDs = append(generatedArtifactIDs, toolArtifactIDs...)
+			generatedArtifacts = append(generatedArtifacts, toolGenerated...)
+			selectedArtifacts = append(selectedArtifacts, toolSelected...)
+			// A later tool-loop iteration may edit a just-generated image by the
+			// internal ID returned in its tool result. Keep those IDs out of the
+			// stored-artifact delivery allowlist: their presentation was already
+			// fixed by generate_image.delivery_mode.
+			tcc.GeneratedInputArtifactIDs = appendUniqueArtifactIDs(tcc.GeneratedInputArtifactIDs, toolArtifactIDs...)
 			for _, c := range toolCitations {
 				seenURLs[c.URL] = true
 			}
@@ -421,6 +439,8 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 	resp = &Response{
 		Content:              finalResponse,
 		GeneratedArtifactIDs: generatedArtifactIDs,
+		GeneratedArtifacts:   generatedArtifacts,
+		SelectedArtifacts:    selectedArtifacts,
 		PromptTokens:         promptTokens,
 		CompletionTokens:     completionTokens,
 		TotalCost:            tracker.TotalCost(),
@@ -510,10 +530,10 @@ func (l *Laplace) runChatTurn(
 	}, nil
 }
 
-// executeToolCalls executes tool calls and returns (tool result messages,
-// accumulated generated artifact IDs). onToolStart receives the tool name
-// and raw arguments JSON so the bot wiring can show a localized status with
-// the tool's primary argument (e.g. the search query or image prompt).
+// executeToolCalls executes tool calls and returns model-facing messages plus
+// ordered, transport-neutral artifact-delivery side channels. onToolStart
+// receives the tool name and raw arguments JSON so the bot wiring can show a
+// localized status with the tool's primary argument (e.g. a search query).
 func (l *Laplace) executeToolCalls(
 	ctx context.Context,
 	handler ToolHandler,
@@ -523,19 +543,21 @@ func (l *Laplace) executeToolCalls(
 	advertiseMediaLayout bool,
 	onToolStart func(toolName, arguments string),
 	logger *slog.Logger,
-) ([]llm.Message, []int64, []llm.Citation) {
+) ([]llm.Message, []int64, []artifactdelivery.Generated, []artifactdelivery.Selected, []llm.Citation) {
 	n := len(toolCalls)
 	if n == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil, nil
 	}
 
 	// Each tool call's outcome is stored by its declared index so the assembled
 	// result preserves order regardless of execution order.
 	type execResult struct {
-		toolName    string
-		msg         llm.Message
-		artifactIDs []int64
-		citations   []llm.Citation
+		toolName           string
+		msg                llm.Message
+		artifactIDs        []int64
+		generatedArtifacts []artifactdelivery.Generated
+		selectedArtifacts  []artifactdelivery.Selected
+		citations          []llm.Citation
 	}
 	results := make([]execResult, n)
 
@@ -553,11 +575,14 @@ func (l *Laplace) executeToolCalls(
 			}
 			return
 		}
+		artifactIDs, generated := normalizeGeneratedDelivery(result)
 		results[i] = execResult{
-			toolName:    tc.Function.Name,
-			msg:         llm.Message{Role: "tool", Content: result.Content, ToolCallID: tc.ID},
-			artifactIDs: result.GeneratedArtifactIDs,
-			citations:   result.Citations,
+			toolName:           tc.Function.Name,
+			msg:                llm.Message{Role: "tool", Content: result.Content, ToolCallID: tc.ID},
+			artifactIDs:        artifactIDs,
+			generatedArtifacts: generated,
+			selectedArtifacts:  append([]artifactdelivery.Selected(nil), result.SelectedArtifacts...),
+			citations:          result.Citations,
 		}
 	}
 
@@ -594,14 +619,16 @@ func (l *Laplace) executeToolCalls(
 	// Generated-media ordinals are assigned only after every parallel call has
 	// joined. The stable order is therefore tool-loop iteration, declared
 	// tool_calls index, then provider output order inside one call; completion
-	// timing can never swap MEDIA references. The base is the number of images
-	// produced by earlier tool-loop iterations in this Execute call.
-	batchGenerated := 0
+	// timing can never swap MEDIA references. Only modes which contain a preview
+	// receive an ordinal: original-only files cannot be embedded in rich prose.
+	// The base is therefore the number of previews produced by earlier tool-loop
+	// iterations, not the total number of generated artifacts.
+	batchPreviews := 0
 	for i := range results {
-		if results[i].toolName != "generate_image" || len(results[i].artifactIDs) == 0 {
+		if results[i].toolName != "generate_image" {
 			continue
 		}
-		batchGenerated += len(results[i].artifactIDs)
+		batchPreviews += countGeneratedPreviews(results[i].generatedArtifacts)
 	}
 	if generatedOrdinalBase < 0 {
 		generatedOrdinalBase = 0
@@ -609,17 +636,21 @@ func (l *Laplace) executeToolCalls(
 	nextGeneratedOrdinal := generatedOrdinalBase + 1
 	if advertiseMediaLayout {
 		for i := range results {
-			if results[i].toolName != "generate_image" || len(results[i].artifactIDs) == 0 {
+			if results[i].toolName != "generate_image" {
+				continue
+			}
+			previewCount := countGeneratedPreviews(results[i].generatedArtifacts)
+			if previewCount == 0 {
 				continue
 			}
 			results[i].msg.Content = appendGeneratedMediaPlacementGuidance(
 				fmt.Sprint(results[i].msg.Content),
 				nextGeneratedOrdinal,
-				len(results[i].artifactIDs),
+				previewCount,
 			)
-			nextGeneratedOrdinal += len(results[i].artifactIDs)
+			nextGeneratedOrdinal += previewCount
 		}
-		cumulativeGenerated := generatedOrdinalBase + batchGenerated
+		cumulativeGenerated := generatedOrdinalBase + batchPreviews
 		// Once the turn crosses the directed-layout bound, keep the override as
 		// the final instruction in every later tool batch. Otherwise a search or
 		// memory result after image generation could make the earlier warning
@@ -635,13 +666,58 @@ func (l *Laplace) executeToolCalls(
 
 	toolMessages := make([]llm.Message, 0, n)
 	var artifactIDs []int64
+	var generatedArtifacts []artifactdelivery.Generated
+	var selectedArtifacts []artifactdelivery.Selected
 	var citations []llm.Citation
 	for i := range results {
 		toolMessages = append(toolMessages, results[i].msg)
 		artifactIDs = append(artifactIDs, results[i].artifactIDs...)
+		generatedArtifacts = append(generatedArtifacts, results[i].generatedArtifacts...)
+		selectedArtifacts = append(selectedArtifacts, results[i].selectedArtifacts...)
 		citations = append(citations, results[i].citations...)
 	}
-	return toolMessages, artifactIDs, citations
+	return toolMessages, artifactIDs, generatedArtifacts, selectedArtifacts, citations
+}
+
+// normalizeGeneratedDelivery bridges old tool handlers that return only raw
+// IDs and the typed delivery contract. Typed entries are canonical when
+// present; legacy IDs default to preview, matching pre-V2 behavior without
+// making resolution (2K/4K) imply an original file.
+func normalizeGeneratedDelivery(result *ToolResult) ([]int64, []artifactdelivery.Generated) {
+	if result == nil {
+		return nil, nil
+	}
+	if len(result.GeneratedArtifacts) == 0 {
+		ids := append([]int64(nil), result.GeneratedArtifactIDs...)
+		generated := make([]artifactdelivery.Generated, 0, len(ids))
+		for _, id := range ids {
+			generated = append(generated, artifactdelivery.Generated{
+				ArtifactID: id,
+				Mode:       artifactdelivery.ModePreview,
+			})
+		}
+		return ids, generated
+	}
+
+	generated := append([]artifactdelivery.Generated(nil), result.GeneratedArtifacts...)
+	ids := make([]int64, 0, len(generated))
+	for i := range generated {
+		if generated[i].Mode == "" {
+			generated[i].Mode = artifactdelivery.ModePreview
+		}
+		ids = append(ids, generated[i].ArtifactID)
+	}
+	return ids, generated
+}
+
+func countGeneratedPreviews(generated []artifactdelivery.Generated) int {
+	count := 0
+	for _, item := range generated {
+		if item.Mode == artifactdelivery.ModePreview || item.Mode == artifactdelivery.ModePreviewAndOriginal {
+			count++
+		}
+	}
+	return count
 }
 
 func appendGeneratedMediaPlacementGuidance(content string, firstOrdinal, count int) string {

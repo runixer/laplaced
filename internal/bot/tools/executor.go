@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/runixer/laplaced/internal/agentlog"
+	"github.com/runixer/laplaced/internal/artifactdelivery"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/fetch"
 	"github.com/runixer/laplaced/internal/files"
@@ -34,6 +35,17 @@ type CallContext struct {
 	// tool_executor span as tool.iteration; zero is acceptable for callers
 	// outside the laplace loop (none today).
 	Iteration int
+	// ArtifactDeliveryEnabled is set only for private Telegram rich-send turns.
+	// send_artifacts fails closed when it is false, even if a model hallucinates
+	// the function name outside the advertised tool set.
+	ArtifactDeliveryEnabled bool
+	// TrustedArtifactIDs is the bounded, application-authored inventory exposed
+	// to this exact turn. User text cannot add IDs to it.
+	TrustedArtifactIDs []int64
+	// GeneratedInputArtifactIDs contains images produced by confirmed earlier
+	// tool-loop iterations. generate_image may consume them for same-turn edits;
+	// send_artifacts must not use them to override the declared delivery mode.
+	GeneratedInputArtifactIDs []int64
 }
 
 // Result is the richer return type of tool execution. Content is what gets
@@ -43,6 +55,8 @@ type CallContext struct {
 type Result struct {
 	Content              string
 	GeneratedArtifactIDs []int64
+	GeneratedArtifacts   []artifactdelivery.Generated
+	SelectedArtifacts    []artifactdelivery.Selected
 	// Citations are source URLs returned by web-search tools (perplexity/sonar).
 	// The orchestrator uses them to verify links in the final reply (strip any
 	// link whose URL isn't in this set). Nil for non-search tools.
@@ -200,6 +214,13 @@ func (e *ToolExecutor) ExecuteToolCall(ctx context.Context, cc CallContext, tool
 		_ = obs.ObserveErr(span, err)
 		span.End()
 	}()
+
+	// send_artifacts is a private-turn capability rather than a globally
+	// configured model tool. Dispatch it before the config lookup, and enforce
+	// the capability again at execution time.
+	if toolName == "send_artifacts" {
+		return e.performSendArtifacts(ctx, cc, arguments)
+	}
 
 	// Find tool config
 	var matchedTool *config.ToolConfig

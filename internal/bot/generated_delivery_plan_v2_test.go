@@ -206,7 +206,7 @@ func TestPlanGeneratedRichDeliveryV2_ElevenPhotosUseBoundedLegacyBatches(t *test
 	require.NoError(t, (deliveryPlan{Operations: fallback}).validate())
 }
 
-func TestPlanGeneratedRichDeliveryV2_HighResolutionUsesPreviewAndDocumentSidecar(t *testing.T) {
+func TestPlanGeneratedRichDeliveryV2_SizeAloneNeverAddsOriginalSidecar(t *testing.T) {
 	bot, path := generatedV2Planner(t)
 	bot.cfg.Agents.ImageGenerator.DocumentThresholdBytes = len(generatedTestPNG) - 1
 	items := generatedV2PhotoItems(1)
@@ -216,24 +216,19 @@ func TestPlanGeneratedRichDeliveryV2_HighResolutionUsesPreviewAndDocumentSidecar
 	)
 
 	require.True(t, ok, "fallback reason: %s", reason)
-	require.Len(t, planned.plan.Operations, 2)
+	require.Len(t, planned.plan.Operations, 1)
 	preview := planned.plan.Operations[0]
-	sidecar := planned.plan.Operations[1]
 	require.Equal(t, persistentOperationRichMedia, preview.Kind)
 	require.Len(t, preview.RichMedia.Items, 1)
 	assert.False(t, preview.RichMedia.Items[0].AsDocument)
+	assert.Equal(t, OutgoingMediaWireKindPhoto, preview.RichMedia.Items[0].WireKind)
 	assert.Equal(t, items[0].Data, preview.RichMedia.Items[0].Data)
-	require.Equal(t, persistentOperationMedia, sidecar.Kind)
-	require.Len(t, sidecar.Media.Items, 1)
-	assert.True(t, sidecar.Media.Items[0].AsDocument)
-	assert.Equal(t, items[0].Data, sidecar.Media.Items[0].Data)
-	assert.Empty(t, sidecar.Media.Caption)
-	assert.Empty(t, sidecar.Media.ReplyTo, "preview already owns the reply anchor")
 
-	// A rejection of the first rich request must send the original exactly once
-	// as a Document, not preview + sidecar.
+	// A rich-format rejection keeps the same preview policy. File size alone
+	// never changes user intent into an original Document request.
 	require.Len(t, preview.formatFallback, 1)
-	assertGeneratedV2HomogeneousBatches(t, preview.formatFallback, []int{1}, true)
+	assertGeneratedV2HomogeneousBatches(t, preview.formatFallback, []int{1}, false)
+	assert.Equal(t, OutgoingMediaWireKindPhoto, preview.formatFallback[0].Media.Items[0].WireKind)
 	assert.Contains(t, preview.formatFallback[0].Media.Caption, "High resolution")
 	require.NoError(t, planned.plan.validate())
 }

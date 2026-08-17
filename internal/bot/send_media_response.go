@@ -197,9 +197,10 @@ func (b *Bot) sendResponseWithGeneratedImages(
 	metricFallbackReason = richMetricFallbackMediaIneligible
 
 	// Prefer the fully preflighted V2 gallery plan. It may contain one rich
-	// gallery, additional block-packed rich text parts, and high-resolution
-	// Document sidecars. A confirmed format rejection can execute only the
-	// immutable legacy suffix embedded in that plan.
+	// gallery and additional block-packed rich text parts. Explicit originals
+	// are owned by sendResponseWithArtifacts; this compatibility path never
+	// infers a Document sidecar from file size. A confirmed format rejection can
+	// execute only the immutable legacy suffix embedded in the plan.
 	deliveryConfirmed := false
 	if richMode == config.TelegramRichMessagesSend {
 		planned, ok, ineligibleReason := b.planGeneratedRichDelivery(ctx, path, responseText, items, len(artifactIDs))
@@ -339,16 +340,23 @@ func (b *Bot) deliverGeneratedOnError(
 	resp *laplace.Response,
 	logger *slog.Logger,
 ) (attempted, confirmed bool) {
-	if resp == nil || len(resp.GeneratedArtifactIDs) == 0 {
+	if resp == nil || (len(resp.GeneratedArtifactIDs) == 0 && len(resp.SelectedArtifacts) == 0) {
 		return false, false
 	}
 	caption := b.translator.Get(b.cfg.Bot.Language, "bot.image_delivered_text_failed")
 	logger.Info("delivering generated images despite laplace failure",
 		"artifact_ids", resp.GeneratedArtifactIDs)
 	path.flushSinkBeforeMedia(ctx, caption)
-	result := b.sendResponseWithGeneratedImages(
-		ctx, path, nil, caption, resp.GeneratedArtifactIDs, logger,
-	)
+	var result generatedDeliveryResult
+	if path.artifactDeliveryEligible() &&
+		(len(resp.GeneratedArtifacts) > 0 || len(resp.SelectedArtifacts) > 0) {
+		result = b.sendResponseWithArtifacts(ctx, path, nil, caption,
+			resp.GeneratedArtifacts, resp.SelectedArtifacts, resp.GeneratedArtifactIDs, logger)
+	} else {
+		result = b.sendResponseWithGeneratedImages(
+			ctx, path, nil, caption, resp.GeneratedArtifactIDs, logger,
+		)
+	}
 	path.tgDuration += result.duration
 	path.tgCalls += result.attempts
 	if result.outcome != richDeliveryConfirmed {
@@ -447,13 +455,22 @@ func (b *Bot) loadArtifactBytes(ctx context.Context, userID storage.ScopeID, ids
 	return out
 }
 
-// buildAssistantHistoryContent formats the assistant history content as
-// compact markers for each generated image followed by the free-text reply.
-// Matches the existing document marker convention: "📄 filename (artifact:N)".
+// buildAssistantHistoryContent formats application-owned artifact markers
+// followed by the free-text reply. The canonical numeric reference stays the
+// same for future tool selection, while the visible icon must not claim that a
+// PDF or arbitrary stored file was a generated image.
 func buildAssistantHistoryContent(loaded []loadedArtifact, text string) string {
 	var sb strings.Builder
 	for _, la := range loaded {
-		fmt.Fprintf(&sb, "🎨 %s (artifact:%d)\n", la.artifact.OriginalName, la.artifact.ID)
+		icon := "📄"
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(la.artifact.MimeType)), "image/") {
+			icon = "🎨"
+		}
+		// Keep this line in the exact application-owned grammar consumed by the
+		// trusted-artifact allowlist. A stored filename is user-controlled, so
+		// normalize path separators/control characters before embedding it.
+		name := safeArtifactFilename(la.artifact.OriginalName, la.ordinal, la.artifact.MimeType)
+		fmt.Fprintf(&sb, "%s %s (artifact:%d)\n", icon, name, la.artifact.ID)
 	}
 	if trimmed := strings.TrimSpace(text); trimmed != "" {
 		sb.WriteString("\n")

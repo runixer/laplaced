@@ -54,6 +54,7 @@ var scopeColumns = map[string]bool{
 	"agent_logs.user_id":                 true,
 	"people.user_id":                     true,
 	"artifacts.user_id":                  true,
+	"history_artifact_refs.user_id":      true,
 	"response_flags.user_id":             true,
 	"history_transport_messages.user_id": true,
 	"outbound_deliveries.user_id":        true,

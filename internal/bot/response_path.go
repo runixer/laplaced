@@ -35,6 +35,11 @@ type responsePath struct {
 	threadRoot string
 	replyTo    string // transport-native id of the triggering message
 	richMode   string // off | shadow | send, resolved once from the native sender
+	// richContextEligible is true only for a plain Telegram private chat as
+	// classified by the transport adapter. Keep this separate from richMode so
+	// artifact delivery cannot be enabled by a partially constructed path or a
+	// future caller that only toggles the rollout mode.
+	richContextEligible bool
 
 	// Telegram-only routing ints for the streaming sink and the laplace
 	// request, parsed from the neutral envelope. They are 0 for non-Telegram
@@ -69,15 +74,16 @@ type responsePath struct {
 // streaming.
 func (b *Bot) newResponsePath(ctx context.Context, userID storage.ScopeID, nativeSenderID string, richContextEligible bool, convID, threadRoot, replyTo string, logger *slog.Logger) *responsePath {
 	p := &responsePath{
-		bot:        b,
-		logger:     logger,
-		userID:     userID,
-		convID:     convID,
-		threadRoot: threadRoot,
-		replyTo:    replyTo,
-		richMode:   config.TelegramRichMessagesOff,
-		tgThreadID: atoiOrZero(threadRoot),
-		tgReplyID:  atoiOrZero(replyTo),
+		bot:                 b,
+		logger:              logger,
+		userID:              userID,
+		convID:              convID,
+		threadRoot:          threadRoot,
+		replyTo:             replyTo,
+		richMode:            config.TelegramRichMessagesOff,
+		richContextEligible: richContextEligible,
+		tgThreadID:          atoiOrZero(threadRoot),
+		tgReplyID:           atoiOrZero(replyTo),
 	}
 	p.tgChatID, _ = strconv.ParseInt(convID, 10, 64)
 	if b.transport.Kind() == transportTelegram && richContextEligible {
@@ -365,6 +371,10 @@ func (p *responsePath) effectiveRichMode() string {
 		return p.richMode
 	}
 	return config.TelegramRichMessagesOff
+}
+
+func (p *responsePath) artifactDeliveryEligible() bool {
+	return p != nil && p.richContextEligible && p.effectiveRichMode() == config.TelegramRichMessagesSend
 }
 
 func (p *responsePath) ledgerContext() []deliveryLedgerContext {

@@ -40,6 +40,7 @@ type Bot struct {
 	msgRepo           storage.MessageRepository
 	exactMsgRepo      storage.ExactMessageRepository
 	deliveryRepo      storage.DeliveryRepository
+	artifactRefRepo   storage.ArtifactReferenceRepository
 	statsRepo         storage.StatsRepository
 	factRepo          storage.FactRepository
 	factHistoryRepo   storage.FactHistoryRepository
@@ -124,6 +125,11 @@ func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRe
 		return nil, errors.New("message repository does not support the outbound delivery ledger")
 	}
 	b.deliveryRepo = deliveryRepo
+	artifactRefRepo, ok := msgRepo.(storage.ArtifactReferenceRepository)
+	if !ok {
+		return nil, errors.New("message repository does not support artifact delivery references")
+	}
+	b.artifactRefRepo = artifactRefRepo
 
 	// Default transport is Telegram. main.go swaps in the
 	// Mattermost/Time transport+renderer via SetTransport when transport=time.
@@ -1243,9 +1249,12 @@ func (b *Bot) newBotToolHandler(userID storage.ScopeID, logger *slog.Logger) *bo
 // ExecuteToolCall implements laplace.ToolHandler.
 func (h *botToolHandler) ExecuteToolCall(ctx context.Context, tcc laplace.ToolCallContext, toolName, arguments string) (*laplace.ToolResult, error) {
 	cc := tools.CallContext{
-		UserID:               h.userID,
-		CurrentMessageImages: tcc.CurrentMessageImages,
-		Iteration:            tcc.Iteration,
+		UserID:                    h.userID,
+		CurrentMessageImages:      tcc.CurrentMessageImages,
+		Iteration:                 tcc.Iteration,
+		ArtifactDeliveryEnabled:   tcc.ArtifactDeliveryEnabled,
+		TrustedArtifactIDs:        tcc.TrustedArtifactIDs,
+		GeneratedInputArtifactIDs: tcc.GeneratedInputArtifactIDs,
 	}
 	result, err := h.bot.toolExecutor.ExecuteToolCall(ctx, cc, toolName, arguments)
 	if err != nil {
@@ -1254,6 +1263,8 @@ func (h *botToolHandler) ExecuteToolCall(ctx context.Context, tcc laplace.ToolCa
 	return &laplace.ToolResult{
 		Content:              result.Content,
 		GeneratedArtifactIDs: result.GeneratedArtifactIDs,
+		GeneratedArtifacts:   result.GeneratedArtifacts,
+		SelectedArtifacts:    result.SelectedArtifacts,
 		Citations:            result.Citations,
 	}, nil
 }

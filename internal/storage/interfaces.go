@@ -94,6 +94,21 @@ type DeliveryRepository interface {
 	PersistOutboundDeliveryReply(userID ScopeID, deliveryID int64, message Message, artifactIDs []int64) (int64, error)
 }
 
+// ArtifactReferenceRepository is the V2 extension for provenance-preserving
+// artifact delivery. It remains separate from DeliveryRepository so existing
+// focused implementations and call sites stay source compatible while new
+// delivery paths can atomically persist repeated stored-artifact references.
+type ArtifactReferenceRepository interface {
+	// PersistOutboundDeliveryReplyWithArtifacts performs the same exact history,
+	// transport-message, and delivery linkage as PersistOutboundDeliveryReply,
+	// while assigning canonical ownership only for newly-created artifacts and
+	// recording every delivered generated/stored artifact as an ordered M:N ref.
+	PersistOutboundDeliveryReplyWithArtifacts(userID ScopeID, deliveryID int64, message Message, artifacts PersistOutboundArtifacts) (int64, error)
+	// GetHistoryArtifactReferences returns all refs for one owned history row in
+	// stable ordinal order. A foreign/missing history id yields an empty result.
+	GetHistoryArtifactReferences(userID ScopeID, historyID int64) ([]HistoryArtifactReference, error)
+}
+
 // FlagRepository handles user-flagged bad replies (migration 016). A flag is
 // recorded when a user reacts to a bot reply; it carries the reply's trace_id so
 // the operator can investigate straight from the trace.

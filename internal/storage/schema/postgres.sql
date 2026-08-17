@@ -236,6 +236,25 @@ CREATE INDEX IF NOT EXISTS idx_artifacts_hash ON artifacts(user_id, content_hash
 CREATE INDEX IF NOT EXISTS idx_artifacts_message_id ON artifacts(user_id, message_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_type ON artifacts(user_id, file_type);
 
+-- Ordered M:N association for artifacts delivered by assistant replies.
+-- artifacts.message_id remains the immutable creator/provenance link; repeated
+-- stored-artifact delivery is represented here without rebinding it.
+CREATE TABLE IF NOT EXISTS history_artifact_refs (
+    id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    history_id  bigint NOT NULL,
+    user_id     uuid NOT NULL,
+    artifact_id bigint NOT NULL,
+    ordinal     integer NOT NULL CHECK (ordinal >= 0),
+    mode        text NOT NULL CHECK (mode IN ('auto', 'preview', 'original', 'preview_and_original')),
+    source_kind text NOT NULL CHECK (source_kind IN ('generated', 'stored')),
+    created_at  timestamptz DEFAULT now(),
+    UNIQUE(history_id, ordinal)
+);
+CREATE INDEX IF NOT EXISTS idx_history_artifact_refs_history
+    ON history_artifact_refs(user_id, history_id, ordinal);
+CREATE INDEX IF NOT EXISTS idx_history_artifact_refs_artifact
+    ON history_artifact_refs(user_id, artifact_id, history_id);
+
 -- Principal identity model. Four normalized tables:
 --   scopes      thin registry of memory tenants (id = partition key).
 --   identities  (transport, native_id) -> scope_id map; many handles per principal.

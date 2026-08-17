@@ -327,6 +327,7 @@ func TestTelegramTransport_SendRichMedia_InjectsTrustedPhotoBlock(t *testing.T) 
 		MediaGroupSizes: []int{1},
 		Items: []OutgoingMediaItem{{
 			Data: append([]byte(nil), generatedTestPNG...), Filename: "generated.png", MIME: "image/png",
+			WireKind: OutgoingMediaWireKindPhoto,
 		}},
 	})
 
@@ -367,6 +368,7 @@ func TestTelegramTransport_SendRichMedia_RejectionClassification(t *testing.T) {
 				MediaGroupSizes: []int{1},
 				Items: []OutgoingMediaItem{{
 					Data: append([]byte(nil), generatedTestPNG...), Filename: "generated.png", MIME: "image/png",
+					WireKind: OutgoingMediaWireKindPhoto,
 				}},
 			})
 
@@ -389,6 +391,7 @@ func TestTelegramTransport_SendRichMedia_ComposesMultipleGroupsWithGlobalIDs(t *
 			Data:          append([]byte(nil), generatedTestPNG...),
 			Filename:      fmt.Sprintf("generated-%d.png", i+1),
 			MIME:          "image/png",
+			WireKind:      OutgoingMediaWireKindPhoto,
 			SourceOrdinal: 100 + i,
 		}
 	}
@@ -442,6 +445,7 @@ func TestTelegramTransport_SendRichMedia_AllowsMediaOnlyTopology(t *testing.T) {
 		MediaGroupSizes: []int{1},
 		Items: []OutgoingMediaItem{{
 			Data: append([]byte(nil), generatedTestPNG...), Filename: "generated.png", MIME: "image/png",
+			WireKind: OutgoingMediaWireKindPhoto,
 		}},
 	})
 
@@ -454,6 +458,7 @@ func TestTelegramTransport_SendRichMedia_RejectsInvalidTopologyAndGraphBeforeAPI
 	validItem := func() OutgoingMediaItem {
 		return OutgoingMediaItem{
 			Data: append([]byte(nil), generatedTestPNG...), Filename: "generated.png", MIME: "image/png",
+			WireKind: OutgoingMediaWireKindPhoto,
 		}
 	}
 	tests := []struct {
