@@ -94,7 +94,7 @@ func TestGeneratedMedia_RichFinalDeliveryMetricRecordsOnePhotoAndAttachmentAttem
 	assert.Equal(t, beforeAttachmentCount+1, afterAttachmentCount)
 	assert.Equal(t, beforeAttachmentCountSum+1, afterAttachmentCountSum)
 	assert.Equal(t, beforeAttachmentBytesCount+1, afterAttachmentBytesCount)
-	assert.Equal(t, beforeAttachmentBytesSum+float64(len("png-bytes")), afterAttachmentBytesSum)
+	assert.Equal(t, beforeAttachmentBytesSum+float64(len(generatedTestPNG)), afterAttachmentBytesSum)
 	store.AssertExpectations(t)
 }
 
@@ -202,28 +202,8 @@ func TestGeneratedMedia_RichShadowRecordsOneLocalFallbackDecision(t *testing.T) 
 		name        string
 		response    string
 		artifactIDs []int64
-		threshold   int
 		wantReason  string
 	}{
-		{
-			name:        "two generated images",
-			response:    "# Album",
-			artifactIDs: []int64{42, 43},
-			wantReason:  richMetricFallbackMediaIneligible,
-		},
-		{
-			name:        "explicit split",
-			response:    "# First\n\n###SPLIT###\n\n## Second",
-			artifactIDs: []int64{42},
-			wantReason:  richMetricFallbackMediaIneligible,
-		},
-		{
-			name:        "document quality image",
-			response:    "# Document",
-			artifactIDs: []int64{42},
-			threshold:   4,
-			wantReason:  richMetricFallbackMediaIneligible,
-		},
 		{
 			name:        "injected photo exceeds block budget",
 			response:    strings.TrimSuffix(strings.Repeat("x\n\n", richMessageSafeBlockLimit), "\n\n"),
@@ -238,17 +218,7 @@ func TestGeneratedMedia_RichShadowRecordsOneLocalFallbackDecision(t *testing.T) 
 			bot, store, userID := newGeneratedDeliveryTestBot(t, transport)
 			path := generatedPath(bot, userID)
 			path.richMode = config.TelegramRichMessagesShadow
-			if tt.threshold > 0 {
-				bot.cfg.Agents.ImageGenerator.DocumentThresholdBytes = tt.threshold
-			}
 			expectGeneratedArtifact(store, userID)
-			if len(tt.artifactIDs) == 2 {
-				bot.fileStorage.(*fakeFileStorage).blobs["gen/dog.png"] = []byte("dog-bytes")
-				store.On("GetArtifact", userID, int64(43)).Return(&storage.Artifact{
-					ID: 43, UserID: userID, FilePath: "gen/dog.png",
-					OriginalName: "dog.png", MimeType: "image/png",
-				}, nil).Once()
-			}
 			expectGeneratedMetricPersistence(store, userID, "legacy-media-shadow", tt.artifactIDs...)
 
 			beforeTotal := richCounterFamilyTotal(t, "laplaced_bot_rich_message_shadow_evaluations_total")

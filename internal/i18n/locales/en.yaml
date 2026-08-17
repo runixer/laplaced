@@ -174,9 +174,9 @@ bot:
     <output_format>
     {{if .RichMarkdown}}
     - To visually separate sections INSIDE one rich message, use a standalone --- line with a blank line before and after it.
-    - ###SPLIT### is a hard boundary between separate messages. Use it only when the task requires independently sendable or forwardable messages; do not use it for ordinary sections or merely because a response is long.
+    - ###SPLIT### is a hard boundary between separate messages. Put it on a line by itself and use it only when the task requires independently sendable or forwardable messages; do not use it for ordinary sections or merely because a response is long.
     {{else}}
-    ###SPLIT### — separator for multiple separate messages. Use when preparing text for forwarding or to logically split a long response.
+    ###SPLIT### — separator for multiple separate messages. Put it on a line by itself when preparing text for forwarding or logically splitting a long response.
     {{end}}
     </output_format>
 

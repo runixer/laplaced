@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -314,7 +315,7 @@ func TestTelegramTransport_SendRichMedia_InjectsTrustedPhotoBlock(t *testing.T) 
 			len(req.Attachments) == 1 &&
 			req.Attachments[0].ID == generatedRichPhotoAttachID &&
 			req.Attachments[0].Filename == "generated.png" &&
-			string(req.Attachments[0].Data) == "png"
+			bytes.Equal(req.Attachments[0].Data, generatedTestPNG)
 	})).Return(&telegram.Message{MessageID: 88}, nil).Once()
 
 	msgID, err := tr.SendRichMedia(context.Background(), OutgoingRichMedia{
@@ -323,7 +324,7 @@ func TestTelegramTransport_SendRichMedia_InjectsTrustedPhotoBlock(t *testing.T) 
 		ReplyTo:        "42",
 		HTML:           "<h1>Heading</h1>",
 		Items: []OutgoingMediaItem{{
-			Data: []byte("png"), Filename: "generated.png", MIME: "image/png",
+			Data: append([]byte(nil), generatedTestPNG...), Filename: "generated.png", MIME: "image/png",
 		}},
 	})
 
@@ -362,7 +363,7 @@ func TestTelegramTransport_SendRichMedia_RejectionClassification(t *testing.T) {
 				ConversationID: "123",
 				HTML:           "<p>answer</p>",
 				Items: []OutgoingMediaItem{{
-					Data: []byte("png"), Filename: "generated.png", MIME: "image/png",
+					Data: append([]byte(nil), generatedTestPNG...), Filename: "generated.png", MIME: "image/png",
 				}},
 			})
 

@@ -66,20 +66,26 @@ sequenceDiagram
 - Один файл — одиночная отправка; 2–10 — сгруппированный альбом.
 - Подпись рендерится Markdown → HTML так же, как текстовые ответы; переполнение
   лимита подписи уходит отдельным сообщением.
-- Для Telegram rich-canary действует узкий нативный путь: ровно одна
-  сгенерированная картинка класса Photo и полный ответ, помещающийся в один Rich
-  Message, отправляются одним multipart `sendRichMessage`. Картинка добавляется
-  из доверенного `GeneratedArtifactID` как верхнеуровневый `<img>`, а рядом
-  сохраняются нативные заголовки, таблицы, формулы, списки и spoiler ответа.
-- Альбомы, Document, rich-ответы со split и локально невалидный rich layout
-  остаются на проверенном media + caption/follow-up пути. При сетевой ошибке,
-  5xx или неразбираемом success бот не повторяет upload в другом формате;
-  legacy fallback разрешён только после явного rich-format rejection Telegram.
+- Для Telegram rich-canary общий v2 planner помещает 1–10 доверенных
+  сгенерированных Photo в начало первого Rich Message: одно изображение —
+  `<img>`, 2–4 — collage, 5–10 — slideshow. Остальной ответ остаётся нативным
+  Rich HTML и при необходимости пакуется по границам верхнеуровневых блоков.
+- Если оригинал больше `document_threshold_bytes`, но проходит Telegram Photo
+  envelope (размер, геометрия и декодирование), он попадает в gallery как Photo
+  preview и затем ровно один раз отправляется отдельным Document без сжатия.
+- Более 10 файлов, невалидная/неподдерживаемая картинка или не помещающийся rich
+  layout переходят на заранее подготовленные однородные legacy-батчи не более
+  чем по 10 файлов. При сетевой ошибке, 5xx или неразбираемом success бот не
+  повторяет upload в другом формате; legacy fallback активируется только после
+  подтверждённого rich-format rejection Telegram.
+- Каждая операция плана соответствует ровно одному persistent Bot API request.
+  Все message ID альбома, split-частей и Document sidecar записываются в общий
+  delivery ledger и связываются с теми же артефактами/строкой истории.
 
-Это зафиксированный контракт rich v1. Общий composition planner, несколько
-изображений в collage/slideshow, media-aware split и отдельная политика
-rich-preview + оригинальный Document относятся к v2. До их реализации legacy
-ветка для этих случаев является поддерживаемым поведением, а не ошибкой.
+Это зафиксированный контракт rich v2. Telegram не предоставляет Rich Document
+block, поэтому Document остаётся отдельным persistent сообщением. Модель не
+может выбрать позицию gallery, media id или URL загрузки: они строятся только
+из подтверждённых `GeneratedArtifactID` приложения.
 Rollout и stop-сигналы описаны в
 [telegram-rich-messages.md](../telegram-rich-messages.md).
 

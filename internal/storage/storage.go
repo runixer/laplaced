@@ -308,6 +308,8 @@ type Artifact struct {
 
 type Storage interface {
 	MessageRepository
+	ExactMessageRepository
+	DeliveryRepository
 	UserRepository
 	StatsRepository
 	TopicRepository

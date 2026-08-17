@@ -38,6 +38,8 @@ type Bot struct {
 	cfg               *config.Config
 	userRepo          storage.UserRepository
 	msgRepo           storage.MessageRepository
+	exactMsgRepo      storage.ExactMessageRepository
+	deliveryRepo      storage.DeliveryRepository
 	statsRepo         storage.StatsRepository
 	factRepo          storage.FactRepository
 	factHistoryRepo   storage.FactHistoryRepository
@@ -112,6 +114,16 @@ func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRe
 		logger:          botLogger,
 		translator:      translator,
 	}
+	exactRepo, ok := msgRepo.(storage.ExactMessageRepository)
+	if !ok {
+		return nil, errors.New("message repository does not support exact transport-message persistence")
+	}
+	b.exactMsgRepo = exactRepo
+	deliveryRepo, ok := msgRepo.(storage.DeliveryRepository)
+	if !ok {
+		return nil, errors.New("message repository does not support the outbound delivery ledger")
+	}
+	b.deliveryRepo = deliveryRepo
 
 	// Default transport is Telegram. main.go swaps in the
 	// Mattermost/Time transport+renderer via SetTransport when transport=time.
@@ -462,37 +474,68 @@ func (b *Bot) HandleReaction(ir IncomingReaction) {
 		return
 	}
 
-	reply, err := b.msgRepo.GetReplyByTransportID(scopeID, ir.MessageID)
+	var reply *storage.Message
+	if b.exactMsgRepo != nil {
+		reply, err = b.exactMsgRepo.GetReplyByTransportMessage(scopeID, b.transport.Kind(), ir.ConversationID, ir.MessageID)
+	} else {
+		reply, err = b.msgRepo.GetReplyByTransportID(scopeID, ir.MessageID)
+	}
 	if err != nil {
 		b.logger.Warn("reaction: failed to look up reply", "error", err, "message_id", ir.MessageID)
 		return
 	}
-	if reply == nil {
-		// Reaction on a non-bot or un-indexed message (e.g. the user's own
-		// message, or a reply that predates this feature) — nothing to flag.
+	var historyID *int64
+	var replyTraceID *string
+	preview := ""
+	switch {
+	case reply != nil:
+		preview = reply.Content
+		if r := []rune(preview); len(r) > reactionFlagPreviewLen {
+			preview = string(r[:reactionFlagPreviewLen])
+		}
+		id := reply.ID
+		historyID = &id
+		replyTraceID = reply.TraceID
+	case b.deliveryRepo != nil:
+		// A confirmed prefix may have no history row when a later operation was
+		// rejected/unknown, or when the process stopped after Telegram confirmed
+		// delivery but before the atomic history transaction. The content-free
+		// ledger still proves this exact transport identity belongs to our reply
+		// and carries its trace id; record a flag without inventing a preview.
+		delivery, lookupErr := b.deliveryRepo.GetOutboundDeliveryByTransportMessage(
+			scopeID, b.transport.Kind(), ir.ConversationID, ir.MessageID,
+		)
+		if lookupErr != nil {
+			b.logger.Warn("reaction: failed to look up outbound delivery", "error", lookupErr, "message_id", ir.MessageID)
+			return
+		}
+		if delivery == nil {
+			return
+		}
+		historyID = delivery.HistoryID
+		replyTraceID = delivery.TraceID
+		span.SetAttributes(attribute.Bool("reaction.resolved_from_delivery_ledger", true))
+	default:
+		// Reaction on a non-bot or unindexed message (e.g. the user's own or a
+		// reply predating both persistence schemes) — nothing to flag.
 		return
 	}
 
-	preview := reply.Content
-	if r := []rune(preview); len(r) > reactionFlagPreviewLen {
-		preview = string(r[:reactionFlagPreviewLen])
-	}
-	historyID := reply.ID
 	span.SetAttributes(
 		attribute.String("reaction.message_id", ir.MessageID),
 		attribute.Int("reaction.added_count", len(added)),
 		attribute.StringSlice("reaction.emoji", added),
 	)
-	if reply.TraceID != nil {
-		span.SetAttributes(attribute.String("reaction.reply_trace_id", *reply.TraceID))
+	if replyTraceID != nil {
+		span.SetAttributes(attribute.String("reaction.reply_trace_id", *replyTraceID))
 	}
 
 	for _, emoji := range added {
 		if err := b.flagRepo.AddFlag(storage.Flag{
 			UserID:       scopeID,
-			HistoryID:    &historyID,
+			HistoryID:    historyID,
 			MessageID:    ir.MessageID,
-			TraceID:      reply.TraceID,
+			TraceID:      replyTraceID,
 			Emoji:        emoji,
 			ReplyPreview: preview,
 		}); err != nil {
@@ -504,7 +547,7 @@ func (b *Bot) HandleReaction(ir IncomingReaction) {
 			"scope_id", scopeID,
 			"message_id", ir.MessageID,
 			"emoji", emoji,
-			"reply_trace_id", traceIDValue(reply.TraceID),
+			"reply_trace_id", traceIDValue(replyTraceID),
 		)
 	}
 }

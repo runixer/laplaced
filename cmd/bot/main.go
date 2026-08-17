@@ -311,6 +311,11 @@ func run() int {
 		logger.Error("failed to initialize storage", "error", err)
 		return 1
 	}
+	if interrupted, err := store.MarkInterruptedOutboundDeliveriesUnknown(); err != nil {
+		logger.Warn("failed to seal interrupted outbound deliveries", "error", err)
+	} else if interrupted > 0 {
+		logger.Warn("sealed interrupted outbound deliveries as unknown", "count", interrupted)
+	}
 
 	// Recovery: Reset zombie artifact states (v0.6.0)
 	if err := store.RecoverArtifactStates(cfg.Agents.Extractor.GetRecoveryThreshold()); err != nil {

@@ -42,6 +42,8 @@ func TestRunner(t *testing.T) {
 		tables := []string{
 			"users", "history", "stats", "topics", "structured_facts",
 			"fact_history", "reranker_logs", "agent_logs", "people", "artifacts",
+			"history_transport_messages", "outbound_deliveries",
+			"outbound_delivery_ops", "outbound_delivery_messages",
 			"schema_version",
 		}
 		for _, table := range tables {
@@ -139,6 +141,64 @@ func TestRunner(t *testing.T) {
 			t.Errorf("Expected >= 9 migrations applied, got %d", count)
 		}
 	})
+}
+
+func TestMigration019_RichDelivery(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	runner := NewRunner(db, testLogger())
+	if err := runner.Run(); err != nil {
+		t.Fatalf("Run() failed: %v", err)
+	}
+	var version int
+	if err := db.QueryRow("SELECT MAX(version) FROM schema_version").Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 19 {
+		t.Fatalf("schema version = %d, want 19", version)
+	}
+	for _, table := range []string{
+		"history_transport_messages", "outbound_deliveries",
+		"outbound_delivery_ops", "outbound_delivery_messages",
+	} {
+		var count int
+		if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&count); err != nil {
+			t.Fatalf("lookup %s: %v", table, err)
+		}
+		if count != 1 {
+			t.Errorf("table %s count = %d, want 1", table, count)
+		}
+	}
+
+	// All payload-like columns are deliberately absent from the content-free
+	// ledger. This guards against a future convenience change leaking content.
+	for _, table := range []string{"outbound_deliveries", "outbound_delivery_ops", "outbound_delivery_messages"} {
+		for _, forbidden := range []string{"content", "prompt", "url", "path", "error_message"} {
+			var count int
+			if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info(?) WHERE name=?", table, forbidden).Scan(&count); err != nil {
+				t.Fatalf("pragma_table_info(%s): %v", table, err)
+			}
+			if count != 0 {
+				t.Errorf("content-free table %s unexpectedly has column %s", table, forbidden)
+			}
+		}
+	}
+
+	// The table-only migration is safe to replay manually.
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateRichDelivery(tx); err != nil {
+		t.Fatalf("second run of migrateRichDelivery: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestMigration009_EmbeddingVersion(t *testing.T) {

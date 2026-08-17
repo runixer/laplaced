@@ -318,14 +318,24 @@ func (p InputRichMessagePhoto) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// RichPhotoUpload is one trusted local photo to bind into an outgoing Rich
+// Message. BuildRichPhotoMedia assigns the Telegram-visible and multipart
+// identifiers; callers only provide file metadata and bytes.
+type RichPhotoUpload struct {
+	Filename string
+	MIME     string
+	Data     []byte
+}
+
 // RichMessageAttachment is a local file uploaded with sendRichMessage. ID is
 // the multipart field identifier used by an InputRichMessagePhoto source of
 // the form attach://<ID>. Attachments are transport-local and never serialized
 // into the rich_message JSON object.
 type RichMessageAttachment struct {
-	ID       string `json:"-"`
-	Filename string `json:"-"`
-	Data     []byte `json:"-"`
+	ID          string `json:"-"`
+	Filename    string `json:"-"`
+	ContentType string `json:"-"`
+	Data        []byte `json:"-"`
 }
 
 // ReplyParameters identifies the message being replied to.

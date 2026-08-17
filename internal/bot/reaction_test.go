@@ -123,3 +123,29 @@ func TestHandleReaction_MultipleEmojisFlagEach(t *testing.T) {
 
 	mockStore.AssertExpectations(t)
 }
+
+func TestHandleReaction_UsesContentFreeDeliveryLedgerBeforeHistoryLink(t *testing.T) {
+	b, mockStore := newReactionTestBot(t, 555)
+	b.exactMsgRepo = mockStore
+	b.deliveryRepo = mockStore
+	scope := storage.PassthroughScopeID("telegram", "555")
+	trace := "0102030405060708090a0b0c0d0e0f10"
+
+	mockStore.On("GetReplyByTransportMessage", scope, transportTelegram, "555", "4474").Return(nil, nil).Once()
+	mockStore.On("GetOutboundDeliveryByTransportMessage", scope, transportTelegram, "555", "4474").
+		Return(&storage.OutboundDelivery{
+			ID: 12, UserID: scope, Transport: transportTelegram, ConversationID: "555",
+			TraceID: &trace, Status: storage.DeliveryStatusPartialUnknown,
+		}, nil).Once()
+	mockStore.On("AddFlag", mock.MatchedBy(func(f storage.Flag) bool {
+		return f.UserID == scope && f.HistoryID == nil && f.MessageID == "4474" &&
+			f.TraceID != nil && *f.TraceID == trace && f.Emoji == "👎" && f.ReplyPreview == ""
+	})).Return(nil).Once()
+
+	b.HandleReaction(IncomingReaction{
+		ConversationID: "555", SenderID: "555", MessageID: "4474",
+		NewEmojis: []string{"👎"}, IsDirect: true,
+	})
+
+	mockStore.AssertExpectations(t)
+}

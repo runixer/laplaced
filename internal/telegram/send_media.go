@@ -4,25 +4,70 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
 	"strconv"
 	"strings"
 	"time"
+
+	htmlparser "golang.org/x/net/html"
 )
 
-const richMessageAttachmentPrefix = "attach://"
+const (
+	richMessageAttachmentPrefix = "attach://"
+	// MaxRichMessageMedia is Telegram's current InputRichMessage.media limit.
+	// Keeping it at the wire boundary prevents callers from building a request
+	// that Telegram can only reject after all local files have been uploaded.
+	MaxRichMessageMedia = 50
+)
 
-func richMessageHasLocalAttachmentReference(message InputRichMessage) bool {
-	for _, media := range message.Media {
-		if strings.HasPrefix(media.Media.Media, richMessageAttachmentPrefix) {
-			return true
-		}
+// BuildRichPhotoMedia converts trusted local photos into the two parallel
+// arrays required by sendRichMessage. Identifiers are stable by input order,
+// ASCII-only and intentionally independent from filenames supplied by tools.
+// The returned media IDs can be referenced as tg://photo?id=<ID> by the rich
+// HTML compositor.
+func BuildRichPhotoMedia(uploads []RichPhotoUpload) ([]InputRichMessageMedia, []RichMessageAttachment, error) {
+	if len(uploads) < 1 || len(uploads) > MaxRichMessageMedia {
+		return nil, nil, fmt.Errorf("rich message requires 1-%d photos, got %d", MaxRichMessageMedia, len(uploads))
 	}
-	return false
+
+	media := make([]InputRichMessageMedia, 0, len(uploads))
+	attachments := make([]RichMessageAttachment, 0, len(uploads))
+	for i, upload := range uploads {
+		filename := strings.TrimSpace(upload.Filename)
+		if err := validateMultipartFilename(filename); err != nil {
+			return nil, nil, fmt.Errorf("rich photo %d: %w", i, err)
+		}
+		if len(upload.Data) == 0 {
+			return nil, nil, fmt.Errorf("rich photo %d has empty data", i)
+		}
+		contentType, err := normalizePhotoContentType(upload.MIME)
+		if err != nil {
+			return nil, nil, fmt.Errorf("rich photo %d: %w", i, err)
+		}
+
+		mediaID := fmt.Sprintf("rich_photo_%d", i)
+		attachmentID := fmt.Sprintf("rich_photo_%d_file", i)
+		media = append(media, InputRichMessageMedia{
+			ID: mediaID,
+			Media: InputRichMessagePhoto{
+				Media: richMessageAttachmentPrefix + attachmentID,
+			},
+		})
+		attachments = append(attachments, RichMessageAttachment{
+			ID:          attachmentID,
+			Filename:    filename,
+			ContentType: contentType,
+			Data:        upload.Data,
+		})
+	}
+
+	return media, attachments, nil
 }
 
 // sendRichMessageMultipart sends one persistent rich message with local photo
@@ -46,63 +91,9 @@ func (c *Client) sendRichMessageMultipart(ctx context.Context, req SendRichMessa
 // Local files are one-to-one with attach:// references in rich_message.media;
 // remote/file_id media may coexist and require no multipart part.
 func buildRichMessageMultipart(req SendRichMessageRequest) (map[string]string, []multipartFile, error) {
-	mediaIDs := make(map[string]struct{}, len(req.RichMessage.Media))
-	localRefs := make(map[string]struct{}, len(req.Attachments))
-	for i, media := range req.RichMessage.Media {
-		if !validRichMessageIdentifier(media.ID) {
-			return nil, nil, fmt.Errorf("rich message media %d has invalid id %q", i, media.ID)
-		}
-		if _, exists := mediaIDs[media.ID]; exists {
-			return nil, nil, fmt.Errorf("rich message media id %q is duplicated", media.ID)
-		}
-		mediaIDs[media.ID] = struct{}{}
-
-		source := media.Media.Media
-		if strings.TrimSpace(source) == "" {
-			return nil, nil, fmt.Errorf("rich message media %q has an empty photo source", media.ID)
-		}
-		if !strings.HasPrefix(source, richMessageAttachmentPrefix) {
-			continue
-		}
-		ref := strings.TrimPrefix(source, richMessageAttachmentPrefix)
-		if !validRichMessageIdentifier(ref) {
-			return nil, nil, fmt.Errorf("rich message media %q has invalid local attachment id %q", media.ID, ref)
-		}
-		if _, exists := localRefs[ref]; exists {
-			return nil, nil, fmt.Errorf("rich message local attachment id %q is referenced more than once", ref)
-		}
-		localRefs[ref] = struct{}{}
-	}
-
-	attachments := make(map[string]struct{}, len(req.Attachments))
-	files := make([]multipartFile, 0, len(req.Attachments))
-	for i, attachment := range req.Attachments {
-		if !validRichMessageIdentifier(attachment.ID) {
-			return nil, nil, fmt.Errorf("rich message attachment %d has invalid id %q", i, attachment.ID)
-		}
-		if _, exists := attachments[attachment.ID]; exists {
-			return nil, nil, fmt.Errorf("rich message attachment id %q is duplicated", attachment.ID)
-		}
-		attachments[attachment.ID] = struct{}{}
-		if strings.TrimSpace(attachment.Filename) == "" {
-			return nil, nil, fmt.Errorf("rich message attachment %q has an empty filename", attachment.ID)
-		}
-		if len(attachment.Data) == 0 {
-			return nil, nil, fmt.Errorf("rich message attachment %q has empty data", attachment.ID)
-		}
-		if _, referenced := localRefs[attachment.ID]; !referenced {
-			return nil, nil, fmt.Errorf("rich message attachment %q is not referenced by rich_message.media", attachment.ID)
-		}
-		files = append(files, multipartFile{
-			FieldName: attachment.ID,
-			Filename:  attachment.Filename,
-			Data:      attachment.Data,
-		})
-	}
-	for ref := range localRefs {
-		if _, exists := attachments[ref]; !exists {
-			return nil, nil, fmt.Errorf("rich message local attachment %q has no uploaded file", ref)
-		}
+	files, _, err := validateRichMessageRequest(req)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	richMessageJSON, err := json.Marshal(req.RichMessage)
@@ -124,6 +115,168 @@ func buildRichMessageMultipart(req SendRichMessageRequest) (map[string]string, [
 		fields["reply_parameters"] = string(replyJSON)
 	}
 	return fields, files, nil
+}
+
+// validateRichMessageRequest validates the full media graph before a request
+// is issued. HTML photo references, InputRichMessage.media entries and local
+// multipart attachments form a strict one-to-one chain. Remote URLs/file_ids
+// participate in the first link but do not require a multipart part.
+func validateRichMessageRequest(req SendRichMessageRequest) ([]multipartFile, bool, error) {
+	if len(req.RichMessage.Media) > MaxRichMessageMedia {
+		return nil, false, fmt.Errorf("rich message has %d media entries; maximum is %d", len(req.RichMessage.Media), MaxRichMessageMedia)
+	}
+
+	htmlRefs, err := richPhotoReferences(req.RichMessage.HTML)
+	if err != nil {
+		return nil, false, err
+	}
+
+	mediaIDs := make(map[string]struct{}, len(req.RichMessage.Media))
+	localRefs := make(map[string]struct{}, len(req.Attachments))
+	for i, media := range req.RichMessage.Media {
+		if !validRichMessageIdentifier(media.ID) {
+			return nil, false, fmt.Errorf("rich message media %d has invalid id %q", i, media.ID)
+		}
+		if _, exists := mediaIDs[media.ID]; exists {
+			return nil, false, fmt.Errorf("rich message media id %q is duplicated", media.ID)
+		}
+		mediaIDs[media.ID] = struct{}{}
+
+		source := media.Media.Media
+		if strings.TrimSpace(source) == "" {
+			return nil, false, fmt.Errorf("rich message media %q has an empty photo source", media.ID)
+		}
+		if strings.TrimSpace(source) != source {
+			return nil, false, fmt.Errorf("rich message media %q has an invalid photo source", media.ID)
+		}
+		if !strings.HasPrefix(source, richMessageAttachmentPrefix) {
+			continue
+		}
+		ref := strings.TrimPrefix(source, richMessageAttachmentPrefix)
+		if !validRichMessageIdentifier(ref) {
+			return nil, false, fmt.Errorf("rich message media %q has invalid local attachment id %q", media.ID, ref)
+		}
+		if _, exists := localRefs[ref]; exists {
+			return nil, false, fmt.Errorf("rich message local attachment id %q is referenced more than once", ref)
+		}
+		localRefs[ref] = struct{}{}
+	}
+	attachments := make(map[string]struct{}, len(req.Attachments))
+	files := make([]multipartFile, 0, len(req.Attachments))
+	for i, attachment := range req.Attachments {
+		if !validRichMessageIdentifier(attachment.ID) {
+			return nil, false, fmt.Errorf("rich message attachment %d has invalid id %q", i, attachment.ID)
+		}
+		if _, exists := attachments[attachment.ID]; exists {
+			return nil, false, fmt.Errorf("rich message attachment id %q is duplicated", attachment.ID)
+		}
+		attachments[attachment.ID] = struct{}{}
+		filename := strings.TrimSpace(attachment.Filename)
+		if err := validateMultipartFilename(filename); err != nil {
+			return nil, false, fmt.Errorf("rich message attachment %q: %w", attachment.ID, err)
+		}
+		if len(attachment.Data) == 0 {
+			return nil, false, fmt.Errorf("rich message attachment %q has empty data", attachment.ID)
+		}
+		if _, referenced := localRefs[attachment.ID]; !referenced {
+			return nil, false, fmt.Errorf("rich message attachment %q is not referenced by rich_message.media", attachment.ID)
+		}
+		contentType, err := normalizeAttachmentContentType(attachment.ContentType)
+		if err != nil {
+			return nil, false, fmt.Errorf("rich message attachment %q: %w", attachment.ID, err)
+		}
+		if attachment.ContentType != "" && !strings.HasPrefix(contentType, "image/") {
+			return nil, false, fmt.Errorf("rich message attachment %q: content type %q is not an image", attachment.ID, contentType)
+		}
+		files = append(files, multipartFile{
+			FieldName:   attachment.ID,
+			Filename:    filename,
+			ContentType: contentType,
+			Data:        attachment.Data,
+		})
+	}
+	for ref := range localRefs {
+		if _, exists := attachments[ref]; !exists {
+			return nil, false, fmt.Errorf("rich message local attachment %q has no uploaded file", ref)
+		}
+	}
+	for id := range mediaIDs {
+		if _, referenced := htmlRefs[id]; !referenced {
+			return nil, false, fmt.Errorf("rich message media id %q is not referenced by rich_message.html", id)
+		}
+	}
+	for ref := range htmlRefs {
+		if _, exists := mediaIDs[ref]; !exists {
+			return nil, false, fmt.Errorf("rich_message.html photo id %q has no rich message media entry", ref)
+		}
+	}
+	return files, len(localRefs) > 0, nil
+}
+
+func richPhotoReferences(rawHTML string) (map[string]struct{}, error) {
+	refs := make(map[string]struct{})
+	z := htmlparser.NewTokenizer(strings.NewReader(rawHTML))
+	for {
+		tokenType := z.Next()
+		switch tokenType {
+		case htmlparser.ErrorToken:
+			if err := z.Err(); err != nil && !errors.Is(err, io.EOF) {
+				return nil, fmt.Errorf("failed to inspect rich_message.html: %w", err)
+			}
+			return refs, nil
+		case htmlparser.StartTagToken, htmlparser.SelfClosingTagToken:
+			token := z.Token()
+			if !strings.EqualFold(token.Data, "img") {
+				continue
+			}
+			for _, attr := range token.Attr {
+				if !strings.EqualFold(attr.Key, "src") || !strings.HasPrefix(attr.Val, "tg://photo?id=") {
+					continue
+				}
+				id := strings.TrimPrefix(attr.Val, "tg://photo?id=")
+				if !validRichMessageIdentifier(id) {
+					return nil, fmt.Errorf("rich_message.html has invalid photo id %q", id)
+				}
+				if _, exists := refs[id]; exists {
+					return nil, fmt.Errorf("rich_message.html photo id %q is referenced more than once", id)
+				}
+				refs[id] = struct{}{}
+			}
+		}
+	}
+}
+
+func validateMultipartFilename(filename string) error {
+	if filename == "" {
+		return fmt.Errorf("empty filename")
+	}
+	if strings.ContainsAny(filename, "\r\n\x00") {
+		return fmt.Errorf("filename contains control characters")
+	}
+	return nil
+}
+
+func normalizePhotoContentType(value string) (string, error) {
+	contentType, err := normalizeAttachmentContentType(value)
+	if err != nil {
+		return "", err
+	}
+	if !strings.HasPrefix(contentType, "image/") {
+		return "", fmt.Errorf("content type %q is not an image", contentType)
+	}
+	return contentType, nil
+}
+
+func normalizeAttachmentContentType(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "application/octet-stream", nil
+	}
+	mediaType, _, err := mime.ParseMediaType(value)
+	if err != nil {
+		return "", fmt.Errorf("invalid content type %q", value)
+	}
+	return strings.ToLower(mediaType), nil
 }
 
 // Telegram requires InputRichMessageMedia identifiers to be 1-64 characters
@@ -248,12 +401,7 @@ func (c *Client) SendPhoto(ctx context.Context, req SendPhotoRequest) (*Message,
 	if err != nil {
 		return nil, err
 	}
-
-	var msg Message
-	if err := json.Unmarshal(resp.Result, &msg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal sendPhoto result: %w", err)
-	}
-	return &msg, nil
+	return decodeSentMessage(resp, "sendPhoto")
 }
 
 // SendDocument uploads a file (preserving original bytes — no recompression)
@@ -285,12 +433,7 @@ func (c *Client) SendDocument(ctx context.Context, req SendDocumentRequest) (*Me
 	if err != nil {
 		return nil, err
 	}
-
-	var msg Message
-	if err := json.Unmarshal(resp.Result, &msg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal sendDocument result: %w", err)
-	}
-	return &msg, nil
+	return decodeSentMessage(resp, "sendDocument")
 }
 
 // SendMediaGroup uploads 2–10 photos as an album and returns the resulting
@@ -345,11 +488,7 @@ func (c *Client) SendMediaGroup(ctx context.Context, req SendMediaGroupRequest) 
 		return nil, err
 	}
 
-	var msgs []Message
-	if err := json.Unmarshal(resp.Result, &msgs); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal sendMediaGroup result: %w", err)
-	}
-	return msgs, nil
+	return decodeSentMessages(resp, "sendMediaGroup", len(req.Media))
 }
 
 // SendMediaGroupDocuments uploads 2–10 documents as a grouped album. Unlike
@@ -403,18 +542,15 @@ func (c *Client) SendMediaGroupDocuments(ctx context.Context, req SendMediaGroup
 	if err != nil {
 		return nil, err
 	}
-	var msgs []Message
-	if err := json.Unmarshal(resp.Result, &msgs); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal sendMediaGroup result: %w", err)
-	}
-	return msgs, nil
+	return decodeSentMessages(resp, "sendMediaGroup", len(req.Media))
 }
 
 // multipartFile is a file part for a multipart/form-data request.
 type multipartFile struct {
-	FieldName string
-	Filename  string
-	Data      []byte
+	FieldName   string
+	Filename    string
+	ContentType string
+	Data        []byte
 }
 
 // makeMultipartRequest issues a POST with multipart/form-data. Unlike
@@ -434,8 +570,14 @@ func (c *Client) makeMultipartRequest(ctx context.Context, method string, fields
 	}
 	for _, f := range files {
 		h := make(textproto.MIMEHeader)
-		h.Set("Content-Disposition", fmt.Sprintf(`form-data; name=%q; filename=%q`, f.FieldName, f.Filename))
-		h.Set("Content-Type", "application/octet-stream")
+		h.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{
+			"name": f.FieldName, "filename": f.Filename,
+		}))
+		contentType := f.ContentType
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		h.Set("Content-Type", contentType)
 		part, err := mw.CreatePart(h)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create multipart part %q: %w", f.FieldName, err)

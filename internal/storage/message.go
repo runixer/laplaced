@@ -2,10 +2,19 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
 func (s *Store) AddMessageToHistory(userID ScopeID, message Message) error {
+	_, err := s.AddMessageToHistoryReturningID(userID, message)
+	return err
+}
+
+// AddMessageToHistoryReturningID inserts a history row and returns that exact
+// row's id. This is the race-free primitive for associating a delivered reply;
+// callers must not rediscover the row via recent-history ordering.
+func (s *Store) AddMessageToHistoryReturningID(userID ScopeID, message Message) (int64, error) {
 	if message.CreatedAt.IsZero() {
 		message.CreatedAt = time.Now()
 	}
@@ -14,9 +23,12 @@ func (s *Store) AddMessageToHistory(userID ScopeID, message Message) error {
 	// unset (DM/Telegram path). trace_id (migration 016) is set on assistant
 	// replies so an inbound reaction can resolve the reply to its trace.
 	query := "INSERT INTO history (user_id, role, content, topic_id, created_at, author, message_id, conversation_id, thread_root, trace_id, do_not_store) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-	_, err := s.exec(query, userID, message.Role, message.Content, message.TopicID, s.dialect.BindTime(message.CreatedAt),
+	id, err := s.insertReturningID(query, "id", userID, message.Role, message.Content, message.TopicID, s.dialect.BindTime(message.CreatedAt),
 		message.Author, message.MessageID, message.ConversationID, message.ThreadRoot, message.TraceID, message.DoNotStore)
-	return err
+	if err != nil {
+		return 0, fmt.Errorf("insert history: %w", err)
+	}
+	return id, nil
 }
 
 // SetReplyTransportID back-fills the transport-native message id on the assistant
@@ -138,10 +150,30 @@ func (s *Store) GetMessagesByIDs(userID ScopeID, ids []int64) ([]Message, error)
 }
 
 func (s *Store) ClearHistory(userID ScopeID) error {
-	query := "DELETE FROM history WHERE user_id = ?"
 	s.logger.Info("clearing history for user", "user_id", userID)
-	_, err := s.exec(query, userID)
-	return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("clear history: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	queries := []string{
+		`DELETE FROM outbound_delivery_messages WHERE delivery_id IN
+			(SELECT id FROM outbound_deliveries WHERE user_id = ?)`,
+		`DELETE FROM outbound_delivery_ops WHERE delivery_id IN
+			(SELECT id FROM outbound_deliveries WHERE user_id = ?)`,
+		`DELETE FROM outbound_deliveries WHERE user_id = ?`,
+		`DELETE FROM history_transport_messages WHERE user_id = ?`,
+		`DELETE FROM history WHERE user_id = ?`,
+	}
+	for _, query := range queries {
+		if _, err := tx.Exec(s.rebind(query), userID); err != nil {
+			return fmt.Errorf("clear history: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("clear history: commit: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) GetMessagesInRange(ctx context.Context, userID ScopeID, startID, endID int64) ([]Message, error) {

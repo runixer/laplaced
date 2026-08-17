@@ -44,33 +44,52 @@ before the first persistent send. Only a local render rejection or a named
 rich-format Bot API rejection may select it; an ambiguous network/decode result
 is never resent in another format.
 
-## v1 release contract
+## v2 release contract
 
-v1 is the production-safe vertical slice, not a promise that every Telegram
-media composition is native Rich Message output:
+v2 uses one preflighted delivery plan for every persistent reply in the
+eligible private-chat rich path. The plan is immutable before its first network
+call and consists of operations where one operation is exactly one Bot API
+request:
 
 - incoming `rich_message`, classic text entities and caption entities are
   always decoded through the bounded projection described above;
 - an eligible private-chat canary receives complete text replies as persistent
   Rich Messages, including safe links, headings, lists, tables, quotes, code,
   spoilers and LaTeX;
+- rich text is packed only at top-level block boundaries. A physical line whose
+  complete trimmed value is `###SPLIT###` creates an explicit part boundary;
+  the same token inside prose, inline/fenced code, tables, lists, quotes or
+  other protected structures remains content;
 - optional rich draft streaming shows ephemeral tool/RAG/content progress and
   is stopped before the persistent final owns delivery;
-- exactly one generated image that still qualifies as Photo can be uploaded
-  together with one complete Rich HTML part in a single multipart final;
-- albums, document-quality images, `###SPLIT###`, oversized/local-fallback
-  layouts, groups, business messages and direct-message topics deliberately
-  retain the established legacy path.
+- one to ten trusted generated Photos can be uploaded with the first Rich HTML
+  part in one multipart final. One photo is a bare image block, two to four use
+  a collage, and five to ten use a slideshow. Media placement and attachment
+  identifiers are application-owned; model-authored image URLs stay inert;
+- an original above `document_threshold_bytes` is included in the native
+  gallery as a validated Photo preview when Telegram's Photo envelope permits
+  it, then sent once as a Document sidecar. Telegram Rich Messages have no
+  Document block;
+- more than ten generated items, non-image/corrupt media, an invalid Photo
+  envelope, or a layout that does not fit the rich limits uses a preplanned
+  legacy sequence of homogeneous batches of at most ten items plus bounded
+  text parts;
+- every logical delivery has a content-free durable ledger. All confirmed
+  transport message IDs are atomically associated with one assistant history
+  row and its artifacts, so a reaction to any album, split or sidecar message
+  resolves the same reply;
+- if a later operation is rejected/unknown, or the process stops after a
+  confirmation but before history persistence, reactions to the confirmed
+  prefix still resolve through the content-free ledger. Such a flag keeps the
+  delivery trace but intentionally has no invented reply preview/history row;
+- a restart seals any interrupted operation as `unknown` (or
+  `partial_unknown`) and skips operations that had not started. It never
+  guesses whether Telegram persisted an in-flight request and never replays it.
 
-The last item is supported fallback behavior in v1, not silent partial Rich
-Message support. In particular, Telegram Rich Messages have no native Document
-block, so the original-quality Document path cannot simply be switched over.
-
-v2 will introduce a shared composition/delivery planner before widening this
-surface: multiple images through collage/slideshow where appropriate,
-media-aware rich splitting, stable IDs for every persistent part, and an
-explicit preview-versus-original policy for document-quality images. Persistent
-rich edits for contexts without private-chat drafts are also a v2 candidate.
+Groups, business messages and direct-message topics deliberately retain the
+established legacy path. Video/audio/voice producers, arbitrary Documents
+inside a Rich Message, model-controlled media placement and persistent rich
+edits are outside the v2 contract.
 
 ## Rollout runbook
 
@@ -101,13 +120,19 @@ the named feature switches:
 
 1. **Off:** deploy with `mode=off`, an empty allowlist and rich draft streaming
    disabled. Verify health, restart count, polling ownership and ingress
-   counters. This is also the egress kill switch.
+   counters. This is also the egress kill switch. Keep one active bot process
+   per database: startup recovery deliberately treats any pre-existing
+   `sending` operation as interrupted.
 2. **Shadow:** add only the operator IDs and select `mode=shadow`. Leave drafts
    disabled. Exercise the representative corpus and compare shadow decisions
-   with the delivered legacy messages; no client-visible output should change.
+   with the delivered legacy messages. Ordinary output is unchanged; the one
+   deliberate compatibility fix is that a previously invalid homogeneous
+   album above ten items is now delivered as bounded `10 + remainder` batches.
 3. **Operator send:** select `mode=send` for those same IDs, still with drafts
-   disabled. Check text, one generated Photo, an album, a Document, explicit
-   split, copy/forward, reply and reaction on Desktop and Android.
+   disabled. Check text, 1/2/4/5/10 generated Photos, an 11-photo legacy
+   fallback, a high-resolution Photo + Document sidecar, standalone and inline
+   split markers, copy/forward, reply and reactions on the first and a later
+   persistent part on Desktop and Android.
 4. **Operator draft:** enable `draft_streaming_enabled` only after persistent
    sends are clean. Exercise a short answer, a long answer, a slow tool and a
    slow image generation; each turn must end with exactly one durable logical
@@ -146,21 +171,20 @@ Changing rollout mode does not disable or roll back rich ingress.
 
 Groups, business messages and direct-message topics fail closed to legacy.
 Errors and ordinary media captions retain their established persistent
-delivery paths. A generated-media response uses one multipart
-`sendRichMessage` when it contains exactly one image that qualifies for Photo
-delivery and its complete text fits one Rich Message. The trusted artifact is
-inserted as a top-level `<img>` block; model-authored Markdown images remain
-inert text. Albums, document-quality images, split rich output and local rich
-preflight failures keep the established media/caption/follow-up path.
+delivery paths. For eligible generated media the planner inserts one trusted
+gallery at the top of the first rich part and may follow it with more packed
+rich text and high-resolution Document sidecars. More than ten items and local
+rich preflight failures use the fully prepared legacy media/text plan instead.
+The model never supplies the media block or upload target.
 
-Persistent sends use explicit `confirmed`, `rejected` and `unknown` outcomes.
-Network errors, malformed successes and Telegram 5xx responses are `unknown`
-and are never resent through another format or followed by a generic message.
-This rule also applies to multipart rich-media uploads: only a named
-rich-format rejection can fall back to the already prepared legacy media path.
-The complete assistant history row and reaction/artifact links are created only
-after every part of the logical reply is confirmed, including generated-media
-follow-up text.
+Persistent sends use explicit `confirmed`, `rejected`, `partial_rejected`,
+`unknown` and `partial_unknown` outcomes. Network errors, malformed successes
+and Telegram 5xx responses are `unknown` and are never resent through another
+format or followed by a generic message. This rule also applies to multipart
+rich-media uploads: only a named rich-format rejection can atomically activate
+the already prepared legacy suffix. The complete assistant history row and
+reaction/artifact links are created only after every operation of the logical
+reply is confirmed, including packed text and generated-media sidecars.
 
 ## Rich streaming
 

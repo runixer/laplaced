@@ -288,7 +288,11 @@ func (c *Client) SendRichMessage(ctx context.Context, req SendRichMessageRequest
 	// There is no idempotency key for Bot API sends. A timeout, connection loss,
 	// or malformed success response after the request was written has an unknown
 	// outcome, so retrying could create a second persistent message.
-	if len(req.Attachments) > 0 || richMessageHasLocalAttachmentReference(req.RichMessage) {
+	_, hasLocalAttachments, err := validateRichMessageRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	if hasLocalAttachments {
 		return c.sendRichMessageMultipart(ctx, req)
 	}
 	resp, err := c.makeRequestWithAttempts(ctx, "sendRichMessage", req, 1)
@@ -339,6 +343,34 @@ func decodeSentMessage(resp *APIResponse, method string) (*Message, error) {
 		return nil, fmt.Errorf("%s returned invalid message_id %d", method, msg.MessageID)
 	}
 	return &msg, nil
+}
+
+// decodeSentMessages validates the complete confirmation returned by a
+// persistent operation such as sendMediaGroup. A malformed, truncated or
+// duplicate-ID result is deliberately an unknown outcome: the caller must not
+// resend the operation because Telegram may already have persisted it.
+func decodeSentMessages(resp *APIResponse, method string, expected int) ([]Message, error) {
+	if resp == nil || len(bytes.TrimSpace(resp.Result)) == 0 || bytes.Equal(bytes.TrimSpace(resp.Result), []byte("null")) {
+		return nil, fmt.Errorf("%s returned an empty messages result", method)
+	}
+	var messages []Message
+	if err := json.Unmarshal(resp.Result, &messages); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal messages from %s: %w", method, err)
+	}
+	if len(messages) != expected {
+		return nil, fmt.Errorf("%s returned %d messages; expected %d", method, len(messages), expected)
+	}
+	seen := make(map[int]struct{}, len(messages))
+	for i, message := range messages {
+		if message.MessageID <= 0 {
+			return nil, fmt.Errorf("%s returned invalid message_id %d at index %d", method, message.MessageID, i)
+		}
+		if _, exists := seen[message.MessageID]; exists {
+			return nil, fmt.Errorf("%s returned duplicate message_id %d", method, message.MessageID)
+		}
+		seen[message.MessageID] = struct{}{}
+	}
+	return messages, nil
 }
 
 // EditMessageText edits the text of a message. Used by the streaming sink to

@@ -295,3 +295,73 @@ CREATE TABLE IF NOT EXISTS response_flags (
 );
 CREATE INDEX IF NOT EXISTS idx_response_flags_user_id ON response_flags(user_id);
 CREATE INDEX IF NOT EXISTS idx_response_flags_created_at ON response_flags(created_at DESC);
+
+-- Rich Message V2 transport identity and delivery ledger. These tables contain
+-- no response content, prompts, media locations, or raw error strings.
+CREATE TABLE IF NOT EXISTS history_transport_messages (
+    id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    history_id      bigint NOT NULL,
+    user_id         uuid NOT NULL,
+    transport       text NOT NULL,
+    conversation_id text NOT NULL,
+    message_id      text NOT NULL,
+    ordinal         integer NOT NULL,
+    is_primary      boolean NOT NULL DEFAULT false,
+    created_at      timestamptz DEFAULT now(),
+    UNIQUE(user_id, transport, conversation_id, message_id),
+    UNIQUE(history_id, transport, conversation_id, ordinal)
+);
+CREATE INDEX IF NOT EXISTS idx_history_transport_messages_history
+    ON history_transport_messages(history_id);
+CREATE INDEX IF NOT EXISTS idx_history_transport_messages_lookup
+    ON history_transport_messages(user_id, transport, conversation_id, message_id);
+
+CREATE TABLE IF NOT EXISTS outbound_deliveries (
+    id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id         uuid NOT NULL,
+    transport       text NOT NULL,
+    conversation_id text NOT NULL,
+    trace_id        text,
+    history_id      bigint,
+    status          text NOT NULL,
+    operation_count integer NOT NULL,
+    confirmed_count integer NOT NULL DEFAULT 0,
+    created_at      timestamptz DEFAULT now(),
+    updated_at      timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_outbound_deliveries_user
+    ON outbound_deliveries(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_outbound_deliveries_status
+    ON outbound_deliveries(status);
+
+CREATE TABLE IF NOT EXISTS outbound_delivery_ops (
+    id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    delivery_id bigint NOT NULL,
+    ordinal     integer NOT NULL,
+    kind        text NOT NULL,
+    status      text NOT NULL,
+    error_class text,
+    started_at  timestamptz,
+    finished_at timestamptz,
+    created_at  timestamptz DEFAULT now(),
+    UNIQUE(delivery_id, ordinal)
+);
+CREATE INDEX IF NOT EXISTS idx_outbound_delivery_ops_delivery
+    ON outbound_delivery_ops(delivery_id, ordinal);
+CREATE INDEX IF NOT EXISTS idx_outbound_delivery_ops_status
+    ON outbound_delivery_ops(status);
+
+CREATE TABLE IF NOT EXISTS outbound_delivery_messages (
+    id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    delivery_id bigint NOT NULL,
+    op_id       bigint NOT NULL,
+    message_id  text NOT NULL,
+    ordinal     integer NOT NULL,
+    created_at  timestamptz DEFAULT now(),
+    UNIQUE(delivery_id, message_id),
+    UNIQUE(op_id, ordinal)
+);
+CREATE INDEX IF NOT EXISTS idx_outbound_delivery_messages_delivery
+    ON outbound_delivery_messages(delivery_id, ordinal);
+CREATE INDEX IF NOT EXISTS idx_outbound_delivery_messages_op
+    ON outbound_delivery_messages(op_id, ordinal);

@@ -57,6 +57,43 @@ type MessageRepository interface {
 	GetReplyByTransportID(userID ScopeID, transportMsgID string) (*Message, error)
 }
 
+// ExactMessageRepository is the V2 extension for collision-safe, exact-row
+// reply persistence. It remains separate from MessageRepository so older
+// consumers and focused test doubles are source compatible.
+type ExactMessageRepository interface {
+	// AddMessageToHistoryReturningID inserts one row and returns its exact id.
+	// Multi-part delivery paths must use this instead of guessing "the latest"
+	// assistant row when linking transport ids and generated artifacts.
+	AddMessageToHistoryReturningID(userID ScopeID, message Message) (int64, error)
+	// LinkReplyTransportMessages associates every persistent transport message
+	// produced by one logical reply with the exact history row.
+	LinkReplyTransportMessages(userID ScopeID, historyID int64, messages []TransportMessage) error
+	// GetReplyByTransportMessage resolves the collision-safe composite identity.
+	// It dual-reads the normalized mapping and pre-v19 history attribution.
+	GetReplyByTransportMessage(userID ScopeID, transport, conversationID, transportMsgID string) (*Message, error)
+}
+
+// DeliveryRepository persists the content-free state machine for persistent
+// outbound operations. It exists independently of MessageRepository so callers
+// that only need conversation history do not acquire delivery responsibilities.
+type DeliveryRepository interface {
+	CreateOutboundDelivery(delivery OutboundDelivery, operations []OutboundDeliveryOperation) (int64, error)
+	MarkOutboundDeliveryOperationSending(deliveryID int64, ordinal int) error
+	CompleteOutboundDeliveryOperation(deliveryID int64, ordinal int, status DeliveryOperationStatus, errorClass DeliveryErrorClass, transportMessageIDs []string) error
+	ActivateOutboundDeliveryFallback(deliveryID int64, rejectedOrdinal int, operations []OutboundDeliveryOperation) ([]int, error)
+	MarkInterruptedOutboundDeliveriesUnknown() (int64, error)
+	GetOutboundDelivery(deliveryID int64) (*OutboundDelivery, []OutboundDeliveryOperation, error)
+	// GetOutboundDeliveryByTransportMessage resolves a confirmed operation's
+	// content-free parent delivery by its exact transport identity. It supports
+	// reactions during the bounded window before (or without) history linkage.
+	GetOutboundDeliveryByTransportMessage(userID ScopeID, transport, conversationID, transportMsgID string) (*OutboundDelivery, error)
+	LinkOutboundDeliveryHistory(userID ScopeID, deliveryID, historyID int64) error
+	// PersistOutboundDeliveryReply atomically inserts an assistant history row,
+	// links every confirmed transport id, associates generated artifacts, and
+	// records the history id on the delivery.
+	PersistOutboundDeliveryReply(userID ScopeID, deliveryID int64, message Message, artifactIDs []int64) (int64, error)
+}
+
 // FlagRepository handles user-flagged bad replies (migration 016). A flag is
 // recorded when a user reacts to a bot reply; it carries the reply's trace_id so
 // the operator can investigate straight from the trace.

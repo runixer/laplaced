@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -58,7 +59,9 @@ type responsePath struct {
 
 	// Set only after Telegram confirmed a persistent message id. History is
 	// saved first, then this id is linked to that exact row.
-	deliveredMessageID string
+	deliveredMessageID  string // legacy streaming compatibility / primary id
+	deliveredMessageIDs []string
+	deliveryID          int64
 }
 
 // newResponsePath builds the delivery path for one turn, opening the
@@ -284,7 +287,7 @@ func (p *responsePath) sendFinal(ctx context.Context, span trace.Span, content s
 	start := time.Now()
 	var result richDeliveryResult
 	if p.effectiveRichMode() == config.TelegramRichMessagesSend {
-		result = p.bot.sendRichRendered(ctx, p.convID, p.threadRoot, p.replyTo, content, p.logger)
+		result = p.bot.sendRichRendered(ctx, p.convID, p.threadRoot, p.replyTo, content, p.logger, p.ledgerContext()...)
 		recordRichFinalDelivery(richFinalMetric{
 			contentKind:    richMetricContentText,
 			path:           result.metricPath,
@@ -320,6 +323,8 @@ func (p *responsePath) sendFinal(ctx context.Context, span trace.Span, content s
 		return false
 	}
 	p.deliveredMessageID = result.firstMsgID
+	p.deliveredMessageIDs = append(p.deliveredMessageIDs[:0], result.confirmedIDs...)
+	p.deliveryID = result.deliveryID
 	obs.RecordContent(span, "bot.reply_sent", content, attribute.Int("chunks", result.sent))
 	return true
 }
@@ -329,6 +334,21 @@ func (p *responsePath) effectiveRichMode() string {
 		return p.richMode
 	}
 	return config.TelegramRichMessagesOff
+}
+
+func (p *responsePath) ledgerContext() []deliveryLedgerContext {
+	// Production construction requires DeliveryRepository. Keeping this
+	// capability check here lets focused struct-literal tests exercise legacy
+	// compatibility without silently accepting an explicitly supplied context:
+	// createDeliveryLedger rejects context+nil repository.
+	if p == nil || p.bot == nil || p.bot.deliveryRepo == nil {
+		return nil
+	}
+	return []deliveryLedgerContext{{
+		UserID:         p.userID,
+		Transport:      p.bot.transport.Kind(),
+		ConversationID: p.convID,
+	}}
 }
 
 // shadowRichRender exercises the exact rich serializer and structural limits
@@ -371,11 +391,6 @@ func (p *responsePath) shadowRichRender(ctx context.Context, span trace.Span, co
 	)
 }
 
-// linkDeliveredReply runs only after the assistant history row exists.
-func (p *responsePath) linkDeliveredReply() {
-	p.bot.linkReplyTrace(p.userID, p.deliveredMessageID, p.logger)
-}
-
 // sendFinalAndPersist keeps the delivery/history ordering structural: only a
 // confirmed final creates the assistant history row, and only then is the
 // confirmed transport id linked to that row.
@@ -383,9 +398,12 @@ func (p *responsePath) sendFinalAndPersist(ctx context.Context, span trace.Span,
 	if !p.sendFinal(ctx, span, content) {
 		return false
 	}
-	if p.bot.saveAssistantReply(p.userID, span, content, p.convID, threadRoot, p.logger) {
-		p.linkDeliveredReply()
+	ids := p.deliveredMessageIDs
+	if len(ids) == 0 && p.deliveredMessageID != "" {
+		ids = []string{p.deliveredMessageID}
 	}
+	p.bot.persistConfirmedAssistantReply(p.userID, span, content, p.convID, threadRoot,
+		p.deliveryID, ids, nil, p.logger)
 	return true
 }
 
@@ -398,20 +416,113 @@ func (p *responsePath) sendFinalAndPersist(ctx context.Context, span trace.Span,
 // never attach transport ids or artifacts to an older unlinked assistant row.
 // Persistence remains best-effort with respect to the already-confirmed send.
 func (b *Bot) saveAssistantReply(userID storage.ScopeID, span trace.Span, content, convID string, threadRoot *string, logger *slog.Logger) bool {
+	message := b.assistantReplyMessage(userID, span, content, convID, threadRoot, logger)
+	if err := b.msgRepo.AddMessageToHistory(userID, message); err != nil {
+		logger.Error("failed to add assistant message to history", "error", err)
+		return false
+	}
+	return true
+}
+
+func (b *Bot) assistantReplyMessage(userID storage.ScopeID, span trace.Span, content, convID string, threadRoot *string, logger *slog.Logger) storage.Message {
 	var replyTraceID *string
 	if sc := span.SpanContext(); sc.HasTraceID() {
 		replyTraceID = strPtrOrNil(sc.TraceID().String())
 	}
-	if err := b.msgRepo.AddMessageToHistory(userID, storage.Message{
+	return storage.Message{
 		Role:           "assistant",
 		Content:        content,
 		ConversationID: strPtrOrNil(convID),
 		ThreadRoot:     threadRoot,
 		TraceID:        replyTraceID,
 		DoNotStore:     b.privacyModeEnabled(userID, logger),
-	}); err != nil {
-		logger.Error("failed to add assistant message to history", "error", err)
+	}
+}
+
+// persistConfirmedAssistantReply persists exactly one history row after every
+// operation of a logical reply was confirmed. V2 ledger-backed deliveries use
+// one transaction for history, all transport IDs, artifacts, and delivery
+// linkage. Older paths retain their best-effort compatibility behavior.
+func (b *Bot) persistConfirmedAssistantReply(
+	userID storage.ScopeID,
+	span trace.Span,
+	content, convID string,
+	threadRoot *string,
+	deliveryID int64,
+	messageIDs []string,
+	artifactIDs []int64,
+	logger *slog.Logger,
+) bool {
+	message := b.assistantReplyMessage(userID, span, content, convID, threadRoot, logger)
+	if deliveryID > 0 {
+		if b.deliveryRepo == nil {
+			logger.Error("delivery was confirmed without a configured delivery repository", "delivery_id", deliveryID)
+			return false
+		}
+		if _, err := b.deliveryRepo.PersistOutboundDeliveryReply(userID, deliveryID, message, artifactIDs); err != nil {
+			logger.Error("failed to atomically persist confirmed delivery reply", "delivery_id", deliveryID, "error", err)
+			return false
+		}
+		return true
+	}
+
+	if b.exactMsgRepo != nil {
+		historyID, err := b.exactMsgRepo.AddMessageToHistoryReturningID(userID, message)
+		if err != nil {
+			logger.Error("failed to add assistant message to history", "error", err)
+			return false
+		}
+		if len(messageIDs) > 0 {
+			messages := make([]storage.TransportMessage, 0, len(messageIDs))
+			seen := make(map[string]struct{}, len(messageIDs))
+			for _, rawID := range messageIDs {
+				id := strings.TrimSpace(rawID)
+				if id == "" {
+					continue
+				}
+				if _, exists := seen[id]; exists {
+					continue
+				}
+				seen[id] = struct{}{}
+				messages = append(messages, storage.TransportMessage{
+					Transport: b.transport.Kind(), ConversationID: convID, MessageID: id,
+					Ordinal: len(messages), IsPrimary: len(messages) == 0,
+				})
+			}
+			if len(messages) > 0 {
+				if err := b.exactMsgRepo.LinkReplyTransportMessages(userID, historyID, messages); err != nil {
+					logger.Warn("failed to link exact reply transport ids", "history_id", historyID, "error", err)
+				}
+			}
+		}
+		for _, artifactID := range artifactIDs {
+			if b.artifactRepo == nil {
+				break
+			}
+			if err := b.artifactRepo.UpdateMessageID(userID, artifactID, historyID); err != nil {
+				logger.Warn("failed to link generated artifact to exact assistant row", "artifact_id", artifactID, "error", err)
+			}
+		}
+		return true
+	}
+
+	if !b.saveAssistantReply(userID, span, content, convID, threadRoot, logger) {
 		return false
+	}
+	if len(messageIDs) > 0 {
+		b.linkReplyTrace(userID, messageIDs[0], logger)
+	}
+	if len(artifactIDs) > 0 && b.artifactRepo != nil {
+		lastMsgs, err := b.msgRepo.GetRecentHistory(userID, 1)
+		if err != nil || len(lastMsgs) == 0 {
+			logger.Warn("failed to resolve legacy assistant row for generated artifacts", "error", err)
+			return true
+		}
+		for _, artifactID := range artifactIDs {
+			if err := b.artifactRepo.UpdateMessageID(userID, artifactID, lastMsgs[0].ID); err != nil {
+				logger.Warn("failed to link generated artifact to legacy assistant row", "artifact_id", artifactID, "error", err)
+			}
+		}
 	}
 	return true
 }

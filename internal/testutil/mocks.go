@@ -136,6 +136,11 @@ func (m *MockStorage) AddMessageToHistory(userID storage.ScopeID, message storag
 	return args.Error(0)
 }
 
+func (m *MockStorage) AddMessageToHistoryReturningID(userID storage.ScopeID, message storage.Message) (int64, error) {
+	args := m.Called(userID, message)
+	return args.Get(0).(int64), args.Error(1)
+}
+
 func (m *MockStorage) ImportMessage(userID storage.ScopeID, message storage.Message) error {
 	args := m.Called(userID, message)
 	return args.Error(0)
@@ -223,6 +228,80 @@ func (m *MockStorage) GetReplyByTransportID(userID storage.ScopeID, transportMsg
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*storage.Message), args.Error(1)
+}
+
+func (m *MockStorage) LinkReplyTransportMessages(userID storage.ScopeID, historyID int64, messages []storage.TransportMessage) error {
+	args := m.Called(userID, historyID, messages)
+	return args.Error(0)
+}
+
+func (m *MockStorage) GetReplyByTransportMessage(userID storage.ScopeID, transport, conversationID, transportMsgID string) (*storage.Message, error) {
+	args := m.Called(userID, transport, conversationID, transportMsgID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*storage.Message), args.Error(1)
+}
+
+// DeliveryRepository methods
+
+func (m *MockStorage) CreateOutboundDelivery(delivery storage.OutboundDelivery, operations []storage.OutboundDeliveryOperation) (int64, error) {
+	args := m.Called(delivery, operations)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockStorage) MarkOutboundDeliveryOperationSending(deliveryID int64, ordinal int) error {
+	args := m.Called(deliveryID, ordinal)
+	return args.Error(0)
+}
+
+func (m *MockStorage) CompleteOutboundDeliveryOperation(deliveryID int64, ordinal int, status storage.DeliveryOperationStatus, errorClass storage.DeliveryErrorClass, messageIDs []string) error {
+	args := m.Called(deliveryID, ordinal, status, errorClass, messageIDs)
+	return args.Error(0)
+}
+
+func (m *MockStorage) ActivateOutboundDeliveryFallback(deliveryID int64, rejectedOrdinal int, operations []storage.OutboundDeliveryOperation) ([]int, error) {
+	args := m.Called(deliveryID, rejectedOrdinal, operations)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]int), args.Error(1)
+}
+
+func (m *MockStorage) MarkInterruptedOutboundDeliveriesUnknown() (int64, error) {
+	args := m.Called()
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockStorage) GetOutboundDelivery(deliveryID int64) (*storage.OutboundDelivery, []storage.OutboundDeliveryOperation, error) {
+	args := m.Called(deliveryID)
+	var delivery *storage.OutboundDelivery
+	if args.Get(0) != nil {
+		delivery = args.Get(0).(*storage.OutboundDelivery)
+	}
+	var operations []storage.OutboundDeliveryOperation
+	if args.Get(1) != nil {
+		operations = args.Get(1).([]storage.OutboundDeliveryOperation)
+	}
+	return delivery, operations, args.Error(2)
+}
+
+func (m *MockStorage) GetOutboundDeliveryByTransportMessage(userID storage.ScopeID, transport, conversationID, transportMsgID string) (*storage.OutboundDelivery, error) {
+	args := m.Called(userID, transport, conversationID, transportMsgID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*storage.OutboundDelivery), args.Error(1)
+}
+
+func (m *MockStorage) LinkOutboundDeliveryHistory(userID storage.ScopeID, deliveryID, historyID int64) error {
+	args := m.Called(userID, deliveryID, historyID)
+	return args.Error(0)
+}
+
+func (m *MockStorage) PersistOutboundDeliveryReply(userID storage.ScopeID, deliveryID int64, message storage.Message, artifactIDs []int64) (int64, error) {
+	args := m.Called(userID, deliveryID, message, artifactIDs)
+	return args.Get(0).(int64), args.Error(1)
 }
 
 // FlagRepository methods

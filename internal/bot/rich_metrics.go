@@ -155,7 +155,8 @@ func boundedRichDeliveryPath(value string) string {
 
 func boundedRichDeliveryOutcome(value richDeliveryOutcome) string {
 	switch value {
-	case richDeliveryConfirmed, richDeliveryRejected, richDeliveryUnknown:
+	case richDeliveryConfirmed, richDeliveryRejected, richDeliveryPartialRejected,
+		richDeliveryUnknown, richDeliveryPartialUnknown:
 		return string(value)
 	default:
 		return string(richDeliveryUnknown)

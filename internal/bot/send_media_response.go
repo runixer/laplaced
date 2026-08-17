@@ -2,7 +2,6 @@ package bot
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -37,6 +36,8 @@ type generatedDeliveryResult struct {
 	duration         time.Duration
 	attempts         int
 	primaryMessageID string
+	confirmedIDs     []string
+	deliveryID       int64
 	persisted        bool
 	err              error
 }
@@ -83,6 +84,18 @@ func (b *Bot) sendResponseWithGeneratedImages(
 			recordRichShadowEvaluation(shadowOutcome, shadowFallbackReason)
 		}()
 	}
+	deliveryStart := time.Now()
+	defer func() { result.duration = time.Since(deliveryStart) }()
+	// A local planner/validation rejection is known to have issued no
+	// persistent request. Install this guard before artifact loading and every
+	// text-only fallback so a missing artifact combined with an invalid text
+	// plan cannot end the turn silently. Unknown or partial outcomes must never
+	// enter this branch because another send could duplicate accepted content.
+	defer func() {
+		if result.outcome == richDeliveryRejected && result.attempts == 0 {
+			result.attempts += b.sendGenericError(ctx, path.convID, path.threadRoot, logger)
+		}
+	}()
 	userID := path.userID
 	if b.artifactRepo == nil {
 		logger.Error("artifact repo not configured but generated artifacts present")
@@ -128,7 +141,7 @@ func (b *Bot) sendResponseWithGeneratedImages(
 		})
 	}
 	if richMode == config.TelegramRichMessagesShadow {
-		if _, _, ok, reason := b.planGeneratedRichMedia(ctx, path, responseText, items); ok {
+		if _, ok, reason := b.planGeneratedRichDelivery(ctx, path, responseText, items); ok {
 			shadowOutcome = richMetricShadowNative
 			shadowFallbackReason = richMetricFallbackNone
 		} else {
@@ -138,79 +151,114 @@ func (b *Bot) sendResponseWithGeneratedImages(
 	metricPath = richMetricPathLegacyMedia
 	metricFallbackReason = richMetricFallbackMediaIneligible
 
-	deliveryStart := time.Now()
-	defer func() { result.duration = time.Since(deliveryStart) }()
-
-	// Prefer one native persistent Rich Message for a single generated photo.
-	// The trusted media reference is constructed by the transport from these
-	// artifact bytes; model-authored image URLs remain suppressed by the Rich
-	// HTML renderer. Larger images that the established Telegram policy sends
-	// as documents, multiple outputs, and non-rich transports retain the legacy
-	// media + caption/follow-up path below.
-	nativeConfirmed := false
-	if richTransport, richMedia, ok, ineligibleReason := b.prepareGeneratedRichMedia(ctx, path, responseText, items); ok {
-		metricPath = richMetricPathNative
-		metricFallbackReason = richMetricFallbackNone
-		nativeAttachmentCount = len(richMedia.Items)
-		for _, item := range richMedia.Items {
-			nativeAttachmentBytes += len(item.Data)
+	// Prefer the fully preflighted V2 gallery plan. It may contain one rich
+	// gallery, additional block-packed rich text parts, and high-resolution
+	// Document sidecars. A confirmed format rejection can execute only the
+	// immutable legacy suffix embedded in that plan.
+	deliveryConfirmed := false
+	if richMode == config.TelegramRichMessagesSend {
+		planned, ok, ineligibleReason := b.planGeneratedRichDelivery(ctx, path, responseText, items)
+		if ok {
+			metricPath = richMetricPathNative
+			metricFallbackReason = richMetricFallbackNone
+			nativeAttachmentCount = planned.nativeAttachments
+			nativeAttachmentBytes = planned.nativeBytes
+			delivery := b.executeDeliveryPlan(ctx, planned.plan, path.ledgerContext()...)
+			result.attempts += delivery.attempts
+			result.confirmedIDs = append(result.confirmedIDs, delivery.confirmedIDs...)
+			result.primaryMessageID = delivery.firstMsgID
+			result.deliveryID = delivery.deliveryID
+			metricPath = delivery.metricPath
+			metricFallbackReason = delivery.fallbackReason
+			if delivery.outcome != richDeliveryConfirmed {
+				result.outcome = delivery.outcome
+				result.err = delivery.err
+				return result
+			}
+			deliveryConfirmed = true
+		} else {
+			metricFallbackReason = ineligibleReason
+			telegramRenderer, rendererOK := b.renderer.(*TelegramRenderer)
+			if !rendererOK {
+				result.outcome = richDeliveryRejected
+				result.err = fmt.Errorf("rich generated-media fallback requires Telegram renderer")
+				return result
+			}
+			fallbackOps, fallbackErr := generatedFallbackOperations(ctx, path, telegramRenderer, responseText, items,
+				b.cfg.Agents.ImageGenerator.DocumentThresholdBytes)
+			if fallbackErr != nil {
+				result.outcome = richDeliveryRejected
+				result.err = fallbackErr
+				return result
+			}
+			fallbackDelivery := b.executeDeliveryPlan(ctx, deliveryPlan{Operations: fallbackOps}, path.ledgerContext()...)
+			result.attempts += fallbackDelivery.attempts
+			result.confirmedIDs = append(result.confirmedIDs, fallbackDelivery.confirmedIDs...)
+			result.primaryMessageID = fallbackDelivery.firstMsgID
+			result.deliveryID = fallbackDelivery.deliveryID
+			if fallbackDelivery.outcome != richDeliveryConfirmed {
+				result.outcome = fallbackDelivery.outcome
+				result.err = fallbackDelivery.err
+				return result
+			}
+			deliveryConfirmed = true
 		}
-		result.attempts++
-		mediaID, err := richTransport.SendRichMedia(ctx, richMedia)
-		switch {
-		case err == nil && strings.TrimSpace(mediaID) != "":
-			result.primaryMessageID = mediaID
-			nativeConfirmed = true
-		case err == nil:
-			result.outcome = richDeliveryUnknown
-			result.err = fmt.Errorf("send generated rich media returned no stable message id")
-			return result
-		case errors.Is(err, ErrRichMessageRejected):
-			// Telegram definitively rejected the rich representation, so no
-			// persistent side effect occurred and the pre-rendered legacy media
-			// path is safe. Ambiguous failures never reach this branch.
-			logger.Warn("generated rich media rejected; using legacy media delivery", "error", err)
-			metricPath = richMetricPathAPIFallback
-			metricFallbackReason = richMetricFallbackFormatRejected
-		default:
-			logger.Error("failed to send generated rich media", "error", err)
-			result.outcome = richOutcomeForError(err)
-			result.err = fmt.Errorf("send generated rich media: %w", err)
-			return result
-		}
-	} else {
-		metricFallbackReason = ineligibleReason
 	}
 
-	if !nativeConfirmed {
+	if !deliveryConfirmed {
 		result.attempts++
-		mediaID, err := b.transport.SendMedia(ctx, OutgoingMedia{
+		outgoing := OutgoingMedia{
 			ConversationID: path.convID,
 			ThreadRoot:     path.threadRoot,
 			ReplyTo:        path.replyTo,
 			Caption:        caption,
 			Items:          items,
-		})
+		}
+		// Off/shadow must keep the established compatibility envelope: Telegram's
+		// SendMedia may split mixed document/photo sets into multiple API calls and
+		// chunk albums above ten. The strict one-call method is reserved for the
+		// fully planned rich-send path, where each batch is already homogeneous and
+		// represented by its own durable ledger operation.
+		mediaID, err := b.transport.SendMedia(ctx, outgoing)
+		sent := persistentSendResult{MessageIDs: []string{mediaID}}
 		if err != nil {
 			logger.Error("failed to send generated media", "error", err)
-			result.outcome = richOutcomeForError(err)
+			ids, idErr := normalizeOptionalPersistentIDs(sent.MessageIDs, map[string]struct{}{})
+			if idErr != nil {
+				result.outcome = richDeliveryUnknown
+				result.err = fmt.Errorf("send generated media returned invalid ids with an error: %w", idErr)
+				return result
+			}
+			result.confirmedIDs = append(result.confirmedIDs, ids...)
+			if len(ids) > 0 {
+				result.primaryMessageID = ids[0]
+			}
+			result.outcome = outcomeAfterFailure(len(result.confirmedIDs), err)
 			result.err = fmt.Errorf("send generated media: %w", err)
 			return result
 		}
-		if strings.TrimSpace(mediaID) == "" {
+		ids, idErr := normalizePersistentIDs(sent.MessageIDs, map[string]struct{}{})
+		if idErr != nil {
 			result.outcome = richDeliveryUnknown
-			result.err = fmt.Errorf("send generated media returned no stable message id")
+			result.err = fmt.Errorf("send generated media: %w", idErr)
 			return result
 		}
-		result.primaryMessageID = mediaID
+		result.confirmedIDs = append(result.confirmedIDs, ids...)
+		result.primaryMessageID = ids[0]
 
 		// Send any remaining text as follow-up messages (no reply-to: the
 		// media already anchored to the user's message).
 		if strings.TrimSpace(followUp) != "" {
 			followUpResult := b.sendGeneratedTextDelivery(ctx, path, "", followUp, logger)
 			result.attempts += followUpResult.attempts
+			result.confirmedIDs = append(result.confirmedIDs, followUpResult.confirmedIDs...)
 			if followUpResult.outcome != richDeliveryConfirmed {
-				result.outcome = followUpResult.outcome
+				switch followUpResult.outcome {
+				case richDeliveryRejected, richDeliveryPartialRejected:
+					result.outcome = richDeliveryPartialRejected
+				default:
+					result.outcome = richDeliveryPartialUnknown
+				}
 				result.err = fmt.Errorf("send generated media follow-up: %w", followUpResult.err)
 				return result
 			}
@@ -219,84 +267,15 @@ func (b *Bot) sendResponseWithGeneratedImages(
 
 	result.outcome = richDeliveryConfirmed
 	span := trace.SpanFromContext(ctx)
-	if b.saveAssistantReply(userID, span, historyContent, path.convID, historyThreadRoot, logger) {
+	loadedArtifactIDs := make([]int64, 0, len(loaded))
+	for _, artifact := range loaded {
+		loadedArtifactIDs = append(loadedArtifactIDs, artifact.artifact.ID)
+	}
+	if b.persistConfirmedAssistantReply(userID, span, historyContent, path.convID, historyThreadRoot,
+		result.deliveryID, result.confirmedIDs, loadedArtifactIDs, logger) {
 		result.persisted = true
-		b.linkReplyTrace(userID, result.primaryMessageID, logger)
-		b.linkGeneratedArtifactsToLatestAssistant(userID, loaded, logger)
 	}
 	return result
-}
-
-// prepareGeneratedRichMedia returns the narrow native-rich media MVP: one
-// generated image that would otherwise be sent as a Telegram photo, plus one
-// complete Rich HTML part. It is deliberately conservative so existing album,
-// document-quality and split-message behavior remains byte-compatible.
-func (b *Bot) prepareGeneratedRichMedia(
-	ctx context.Context,
-	path *responsePath,
-	responseText string,
-	items []OutgoingMediaItem,
-) (RichMediaTransport, OutgoingRichMedia, bool, string) {
-	if path == nil || path.effectiveRichMode() != config.TelegramRichMessagesSend {
-		return nil, OutgoingRichMedia{}, false, richMetricFallbackMediaIneligible
-	}
-	return b.planGeneratedRichMedia(ctx, path, responseText, items)
-}
-
-// planGeneratedRichMedia performs the exact native-photo eligibility and
-// bounded Rich HTML preflight without selecting a rollout mode or causing a
-// network side effect. Send mode consumes the returned plan; shadow mode only
-// records the same decision while retaining legacy delivery.
-func (b *Bot) planGeneratedRichMedia(
-	ctx context.Context,
-	path *responsePath,
-	responseText string,
-	items []OutgoingMediaItem,
-) (RichMediaTransport, OutgoingRichMedia, bool, string) {
-	if path == nil || len(items) != 1 {
-		return nil, OutgoingRichMedia{}, false, richMetricFallbackMediaIneligible
-	}
-	richTransport, ok := b.transport.(RichMediaTransport)
-	if !ok {
-		return nil, OutgoingRichMedia{}, false, richMetricFallbackMediaIneligible
-	}
-	item := items[0]
-	if len(item.Data) == 0 || item.AsDocument || !strings.HasPrefix(strings.ToLower(item.MIME), "image/") {
-		return nil, OutgoingRichMedia{}, false, richMetricFallbackMediaIneligible
-	}
-	threshold := b.cfg.Agents.ImageGenerator.DocumentThresholdBytes
-	if threshold > 0 && len(item.Data) > threshold {
-		return nil, OutgoingRichMedia{}, false, richMetricFallbackMediaIneligible
-	}
-	renderer, ok := b.renderer.(*TelegramRenderer)
-	if !ok {
-		return nil, OutgoingRichMedia{}, false, richMetricFallbackMediaIneligible
-	}
-	preflight, err := preflightRichDelivery(ctx, responseText, renderer)
-	if err != nil {
-		return nil, OutgoingRichMedia{}, false, richMetricFallbackHardPreflight
-	}
-	if preflight.localFallback {
-		return nil, OutgoingRichMedia{}, false, preflight.fallbackReason
-	}
-	if len(preflight.parts) != 1 {
-		return nil, OutgoingRichMedia{}, false, richMetricFallbackMediaIneligible
-	}
-	part := preflight.parts[0]
-	if strings.TrimSpace(part.html) == "" {
-		return nil, OutgoingRichMedia{}, false, richMetricFallbackMediaIneligible
-	}
-	if part.stats.Blocks+1 > richMessageSafeBlockLimit ||
-		len(part.html)+len(generatedRichPhotoHTML) > richMessageMaxRenderedBytes {
-		return nil, OutgoingRichMedia{}, false, richMetricFallbackRenderOrLimit
-	}
-	return richTransport, OutgoingRichMedia{
-		ConversationID: path.convID,
-		ThreadRoot:     path.threadRoot,
-		ReplyTo:        path.replyTo,
-		HTML:           part.html,
-		Items:          []OutgoingMediaItem{item},
-	}, true, richMetricFallbackNone
 }
 
 // deliverGeneratedOnError delivers generated images from a failed laplace turn
@@ -347,46 +326,26 @@ func (b *Bot) sendTextOnlyFallback(
 		duration:         time.Since(start),
 		attempts:         delivery.attempts,
 		primaryMessageID: delivery.firstMsgID,
+		confirmedIDs:     append([]string(nil), delivery.confirmedIDs...),
+		deliveryID:       delivery.deliveryID,
 		err:              delivery.err,
 	}
 	if delivery.outcome != richDeliveryConfirmed {
 		return result
 	}
 	span := trace.SpanFromContext(ctx)
-	if b.saveAssistantReply(path.userID, span, responseText, path.convID, historyThreadRoot, logger) {
+	if b.persistConfirmedAssistantReply(path.userID, span, responseText, path.convID, historyThreadRoot,
+		result.deliveryID, result.confirmedIDs, nil, logger) {
 		result.persisted = true
-		b.linkReplyTrace(path.userID, result.primaryMessageID, logger)
 	}
 	return result
 }
 
 func (b *Bot) sendGeneratedTextDelivery(ctx context.Context, path *responsePath, replyTo, text string, logger *slog.Logger) richDeliveryResult {
 	if path.effectiveRichMode() == config.TelegramRichMessagesSend {
-		return b.sendRichRendered(ctx, path.convID, path.threadRoot, replyTo, text, logger)
+		return b.sendRichRendered(ctx, path.convID, path.threadRoot, replyTo, text, logger, path.ledgerContext()...)
 	}
 	return b.sendRenderedDelivery(ctx, path.convID, path.threadRoot, replyTo, text, logger)
-}
-
-// linkGeneratedArtifactsToLatestAssistant runs only after the assistant
-// history insert succeeded. A lookup failure leaves artifacts unlinked rather
-// than risking attachment to an older row.
-func (b *Bot) linkGeneratedArtifactsToLatestAssistant(userID storage.ScopeID, loaded []loadedArtifact, logger *slog.Logger) {
-	lastMsgs, err := b.msgRepo.GetRecentHistory(userID, 1)
-	if err != nil {
-		logger.Warn("failed to resolve generated-media assistant history row", "error", err)
-		return
-	}
-	if len(lastMsgs) == 0 {
-		logger.Warn("generated-media assistant history row was not found")
-		return
-	}
-	assistantMsgID := lastMsgs[0].ID
-	for _, la := range loaded {
-		if err := b.artifactRepo.UpdateMessageID(userID, la.artifact.ID, assistantMsgID); err != nil {
-			logger.Warn("failed to link generated artifact to assistant message",
-				"artifact_id", la.artifact.ID, "error", err)
-		}
-	}
 }
 
 // loadedArtifact pairs an Artifact row with its on-disk bytes.
@@ -400,7 +359,17 @@ type loadedArtifact struct {
 // the caller decides what to do with an empty result.
 func (b *Bot) loadArtifactBytes(ctx context.Context, userID storage.ScopeID, ids []int64, logger *slog.Logger) []loadedArtifact {
 	out := make([]loadedArtifact, 0, len(ids))
+	seen := make(map[int64]struct{}, len(ids))
 	for _, id := range ids {
+		if id <= 0 {
+			logger.Warn("ignoring invalid generated artifact id", "artifact_id", id)
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			logger.Warn("ignoring duplicate generated artifact id", "artifact_id", id)
+			continue
+		}
+		seen[id] = struct{}{}
 		art, err := b.artifactRepo.GetArtifact(userID, id)
 		if err != nil {
 			logger.Warn("failed to load generated artifact", "artifact_id", id, "error", err)

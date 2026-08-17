@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -15,10 +16,13 @@ import (
 	"github.com/runixer/laplaced/internal/agent/laplace"
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/files"
-	"github.com/runixer/laplaced/internal/markdown"
 	"github.com/runixer/laplaced/internal/storage"
 	"github.com/runixer/laplaced/internal/telegram"
 	"github.com/runixer/laplaced/internal/testutil"
+)
+
+var generatedTestPNG, _ = base64.StdEncoding.DecodeString(
+	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
 )
 
 // fakeFileStorage is a minimal in-memory files.Storage for delivery tests.
@@ -38,17 +42,20 @@ func (f *fakeFileStorage) DeleteFile(context.Context, string) error { return nil
 // inject terminal outcomes without standing up a Telegram client.
 type recordingTransport struct {
 	stubTransport
-	media           []OutgoingMedia
-	mediaID         string
-	mediaErr        error
-	richMedia       []OutgoingRichMedia
-	richMediaID     string
-	richMediaErr    error
-	beforeRichMedia func()
-	text            []OutgoingResponse
-	textErrors      map[int]error
-	beforeMediaSend func()
+	media                []OutgoingMedia
+	mediaID              string
+	mediaErr             error
+	richMedia            []OutgoingRichMedia
+	richMediaID          string
+	richMediaErr         error
+	beforeRichMedia      func()
+	text                 []OutgoingResponse
+	textErrors           map[int]error
+	beforeMediaSend      func()
+	persistentMediaCalls int
 }
+
+func (*recordingTransport) Kind() string { return transportTelegram }
 
 func (r *recordingTransport) SendRichMedia(_ context.Context, m OutgoingRichMedia) (string, error) {
 	if r.beforeRichMedia != nil {
@@ -75,6 +82,26 @@ func (r *recordingTransport) SendText(_ context.Context, response OutgoingRespon
 	return "text-message-1", nil
 }
 
+func (r *recordingTransport) SendTextPersistent(ctx context.Context, response OutgoingResponse) (string, error) {
+	return r.SendText(ctx, response)
+}
+
+func (r *recordingTransport) SendMediaPersistent(ctx context.Context, media OutgoingMedia) (persistentSendResult, error) {
+	r.persistentMediaCalls++
+	id, err := r.SendMedia(ctx, media)
+	if err != nil {
+		return persistentSendResult{MessageIDs: []string{id}}, err
+	}
+	ids := make([]string, len(media.Items))
+	for i := range ids {
+		ids[i] = id
+		if i > 0 {
+			ids[i] = fmt.Sprintf("%s-%d", id, i+1)
+		}
+	}
+	return persistentSendResult{MessageIDs: ids}, nil
+}
+
 func newGeneratedDeliveryTestBot(t *testing.T, transport *recordingTransport) (*Bot, *testutil.MockStorage, storage.ScopeID) {
 	t.Helper()
 	userID := storage.ScopeID("123")
@@ -86,7 +113,7 @@ func newGeneratedDeliveryTestBot(t *testing.T, transport *recordingTransport) (*
 		translator:   testutil.TestTranslator(t),
 		msgRepo:      store,
 		artifactRepo: store,
-		fileStorage:  &fakeFileStorage{blobs: map[string][]byte{"gen/cat.png": []byte("png-bytes")}},
+		fileStorage:  &fakeFileStorage{blobs: map[string][]byte{"gen/cat.png": append([]byte(nil), generatedTestPNG...)}},
 		transport:    transport,
 		renderer:     NewTelegramRenderer(testutil.TestLogger()),
 	}
@@ -144,7 +171,99 @@ func TestGeneratedMedia_PersistsAndLinksOnlyAfterConfirmedDelivery(t *testing.T)
 	assert.Equal(t, 1, result.attempts)
 	require.Len(t, transport.media, 1)
 	require.Len(t, transport.media[0].Items, 1)
-	assert.Equal(t, []byte("png-bytes"), transport.media[0].Items[0].Data)
+	assert.Equal(t, generatedTestPNG, transport.media[0].Items[0].Data)
+	store.AssertExpectations(t)
+}
+
+func TestGeneratedMedia_OffModeKeepsCompatibilityMediaEnvelope(t *testing.T) {
+	transport := &recordingTransport{mediaID: "legacy-batch-primary"}
+	bot, store, userID := newGeneratedDeliveryTestBot(t, transport)
+	path := generatedPath(bot, userID)
+	path.richMode = config.TelegramRichMessagesOff
+
+	artifactIDs := make([]int64, 11)
+	for i := range artifactIDs {
+		id := int64(i + 1)
+		artifactIDs[i] = id
+		mimeType := "image/png"
+		if i == 0 {
+			mimeType = "application/octet-stream"
+		}
+		store.On("GetArtifact", userID, id).Return(&storage.Artifact{
+			ID: id, UserID: userID, FilePath: "gen/cat.png",
+			OriginalName: fmt.Sprintf("generated-%02d.png", i+1), MimeType: mimeType,
+		}, nil).Once()
+	}
+	store.On("AddMessageToHistory", userID, mock.Anything).Return(nil).Once()
+	store.On("SetReplyTransportID", userID, "legacy-batch-primary").Return(nil).Once()
+	store.On("GetRecentHistory", userID, 1).Return([]storage.Message{{ID: 9}}, nil).Once()
+	for _, id := range artifactIDs {
+		store.On("UpdateMessageID", userID, id, int64(9)).Return(nil).Once()
+	}
+
+	result := bot.sendResponseWithGeneratedImages(
+		context.Background(), path, nil, "Compatibility envelope", artifactIDs, bot.logger,
+	)
+
+	require.Equal(t, richDeliveryConfirmed, result.outcome, "delivery error: %v", result.err)
+	require.Len(t, transport.media, 1)
+	assert.Len(t, transport.media[0].Items, 11)
+	assert.Zero(t, transport.persistentMediaCalls,
+		"off/shadow path must leave mixed and >10 batching to compatibility SendMedia")
+	store.AssertExpectations(t)
+}
+
+func TestGeneratedMedia_LocalV2RejectionNotifiesWithBoundedGenericError(t *testing.T) {
+	transport := &recordingTransport{richMediaID: "must-not-send"}
+	bot, store, userID := newGeneratedDeliveryTestBot(t, transport)
+	path := generatedPath(bot, userID)
+	path.richMode = config.TelegramRichMessagesSend
+	expectGeneratedArtifact(store, userID)
+
+	parts := make([]string, richMessageMaxParts+1)
+	for i := range parts {
+		parts[i] = fmt.Sprintf("# Part %d", i+1)
+	}
+	response := strings.Join(parts, "\n"+richSplitDelimiter+"\n")
+
+	result := bot.sendResponseWithGeneratedImages(
+		context.Background(), path, nil, response, []int64{42}, bot.logger,
+	)
+
+	require.Equal(t, richDeliveryRejected, result.outcome)
+	require.Error(t, result.err)
+	assert.Equal(t, 1, result.attempts, "only the bounded notification is sent")
+	assert.Empty(t, transport.richMedia)
+	assert.Empty(t, transport.media)
+	require.Len(t, transport.text, 1)
+	assert.NotContains(t, transport.text[0].Text, "Part 1")
+	store.AssertExpectations(t)
+}
+
+func TestGeneratedMedia_UnloadableArtifactAndRejectedTextFallbackNotifies(t *testing.T) {
+	transport := &recordingTransport{richMediaID: "must-not-send"}
+	bot, store, userID := newGeneratedDeliveryTestBot(t, transport)
+	path := generatedPath(bot, userID)
+	path.richMode = config.TelegramRichMessagesSend
+	store.On("GetArtifact", userID, int64(42)).Return(nil, nil).Once()
+
+	parts := make([]string, richMessageMaxParts+1)
+	for i := range parts {
+		parts[i] = fmt.Sprintf("# Missing artifact part %d", i+1)
+	}
+	response := strings.Join(parts, "\n"+richSplitDelimiter+"\n")
+
+	result := bot.sendResponseWithGeneratedImages(
+		context.Background(), path, nil, response, []int64{42}, bot.logger,
+	)
+
+	require.Equal(t, richDeliveryRejected, result.outcome)
+	require.Error(t, result.err)
+	assert.Equal(t, 1, result.attempts, "only the bounded notification is sent")
+	assert.Empty(t, transport.richMedia)
+	assert.Empty(t, transport.media)
+	require.Len(t, transport.text, 1)
+	assert.NotContains(t, transport.text[0].Text, "Missing artifact part 1")
 	store.AssertExpectations(t)
 }
 
@@ -166,14 +285,14 @@ func TestGeneratedMedia_RichModeSendsOneNativeMessageWithTrustedPhoto(t *testing
 		context.Background(), path, nil, source, []int64{42}, bot.logger,
 	)
 
-	require.Equal(t, richDeliveryConfirmed, result.outcome)
+	require.Equal(t, richDeliveryConfirmed, result.outcome, "delivery error: %v", result.err)
 	assert.Equal(t, "rich-media-7", result.primaryMessageID)
 	assert.Equal(t, 1, result.attempts)
 	assert.Empty(t, transport.media)
 	require.Len(t, transport.richMedia, 1)
 	rich := transport.richMedia[0]
 	require.Len(t, rich.Items, 1)
-	assert.Equal(t, []byte("png-bytes"), rich.Items[0].Data)
+	assert.Equal(t, generatedTestPNG, rich.Items[0].Data)
 	assert.Contains(t, rich.HTML, "<h1>Result</h1>")
 	assert.Contains(t, rich.HTML, "<tg-math>x^2</tg-math>")
 	assert.Contains(t, rich.HTML, "cat photo")
@@ -328,7 +447,7 @@ func TestGeneratedMedia_RichEmptySuccessNeverResendsLegacy(t *testing.T) {
 func TestGeneratedMedia_RichModeUsesNativePhotoAtDocumentThreshold(t *testing.T) {
 	transport := &recordingTransport{richMediaID: "rich-media-boundary"}
 	bot, store, userID := newGeneratedDeliveryTestBot(t, transport)
-	bot.cfg.Agents.ImageGenerator.DocumentThresholdBytes = len([]byte("png-bytes"))
+	bot.cfg.Agents.ImageGenerator.DocumentThresholdBytes = len(generatedTestPNG)
 	path := generatedPath(bot, userID)
 	path.richMode = config.TelegramRichMessagesSend
 	expectGeneratedArtifact(store, userID)
@@ -348,108 +467,46 @@ func TestGeneratedMedia_RichModeUsesNativePhotoAtDocumentThreshold(t *testing.T)
 	store.AssertExpectations(t)
 }
 
-func TestPrepareGeneratedRichMedia_ReservesInjectedPhotoLimits(t *testing.T) {
-	transport := &recordingTransport{richMediaID: "unused"}
-	bot, _, userID := newGeneratedDeliveryTestBot(t, transport)
-	path := generatedPath(bot, userID)
-	path.richMode = config.TelegramRichMessagesSend
-	item := OutgoingMediaItem{Data: []byte("png"), Filename: "cat.png", MIME: "image/png"}
-
-	paragraphs := func(count int) string {
-		return strings.TrimSuffix(strings.Repeat("x\n\n", count), "\n\n")
-	}
-
-	t.Run("block reservation accepts exact boundary", func(t *testing.T) {
-		source := paragraphs(richMessageSafeBlockLimit - 1)
-		preflight, err := preflightRichDelivery(context.Background(), source, bot.renderer.(*TelegramRenderer))
-		require.NoError(t, err)
-		require.Len(t, preflight.parts, 1)
-		require.Equal(t, richMessageSafeBlockLimit-1, preflight.parts[0].stats.Blocks)
-
-		_, message, ok, _ := bot.prepareGeneratedRichMedia(context.Background(), path, source, []OutgoingMediaItem{item})
-		require.True(t, ok)
-		assert.NotEmpty(t, message.HTML)
-	})
-
-	t.Run("block reservation rejects one over boundary", func(t *testing.T) {
-		source := paragraphs(richMessageSafeBlockLimit)
-		preflight, err := preflightRichDelivery(context.Background(), source, bot.renderer.(*TelegramRenderer))
-		require.NoError(t, err, "text-only body must remain valid before adding the photo block")
-		require.Len(t, preflight.parts, 1)
-		require.Equal(t, richMessageSafeBlockLimit, preflight.parts[0].stats.Blocks)
-
-		_, _, ok, _ := bot.prepareGeneratedRichMedia(context.Background(), path, source, []OutgoingMediaItem{item})
-		assert.False(t, ok)
-	})
-
-	richParagraphAtRenderedBytes := func(target int) string {
-		t.Helper()
-		// A plain paragraph renders as <p>...</p>. Fill most of the payload
-		// with ampersands (five-byte &amp;) so the rendered-byte boundary is
-		// reached while staying below the semantic-character ceiling.
-		const paragraphMarkupBytes = len("<p></p>")
-		require.GreaterOrEqual(t, target, paragraphMarkupBytes)
-		payloadBytes := target - paragraphMarkupBytes
-		ampersands := payloadBytes / len("&amp;")
-		plainBytes := payloadBytes % len("&amp;")
-		source := strings.Repeat("&", ampersands) + strings.Repeat("x", plainBytes)
-		html, _, err := markdown.ToRichHTML(source)
-		require.NoError(t, err)
-		require.Len(t, html, target)
-		return source
-	}
-
-	t.Run("byte reservation accepts exact boundary", func(t *testing.T) {
-		source := richParagraphAtRenderedBytes(richMessageMaxRenderedBytes - len(generatedRichPhotoHTML))
-		_, message, ok, _ := bot.prepareGeneratedRichMedia(context.Background(), path, source, []OutgoingMediaItem{item})
-		require.True(t, ok)
-		assert.Equal(t, richMessageMaxRenderedBytes, len(message.HTML)+len(generatedRichPhotoHTML))
-	})
-
-	t.Run("byte reservation rejects one over boundary", func(t *testing.T) {
-		source := richParagraphAtRenderedBytes(richMessageMaxRenderedBytes - len(generatedRichPhotoHTML) + 1)
-		preflight, err := preflightRichDelivery(context.Background(), source, bot.renderer.(*TelegramRenderer))
-		require.NoError(t, err, "text-only body must remain valid before adding the photo tag")
-		require.Len(t, preflight.parts, 1)
-		require.LessOrEqual(t, len(preflight.parts[0].html), richMessageMaxRenderedBytes)
-
-		_, _, ok, _ := bot.prepareGeneratedRichMedia(context.Background(), path, source, []OutgoingMediaItem{item})
-		assert.False(t, ok)
-	})
-}
-
-func TestGeneratedMedia_RichMediaIneligibleUsesLegacyOnce(t *testing.T) {
+func TestGeneratedMedia_V2GallerySplitAndHighResolutionSidecar(t *testing.T) {
 	tests := []struct {
-		name        string
-		response    string
-		artifactIDs []int64
-		threshold   int
-		wantItems   int
+		name         string
+		response     string
+		artifactIDs  []int64
+		threshold    int
+		wantAttempts int
+		wantGallery  int
+		wantText     int
+		wantSidecar  int
 	}{
 		{
-			name:        "two generated images",
-			response:    "# Album",
-			artifactIDs: []int64{42, 43},
-			wantItems:   2,
+			name:         "two generated images",
+			response:     "# Album",
+			artifactIDs:  []int64{42, 43},
+			wantAttempts: 1,
+			wantGallery:  2,
 		},
 		{
-			name:        "explicit split",
-			response:    "# First\n\n###SPLIT###\n\n## Second",
-			artifactIDs: []int64{42},
-			wantItems:   1,
+			name:         "explicit split",
+			response:     "# First\n\n###SPLIT###\n\n## Second",
+			artifactIDs:  []int64{42},
+			wantAttempts: 2,
+			wantGallery:  1,
+			wantText:     1,
 		},
 		{
-			name:        "document quality image",
-			response:    "# Document",
-			artifactIDs: []int64{42},
-			threshold:   4,
-			wantItems:   1,
+			name:         "document quality image",
+			response:     "# Document",
+			artifactIDs:  []int64{42},
+			threshold:    4,
+			wantAttempts: 2,
+			wantGallery:  1,
+			wantSidecar:  1,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			transport := &recordingTransport{mediaID: "legacy-media-7"}
+			transport := &recordingTransport{richMediaID: "rich-media-7", mediaID: "sidecar-8"}
 			bot, store, userID := newGeneratedDeliveryTestBot(t, transport)
 			path := generatedPath(bot, userID)
 			path.richMode = config.TelegramRichMessagesSend
@@ -459,14 +516,14 @@ func TestGeneratedMedia_RichMediaIneligibleUsesLegacyOnce(t *testing.T) {
 
 			expectGeneratedArtifact(store, userID)
 			if len(tt.artifactIDs) == 2 {
-				bot.fileStorage.(*fakeFileStorage).blobs["gen/dog.png"] = []byte("dog-bytes")
+				bot.fileStorage.(*fakeFileStorage).blobs["gen/dog.png"] = append([]byte(nil), generatedTestPNG...)
 				store.On("GetArtifact", userID, int64(43)).Return(&storage.Artifact{
 					ID: 43, UserID: userID, FilePath: "gen/dog.png",
 					OriginalName: "dog.png", MimeType: "image/png",
 				}, nil).Once()
 			}
 			store.On("AddMessageToHistory", userID, mock.Anything).Return(nil).Once()
-			store.On("SetReplyTransportID", userID, "legacy-media-7").Return(nil).Once()
+			store.On("SetReplyTransportID", userID, "rich-media-7").Return(nil).Once()
 			store.On("GetRecentHistory", userID, 1).Return([]storage.Message{{ID: 9}}, nil).Once()
 			for _, artifactID := range tt.artifactIDs {
 				store.On("UpdateMessageID", userID, artifactID, int64(9)).Return(nil).Once()
@@ -476,12 +533,16 @@ func TestGeneratedMedia_RichMediaIneligibleUsesLegacyOnce(t *testing.T) {
 				context.Background(), path, nil, tt.response, tt.artifactIDs, bot.logger,
 			)
 
-			require.Equal(t, richDeliveryConfirmed, result.outcome)
-			assert.Equal(t, 1, result.attempts)
-			assert.Empty(t, transport.richMedia, "ineligible native path must not be attempted")
-			require.Len(t, transport.media, 1, "legacy envelope must be sent exactly once")
-			assert.Len(t, transport.media[0].Items, tt.wantItems)
-			assert.Empty(t, transport.text, "short fixtures must not create a duplicate follow-up")
+			require.Equal(t, richDeliveryConfirmed, result.outcome, "delivery error: %v", result.err)
+			assert.Equal(t, tt.wantAttempts, result.attempts)
+			require.Len(t, transport.richMedia, 1)
+			assert.Len(t, transport.richMedia[0].Items, tt.wantGallery)
+			assert.Len(t, transport.text, tt.wantText)
+			assert.Len(t, transport.media, tt.wantSidecar)
+			if tt.wantSidecar > 0 {
+				require.Len(t, transport.media[0].Items, 1)
+				assert.True(t, transport.media[0].Items[0].AsDocument)
+			}
 			store.AssertExpectations(t)
 		})
 	}
@@ -557,7 +618,7 @@ func TestGeneratedMedia_FollowUp500DoesNotPersistCompleteReply(t *testing.T) {
 		longReply, []int64{42}, bot.logger,
 	)
 
-	assert.Equal(t, richDeliveryUnknown, result.outcome)
+	assert.Equal(t, richDeliveryPartialUnknown, result.outcome)
 	assert.False(t, result.persisted)
 	assert.Equal(t, 2, result.attempts)
 	require.Len(t, transport.media, 1)

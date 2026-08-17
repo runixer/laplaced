@@ -35,6 +35,64 @@ type RichStats struct {
 	MaxTableColumns int
 }
 
+// RichFragmentKind identifies the top-level structural unit represented by a
+// RichFragment. A fragment kind describes the rendered structure rather than
+// the Markdown spelling (for example, both fenced and indented code are code
+// fragments).
+type RichFragmentKind string
+
+const (
+	RichFragmentParagraph  RichFragmentKind = "paragraph"
+	RichFragmentHeading    RichFragmentKind = "heading"
+	RichFragmentList       RichFragmentKind = "list"
+	RichFragmentTable      RichFragmentKind = "table"
+	RichFragmentCode       RichFragmentKind = "code"
+	RichFragmentMath       RichFragmentKind = "math"
+	RichFragmentBlockquote RichFragmentKind = "blockquote"
+	RichFragmentDivider    RichFragmentKind = "divider"
+	RichFragmentRaw        RichFragmentKind = "raw"
+	RichFragmentOther      RichFragmentKind = "other"
+)
+
+// RichSourceRange is a half-open byte range in the exact canonical input
+// passed to ParseRichFragments.
+type RichSourceRange struct {
+	Start int
+	End   int
+}
+
+// RichFragment is one complete top-level Markdown block rendered through the
+// Rich HTML allowlist. Atomic is deliberately explicit: a delivery packer may
+// group adjacent fragments, but must not split an atomic fragment's HTML or
+// LegacySource. SourceStart and SourceEnd are byte offsets into the exact input
+// passed to ParseRichFragments, and LegacySource is that byte-identical slice.
+// Blank lines between blocks belong to the preceding fragment so the ordered
+// LegacySource values concatenate back to the input without normalization.
+type RichFragment struct {
+	Kind         RichFragmentKind
+	Atomic       bool
+	SourceStart  int
+	SourceEnd    int
+	LegacySource string
+	HTML         string
+	Stats        RichStats
+	// BoundaryTextRanges are exact source ranges of direct Text children of a
+	// top-level paragraph. Application protocol markers may only be recognized
+	// inside these ranges; syntax owned by any inline container is excluded.
+	BoundaryTextRanges []RichSourceRange
+}
+
+// RichDocument is the immutable result of one canonical Markdown parse. HTML
+// and Stats are exact aggregates of Fragments in order. LegacySource is kept
+// byte-identical even when the rich parser applies its narrow list-boundary
+// normalization internally.
+type RichDocument struct {
+	LegacySource string
+	HTML         string
+	Stats        RichStats
+	Fragments    []RichFragment
+}
+
 // richMathNode protects formula source from Markdown parsing. In particular,
 // LaTeX underscores, asterisks and angle brackets must stay formula text rather
 // than becoming emphasis or raw HTML nodes.
@@ -659,7 +717,17 @@ func renderRichHTML(input string, richRenderer *richHTMLRenderer) (string, RichS
 	}
 	input = normalizeRichListBoundaries(input)
 
-	md := goldmark.New(
+	md := newRichMarkdown(richRenderer)
+
+	var out bytes.Buffer
+	if err := md.Convert([]byte(input), &out); err != nil {
+		return "", RichStats{}, fmt.Errorf("render rich markdown: %w", err)
+	}
+	return out.String(), richRenderer.stats, nil
+}
+
+func newRichMarkdown(richRenderer *richHTMLRenderer) goldmark.Markdown {
+	return goldmark.New(
 		goldmark.WithExtensions(extension.GFM),
 		goldmark.WithParserOptions(parser.WithInlineParsers(
 			util.Prioritized(&richMathParser{}, 50),
@@ -674,10 +742,214 @@ func renderRichHTML(input string, richRenderer *richHTMLRenderer) (string, RichS
 			),
 		)),
 	)
+}
 
+// ParseRichFragments parses canonical Markdown once and renders every
+// top-level block as an independently packable Rich HTML fragment. Every
+// returned fragment is atomic: callers may combine adjacent fragments into a
+// Telegram message, but must not split a fragment internally. This keeps
+// lists, tables, quotes, code and display math structurally valid.
+func ParseRichFragments(input string) (RichDocument, error) {
+	document := RichDocument{LegacySource: input}
+	if !utf8.ValidString(input) {
+		return RichDocument{}, fmt.Errorf("rich markdown is not valid UTF-8")
+	}
+
+	normalized := normalizeRichListBoundaries(input)
+	normalizedSource := []byte(normalized)
+	markdownParser := newRichMarkdown(newRichHTMLRenderer()).Parser()
+	root := markdownParser.Parse(text.NewReader(normalizedSource))
+	if root.FirstChild() == nil {
+		return document, nil
+	}
+
+	offsetMap, err := richNormalizedOffsetMap(input, normalized)
+	if err != nil {
+		return RichDocument{}, err
+	}
+
+	children := make([]ast.Node, 0, root.ChildCount())
+	starts := make([]int, 0, root.ChildCount())
+	for child := root.FirstChild(); child != nil; child = child.NextSibling() {
+		children = append(children, child)
+		if len(children) == 1 {
+			// Preserve leading blank lines as part of the first legacy source.
+			starts = append(starts, 0)
+			continue
+		}
+
+		normalizedStart, startErr := richTopLevelLineStart(child, normalizedSource)
+		if startErr != nil {
+			return RichDocument{}, fmt.Errorf("locate rich fragment %d: %w", len(children)-1, startErr)
+		}
+		originalStart := offsetMap[normalizedStart]
+		if originalStart <= starts[len(starts)-1] || originalStart > len(input) {
+			return RichDocument{}, fmt.Errorf(
+				"locate rich fragment %d: invalid source boundary %d after %d",
+				len(children)-1, originalStart, starts[len(starts)-1],
+			)
+		}
+		starts = append(starts, originalStart)
+	}
+
+	document.Fragments = make([]RichFragment, 0, len(children))
+	var htmlBuilder strings.Builder
+	for i, child := range children {
+		end := len(input)
+		if i+1 < len(starts) {
+			end = starts[i+1]
+		}
+
+		html, stats, renderErr := renderRichFragmentNode(normalizedSource, child)
+		if renderErr != nil {
+			return RichDocument{}, fmt.Errorf("render rich fragment %d: %w", i, renderErr)
+		}
+		boundaryRanges, rangeErr := richBoundaryTextRanges(child, offsetMap)
+		if rangeErr != nil {
+			return RichDocument{}, fmt.Errorf("locate boundary text ranges in rich fragment %d: %w", i, rangeErr)
+		}
+		fragment := RichFragment{
+			Kind:               richFragmentKind(child),
+			Atomic:             true,
+			SourceStart:        starts[i],
+			SourceEnd:          end,
+			LegacySource:       input[starts[i]:end],
+			HTML:               html,
+			Stats:              stats,
+			BoundaryTextRanges: boundaryRanges,
+		}
+		document.Fragments = append(document.Fragments, fragment)
+		htmlBuilder.WriteString(html)
+		mergeRichStats(&document.Stats, stats)
+	}
+	document.HTML = htmlBuilder.String()
+	return document, nil
+}
+
+func renderRichFragmentNode(source []byte, node ast.Node) (string, RichStats, error) {
+	richRenderer := newRichHTMLRenderer()
+	nodeRenderer := renderer.NewRenderer(renderer.WithNodeRenderers(
+		util.Prioritized(richRenderer, 0),
+	))
 	var out bytes.Buffer
-	if err := md.Convert([]byte(input), &out); err != nil {
-		return "", RichStats{}, fmt.Errorf("render rich markdown: %w", err)
+	if err := nodeRenderer.Render(&out, source, node); err != nil {
+		return "", RichStats{}, err
 	}
 	return out.String(), richRenderer.stats, nil
+}
+
+func richFragmentKind(node ast.Node) RichFragmentKind {
+	switch node.Kind() {
+	case ast.KindHeading:
+		return RichFragmentHeading
+	case ast.KindList:
+		return RichFragmentList
+	case extast.KindTable:
+		return RichFragmentTable
+	case ast.KindCodeBlock, ast.KindFencedCodeBlock:
+		return RichFragmentCode
+	case ast.KindBlockquote:
+		return RichFragmentBlockquote
+	case ast.KindThematicBreak:
+		return RichFragmentDivider
+	case ast.KindHTMLBlock:
+		return RichFragmentRaw
+	case ast.KindParagraph:
+		if paragraphHasDisplayMath(node) {
+			return RichFragmentMath
+		}
+		return RichFragmentParagraph
+	default:
+		return RichFragmentOther
+	}
+}
+
+func mergeRichStats(total *RichStats, next RichStats) {
+	total.Characters += next.Characters
+	total.Blocks += next.Blocks
+	if next.MaxDepth > total.MaxDepth {
+		total.MaxDepth = next.MaxDepth
+	}
+	if next.MaxTableColumns > total.MaxTableColumns {
+		total.MaxTableColumns = next.MaxTableColumns
+	}
+}
+
+// richBoundaryTextRanges is a positive allowlist for application protocol
+// boundaries. Only source owned by a Text node directly under a top-level
+// paragraph is eligible. Text under code, emphasis, links, images, spoilers or
+// any future inline container is deliberately excluded; hidden syntax such as
+// link titles/references and raw HTML has no Text node and is excluded too.
+func richBoundaryTextRanges(node ast.Node, offsetMap []int) ([]RichSourceRange, error) {
+	if node.Kind() != ast.KindParagraph {
+		return nil, nil
+	}
+
+	var ranges []RichSourceRange
+	for child := node.FirstChild(); child != nil; child = child.NextSibling() {
+		textNode, ok := child.(*ast.Text)
+		if !ok {
+			continue
+		}
+		start, end := textNode.Segment.Start, textNode.Segment.Stop
+		if start < 0 || end < start || start >= len(offsetMap) || end >= len(offsetMap) {
+			return nil, fmt.Errorf("boundary text range [%d,%d) exceeds normalized source", start, end)
+		}
+		originalStart, originalEnd := offsetMap[start], offsetMap[end]
+		if originalStart < originalEnd {
+			ranges = append(ranges, RichSourceRange{Start: originalStart, End: originalEnd})
+		}
+	}
+	return ranges, nil
+}
+
+// richTopLevelLineStart expands a block's AST position back to the beginning
+// of its physical source line so Markdown container markers remain in the
+// byte-identical LegacySource slice.
+func richTopLevelLineStart(node ast.Node, source []byte) (int, error) {
+	position := len(source)
+	if err := ast.Walk(node, func(current ast.Node, _ bool) (ast.WalkStatus, error) {
+		if pos := current.Pos(); pos >= 0 && pos < position {
+			position = pos
+		}
+		if current.Type() == ast.TypeBlock {
+			lines := current.Lines()
+			for i := 0; i < lines.Len(); i++ {
+				if start := lines.At(i).Start; start >= 0 && start < position {
+					position = start
+				}
+			}
+		}
+		return ast.WalkContinue, nil
+	}); err != nil {
+		return 0, err
+	}
+	if position == len(source) {
+		return 0, fmt.Errorf("top-level %s has no source position", node.Kind())
+	}
+	if position > len(source) {
+		return 0, fmt.Errorf("top-level %s position %d exceeds source length %d", node.Kind(), position, len(source))
+	}
+	if lineBreak := bytes.LastIndexByte(source[:position], '\n'); lineBreak >= 0 {
+		return lineBreak + 1, nil
+	}
+	return 0, nil
+}
+
+// richNormalizedOffsetMap maps every byte boundary in normalized back to the
+// corresponding byte boundary in original. normalizeRichListBoundaries only
+// inserts line separators; it never deletes or rewrites source bytes.
+func richNormalizedOffsetMap(original, normalized string) ([]int, error) {
+	offsets := make([]int, len(normalized)+1)
+	originalOffset := 0
+	for normalizedOffset := 0; normalizedOffset < len(normalized); normalizedOffset++ {
+		if originalOffset < len(original) && normalized[normalizedOffset] == original[originalOffset] {
+			originalOffset++
+		}
+		offsets[normalizedOffset+1] = originalOffset
+	}
+	if originalOffset != len(original) {
+		return nil, fmt.Errorf("map rich source normalization: original source is not preserved")
+	}
+	return offsets, nil
 }

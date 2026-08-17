@@ -290,17 +290,28 @@ rich drafts. Незакрытый Markdown автозакрывается на �
    - Markdown → allowlisted Rich HTML для eligible Telegram canary, legacy HTML
      для остальных Telegram-путей или Markdown как есть для Mattermost — через
      `Renderer` транспорта
-   - Rich preflight ограничивает размер/структуру и при необходимости разбивает
-     текст на Rich Messages; legacy Telegram использует лимит 4096 UTF-16, а
-     tables/captions переразбиваются при переполнении
+   - Rich preflight ограничивает размер/структуру и пакует верхнеуровневые
+     блоки в Rich Messages; отдельная физическая строка `###SPLIT###` задаёт
+     явную границу, но тот же текст внутри prose/code/table/list/quote не режет
+     ответ
+   - legacy Telegram использует лимит 4096 UTF-16, а tables/captions
+     переразбиваются при переполнении
    - Fallback на plain text при ошибках
 
 3. **Отправка**
    - Reply на оригинальное сообщение
-   - Ровно одна сгенерированная Photo у eligible rich-canary может уйти вместе
-     со всем форматированным ответом одним multipart `sendRichMessage`; albums,
-     Documents и split-ответы сохраняют legacy media/caption path
-   - Сохранение в историю
+   - Для eligible rich-canary единый immutable delivery plan содержит text,
+     gallery из 1–10 generated Photos, packed rich parts и при необходимости
+     high-resolution Document sidecars; одна операция плана равна одному Bot
+     API request
+   - До первого persistent request создаётся content-free delivery ledger.
+     Только подтверждённый rich-format rejection активирует заранее
+     подготовленный legacy suffix; `unknown` останавливает план без resend
+   - После подтверждения всех операций одна транзакция сохраняет assistant
+     history row, все transport message ID и связи с артефактами. Поэтому reply
+     reaction на любую часть/альбом/sidecar разрешается к одному ответу
+   - При старте незавершённые `sending` операции становятся `unknown`, а ещё не
+     начатые — `skipped`; они не переигрываются автоматически
 
 ### 7. Асинхронная обработка
 

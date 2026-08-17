@@ -20,6 +20,7 @@ import (
 // byte/part limits bound work and wire payloads that are not covered by the
 // semantic-character limit (notably tag and URL attributes).
 const (
+	richSplitDelimiter            = "###SPLIT###"
 	richMessageSafeCharacterLimit = 30_000
 	richMessageSafeBlockLimit     = 450
 	richMessageMaxDepth           = 14
@@ -44,13 +45,16 @@ type richRenderedPart struct {
 type richDeliveryOutcome string
 
 const (
-	richDeliveryConfirmed richDeliveryOutcome = "confirmed"
-	richDeliveryRejected  richDeliveryOutcome = "rejected"
-	richDeliveryUnknown   richDeliveryOutcome = "unknown"
+	richDeliveryConfirmed       richDeliveryOutcome = "confirmed"
+	richDeliveryRejected        richDeliveryOutcome = "rejected"
+	richDeliveryPartialRejected richDeliveryOutcome = "partial_rejected"
+	richDeliveryUnknown         richDeliveryOutcome = "unknown"
+	richDeliveryPartialUnknown  richDeliveryOutcome = "partial_unknown"
 )
 
 type richDeliveryResult struct {
 	outcome        richDeliveryOutcome
+	deliveryID     int64
 	sent           int
 	firstMsgID     string
 	confirmedIDs   []string
@@ -68,71 +72,215 @@ type richDeliveryPreflight struct {
 	fallbackReason string
 }
 
-// splitRichSources applies cheap, hard resource bounds before invoking either
+// validateRichSourceBounds applies cheap hard bounds before invoking either
 // Markdown renderer. A hard preflight failure sends nothing; it is not a reason
 // to feed an unbounded payload into the legacy renderer.
-func splitRichSources(text string) ([]string, error) {
+func validateRichSourceBounds(text string) error {
 	if !utf8.ValidString(text) {
-		return nil, errors.New("rich source is not valid UTF-8")
+		return errors.New("rich source is not valid UTF-8")
 	}
 	if len(text) > richMessageMaxSourceBytes {
-		return nil, fmt.Errorf("rich source has %d bytes, limit is %d", len(text), richMessageMaxSourceBytes)
+		return fmt.Errorf("rich source has %d bytes, limit is %d", len(text), richMessageMaxSourceBytes)
 	}
+	if strings.TrimSpace(text) == "" {
+		return errors.New("rich source is empty")
+	}
+	return nil
+}
 
-	parts := fixListNumbering(splitByDelimiter(text))
-	if len(parts) > richMessageMaxParts {
-		return nil, fmt.Errorf("rich source has %d parts, limit is %d", len(parts), richMessageMaxParts)
+func mergeBotRichStats(total *markdown.RichStats, next markdown.RichStats) {
+	total.Characters += next.Characters
+	total.Blocks += next.Blocks
+	if next.MaxDepth > total.MaxDepth {
+		total.MaxDepth = next.MaxDepth
 	}
-	for i, source := range parts {
-		if strings.TrimSpace(source) == "" {
-			return nil, fmt.Errorf("rich source part %d is empty", i)
+	if next.MaxTableColumns > total.MaxTableColumns {
+		total.MaxTableColumns = next.MaxTableColumns
+	}
+}
+
+func richPartWithinLimits(html string, stats markdown.RichStats) bool {
+	return strings.TrimSpace(html) != "" &&
+		len(html) <= richMessageMaxRenderedBytes &&
+		stats.Characters <= richMessageSafeCharacterLimit &&
+		stats.Blocks <= richMessageSafeBlockLimit &&
+		stats.MaxDepth <= richMessageMaxDepth &&
+		stats.MaxTableColumns <= richMessageMaxTableColumns
+}
+
+var (
+	errRichPartFanout = errors.New("rich message part fan-out exceeds limit")
+	errRichSplitEmpty = errors.New("rich split contains no message content")
+)
+
+type richSourceRange struct {
+	start int
+	end   int
+}
+
+// splitStandaloneRichSources recognizes a marker on its own physical line only
+// when its exact bytes belong to a direct Paragraph Text node. This positive
+// AST allowlist accepts ordinary soft-break prose while excluding every inline
+// container plus hidden link/reference/raw-HTML syntax without reconstructing
+// their Markdown source envelopes.
+func splitStandaloneRichSources(text string) ([]string, error) {
+	document, err := markdown.ParseRichFragments(text)
+	if err != nil {
+		return nil, err
+	}
+	var markers []richSourceRange
+	for _, fragment := range document.Fragments {
+		if fragment.Kind != markdown.RichFragmentParagraph {
+			continue
+		}
+		local := fragment.LegacySource
+		for lineStart := 0; lineStart <= len(local); {
+			lineEnd := strings.IndexByte(local[lineStart:], '\n')
+			next := len(local)
+			if lineEnd >= 0 {
+				lineEnd += lineStart
+				next = lineEnd + 1
+			} else {
+				lineEnd = len(local)
+			}
+			line := strings.TrimSuffix(local[lineStart:lineEnd], "\r")
+			if strings.TrimSpace(line) == richSplitDelimiter {
+				markerOffset := strings.Index(line, richSplitDelimiter)
+				markerText := richSourceRange{
+					start: fragment.SourceStart + lineStart + markerOffset,
+					end:   fragment.SourceStart + lineStart + markerOffset + len(richSplitDelimiter),
+				}
+				marker := richSourceRange{
+					start: fragment.SourceStart + lineStart,
+					end:   fragment.SourceStart + next,
+				}
+				if richRangeCoveredByBoundaryText(markerText, fragment.BoundaryTextRanges) {
+					markers = append(markers, marker)
+				}
+			}
+			if next >= len(local) {
+				break
+			}
+			lineStart = next
 		}
 	}
-	if len(parts) == 0 {
-		return nil, errors.New("rich source produced no message parts")
+	if len(markers) == 0 {
+		return []string{text}, nil
+	}
+
+	sources := make([]string, 0, len(markers)+1)
+	start := 0
+	for _, marker := range markers {
+		if source := text[start:marker.start]; strings.TrimSpace(source) != "" {
+			sources = append(sources, source)
+		}
+		start = marker.end
+	}
+	if source := text[start:]; strings.TrimSpace(source) != "" {
+		sources = append(sources, source)
+	}
+	if len(sources) == 0 {
+		return nil, errRichSplitEmpty
+	}
+	if len(sources) > richMessageMaxParts {
+		return nil, fmt.Errorf("%w: %d parts, limit is %d", errRichPartFanout, len(sources), richMessageMaxParts)
+	}
+	return sources, nil
+}
+
+func richRangeCoveredByBoundaryText(candidate richSourceRange, eligible []markdown.RichSourceRange) bool {
+	for _, sourceRange := range eligible {
+		if sourceRange.Start <= candidate.start && candidate.end <= sourceRange.End {
+			return true
+		}
+	}
+	return false
+}
+
+// renderRichParts resolves protocol boundaries, parses each resulting source
+// independently, and packs complete top-level blocks.
+// `###SPLIT###` is a hard boundary only when it is its own top-level block;
+// occurrences inside prose, code, tables, or another atomic block stay text.
+// Automatic packing never cuts a code block, formula, table, list, quote, or
+// any other fragment produced by ParseRichFragments.
+func renderRichParts(text string) ([]richRenderedPart, error) {
+	if err := validateRichSourceBounds(text); err != nil {
+		return nil, err
+	}
+	sources, err := splitStandaloneRichSources(text)
+	if err != nil {
+		return nil, err
+	}
+
+	parts := make([]richRenderedPart, 0, min(len(sources), richMessageMaxParts))
+	var source, html strings.Builder
+	var stats markdown.RichStats
+	flush := func() error {
+		if source.Len() == 0 && html.Len() == 0 {
+			return errors.New("rich split produced an empty part")
+		}
+		if !richPartWithinLimits(html.String(), stats) {
+			return fmt.Errorf("rich part exceeds structural or wire limits")
+		}
+		parts = append(parts, richRenderedPart{source: source.String(), html: html.String(), stats: stats})
+		if len(parts) > richMessageMaxParts {
+			return fmt.Errorf("%w: more than %d packed parts", errRichPartFanout, richMessageMaxParts)
+		}
+		source.Reset()
+		html.Reset()
+		stats = markdown.RichStats{}
+		return nil
+	}
+
+	fragmentIndex := 0
+	for sourceIndex, explicitSource := range sources {
+		document, parseErr := markdown.ParseRichFragments(explicitSource)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parse rich source part %d: %w", sourceIndex, parseErr)
+		}
+		if len(document.Fragments) == 0 {
+			return nil, fmt.Errorf("rich source part %d produced no blocks", sourceIndex)
+		}
+		for _, fragment := range document.Fragments {
+			candidateStats := stats
+			mergeBotRichStats(&candidateStats, fragment.Stats)
+			candidateHTML := html.String() + fragment.HTML
+			if (source.Len() > 0 || html.Len() > 0) && !richPartWithinLimits(candidateHTML, candidateStats) {
+				if err := flush(); err != nil {
+					return nil, fmt.Errorf("pack before fragment %d: %w", fragmentIndex, err)
+				}
+				candidateStats = fragment.Stats
+				candidateHTML = fragment.HTML
+			}
+			if !richPartWithinLimits(candidateHTML, candidateStats) && strings.TrimSpace(fragment.HTML) != "" {
+				return nil, fmt.Errorf("atomic rich fragment %d (%s) exceeds structural or wire limits", fragmentIndex, fragment.Kind)
+			}
+			source.WriteString(fragment.LegacySource)
+			html.WriteString(fragment.HTML)
+			stats = candidateStats
+			fragmentIndex++
+		}
+		if err := flush(); err != nil {
+			return nil, fmt.Errorf("hard split after source part %d: %w", sourceIndex, err)
+		}
 	}
 	return parts, nil
 }
 
-func renderRichSources(sources []string) ([]richRenderedPart, error) {
-	rendered := make([]richRenderedPart, 0, len(sources))
-	for i, source := range sources {
-		html, stats, err := markdown.ToRichHTML(source)
-		if err != nil {
-			return nil, fmt.Errorf("render part %d: %w", i, err)
-		}
-		if strings.TrimSpace(html) == "" {
-			return nil, fmt.Errorf("render part %d: empty rich HTML", i)
-		}
-		if len(html) > richMessageMaxRenderedBytes {
-			return nil, fmt.Errorf("render part %d: %d rendered bytes exceed limit %d", i, len(html), richMessageMaxRenderedBytes)
-		}
-		if stats.Characters > richMessageSafeCharacterLimit {
-			return nil, fmt.Errorf("render part %d: %d semantic characters exceed safe limit %d", i, stats.Characters, richMessageSafeCharacterLimit)
-		}
-		if stats.Blocks > richMessageSafeBlockLimit {
-			return nil, fmt.Errorf("render part %d: %d blocks exceed safe limit %d", i, stats.Blocks, richMessageSafeBlockLimit)
-		}
-		if stats.MaxDepth > richMessageMaxDepth {
-			return nil, fmt.Errorf("render part %d: nesting depth %d exceeds safe limit %d", i, stats.MaxDepth, richMessageMaxDepth)
-		}
-		if stats.MaxTableColumns > richMessageMaxTableColumns {
-			return nil, fmt.Errorf("render part %d: table has %d columns, limit is %d", i, stats.MaxTableColumns, richMessageMaxTableColumns)
-		}
-		rendered = append(rendered, richRenderedPart{source: source, html: html, stats: stats})
-	}
-	return rendered, nil
-}
-
-// renderRichParts is kept as the pure rich-render preflight used by tests and
-// future non-send consumers. The delivery path additionally pre-renders its
-// policy-equivalent legacy representation before making a network call.
-func renderRichParts(text string) ([]richRenderedPart, error) {
-	sources, err := splitRichSources(text)
+func renderSafeFallbackSources(ctx context.Context, renderer *TelegramRenderer, text string) ([]string, error) {
+	sources, err := splitStandaloneRichSources(text)
 	if err != nil {
 		return nil, err
 	}
-	return renderRichSources(sources)
+	var chunks []string
+	for i, source := range sources {
+		partChunks, renderErr := renderer.renderSafeRichFallbackPart(ctx, source)
+		if renderErr != nil {
+			return nil, fmt.Errorf("render safe fallback source %d: %w", i, renderErr)
+		}
+		chunks = append(chunks, partChunks...)
+	}
+	return chunks, nil
 }
 
 // preflightRichDelivery prepares both representations before any persistent
@@ -140,15 +288,38 @@ func renderRichParts(text string) ([]richRenderedPart, error) {
 // half-missing response and guarantees that fallback uses the same link/media/
 // mention policy as native Rich Messages.
 func preflightRichDelivery(ctx context.Context, text string, renderer *TelegramRenderer) (richDeliveryPreflight, error) {
-	sources, err := splitRichSources(text)
-	if err != nil {
+	if err := validateRichSourceBounds(text); err != nil {
 		return richDeliveryPreflight{}, err
 	}
 
-	parts := make([]richRenderedPart, len(sources))
+	richParts, richErr := renderRichParts(text)
+	if richErr != nil {
+		if errors.Is(richErr, errRichPartFanout) || errors.Is(richErr, errRichSplitEmpty) {
+			return richDeliveryPreflight{}, richErr
+		}
+		chunks, fallbackErr := renderSafeFallbackSources(ctx, renderer, text)
+		if fallbackErr != nil {
+			return richDeliveryPreflight{}, fmt.Errorf("render safe fallback after rich packing: %w", fallbackErr)
+		}
+		if len(chunks) == 0 || len(chunks) > richMessageMaxFallbackChunks {
+			return richDeliveryPreflight{}, fmt.Errorf("safe fallback has %d chunks, limit is %d", len(chunks), richMessageMaxFallbackChunks)
+		}
+		for i, chunk := range chunks {
+			if strings.TrimSpace(chunk) == "" || markdown.UTF16Length(chunk) > telegramMessageLimit {
+				return richDeliveryPreflight{}, fmt.Errorf("safe fallback chunk %d is empty or exceeds wire limit", i)
+			}
+		}
+		return richDeliveryPreflight{
+			parts:          []richRenderedPart{{source: text, legacyFallback: chunks}},
+			localFallback:  true,
+			fallbackReason: "rich_render_or_limit",
+		}, nil
+	}
+
+	parts := make([]richRenderedPart, len(richParts))
 	fallbackChunks := 0
-	for i, source := range sources {
-		chunks, renderErr := renderer.renderSafeRichFallback(ctx, source)
+	for i, richPart := range richParts {
+		chunks, renderErr := renderer.renderSafeRichFallbackPart(ctx, richPart.source)
 		if renderErr != nil {
 			return richDeliveryPreflight{}, fmt.Errorf("render safe fallback part %d: %w", i, renderErr)
 		}
@@ -167,20 +338,8 @@ func preflightRichDelivery(ctx context.Context, text string, renderer *TelegramR
 		if fallbackChunks > richMessageMaxFallbackChunks {
 			return richDeliveryPreflight{}, fmt.Errorf("safe fallback has %d chunks, limit is %d", fallbackChunks, richMessageMaxFallbackChunks)
 		}
-		parts[i] = richRenderedPart{source: source, legacyFallback: chunks}
-	}
-
-	richParts, richErr := renderRichSources(sources)
-	if richErr != nil {
-		return richDeliveryPreflight{
-			parts:          parts,
-			localFallback:  true,
-			fallbackReason: "rich_render_or_limit",
-		}, nil
-	}
-	for i := range parts {
-		parts[i].html = richParts[i].html
-		parts[i].stats = richParts[i].stats
+		parts[i] = richPart
+		parts[i].legacyFallback = chunks
 	}
 	return richDeliveryPreflight{parts: parts}, nil
 }
@@ -221,57 +380,55 @@ func finishRichDelivery(span trace.Span, result richDeliveryResult) richDelivery
 	return result
 }
 
-// sendLegacyRichFallback sends only already-rendered chunks. It deliberately
-// does not call the generic sendRendered helper: that helper can hide errors
-// behind a generic-error send, while this path must preserve exact confirmed /
-// rejected / unknown semantics for the persistent answer.
-func (b *Bot) sendLegacyRichFallback(
-	ctx context.Context,
-	convID, threadRoot, replyTo string,
-	parts []richRenderedPart,
-	startPart int,
-	result richDeliveryResult,
-) richDeliveryResult {
-	for i := startPart; i < len(parts); i++ {
-		for j, chunk := range parts[i].legacyFallback {
-			partReplyTo := ""
-			if result.sent == 0 {
-				partReplyTo = replyTo
-			}
-
-			result.attempts++
-			msgID, err := b.transport.SendText(ctx, OutgoingResponse{
-				ConversationID: convID,
-				Text:           chunk,
-				ThreadRoot:     threadRoot,
-				ReplyTo:        partReplyTo,
-			})
-			if err != nil {
-				result.outcome = richOutcomeForError(err)
-				result.failedPart = deliveryIndex(i)
-				result.failedChunk = deliveryIndex(j)
-				result.err = fmt.Errorf("send safe fallback part %d chunk %d: %w", i, j, err)
-				return result
-			}
-			if msgID == "" {
-				result.outcome = richDeliveryUnknown
-				result.failedPart = deliveryIndex(i)
-				result.failedChunk = deliveryIndex(j)
-				result.err = fmt.Errorf("send safe fallback part %d chunk %d returned no stable message id", i, j)
-				return result
-			}
-			result.confirmMessage(msgID)
-		}
+func richTextFallbackOperations(convID, threadRoot string, parts []richRenderedPart, start int) []deliveryOperation {
+	var operations []deliveryOperation
+	for i := start; i < len(parts); i++ {
+		operations = append(operations, generatedLegacyTextOperations(convID, threadRoot, parts[i].legacyFallback)...)
 	}
-	result.outcome = richDeliveryConfirmed
-	return result
+	return operations
 }
 
-// sendRichRendered is the buffered v1 final-response path. Every fallback
-// chunk is prepared before the first network call. A confirmed Rich Message
-// format rejection may switch to legacy starting at that part; an ambiguous
-// failure never resends because Telegram may already have accepted the answer.
-func (b *Bot) sendRichRendered(ctx context.Context, convID, threadRoot, replyTo, text string, logger *slog.Logger) richDeliveryResult {
+func richTextDeliveryPlan(convID, threadRoot, replyTo string, preflight richDeliveryPreflight) (deliveryPlan, error) {
+	if len(preflight.parts) == 0 {
+		return deliveryPlan{}, errors.New("rich delivery preflight has no parts")
+	}
+	if preflight.localFallback {
+		operations := richTextFallbackOperations(convID, threadRoot, preflight.parts, 0)
+		if len(operations) > 0 {
+			operations[0].Text.ReplyTo = replyTo
+		}
+		plan := deliveryPlan{Operations: operations}
+		return plan, plan.validate()
+	}
+	operations := make([]deliveryOperation, 0, len(preflight.parts))
+	for i, part := range preflight.parts {
+		op := deliveryOperation{
+			Kind: persistentOperationRichText,
+			Text: &OutgoingResponse{
+				ConversationID: convID,
+				ThreadRoot:     threadRoot,
+				Text:           part.html,
+				Format:         ResponseFormatRichHTML,
+			},
+			formatFallback: richTextFallbackOperations(convID, threadRoot, preflight.parts, i),
+		}
+		if i == 0 {
+			op.Text.ReplyTo = replyTo
+			if len(op.formatFallback) > 0 {
+				op.formatFallback[0].Text.ReplyTo = replyTo
+			}
+		}
+		operations = append(operations, op)
+	}
+	plan := deliveryPlan{Operations: operations}
+	return plan, plan.validate()
+}
+
+// sendRichRendered is the buffered V2 final-response path. It executes one
+// immutable plan shared by ordinary rich text, block-aware splits and the
+// content-free delivery ledger. A confirmed format rejection may switch only
+// to the pre-rendered suffix; an ambiguous failure never resends.
+func (b *Bot) sendRichRendered(ctx context.Context, convID, threadRoot, replyTo, text string, logger *slog.Logger, ledger ...deliveryLedgerContext) richDeliveryResult {
 	span := trace.SpanFromContext(ctx)
 	renderer := NewTelegramRenderer(logger)
 	preflight, err := preflightRichDelivery(ctx, text, renderer)
@@ -292,10 +449,18 @@ func (b *Bot) sendRichRendered(ctx context.Context, convID, threadRoot, replyTo,
 			attribute.Bool("bot.rich_message.local_fallback", true),
 			attribute.String("bot.rich_message.local_fallback_reason", preflight.fallbackReason),
 		)
-		result := b.sendLegacyRichFallback(ctx, convID, threadRoot, replyTo, preflight.parts, 0, richDeliveryResult{
-			metricPath:     richMetricPathLocalFallback,
-			fallbackReason: preflight.fallbackReason,
-		})
+		plan, planErr := richTextDeliveryPlan(convID, threadRoot, replyTo, preflight)
+		if planErr != nil {
+			return finishRichDelivery(span, richDeliveryResult{
+				outcome:        richDeliveryRejected,
+				metricPath:     richMetricPathPreflightRejected,
+				fallbackReason: richMetricFallbackHardPreflight,
+				err:            planErr,
+			})
+		}
+		result := b.executeDeliveryPlan(ctx, plan, ledger...)
+		result.metricPath = richMetricPathLocalFallback
+		result.fallbackReason = preflight.fallbackReason
 		return finishRichDelivery(span, result)
 	}
 
@@ -311,64 +476,22 @@ func (b *Bot) sendRichRendered(ctx context.Context, convID, threadRoot, replyTo,
 		attribute.Int("bot.rich_message.blocks", totalBlocks),
 	)
 
-	result := richDeliveryResult{
-		metricPath:     richMetricPathNative,
-		fallbackReason: richMetricFallbackNone,
-	}
-	for i, part := range preflight.parts {
-		partReplyTo := ""
-		if result.sent == 0 {
-			partReplyTo = replyTo
-		}
-
-		result.attempts++
-		msgID, sendErr := b.transport.SendText(ctx, OutgoingResponse{
-			ConversationID: convID,
-			Text:           part.html,
-			ThreadRoot:     threadRoot,
-			ReplyTo:        partReplyTo,
-			Format:         ResponseFormatRichHTML,
+	plan, planErr := richTextDeliveryPlan(convID, threadRoot, replyTo, preflight)
+	if planErr != nil {
+		return finishRichDelivery(span, richDeliveryResult{
+			outcome:        richDeliveryRejected,
+			metricPath:     richMetricPathPreflightRejected,
+			fallbackReason: richMetricFallbackHardPreflight,
+			err:            planErr,
 		})
-		if sendErr != nil {
-			if errors.Is(sendErr, ErrRichMessageRejected) {
-				result.failedPart = deliveryIndex(i)
-				result.failedChunk = nil
-				result.metricPath = richMetricPathAPIFallback
-				result.fallbackReason = richMetricFallbackFormatRejected
-				span.SetAttributes(
-					attribute.Bool("bot.rich_message.api_fallback", true),
-					attribute.Int("bot.rich_message.fallback_part", i),
-				)
-				logger.Warn("rich message format rejected; using pre-rendered safe legacy fallback", "part_index", i)
-				result = b.sendLegacyRichFallback(ctx, convID, threadRoot, replyTo, preflight.parts, i, result)
-				return finishRichDelivery(span, result)
-			}
-
-			result.outcome = richOutcomeForError(sendErr)
-			result.failedPart = deliveryIndex(i)
-			result.failedChunk = nil
-			result.err = fmt.Errorf("send rich part %d: %w", i, sendErr)
-			if result.outcome == richDeliveryUnknown {
-				logger.Error("failed to send rich message; answer not resent after unknown outcome", "error", sendErr, "part_index", i)
-				span.SetAttributes(attribute.Bool("bot.rich_message.ambiguous_failure", true))
-			}
-			span.SetAttributes(attribute.Int("bot.rich_message.failed_part", i))
-			return finishRichDelivery(span, result)
-		}
-		if msgID == "" {
-			result.outcome = richDeliveryUnknown
-			result.failedPart = deliveryIndex(i)
-			result.failedChunk = nil
-			result.err = fmt.Errorf("send rich part %d returned no stable message id", i)
-			span.SetAttributes(
-				attribute.Bool("bot.rich_message.ambiguous_failure", true),
-				attribute.Int("bot.rich_message.failed_part", i),
-			)
-			return finishRichDelivery(span, result)
-		}
-		result.confirmMessage(msgID)
 	}
-
-	result.outcome = richDeliveryConfirmed
+	result := b.executeDeliveryPlan(ctx, plan, ledger...)
+	if result.outcome == richDeliveryUnknown || result.outcome == richDeliveryPartialUnknown {
+		logger.Error("failed to send rich message; answer not resent after unknown outcome", "error", result.err)
+		span.SetAttributes(attribute.Bool("bot.rich_message.ambiguous_failure", true))
+	}
+	if result.metricPath == richMetricPathAPIFallback {
+		span.SetAttributes(attribute.Bool("bot.rich_message.api_fallback", true))
+	}
 	return finishRichDelivery(span, result)
 }

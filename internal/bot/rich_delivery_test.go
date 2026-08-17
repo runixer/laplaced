@@ -40,6 +40,10 @@ func (t *recordingRichTransport) SendText(_ context.Context, response OutgoingRe
 	return fmt.Sprintf("message-%d", call+1), nil
 }
 
+func (t *recordingRichTransport) SendTextPersistent(ctx context.Context, response OutgoingResponse) (string, error) {
+	return t.SendText(ctx, response)
+}
+
 func (*recordingRichTransport) SendMedia(context.Context, OutgoingMedia) (string, error) {
 	return "", nil
 }
@@ -286,7 +290,7 @@ func TestSendRichRendered_PartialFallbackFailureIsNotHidden(t *testing.T) {
 	)
 
 	require.Error(t, result.err)
-	assert.Equal(t, richDeliveryUnknown, result.outcome)
+	assert.Equal(t, richDeliveryPartialUnknown, result.outcome)
 	assert.Equal(t, 1, result.sent)
 	assert.Equal(t, 3, result.attempts)
 	assert.Equal(t, "message-2", result.firstMsgID)
@@ -367,6 +371,374 @@ func TestRenderRichParts_RejectsInvalidUTF8BeforeSending(t *testing.T) {
 	parts, err := renderRichParts(string([]byte{'o', 'k', 0xff}))
 	require.Error(t, err)
 	assert.Nil(t, parts)
+}
+
+func TestRenderRichParts_V2StandaloneSplitOnly(t *testing.T) {
+	inline := "before ###SPLIT### after"
+	parts, err := renderRichParts(inline)
+	require.NoError(t, err)
+	require.Len(t, parts, 1)
+	assert.Contains(t, parts[0].html, "###SPLIT###")
+
+	inCode := "```text\n###SPLIT###\n```"
+	parts, err = renderRichParts(inCode)
+	require.NoError(t, err)
+	require.Len(t, parts, 1)
+	assert.Contains(t, parts[0].html, "###SPLIT###")
+
+	hard := "# First\n\n###SPLIT###\n\n## Second"
+	parts, err = renderRichParts(hard)
+	require.NoError(t, err)
+	require.Len(t, parts, 2)
+	assert.Equal(t, "<h1>First</h1>", parts[0].html)
+	assert.Equal(t, "<h2>Second</h2>", parts[1].html)
+
+	withoutBlankLines := "First\n###SPLIT###\nSecond"
+	parts, err = renderRichParts(withoutBlankLines)
+	require.NoError(t, err)
+	require.Len(t, parts, 2)
+	assert.Equal(t, "First", strings.TrimSpace(parts[0].source))
+	assert.Equal(t, "Second", strings.TrimSpace(parts[1].source))
+	assert.Equal(t, "<p>First</p>", parts[0].html)
+	assert.Equal(t, "<p>Second</p>", parts[1].html)
+
+	crlfUnicode := "Привет 👋\r\n###SPLIT###\r\nмир"
+	parts, err = renderRichParts(crlfUnicode)
+	require.NoError(t, err)
+	require.Len(t, parts, 2)
+	assert.Equal(t, "Привет 👋", strings.TrimSpace(parts[0].source))
+	assert.Equal(t, "мир", strings.TrimSpace(parts[1].source))
+	assert.Equal(t, "<p>Привет 👋</p>", parts[0].html)
+	assert.Equal(t, "<p>мир</p>", parts[1].html)
+
+	multilineSpoiler := "before ||alpha\n###SPLIT###\nomega|| after"
+	parts, err = renderRichParts(multilineSpoiler)
+	require.NoError(t, err)
+	require.Len(t, parts, 2, "the custom spoiler parser deliberately cannot cross a physical line")
+	assert.NotContains(t, parts[0].html+parts[1].html, "<tg-spoiler>")
+
+	markerAfterLink := "[label](https://example.com)\n###SPLIT###\nafter"
+	parts, err = renderRichParts(markerAfterLink)
+	require.NoError(t, err)
+	require.Len(t, parts, 2, "a link envelope must not absorb the next standalone marker line")
+	assert.Equal(t, `<p><a href="https://example.com">label</a></p>`, parts[0].html)
+	assert.Equal(t, "<p>after</p>", parts[1].html)
+}
+
+func TestRenderRichParts_V2IgnoresEmptySegmentsAroundStandaloneSplits(t *testing.T) {
+	source := "###SPLIT###\nfirst\n###SPLIT###\n###SPLIT###\nsecond\n###SPLIT###"
+
+	parts, err := renderRichParts(source)
+	require.NoError(t, err)
+	require.Len(t, parts, 2)
+	assert.Equal(t, "first", strings.TrimSpace(parts[0].source))
+	assert.Equal(t, "second", strings.TrimSpace(parts[1].source))
+	assert.Equal(t, "<p>first</p>", parts[0].html)
+	assert.Equal(t, "<p>second</p>", parts[1].html)
+}
+
+func TestRenderRichParts_V2OnlyStandaloneSplitIsHardRejection(t *testing.T) {
+	parts, err := renderRichParts(" \n###SPLIT###\n ")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errRichSplitEmpty)
+	assert.Nil(t, parts)
+
+	preflight, err := preflightRichDelivery(
+		context.Background(), " \n###SPLIT###\n ", NewTelegramRenderer(testutil.TestLogger()),
+	)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errRichSplitEmpty)
+	assert.Empty(t, preflight.parts)
+}
+
+func TestRenderRichParts_V2PartFanoutBoundary(t *testing.T) {
+	makeSource := func(parts int) string {
+		values := make([]string, parts)
+		for i := range parts {
+			values[i] = fmt.Sprintf("part-%d", i)
+		}
+		return strings.Join(values, "\n###SPLIT###\n")
+	}
+
+	parts, err := renderRichParts(makeSource(richMessageMaxParts))
+	require.NoError(t, err)
+	assert.Len(t, parts, richMessageMaxParts)
+
+	parts, err = renderRichParts(makeSource(richMessageMaxParts + 1))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errRichPartFanout)
+	assert.Nil(t, parts)
+}
+
+func TestPreflightRichDelivery_V2FallbackDoesNotReinterpretInlineOrProtectedSplit(t *testing.T) {
+	tests := []struct {
+		name         string
+		source       string
+		wantFallback string
+	}{
+		{name: "inline prose", source: "before ###SPLIT### after"},
+		{name: "fenced code", source: "```text\n###SPLIT###\n```"},
+		{name: "multiline inline code", source: "before `alpha\n###SPLIT###\nomega` after"},
+		{name: "multiline emphasis", source: "before *alpha\n###SPLIT###\nomega* after"},
+		{name: "multiline link", source: "before [alpha\n###SPLIT###\nomega](https://example.com) after"},
+		{name: "multiline image label", source: "before ![alpha\n###SPLIT###\nomega](https://example.com/image.png) after"},
+		{name: "multiline link label after bracket code", source: "before [alpha `]`\n###SPLIT###\nomega](https://example.com) after"},
+		{name: "multiline image label after bracket code", source: "before ![alpha `]`\n###SPLIT###\nomega](https://example.com/image.png) after"},
+		{name: "multiline link label after bracket raw HTML", source: "before [alpha <!-- ] -->\n###SPLIT###\nomega](https://example.com) after"},
+		{name: "multiline image label after bracket raw HTML", source: "before ![alpha <!-- ] -->\n###SPLIT###\nomega](https://example.com/image.png) after"},
+		{name: "multiline strikethrough", source: "before ~~alpha\n###SPLIT###\nomega~~ after"},
+		{
+			name:         "multiline link title",
+			source:       "before [label](https://example.com \"alpha\n###SPLIT###\nomega\") after",
+			wantFallback: `before <a href="https://example.com">label</a> after`,
+		},
+		{
+			name:         "multiline image title",
+			source:       "before ![label](https://example.com/image.png \"alpha\n###SPLIT###\nomega\") after",
+			wantFallback: "before label after",
+		},
+		{
+			name: "multiline full link reference",
+			source: "before [label][alpha\n###SPLIT###\nomega] after\n\n" +
+				"[alpha ###SPLIT### omega]: https://example.com",
+			wantFallback: `before <a href="https://example.com">label</a> after`,
+		},
+		{
+			name: "multiline full image reference",
+			source: "before ![label][alpha\n###SPLIT###\nomega] after\n\n" +
+				"[alpha ###SPLIT### omega]: https://example.com/image.png",
+			wantFallback: "before label after",
+		},
+		{
+			name:         "raw HTML nested in emphasis",
+			source:       "before *alpha <!-- x\n###SPLIT###\ny -->* after",
+			wantFallback: "before <i>alpha </i> after",
+		},
+		{
+			name:         "multiline inline raw HTML",
+			source:       "before <!-- alpha\n###SPLIT###\nomega --> after",
+			wantFallback: "before  after",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			preflight, err := preflightRichDelivery(
+				context.Background(), tt.source, NewTelegramRenderer(testutil.TestLogger()),
+			)
+			require.NoError(t, err)
+			assert.False(t, preflight.localFallback)
+			require.Len(t, preflight.parts, 1)
+			require.Len(t, preflight.parts[0].legacyFallback, 1)
+			if tt.wantFallback != "" {
+				assert.Equal(t, tt.wantFallback, preflight.parts[0].legacyFallback[0])
+			} else {
+				assert.Contains(t, preflight.parts[0].legacyFallback[0], richSplitDelimiter)
+			}
+		})
+	}
+}
+
+func TestRenderRichParts_V2SplitMarkerInsideAtomicBlocksStaysContent(t *testing.T) {
+	tests := []struct {
+		name     string
+		source   string
+		wantHTML string
+	}{
+		{name: "table", source: "| Value |\n|---|\n| ###SPLIT### |"},
+		{name: "display math", source: "$$\n###SPLIT###\n$$"},
+		{name: "blockquote", source: "> ###SPLIT###"},
+		{name: "list", source: "- ###SPLIT###"},
+		{name: "multiline inline code", source: "before `alpha\n###SPLIT###\nomega` after"},
+		{name: "multiline inline code CRLF", source: "before `alpha\r\n###SPLIT###\r\nomega` after"},
+		{name: "multiline double-backtick code", source: "before ``alpha\n###SPLIT###\nomega`` after"},
+		{name: "multiline emphasis", source: "before *alpha\n###SPLIT###\nomega* after"},
+		{name: "multiline link", source: "before [alpha\n###SPLIT###\nomega](https://example.com) after"},
+		{name: "multiline image label", source: "before ![alpha\n###SPLIT###\nomega](https://example.com/image.png) after"},
+		{name: "multiline link label after bracket code", source: "before [alpha `]`\n###SPLIT###\nomega](https://example.com) after"},
+		{name: "multiline image label after bracket code", source: "before ![alpha `]`\n###SPLIT###\nomega](https://example.com/image.png) after"},
+		{name: "multiline link label after bracket raw HTML", source: "before [alpha <!-- ] -->\n###SPLIT###\nomega](https://example.com) after"},
+		{name: "multiline image label after bracket raw HTML", source: "before ![alpha <!-- ] -->\n###SPLIT###\nomega](https://example.com/image.png) after"},
+		{name: "multiline strikethrough", source: "before ~~alpha\n###SPLIT###\nomega~~ after"},
+		{
+			name:     "multiline link title",
+			source:   "before [label](https://example.com \"alpha\n###SPLIT###\nomega\") after",
+			wantHTML: `<p>before <a href="https://example.com">label</a> after</p>`,
+		},
+		{
+			name:     "multiline image title",
+			source:   "before ![label](https://example.com/image.png \"alpha\n###SPLIT###\nomega\") after",
+			wantHTML: "<p>before label after</p>",
+		},
+		{
+			name: "multiline full link reference",
+			source: "before [label][alpha\n###SPLIT###\nomega] after\n\n" +
+				"[alpha ###SPLIT### omega]: https://example.com",
+			wantHTML: `<p>before <a href="https://example.com">label</a> after</p>`,
+		},
+		{
+			name: "multiline full image reference",
+			source: "before ![label][alpha\n###SPLIT###\nomega] after\n\n" +
+				"[alpha ###SPLIT### omega]: https://example.com/image.png",
+			wantHTML: "<p>before label after</p>",
+		},
+		{
+			name:     "raw HTML nested in emphasis",
+			source:   "before *alpha <!-- x\n###SPLIT###\ny -->* after",
+			wantHTML: "<p>before <em>alpha </em> after</p>",
+		},
+		{
+			name:     "multiline inline raw HTML",
+			source:   "before <!-- alpha\n###SPLIT###\nomega --> after",
+			wantHTML: "<p>before  after</p>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parts, err := renderRichParts(tt.source)
+			require.NoError(t, err)
+			require.Len(t, parts, 1)
+			assert.Equal(t, tt.source, parts[0].source)
+			if tt.wantHTML != "" {
+				assert.Equal(t, tt.wantHTML, parts[0].html)
+			} else {
+				assert.Contains(t, parts[0].html, richSplitDelimiter)
+			}
+		})
+	}
+}
+
+func TestRenderRichParts_V2PacksOnlyBetweenTopLevelBlocks(t *testing.T) {
+	first := strings.Repeat("a", 16_000)
+	second := strings.Repeat("b", 16_000)
+	source := first + "\n\n" + second
+
+	parts, err := renderRichParts(source)
+	require.NoError(t, err)
+	require.Len(t, parts, 2)
+	assert.Equal(t, source, parts[0].source+parts[1].source)
+	assert.Contains(t, parts[0].html, first)
+	assert.Contains(t, parts[1].html, second)
+}
+
+func TestRenderRichParts_V2OversizedAtomicStructuresAreNeverSplit(t *testing.T) {
+	payload := strings.Repeat("x", richMessageSafeCharacterLimit+1)
+	tests := []struct {
+		name   string
+		kind   string
+		source string
+	}{
+		{name: "fenced code", kind: "code", source: "```text\n" + payload + "\n```"},
+		{name: "table", kind: "table", source: "| Value |\n|---|\n| " + payload + " |"},
+		{name: "display math", kind: "math", source: "$$\n" + payload + "\n$$"},
+		{name: "blockquote", kind: "blockquote", source: "> " + payload},
+		{name: "list", kind: "list", source: "- " + payload},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parts, err := renderRichParts(tt.source)
+			require.Error(t, err)
+			assert.Nil(t, parts, "an atomic failure must not expose a sendable prefix")
+			assert.Contains(t, err.Error(), "atomic rich fragment 0 ("+tt.kind+")")
+		})
+	}
+}
+
+func TestRenderRichParts_V2StructuralLimitsUseExactFragmentStats(t *testing.T) {
+	t.Run("table columns", func(t *testing.T) {
+		makeTable := func(columns int) string {
+			header := make([]string, columns)
+			separator := make([]string, columns)
+			row := make([]string, columns)
+			for i := range columns {
+				header[i] = fmt.Sprintf("H%d", i)
+				separator[i] = "---"
+				row[i] = "x"
+			}
+			return "| " + strings.Join(header, " | ") + " |\n| " +
+				strings.Join(separator, " | ") + " |\n| " + strings.Join(row, " | ") + " |"
+		}
+
+		parts, err := renderRichParts(makeTable(richMessageMaxTableColumns))
+		require.NoError(t, err)
+		require.Len(t, parts, 1)
+		assert.Equal(t, richMessageMaxTableColumns, parts[0].stats.MaxTableColumns)
+
+		parts, err = renderRichParts(makeTable(richMessageMaxTableColumns + 1))
+		require.Error(t, err)
+		assert.Nil(t, parts)
+		assert.Contains(t, err.Error(), "atomic rich fragment 0 (table)")
+	})
+
+	t.Run("list block count", func(t *testing.T) {
+		makeList := func(items int) string {
+			var source strings.Builder
+			for i := range items {
+				fmt.Fprintf(&source, "- item %d\n", i)
+			}
+			return source.String()
+		}
+
+		// One list container plus 449 list items is exactly the safe limit.
+		parts, err := renderRichParts(makeList(richMessageSafeBlockLimit - 1))
+		require.NoError(t, err)
+		require.Len(t, parts, 1)
+		assert.Equal(t, richMessageSafeBlockLimit, parts[0].stats.Blocks)
+
+		parts, err = renderRichParts(makeList(richMessageSafeBlockLimit))
+		require.Error(t, err)
+		assert.Nil(t, parts)
+		assert.Contains(t, err.Error(), "atomic rich fragment 0 (list)")
+	})
+
+	t.Run("nested list depth", func(t *testing.T) {
+		makeNestedList := func(levels int) string {
+			var source strings.Builder
+			for level := range levels {
+				fmt.Fprintf(&source, "%s- level %d\n", strings.Repeat("  ", level), level)
+			}
+			return source.String()
+		}
+
+		// Every tight-list level contributes one <ul> and one <li> tag.
+		parts, err := renderRichParts(makeNestedList(richMessageMaxDepth / 2))
+		require.NoError(t, err)
+		require.Len(t, parts, 1)
+		assert.Equal(t, richMessageMaxDepth, parts[0].stats.MaxDepth)
+
+		parts, err = renderRichParts(makeNestedList(richMessageMaxDepth/2 + 1))
+		require.Error(t, err)
+		assert.Nil(t, parts)
+		assert.Contains(t, err.Error(), "atomic rich fragment 0 (list)")
+	})
+}
+
+func TestRenderRichParts_V2EmptyRawHTMLDoesNotCreateOrEraseAVisiblePart(t *testing.T) {
+	source := "before\n\n<script>\nalert('nope')\n</script>\n\nafter"
+
+	parts, err := renderRichParts(source)
+	require.NoError(t, err)
+	require.Len(t, parts, 1)
+	assert.Equal(t, source, parts[0].source)
+	assert.Equal(t, "<p>before</p><p>after</p>", parts[0].html)
+	assert.Equal(t, 2, parts[0].stats.Blocks)
+
+	parts, err = renderRichParts("<script>\nalert('nope')\n</script>")
+	require.Error(t, err)
+	assert.Nil(t, parts, "a semantically empty document cannot become a persistent message")
+}
+
+func TestPreflightRichDelivery_V2OversizedAtomicBlockUsesPreparedLegacyFallback(t *testing.T) {
+	source := strings.Repeat("x", richMessageSafeCharacterLimit+1)
+	preflight, err := preflightRichDelivery(context.Background(), source, NewTelegramRenderer(testutil.TestLogger()))
+
+	require.NoError(t, err)
+	assert.True(t, preflight.localFallback)
+	assert.Equal(t, richMetricFallbackRenderOrLimit, preflight.fallbackReason)
+	require.Len(t, preflight.parts, 1)
+	assert.NotEmpty(t, preflight.parts[0].legacyFallback)
 }
 
 func TestRenderRichParts_ListBoundaryRepairKeepsFallbackSource(t *testing.T) {

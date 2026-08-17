@@ -99,40 +99,12 @@ func (t *TelegramTransport) AllowlistConfigured() bool {
 //
 // Both retries use a fresh, non-cancellable context.
 func (t *TelegramTransport) SendText(ctx context.Context, r OutgoingResponse) (string, error) {
+	if r.Format == ResponseFormatRichHTML {
+		return t.SendTextPersistent(ctx, r)
+	}
 	chatID, err := strconv.ParseInt(r.ConversationID, 10, 64)
 	if err != nil {
 		return "", err
-	}
-	if r.Format == ResponseFormatRichHTML {
-		if !t.cfg.Telegram.RichMessages.AnyEnabled() {
-			return "", fmt.Errorf("telegram rich messages are disabled")
-		}
-		req := telegram.SendRichMessageRequest{
-			ChatID:          chatID,
-			MessageThreadID: intPtrOrNil(atoiOrZero(r.ThreadRoot)),
-			RichMessage: telegram.InputRichMessage{
-				HTML:                r.Text,
-				SkipEntityDetection: true,
-			},
-		}
-		if replyID := atoiOrZero(r.ReplyTo); replyID != 0 {
-			req.ReplyParameters = &telegram.ReplyParameters{MessageID: replyID}
-		}
-
-		sent, sendErr := t.api.SendRichMessage(ctx, req)
-		if sendErr != nil {
-			var apiErr *telegram.APIError
-			if errors.As(sendErr, &apiErr) && isRichMessageFormatRejection(apiErr) {
-				return "", fmt.Errorf("%w: %w", ErrRichMessageRejected, sendErr)
-			}
-			return "", sendErr
-		}
-		if sent == nil || sent.MessageID <= 0 {
-			// A malformed success may have followed an accepted request. Surface an
-			// unknown outcome and never trigger cross-format fallback.
-			return "", fmt.Errorf("sendRichMessage returned no stable message id")
-		}
-		return strconv.Itoa(sent.MessageID), nil
 	}
 
 	req := telegram.SendMessageRequest{
@@ -189,6 +161,63 @@ func (t *TelegramTransport) SendText(ctx context.Context, r OutgoingResponse) (s
 	if sent == nil || sent.MessageID <= 0 {
 		// As with sendRichMessage, a malformed success has an unknown outcome:
 		// the request may already have created a persistent message.
+		return "", fmt.Errorf("sendMessage returned no stable message id")
+	}
+	return strconv.Itoa(sent.MessageID), nil
+}
+
+// SendTextPersistent performs exactly one Bot API request and returns its
+// stable ID. Delivery plans use it instead of SendText's compatibility
+// retries, because a ledger operation must never conceal a second
+// non-idempotent request.
+func (t *TelegramTransport) SendTextPersistent(ctx context.Context, r OutgoingResponse) (string, error) {
+	chatID, err := strconv.ParseInt(r.ConversationID, 10, 64)
+	if err != nil {
+		return "", err
+	}
+	if r.Format == ResponseFormatRichHTML {
+		if !t.cfg.Telegram.RichMessages.AnyEnabled() {
+			return "", fmt.Errorf("telegram rich messages are disabled")
+		}
+		req := telegram.SendRichMessageRequest{
+			ChatID:          chatID,
+			MessageThreadID: intPtrOrNil(atoiOrZero(r.ThreadRoot)),
+			RichMessage: telegram.InputRichMessage{
+				HTML:                r.Text,
+				SkipEntityDetection: true,
+			},
+		}
+		if replyID := atoiOrZero(r.ReplyTo); replyID != 0 {
+			req.ReplyParameters = &telegram.ReplyParameters{MessageID: replyID}
+		}
+		sent, sendErr := t.api.SendRichMessage(ctx, req)
+		if sendErr != nil {
+			var apiErr *telegram.APIError
+			if errors.As(sendErr, &apiErr) && isRichMessageFormatRejection(apiErr) {
+				return "", fmt.Errorf("%w: %w", ErrRichMessageRejected, sendErr)
+			}
+			return "", sendErr
+		}
+		if sent == nil || sent.MessageID <= 0 {
+			return "", fmt.Errorf("sendRichMessage returned no stable message id")
+		}
+		return strconv.Itoa(sent.MessageID), nil
+	}
+
+	req := telegram.SendMessageRequest{
+		ChatID:          chatID,
+		MessageThreadID: intPtrOrNil(atoiOrZero(r.ThreadRoot)),
+		Text:            r.Text,
+		ParseMode:       "HTML",
+	}
+	if replyID := atoiOrZero(r.ReplyTo); replyID != 0 {
+		req.ReplyToMessageID = replyID
+	}
+	sent, sendErr := t.api.SendMessage(ctx, req)
+	if sendErr != nil {
+		return "", sendErr
+	}
+	if sent == nil || sent.MessageID <= 0 {
 		return "", fmt.Errorf("sendMessage returned no stable message id")
 	}
 	return strconv.Itoa(sent.MessageID), nil
@@ -258,15 +287,37 @@ func (t *TelegramTransport) SetReaction(ctx context.Context, conversationID, mes
 const telegramCaptionLimit = 1000
 
 const (
-	generatedRichPhotoID       = "generated_photo_0"
-	generatedRichPhotoAttachID = "generated_photo_0_file"
-	generatedRichPhotoHTML     = `<img src="tg://photo?id=generated_photo_0"/>`
+	generatedRichPhotoID       = "rich_photo_0"
+	generatedRichPhotoAttachID = "rich_photo_0_file"
+	generatedRichPhotoHTML     = `<img src="tg://photo?id=rich_photo_0"/>`
+	generatedRichGalleryMax    = 10
+	telegramRichPhotoMaxBytes  = 10 << 20
+	telegramDocumentMaxBytes   = 50 << 20
 )
 
-// SendRichMedia atomically uploads one trusted generated photo and persists it
-// together with the complete Rich HTML response. This is intentionally the
-// narrow first vertical slice: albums and images selected for document-quality
-// delivery continue through SendMedia until their native layout is validated.
+func generatedRichGalleryHTML(media []telegram.InputRichMessageMedia) (string, error) {
+	if len(media) == 0 || len(media) > generatedRichGalleryMax {
+		return "", fmt.Errorf("rich photo gallery requires 1-%d photos, got %d", generatedRichGalleryMax, len(media))
+	}
+	if len(media) == 1 {
+		return fmt.Sprintf(`<img src="tg://photo?id=%s"/>`, media[0].ID), nil
+	}
+	tag := "tg-collage"
+	if len(media) >= 5 {
+		tag = "tg-slideshow"
+	}
+	var html strings.Builder
+	fmt.Fprintf(&html, "<%s>", tag)
+	for _, item := range media {
+		fmt.Fprintf(&html, `<img src="tg://photo?id=%s"/>`, item.ID)
+	}
+	fmt.Fprintf(&html, "</%s>", tag)
+	return html.String(), nil
+}
+
+// SendRichMedia atomically uploads one trusted generated-photo gallery and
+// persists it together with the complete Rich HTML response. One photo is a
+// bare image block, 2-4 photos form a collage and 5-10 form a slideshow.
 //
 // The photo block is injected after model Markdown has passed the allowlisted
 // Rich HTML renderer. Consequently model-authored URLs can never become media
@@ -275,16 +326,22 @@ func (t *TelegramTransport) SendRichMedia(ctx context.Context, m OutgoingRichMed
 	if !t.cfg.Telegram.RichMessages.AnyEnabled() {
 		return "", fmt.Errorf("telegram rich messages are disabled")
 	}
-	if len(m.Items) != 1 {
-		return "", fmt.Errorf("telegram rich media MVP requires exactly one photo, got %d", len(m.Items))
+	if len(m.Items) == 0 || len(m.Items) > generatedRichGalleryMax {
+		return "", fmt.Errorf("telegram rich media requires 1-%d photos, got %d", generatedRichGalleryMax, len(m.Items))
 	}
-	item := m.Items[0]
-	if len(item.Data) == 0 || item.AsDocument || !strings.HasPrefix(strings.ToLower(item.MIME), "image/") {
-		return "", fmt.Errorf("telegram rich media MVP requires one non-empty image photo")
-	}
-	threshold := t.cfg.Agents.ImageGenerator.DocumentThresholdBytes
-	if threshold > 0 && len(item.Data) > threshold {
-		return "", fmt.Errorf("telegram rich media photo exceeds document-quality threshold")
+	uploads := make([]telegram.RichPhotoUpload, 0, len(m.Items))
+	for i, item := range m.Items {
+		if err := validatePersistentMediaItem(item); err != nil {
+			return "", fmt.Errorf("telegram rich media item %d: %w", i, err)
+		}
+		if item.AsDocument || !strings.HasPrefix(persistentMediaType(item), "image/") || !generatedPhotoCanBePreviewed(item) {
+			return "", fmt.Errorf("telegram rich media item %d is outside the photo envelope", i)
+		}
+		filename := strings.TrimSpace(item.Filename)
+		if filename == "" {
+			filename = fmt.Sprintf("generated-%d.png", i+1)
+		}
+		uploads = append(uploads, telegram.RichPhotoUpload{Filename: filename, MIME: item.MIME, Data: item.Data})
 	}
 	if strings.TrimSpace(m.HTML) == "" {
 		return "", fmt.Errorf("telegram rich media requires a non-empty Rich HTML body")
@@ -294,32 +351,27 @@ func (t *TelegramTransport) SendRichMedia(ctx context.Context, m OutgoingRichMed
 	if err != nil {
 		return "", err
 	}
-	filename := strings.TrimSpace(item.Filename)
-	if filename == "" {
-		filename = "generated.png"
+	media, attachments, err := telegram.BuildRichPhotoMedia(uploads)
+	if err != nil {
+		return "", fmt.Errorf("build telegram rich photo gallery: %w", err)
+	}
+	galleryHTML, err := generatedRichGalleryHTML(media)
+	if err != nil {
+		return "", err
 	}
 	// Media must be a top-level block. A bare img is the official no-caption
 	// form; the separately rendered body keeps headings/lists/formulas as their
 	// own blocks instead of forcing them into RichText-only figcaption content.
-	richHTML := generatedRichPhotoHTML + m.HTML
+	richHTML := galleryHTML + m.HTML
 	req := telegram.SendRichMessageRequest{
 		ChatID:          chatID,
 		MessageThreadID: intPtrOrNil(atoiOrZero(m.ThreadRoot)),
 		RichMessage: telegram.InputRichMessage{
-			HTML: richHTML,
-			Media: []telegram.InputRichMessageMedia{{
-				ID: generatedRichPhotoID,
-				Media: telegram.InputRichMessagePhoto{
-					Media: "attach://" + generatedRichPhotoAttachID,
-				},
-			}},
+			HTML:                richHTML,
+			Media:               media,
 			SkipEntityDetection: true,
 		},
-		Attachments: []telegram.RichMessageAttachment{{
-			ID:       generatedRichPhotoAttachID,
-			Filename: filename,
-			Data:     item.Data,
-		}},
+		Attachments: attachments,
 	}
 	if replyID := atoiOrZero(m.ReplyTo); replyID != 0 {
 		req.ReplyParameters = &telegram.ReplyParameters{MessageID: replyID}
@@ -340,19 +392,78 @@ func (t *TelegramTransport) SendRichMedia(ctx context.Context, m OutgoingRichMed
 }
 
 // SendMedia delivers a batch of files as Telegram photos and/or documents. It
-// reproduces the legacy send_media_response.go policy byte-for-byte: items over
-// the configured document threshold (or forced via AsDocument) go as documents
-// preserving resolution, the rest as photos; both kinds can't share a media
-// group, so they're sent as separate batches. The caption (rendered to HTML)
-// rides the document batch when present, else the photo batch; the reply-to
-// anchors the caption-bearing batch only.
+// preserves the legacy send_media_response.go classification and caption
+// policy: items over the configured document threshold (or forced via
+// AsDocument) go as documents preserving resolution, the rest as photos; both
+// kinds can't share a media group, so they're sent as separate batches. Each
+// homogeneous batch is additionally capped at Telegram's ten-item limit. The
+// caption (rendered to HTML) rides the first batch; the reply-to anchors that
+// caption-bearing batch only.
 func (t *TelegramTransport) SendMedia(ctx context.Context, m OutgoingMedia) (string, error) {
+	result, err := t.sendMediaCompatibility(ctx, m)
+	return result.primaryMessageID(), err
+}
+
+// SendMediaPersistent executes exactly one Bot API media call and returns all
+// stable IDs from that call. V2 planners must pre-split mixed photo/document
+// sets and batches above Telegram's group limit before entering the ledger's
+// non-idempotent sending state.
+func (t *TelegramTransport) SendMediaPersistent(ctx context.Context, m OutgoingMedia) (persistentSendResult, error) {
 	chatID, err := strconv.ParseInt(m.ConversationID, 10, 64)
 	if err != nil {
-		return "", err
+		return persistentSendResult{}, err
+	}
+	if len(m.Items) == 0 || len(m.Items) > 10 {
+		return persistentSendResult{}, fmt.Errorf("persistent Telegram media operation requires 1-10 items, got %d", len(m.Items))
+	}
+	threshold := t.cfg.Agents.ImageGenerator.DocumentThresholdBytes
+	for i, item := range m.Items {
+		if err := validatePersistentMediaItem(item); err != nil {
+			return persistentSendResult{}, fmt.Errorf("persistent Telegram media item %d: %w", i, err)
+		}
+	}
+	asDocument := m.Items[0].AsDocument || (threshold > 0 && len(m.Items[0].Data) > threshold)
+	for i, item := range m.Items[1:] {
+		itemAsDocument := item.AsDocument || (threshold > 0 && len(item.Data) > threshold)
+		if itemAsDocument != asDocument {
+			return persistentSendResult{}, fmt.Errorf("persistent Telegram media operation mixes photo and document at index %d", i+1)
+		}
+	}
+	for i, item := range m.Items {
+		if asDocument {
+			if len(item.Data) > telegramDocumentMaxBytes {
+				return persistentSendResult{}, fmt.Errorf("persistent Telegram document %d exceeds %d bytes", i, telegramDocumentMaxBytes)
+			}
+		} else if !strings.HasPrefix(persistentMediaType(item), "image/") || !generatedPhotoCanBePreviewed(item) {
+			return persistentSendResult{}, fmt.Errorf("persistent Telegram photo %d is outside the photo envelope", i)
+		}
+	}
+	thread := intPtrOrNil(atoiOrZero(m.ThreadRoot))
+	replyTo := atoiOrZero(m.ReplyTo)
+	parseMode := ""
+	if m.Caption != "" {
+		parseMode = "HTML"
+	}
+	var ids []string
+	if asDocument {
+		ids, err = t.sendItemsAsDocuments(ctx, chatID, thread, replyTo, m.Items, m.Caption, parseMode)
+	} else {
+		ids, err = t.sendItemsAsPhotos(ctx, chatID, thread, replyTo, m.Items, m.Caption, parseMode)
+	}
+	return persistentSendResult{MessageIDs: ids}, err
+}
+
+// sendMediaCompatibility preserves the established broad Transport.SendMedia
+// behavior for non-V2 callers. It may use several document/photo calls (each
+// album is capped at ten) and therefore must never be used as one durable
+// ledger operation.
+func (t *TelegramTransport) sendMediaCompatibility(ctx context.Context, m OutgoingMedia) (persistentSendResult, error) {
+	chatID, err := strconv.ParseInt(m.ConversationID, 10, 64)
+	if err != nil {
+		return persistentSendResult{}, err
 	}
 	if len(m.Items) == 0 {
-		return "", fmt.Errorf("telegram media delivery requires at least one item")
+		return persistentSendResult{}, fmt.Errorf("telegram media delivery requires at least one item")
 	}
 	thread := intPtrOrNil(atoiOrZero(m.ThreadRoot))
 	replyTo := atoiOrZero(m.ReplyTo)
@@ -378,50 +489,49 @@ func (t *TelegramTransport) SendMedia(ctx context.Context, m OutgoingMedia) (str
 		}
 	}
 
-	// Caption goes with documents when any exist (they're the high-res result),
-	// else with photos. The caption-bearing batch carries the reply-to.
-	captionOwnerIsDoc := len(docBatch) > 0
-
-	var firstMsgID string
-	if len(docBatch) > 0 {
-		c, pm, rt := "", "", 0
-		if captionOwnerIsDoc {
-			c, pm, rt = caption, parseMode, replyTo
+	var messageIDs []string
+	sendBatches := func(items []OutgoingMediaItem, documents bool) error {
+		for len(items) > 0 {
+			size := min(10, len(items))
+			batch := items[:size]
+			items = items[size:]
+			batchCaption, batchParseMode, batchReplyTo := "", "", 0
+			if len(messageIDs) == 0 {
+				batchCaption, batchParseMode, batchReplyTo = caption, parseMode, replyTo
+			}
+			var ids []string
+			var sendErr error
+			if documents {
+				ids, sendErr = t.sendItemsAsDocuments(ctx, chatID, thread, batchReplyTo, batch, batchCaption, batchParseMode)
+			} else {
+				ids, sendErr = t.sendItemsAsPhotos(ctx, chatID, thread, batchReplyTo, batch, batchCaption, batchParseMode)
+			}
+			messageIDs = append(messageIDs, ids...)
+			if sendErr != nil {
+				return sendErr
+			}
 		}
-		id, sendErr := t.sendItemsAsDocuments(ctx, chatID, thread, rt, docBatch, c, pm)
-		if firstMsgID == "" {
-			firstMsgID = id
-		}
-		if sendErr != nil {
-			return firstMsgID, sendErr
-		}
+		return nil
 	}
-	if len(photoBatch) > 0 {
-		c, pm, rt := "", "", replyTo
-		if captionOwnerIsDoc {
-			rt = 0 // caption + reply-to already went with the documents
-		} else {
-			c, pm = caption, parseMode
-		}
-		id, sendErr := t.sendItemsAsPhotos(ctx, chatID, thread, rt, photoBatch, c, pm)
-		if firstMsgID == "" {
-			firstMsgID = id
-		}
-		if sendErr != nil {
-			return firstMsgID, sendErr
-		}
+	// Documents stay first so the original-quality result owns caption/reply.
+	// Once any batch confirms, all later batches are unanchored.
+	if sendErr := sendBatches(docBatch, true); sendErr != nil {
+		return persistentSendResult{MessageIDs: messageIDs}, sendErr
 	}
-	if firstMsgID == "" {
-		return "", fmt.Errorf("telegram media delivery returned no stable message id")
+	if sendErr := sendBatches(photoBatch, false); sendErr != nil {
+		return persistentSendResult{MessageIDs: messageIDs}, sendErr
 	}
-	return firstMsgID, nil
+	if len(messageIDs) == 0 {
+		return persistentSendResult{}, fmt.Errorf("telegram media delivery returned no stable message id")
+	}
+	return persistentSendResult{MessageIDs: messageIDs}, nil
 }
 
 // sendItemsAsPhotos sends a batch as sendPhoto (1 item) or sendMediaGroup (2+),
-// returning the first resulting message id.
-func (t *TelegramTransport) sendItemsAsPhotos(ctx context.Context, chatID int64, thread *int, replyTo int, batch []OutgoingMediaItem, caption, parseMode string) (string, error) {
+// returning every resulting message id.
+func (t *TelegramTransport) sendItemsAsPhotos(ctx context.Context, chatID int64, thread *int, replyTo int, batch []OutgoingMediaItem, caption, parseMode string) ([]string, error) {
 	if len(batch) == 0 {
-		return "", nil
+		return nil, nil
 	}
 	if len(batch) == 1 {
 		sent, err := t.api.SendPhoto(ctx, telegram.SendPhotoRequest{
@@ -435,9 +545,13 @@ func (t *TelegramTransport) sendItemsAsPhotos(ctx context.Context, chatID int64,
 		})
 		if err != nil {
 			t.logger.Error("sendPhoto failed", "error", err)
-			return "", err
+			return nil, err
 		}
-		return confirmedTelegramMessageID(sent, "sendPhoto")
+		id, confirmErr := confirmedTelegramMessageID(sent, "sendPhoto")
+		if confirmErr != nil {
+			return nil, confirmErr
+		}
+		return []string{id}, nil
 	}
 	media := make([]telegram.InputMediaPhoto, 0, len(batch))
 	for i, it := range batch {
@@ -456,16 +570,16 @@ func (t *TelegramTransport) sendItemsAsPhotos(ctx context.Context, chatID int64,
 	})
 	if err != nil {
 		t.logger.Error("sendMediaGroup failed", "error", err)
-		return "", err
+		return nil, err
 	}
-	return confirmedTelegramMediaGroupID(sent, len(batch), "sendMediaGroup")
+	return confirmedTelegramMediaGroupIDs(sent, len(batch), "sendMediaGroup")
 }
 
 // sendItemsAsDocuments sends a batch as sendDocument (1 item) or
-// sendMediaGroup-of-documents (2+), returning the first resulting message id.
-func (t *TelegramTransport) sendItemsAsDocuments(ctx context.Context, chatID int64, thread *int, replyTo int, batch []OutgoingMediaItem, caption, parseMode string) (string, error) {
+// sendMediaGroup-of-documents (2+), returning every resulting message id.
+func (t *TelegramTransport) sendItemsAsDocuments(ctx context.Context, chatID int64, thread *int, replyTo int, batch []OutgoingMediaItem, caption, parseMode string) ([]string, error) {
 	if len(batch) == 0 {
-		return "", nil
+		return nil, nil
 	}
 	if len(batch) == 1 {
 		sent, err := t.api.SendDocument(ctx, telegram.SendDocumentRequest{
@@ -479,9 +593,13 @@ func (t *TelegramTransport) sendItemsAsDocuments(ctx context.Context, chatID int
 		})
 		if err != nil {
 			t.logger.Error("sendDocument failed", "error", err)
-			return "", err
+			return nil, err
 		}
-		return confirmedTelegramMessageID(sent, "sendDocument")
+		id, confirmErr := confirmedTelegramMessageID(sent, "sendDocument")
+		if confirmErr != nil {
+			return nil, confirmErr
+		}
+		return []string{id}, nil
 	}
 	media := make([]telegram.InputMediaDocument, 0, len(batch))
 	for i, it := range batch {
@@ -500,9 +618,9 @@ func (t *TelegramTransport) sendItemsAsDocuments(ctx context.Context, chatID int
 	})
 	if err != nil {
 		t.logger.Error("sendMediaGroup(documents) failed", "error", err)
-		return "", err
+		return nil, err
 	}
-	return confirmedTelegramMediaGroupID(sent, len(batch), "sendMediaGroup(documents)")
+	return confirmedTelegramMediaGroupIDs(sent, len(batch), "sendMediaGroup(documents)")
 }
 
 func confirmedTelegramMessageID(message *telegram.Message, method string) (string, error) {
@@ -516,16 +634,23 @@ func confirmedTelegramMessageID(message *telegram.Message, method string) (strin
 	return strconv.Itoa(message.MessageID), nil
 }
 
-func confirmedTelegramMediaGroupID(messages []telegram.Message, expected int, method string) (string, error) {
+func confirmedTelegramMediaGroupIDs(messages []telegram.Message, expected int, method string) ([]string, error) {
 	if len(messages) != expected {
-		return "", fmt.Errorf("%s returned %d messages, expected %d", method, len(messages), expected)
+		return nil, fmt.Errorf("%s returned %d messages, expected %d", method, len(messages), expected)
 	}
+	ids := make([]string, 0, len(messages))
+	seen := make(map[int]struct{}, len(messages))
 	for i, message := range messages {
 		if message.MessageID <= 0 {
-			return "", fmt.Errorf("%s returned invalid message_id %d at index %d", method, message.MessageID, i)
+			return nil, fmt.Errorf("%s returned invalid message_id %d at index %d", method, message.MessageID, i)
 		}
+		if _, ok := seen[message.MessageID]; ok {
+			return nil, fmt.Errorf("%s returned duplicate message_id %d at index %d", method, message.MessageID, i)
+		}
+		seen[message.MessageID] = struct{}{}
+		ids = append(ids, strconv.Itoa(message.MessageID))
 	}
-	return strconv.Itoa(messages[0].MessageID), nil
+	return ids, nil
 }
 
 // telegramCaptionWireLimit is Telegram's hard caption limit in UTF-16 units.
@@ -645,12 +770,11 @@ func (r *TelegramRenderer) Render(ctx context.Context, text string) ([]string, e
 	return r.renderWith(ctx, text, markdown.ToHTML, html.EscapeString)
 }
 
-// renderSafeRichFallback pre-renders the legacy representation used after a
-// confirmed/local Rich Message rejection. It intentionally has a separate
-// entry point from Render: the normal flag-off renderer remains byte-compatible,
-// while fallback output enforces the model-safe link/media/mention policy.
-func (r *TelegramRenderer) renderSafeRichFallback(ctx context.Context, text string) ([]string, error) {
-	return r.renderWith(ctx, text, markdown.ToSafeLegacyHTML, markdown.SafeLegacyPlainText)
+// renderSafeRichFallbackPart renders one source part whose application-level
+// split boundaries were already resolved by the Rich Message packer. It must
+// not reinterpret an inline ###SPLIT### token as a second protocol boundary.
+func (r *TelegramRenderer) renderSafeRichFallbackPart(ctx context.Context, text string) ([]string, error) {
+	return r.renderWithParts(ctx, []string{text}, markdown.ToSafeLegacyHTML, markdown.SafeLegacyPlainText)
 }
 
 type telegramHTMLConverter func(string) (string, error)
@@ -658,7 +782,10 @@ type telegramPlainEscaper func(string) string
 
 func (r *TelegramRenderer) renderWith(ctx context.Context, text string, convert telegramHTMLConverter, escapePlain telegramPlainEscaper) ([]string, error) {
 	parts := fixListNumbering(splitByDelimiter(text))
+	return r.renderWithParts(ctx, parts, convert, escapePlain)
+}
 
+func (r *TelegramRenderer) renderWithParts(ctx context.Context, parts []string, convert telegramHTMLConverter, escapePlain telegramPlainEscaper) ([]string, error) {
 	var rawChunks []string
 	for _, part := range parts {
 		rawChunks = append(rawChunks, telegram.SplitMessageSmart(part, telegramMarkdownSafeLimit)...)

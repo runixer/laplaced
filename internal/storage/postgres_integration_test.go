@@ -40,6 +40,8 @@ func openTestPG(t *testing.T) *Store {
 	}
 	// Clean slate: drop every table this schema creates, then re-init.
 	for _, tbl := range []string{
+		"outbound_delivery_messages", "outbound_delivery_ops", "outbound_deliveries",
+		"history_transport_messages", "response_flags",
 		"users", "history", "stats", "rag_logs", "topics", "memory_bank",
 		"structured_facts", "fact_history", "reranker_logs", "agent_logs",
 		"people", "artifacts", "scopes", "identities", "principals", "channels",
@@ -126,6 +128,57 @@ func TestPostgresRoundTrip(t *testing.T) {
 	}
 
 	_ = ctx
+}
+
+func TestPostgresRichDeliveryRoundTrip(t *testing.T) {
+	store := openTestPG(t)
+	scope := PassthroughScopeID("telegram", "rich-delivery-user")
+
+	deliveryID, err := store.CreateOutboundDelivery(OutboundDelivery{
+		UserID: scope, Transport: "telegram", ConversationID: "chat-42",
+	}, []OutboundDeliveryOperation{
+		{Ordinal: 0, Kind: DeliveryOperationRichMedia},
+		{Ordinal: 1, Kind: DeliveryOperationMedia},
+	})
+	if err != nil {
+		t.Fatalf("CreateOutboundDelivery: %v", err)
+	}
+	if err := store.MarkOutboundDeliveryOperationSending(deliveryID, 0); err != nil {
+		t.Fatalf("MarkOutboundDeliveryOperationSending(0): %v", err)
+	}
+	if err := store.CompleteOutboundDeliveryOperation(deliveryID, 0,
+		DeliveryOperationStatusConfirmed, DeliveryErrorNone, []string{"900", "901"}); err != nil {
+		t.Fatalf("CompleteOutboundDeliveryOperation(0): %v", err)
+	}
+	if err := store.MarkOutboundDeliveryOperationSending(deliveryID, 1); err != nil {
+		t.Fatalf("MarkOutboundDeliveryOperationSending(1): %v", err)
+	}
+	if err := store.CompleteOutboundDeliveryOperation(deliveryID, 1,
+		DeliveryOperationStatusConfirmed, DeliveryErrorNone, []string{"902"}); err != nil {
+		t.Fatalf("CompleteOutboundDeliveryOperation(1): %v", err)
+	}
+
+	historyID, err := store.PersistOutboundDeliveryReply(scope, deliveryID,
+		Message{Role: "assistant", Content: "postgres rich reply"}, nil)
+	if err != nil {
+		t.Fatalf("PersistOutboundDeliveryReply: %v", err)
+	}
+	for _, nativeID := range []string{"900", "901", "902"} {
+		reply, err := store.GetReplyByTransportMessage(scope, "telegram", "chat-42", nativeID)
+		if err != nil {
+			t.Fatalf("GetReplyByTransportMessage(%s): %v", nativeID, err)
+		}
+		if reply == nil || reply.ID != historyID {
+			t.Fatalf("GetReplyByTransportMessage(%s) = %+v, want history %d", nativeID, reply, historyID)
+		}
+	}
+	delivery, operations, err := store.GetOutboundDelivery(deliveryID)
+	if err != nil {
+		t.Fatalf("GetOutboundDelivery: %v", err)
+	}
+	if delivery.Status != DeliveryStatusConfirmed || delivery.ConfirmedCount != 2 || len(operations) != 2 {
+		t.Fatalf("delivery round trip mismatch: delivery=%+v operations=%+v", delivery, operations)
+	}
 }
 
 // TestPostgresScopeResolution verifies IsChannelScope and the uuid scope round-trip
@@ -414,7 +467,7 @@ func TestPostgresMaintenanceCleanup(t *testing.T) {
 			t.Fatalf("AddAgentLog(alice/reranker): %v", err)
 		}
 	}
-	deleted, err = store.CleanupAgentLogs(2)
+	deleted, err = store.CleanupAgentLogs(2, 0)
 	if err != nil {
 		t.Fatalf("CleanupAgentLogs: %v", err)
 	}
