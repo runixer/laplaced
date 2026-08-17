@@ -233,7 +233,7 @@ type Person struct {
 	ID           int64     `json:"id"`
 	UserID       ScopeID   `json:"user_id"`
 	DisplayName  string    `json:"display_name"`
-	Aliases      []string  `json:"aliases"`     // JSON array: ["Гелёй", "@akaGelo"]
+	Aliases      []string  `json:"aliases"`     // JSON array: ["Johnny", "@johndoe"]
 	TelegramID   *int64    `json:"telegram_id"` // For direct @mention match
 	Username     *string   `json:"username"`    // @username without @
 	Circle       string    `json:"circle"`      // Family, Friends, Work_Inner, Work_Outer, Other

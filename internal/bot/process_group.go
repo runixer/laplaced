@@ -595,8 +595,9 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	}
 
 	// Typed artifact intent (new generated outputs and/or stored selections)
-	// shares one immutable private-chat delivery plan and one ledger. The legacy
-	// generated-ID branch remains only as backward compatibility for old handlers.
+	// shares one immutable private-chat delivery plan and one ledger. Turns that
+	// are not an eligible private rich send fall through to the generated-media
+	// path below.
 	if path.artifactDeliveryEligible() && (len(resp.GeneratedArtifacts) > 0 || len(resp.SelectedArtifacts) > 0) {
 		path.flushSinkBeforeMedia(shutdownSafeCtx, resp.Content)
 		result := b.sendResponseWithArtifacts(
@@ -622,8 +623,10 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		return
 	}
 
-	// Backward-compatible media path for a custom/older ToolHandler that only
-	// supplies raw generated IDs and no typed delivery intent.
+	// Generated-media path for every turn that is not an eligible private rich
+	// send: group chats, non-Telegram transports, and any deployment with rich
+	// output disabled. This is a live path, not a compatibility shim — it owns
+	// image delivery whenever the typed plan above does not apply.
 	if len(resp.GeneratedArtifactIDs) > 0 {
 		path.flushSinkBeforeMedia(shutdownSafeCtx, resp.Content)
 		result := b.sendResponseWithGeneratedImages(

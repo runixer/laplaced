@@ -280,47 +280,6 @@ func (s *Service) createEmbedding(ctx context.Context, userID storage.ScopeID, q
 	return resp.Data[0].Embedding, nil
 }
 
-func (s *Service) RetrieveFacts(ctx context.Context, userID storage.ScopeID, query string) ([]storage.Fact, error) {
-	if !s.cfg.RAG.Enabled {
-		return nil, nil
-	}
-
-	// Embedding for query
-	embeddingStart := time.Now()
-	resp, err := s.client.CreateEmbeddings(ctx, llm.EmbeddingRequest{
-		Model:      s.cfg.Embedding.Model,
-		Dimensions: s.cfg.Embedding.Dimensions,
-		Input:      []string{query},
-	})
-	embeddingDuration := time.Since(embeddingStart).Seconds()
-	if err != nil {
-		RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeFacts, embeddingDuration, false, 0, nil)
-		return nil, err
-	}
-	if len(resp.Data) == 0 {
-		RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeFacts, embeddingDuration, false, 0, nil)
-		return nil, fmt.Errorf("no embedding returned")
-	}
-	RecordEmbeddingRequest(userID, s.cfg.Embedding.Model, searchTypeFacts, embeddingDuration, true, resp.Usage.TotalTokens, resp.Usage.Cost)
-	qVec := resp.Data[0].Embedding
-
-	// Use generic vector search
-	results, _ := s.vectorSearch(userID, VectorKindFacts, qVec, VectorSearchConfig{
-		Limit: 10,
-	})
-
-	if len(results) == 0 {
-		return nil, nil
-	}
-
-	// Fetch facts
-	var ids []int64
-	for _, r := range results {
-		ids = append(ids, r.ID)
-	}
-	return s.factRepo.GetFactsByIDs(userID, ids)
-}
-
 func (s *Service) FindSimilarFacts(ctx context.Context, userID storage.ScopeID, embedding []float32, threshold float32) ([]storage.Fact, error) {
 	results, _ := s.vectorSearch(userID, VectorKindFacts, embedding, VectorSearchConfig{
 		Limit:     5,
