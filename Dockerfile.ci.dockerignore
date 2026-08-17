@@ -1,0 +1,10 @@
+# Dockerfile.ci packages only the two binaries produced by the CI build jobs.
+# Keep the context allowlisted so repository files, local state, and secrets can
+# never become available to this image build.
+*
+!bin/
+!bin/linux/
+!bin/linux/amd64/
+!bin/linux/amd64/laplaced
+!bin/linux/arm64/
+!bin/linux/arm64/laplaced
