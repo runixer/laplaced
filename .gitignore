@@ -42,10 +42,12 @@ configs/dev-time.yaml
 *.log
 laplaced.db
 
-# Binaries from LLM
+# Generated binaries and CI staging. Keep bin/ ignored: Dockerfile.ci's
+# dedicated context allowlist admits packaged binaries to Docker, never to Git.
 /laplaced
 /bot
 /testbot
+/bin/
 
 # docs
 /docs/plans/
@@ -61,5 +63,4 @@ laplaced.db
 # AI assistants
 .roorules
 .claude/
-bin/
 logs/

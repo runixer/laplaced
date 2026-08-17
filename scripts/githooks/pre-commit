@@ -5,6 +5,14 @@ set -eu
 
 export PATH="$HOME/go/bin:$PATH"
 
+echo "==> generated binaries"
+staged_binary_paths="$(git diff --cached --name-only --diff-filter=ACMR -- laplaced bot testbot bin/)"
+if [[ -n "$staged_binary_paths" ]]; then
+    echo "Refusing to commit generated binaries:"
+    printf '%s\n' "$staged_binary_paths"
+    exit 1
+fi
+
 echo "==> golangci-lint"
 golangci-lint run --timeout=2m
 

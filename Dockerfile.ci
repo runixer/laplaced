@@ -14,7 +14,8 @@ COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 # Copy timezone data
 COPY --from=certs /usr/share/zoneinfo /usr/share/zoneinfo
 
-# Copy pre-built binary based on target architecture
+# Copy the pre-built binary for the target architecture. Keep this path in sync
+# with Dockerfile.ci.dockerignore and the CI/Branch Image workflows.
 ARG TARGETARCH
 COPY bin/linux/${TARGETARCH}/laplaced /laplaced
 

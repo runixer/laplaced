@@ -520,7 +520,7 @@ Project ships git hooks in `scripts/githooks/`. Install once after clone:
 make hooks
 ```
 
-- `pre-commit` — `golangci-lint`, `go mod tidy` drift check, `go build ./...`
+- `pre-commit` — generated-binary guard, `golangci-lint`, `go mod tidy` drift check, `go build ./...`
 - `pre-push` — `go test -race -shuffle=on -short ./...`, plus `govulncheck` if installed
 
 Skip with `--no-verify` if needed. CI is the source of truth; hooks just save round-trips.
@@ -599,7 +599,8 @@ This project uses [Keep a Changelog](https://keepachangelog.com/) format.
 2. Update CHANGELOG.md: move `[Unreleased]` to new version
 3. Commit with exact prefix: `git commit -m "Release vX.Y.Z"` (**MUST start with "Release v"** — CI skips these commits)
 4. Tag and push: `git tag vX.Y.Z && git push && git push --tags`
-5. Wait for release.yml to complete (CI is skipped for release commits)
+5. Wait for the tag-triggered jobs in `.github/workflows/ci.yml` to complete
+   (the release commit's main-branch run is skipped)
 6. Deploy via Gitea MCP (see `.claude/deploy.md`)
 
 CI automatically extracts release notes from CHANGELOG.md for GitHub Releases.
@@ -651,16 +652,29 @@ Run the bot locally and verify. I'll wait.
 
 GitHub Actions workflows:
 
-**`.github/workflows/ci.yml`** — runs on push to main and PRs:
-- lint (golangci-lint)
-- test (with coverage)
-- **Skipped for commits starting with "Release v"** (to avoid duplicate runs with release.yml)
+**`.github/workflows/ci.yml`** — runs on pushes to `main`, PRs, and `v*` tags:
+- lint, test, and vulnerability scan
+- build binaries for linux/amd64 and linux/arm64
+- build the multi-arch image without credentials or a push on PRs (`docker-smoke`)
+- publish the multi-arch image on `main` and tags
+- create the GitHub Release with binaries and changelog on tags
+- skip the main-branch run for commits starting with `Release v`; the tag run
+  performs the release checks and publishing
 
-**`.github/workflows/release.yml`** — runs on tag push (`v*`):
-- lint, test
-- build binaries (linux/amd64, linux/arm64)
-- build & push multi-arch Docker image to GHCR
-- create GitHub Release with binaries and changelog
+**`.github/workflows/branch-image.yml`** — manually builds and publishes a
+multi-arch image from an explicitly selected branch.
+
+**Binary staging invariant:**
+- `/laplaced`, `/bot`, `/testbot`, and `/bin/` are generated outputs and must
+  remain untracked; `.gitignore` protects normal adds, the optional pre-commit
+  hook rejects staged outputs, and the lint job enforces the merge invariant
+- the source-build `Dockerfile` uses the root `.dockerignore`, which excludes
+  `bin/`
+- `Dockerfile.ci` uses the deny-by-default `Dockerfile.ci.dockerignore`, which
+  admits only `bin/linux/{amd64,arm64}/laplaced` to the Docker context
+- keep `Dockerfile.ci`, `Dockerfile.ci.dockerignore`, `ci.yml`, and
+  `branch-image.yml` artifact paths in sync; PR `docker-smoke` validates both
+  architectures
 
 Docker image: `ghcr.io/runixer/laplaced:latest`
 

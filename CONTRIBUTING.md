@@ -31,6 +31,12 @@ Awesome! If it's a big change, maybe open an Issue first to discuss it. If it's 
     ```
 6.  Send a **Pull Request**!
 
+## Generated Binaries
+
+Do not force-add `/laplaced`, `/bot`, `/testbot`, or anything under `/bin/`;
+they are generated build outputs. Changes to Docker or CI artifact paths must
+pass the PR Docker smoke job for both architectures.
+
 ## Quick Tips
 
 - Check [`internal/config/default.yaml`](internal/config/default.yaml) to see how things are configured.

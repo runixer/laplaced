@@ -27,6 +27,8 @@ logs/
 .idea/
 .vscode/
 docs/
+# Local build output stays out of normal source builds. Dockerfile.ci uses
+# Dockerfile.ci.dockerignore instead, with an exact binary allowlist.
 bin/
 coverage.*
 *.coverprofile

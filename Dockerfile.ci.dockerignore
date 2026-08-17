@@ -1,6 +1,9 @@
 # Dockerfile.ci packages only the two binaries produced by the CI build jobs.
 # Keep the context allowlisted so repository files, local state, and secrets can
 # never become available to this image build.
+# These paths are a contract with Dockerfile.ci, ci.yml, and branch-image.yml;
+# update them together. The PR docker-smoke job validates both architectures.
+# Docker-only exceptions do not affect Git; /bin/ must stay in .gitignore.
 *
 !bin/
 !bin/linux/
