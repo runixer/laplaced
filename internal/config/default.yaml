@@ -28,11 +28,9 @@ telegram:
   rich_messages:
     mode: "send"
     allowed_user_ids: []
-    # Ephemeral sendRichMessageDraft previews (tool/RAG progress) for eligible
-    # rich private turns. Off by default: the rich final is the product, and the
-    # draft is an extra Bot API call per snapshot. Independent from
-    # bot.streaming.enabled (that flag is legacy edits only).
-    draft_streaming_enabled: false
+    # Ephemeral sendRichMessageDraft previews for eligible rich private turns.
+    # Independent from bot.streaming.enabled (that flag is legacy edits only).
+    draft_streaming_enabled: true
 
 # Mattermost/Time Configuration (used when transport: "mattermost")
 # server_url/bot_token/allowed_user_ids come from an overlay config + env.
