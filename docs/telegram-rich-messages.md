@@ -150,7 +150,7 @@ Environment equivalents:
 still sends the legacy representation. `send` — the default — uses
 `sendRichMessage` in eligible private chats, for every user unless
 `allowed_user_ids` narrows it to a canary. Rich draft streaming has its own
-default-on switch and does not inherit `bot.streaming.enabled`, which remains
+default-off switch and does not inherit `bot.streaming.enabled`, which remains
 the legacy edit-streaming switch. The persistent final is always a separate
 confirmed send. Neither `rich_message` decoding nor classic entity projection
 is gated by any rollout setting.

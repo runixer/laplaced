@@ -85,8 +85,8 @@ func TestLoadDefault(t *testing.T) {
 	assert.Empty(t, cfg.Telegram.RichMessages.AllowedUserIDs)
 	assert.Equal(t, TelegramRichMessagesSend, cfg.Telegram.RichMessages.ModeForNativeUser("123"),
 		"an empty canary list applies the default send mode to every Telegram user")
-	assert.True(t, cfg.Telegram.RichMessages.DraftStreamingEnabled,
-		"rich drafts keep progressive previews on the default rich send path")
+	assert.False(t, cfg.Telegram.RichMessages.DraftStreamingEnabled,
+		"ephemeral rich drafts are opt-in; the persistent rich final is the default product")
 }
 
 func TestLoad_TelegramRichMessagesDraftStreamingEnvOverride(t *testing.T) {
