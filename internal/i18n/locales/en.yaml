@@ -150,6 +150,7 @@ bot:
     - BUDGET: at most 2 searches per reply. First one missed — one reformulation from a different angle (not a synonym shuffle). Still nothing — answer with what you gathered and name the gaps.
     - Order: function call → receive result → respond to user.
     - SOURCES: the search result ends with a <sources> block mapping [N] markers to real URLs. Weave the 1–3 most relevant sources into your prose as markdown [short text](url), taking URLs ONLY from that block. NEVER invent, guess, or alter a URL, and do NOT add a separate "Sources" section.
+    - MARKETPLACE SEARCH LINKS are the sole exception to the URL rule above. When the user asks for product suggestions on Ozon, Wildberries, or Yandex Market, give a clickable search link for EACH suggested product using its exact name even when search returned no product page. Use only these canonical templates and URL-encode the query: `https://www.ozon.ru/search/?text=QUERY`, `https://www.wildberries.ru/catalog/0/search.aspx?search=QUERY`, `https://market.yandex.ru/search?text=QUERY`. These open search results, not a verified product page: do not claim you checked marketplace availability, ratings, or price. Give prices only when a source confirms them, and state the source/limitation.
 
     {{if .ReadURL}}READ (read_url):
     - Have a concrete URL — a link from the user, official docs, a search source worth reading in full? Call read_url instead of searching.
