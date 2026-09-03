@@ -1463,7 +1463,46 @@ func postOnce(ctx context.Context, endpoint, apiKey string, body []byte, variant
 	return postOnceAtTurn(ctx, endpoint, apiKey, body, variant, run, -1, outDir, timeout)
 }
 
+// replayTransientRetries bounds retries on upstream rate limits and 5xx so a
+// batch eval is not decided by a provider's burst limiter (some routes return
+// 429 even at one request every few seconds).
+const replayTransientRetries = 3
+
 func postOnceAtTurn(ctx context.Context, endpoint, apiKey string, body []byte, variant string, run, turn int, outDir string, timeout time.Duration) replayRunResult {
+	var res replayRunResult
+	for attempt := 0; attempt <= replayTransientRetries; attempt++ {
+		res = postOnceAtTurnAttempt(ctx, endpoint, apiKey, body, variant, run, turn, outDir, timeout)
+		if res.Err == "" || !replayTransientFailure(res) || attempt == replayTransientRetries {
+			return res
+		}
+		delay := time.Duration(8*(attempt+1)) * time.Second
+		select {
+		case <-ctx.Done():
+			return res
+		case <-time.After(delay):
+		}
+	}
+	return res
+}
+
+// replayTransientFailure reports whether a failed generation is worth retrying:
+// HTTP 429/5xx, or an OpenRouter error body announcing an upstream rate limit.
+func replayTransientFailure(res replayRunResult) bool {
+	switch res.HTTPStatus {
+	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	if res.RawFile == "" {
+		return false
+	}
+	raw, err := os.ReadFile(res.RawFile)
+	if err != nil {
+		return false
+	}
+	return bytes.Contains(raw, []byte("rate-limited upstream")) || bytes.Contains(raw, []byte("Upstream idle timeout"))
+}
+
+func postOnceAtTurnAttempt(ctx context.Context, endpoint, apiKey string, body []byte, variant string, run, turn int, outDir string, timeout time.Duration) replayRunResult {
 	res := replayRunResult{Variant: variant, Run: run, RequestedModel: requestModel(body)}
 	fileVariant := safeFileComponent(variant)
 	if turn >= 0 {

@@ -589,6 +589,15 @@ func mustGetInt(cmd *cobra.Command, name string) int {
 	return val
 }
 
+// mustGetDuration retrieves a duration flag value. Panics on error (indicates bug in flag name).
+func mustGetDuration(cmd *cobra.Command, name string) time.Duration {
+	val, err := cmd.Flags().GetDuration(name)
+	if err != nil {
+		panic(fmt.Sprintf("bug: failed to get flag %q: %v", name, err))
+	}
+	return val
+}
+
 // mustGetBool retrieves a bool flag value. Panics on error (indicates bug in flag name).
 func mustGetBool(cmd *cobra.Command, name string) bool {
 	val, err := cmd.Flags().GetBool(name)

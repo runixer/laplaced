@@ -163,6 +163,10 @@ func summarizeResults(results []runResult) reportSummary {
 }
 
 func compareResults(baseline, candidate []runResult) (*comparisonReport, error) {
+	// A case that failed to run (continue-on-error row) counts as answered
+	// incorrectly, so a flaky candidate is penalised rather than excluded.
+	markFailedAsIncorrect(baseline)
+	markFailedAsIncorrect(candidate)
 	baselineByKey, err := indexResults(baseline)
 	if err != nil {
 		return nil, err
@@ -272,5 +276,20 @@ func writeOfflineReport(writer io.Writer, value any, format string) error {
 		return err
 	default:
 		return fmt.Errorf("unsupported markdown report type %T", value)
+	}
+}
+
+func markFailedAsIncorrect(results []runResult) {
+	judgeModel := ""
+	for _, r := range results {
+		if r.AutoevalLabel != nil {
+			judgeModel = r.AutoevalLabel.Model
+			break
+		}
+	}
+	for i := range results {
+		if results[i].AutoevalLabel == nil && results[i].Error != "" {
+			results[i].AutoevalLabel = &autoevalLabel{Model: judgeModel, Label: false}
+		}
 	}
 }
