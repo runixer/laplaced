@@ -13,7 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A topic that repeatedly fails fact extraction (for example when the provider's content filter rejects it) now backs off exponentially instead of being retried every minute.
 
 ### Changed
-- Built with Go 1.26; dependency updates (AWS SDK, pgx, OpenTelemetry, SQLite driver, gRPC and others).
+- Built with Go 1.26; dependency updates (AWS SDK, pgx, OpenTelemetry, SQLite driver and others).
+
+### Security
+- gRPC updated to 1.83.2, closing three published advisories in its xDS code paths (not reachable from this bot, per govulncheck).
 
 ## [0.11.0] - 2026-08-18
 
