@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"strings"
 	"testing"
 	"time"
@@ -538,12 +539,79 @@ func TestSendRichMessageDraft_TransportRetryReusesDraftID(t *testing.T) {
 	}`, bodies[0])
 }
 
+// markRequestWritten fires the httptrace hook a real transport would fire once
+// the request body is on the wire, so a stub can model a post-write failure.
+func markRequestWritten(req *http.Request) {
+	if tr := httptrace.ContextClientTrace(req.Context()); tr != nil && tr.WroteRequest != nil {
+		tr.WroteRequest(httptrace.WroteRequestInfo{})
+	}
+}
+
+// TestSend_UnsentRequestIsRetriedOnce covers the prod failure where the proxy
+// connect or TLS handshake failed: Telegram never saw the call, so the single
+// attempt budget of sendMessage/sendRichMessage gets one extra try.
+func TestSend_UnsentRequestIsRetriedOnce(t *testing.T) {
+	prev := requestRetryDelay
+	requestRetryDelay = time.Millisecond
+	t.Cleanup(func() { requestRetryDelay = prev })
+
+	t.Run("recovers on the second attempt", func(t *testing.T) {
+		calls := 0
+		var bodies []string
+		client := &Client{
+			token: "fake-token",
+			httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				calls++
+				raw, _ := io.ReadAll(req.Body)
+				bodies = append(bodies, string(raw))
+				if calls == 1 {
+					return nil, errors.New("proxyconnect tcp: net/http: TLS handshake timeout")
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":7,"chat":{"id":123}}}`)),
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+				}, nil
+			})},
+			apiURL: "https://api.telegram.invalid/botfake-token",
+		}
+
+		msg, err := client.SendRichMessage(context.Background(), SendRichMessageRequest{
+			ChatID:      123,
+			RichMessage: InputRichMessage{HTML: "<p>answer</p>"},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 2, calls)
+		require.Len(t, bodies, 2)
+		assert.JSONEq(t, bodies[0], bodies[1])
+		assert.Equal(t, 7, msg.MessageID)
+	})
+
+	t.Run("gives up after one extra attempt", func(t *testing.T) {
+		calls := 0
+		client := &Client{
+			token: "fake-token",
+			httpClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls++
+				return nil, errors.New("dial tcp: connection refused")
+			})},
+			apiURL: "https://api.telegram.invalid/botfake-token",
+		}
+
+		_, err := client.SendMessage(context.Background(), SendMessageRequest{ChatID: 123, Text: "unique answer"})
+		require.Error(t, err)
+		assert.Equal(t, 2, calls)
+		assert.NotContains(t, err.Error(), "fake-token")
+	})
+}
+
 func TestSendRichMessage_AmbiguousNetworkFailureIsNotRetried(t *testing.T) {
 	calls := 0
 	client := &Client{
 		token: "fake-token",
-		httpClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			calls++
+			markRequestWritten(req)
 			return nil, errors.New("connection reset after request write")
 		})},
 		apiURL: "https://api.telegram.invalid/botfake-token",
@@ -564,8 +632,9 @@ func TestSendMessage_AmbiguousNetworkFailureIsNotRetried(t *testing.T) {
 	calls := 0
 	client := &Client{
 		token: "fake-token",
-		httpClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			calls++
+			markRequestWritten(req)
 			return nil, errors.New("connection reset after request write")
 		})},
 		apiURL: "https://api.telegram.invalid/botfake-token",
