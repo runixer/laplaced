@@ -165,7 +165,7 @@ func sendVoiceMessage(ctx context.Context, tb *testBot, tgID int64, voicePath st
 
 	// Create mock voice message
 	voiceMsg := &telegram.Message{
-		MessageID: 1,
+		MessageID: nextMockMessageID(),
 		From: &telegram.User{
 			ID:        tgID,
 			IsBot:     false,
