@@ -226,6 +226,15 @@ func (s *Service) processFactExtraction(ctx context.Context) {
 				break
 			}
 
+			// A topic whose extraction keeps failing (e.g. the provider's safety
+			// filter rejects it every time) waits out its cooldown instead of
+			// being retried on every tick.
+			if remaining := s.factsBreaker.cooldownRemaining(userID, topic.ID); remaining > 0 {
+				s.logger.Debug("facts extraction in cooldown, skipping topic",
+					"topic_id", topic.ID, "remaining", remaining)
+				continue
+			}
+
 			// Try to acquire processing lock for this topic (prevents race with ForceProcess)
 			if !s.tryStartProcessingTopic(topic.ID) {
 				s.logger.Debug("topic already being processed, skipping", "topic_id", topic.ID)
@@ -254,12 +263,14 @@ func (s *Service) processFactExtraction(ctx context.Context) {
 			cancel()
 
 			if err != nil {
-				s.logger.Error("failed to process facts for topic", "topic_id", topic.ID, "error", err)
-				// Don't mark processed so we retry? Or mark processed to avoid stuck?
-				// Let's retry later.
+				cooldown := s.factsBreaker.recordFailure(userID, topic.ID)
+				s.logger.Error("failed to process facts for topic",
+					"topic_id", topic.ID, "cooldown", cooldown, "error", err)
+				// Not marked as extracted: the topic is retried after the cooldown.
 				s.finishProcessingTopic(topic.ID)
 				continue
 			}
+			s.factsBreaker.recordSuccess(userID, topic.ID)
 
 			// Mark processed
 			if err := s.topicRepo.SetTopicFactsExtracted(topic.UserID, topic.ID, true); err != nil {

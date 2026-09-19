@@ -41,6 +41,7 @@ type options struct {
 	parallel         int
 	judge            bool
 	judgeModel       string
+	continueOnError  bool
 	cacheDir         string
 	roleRoutes       map[agent.AgentType]matrixAgentRoute
 	reportInput      string
@@ -54,6 +55,7 @@ type runResult struct {
 	QuestionID      string             `json:"question_id"`
 	Hypothesis      string             `json:"hypothesis"`
 	QuestionType    string             `json:"question_type,omitempty"`
+	Error           string             `json:"error,omitempty"`
 	ReferenceAnswer string             `json:"reference_answer,omitempty"`
 	Mode            string             `json:"mode"`
 	ChatBackend     string             `json:"chat_backend"`
@@ -239,7 +241,13 @@ func runVariant(ctx context.Context, base options, variant matrixVariant, cases 
 		logger.Info("running evaluation case", "variant", variant.Name, "index", i+1, "total", len(cases), "question_id", eval.QuestionID)
 		result, err := runCachedCase(ctx, baseCfg, logger, opts, cache, eval, base.mode)
 		if err != nil {
-			return fmt.Errorf("variant %s case %s: %w", variant.Name, eval.QuestionID, err)
+			if !opts.continueOnError {
+				return fmt.Errorf("variant %s case %s: %w", variant.Name, eval.QuestionID, err)
+			}
+			// Record the failure as a row (no hypothesis) so the run and its
+			// paired comparison keep the full case set; the judge skips such rows.
+			logger.Error("evaluation case failed", "variant", variant.Name, "question_id", eval.QuestionID, "error", err)
+			result = &runResult{QuestionID: eval.QuestionID, QuestionType: eval.QuestionType, Mode: base.mode, Error: err.Error()}
 		}
 		result.Variant = variant.Name
 		if err := writeResult(result); err != nil {
@@ -473,6 +481,7 @@ func parseOptions(args []string) (options, error) {
 	set.StringVar(&opts.matrix, "matrix", "", "YAML file containing evaluation variants")
 	set.IntVar(&opts.parallel, "parallel", 1, "Maximum matrix variants to run concurrently")
 	set.BoolVar(&opts.judge, "judge", false, "Judge generated answers with the official LongMemEval V1 protocol")
+	set.BoolVar(&opts.continueOnError, "continue-on-error", false, "Record a failed case as an error row and keep going instead of aborting the variant")
 	set.StringVar(&opts.judgeModel, "judge-model", defaultJudgeModel, "Model used by the LongMemEval judge")
 	set.StringVar(&opts.cacheDir, "cache-dir", "", "Directory for immutable per-case ingestion snapshots")
 	set.StringVar(&opts.reportInput, "report-input", "", "Build an offline summary from a result JSONL file")

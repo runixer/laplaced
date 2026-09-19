@@ -94,6 +94,9 @@ func TestBuildMessages_Golden(t *testing.T) {
 		artifacts        []artifactFixture
 		artifactResults  []rag.ArtifactResult
 		enrichedQuery    string
+		// noneLoaded marks scenarios where every selected artifact is held
+		// back (recalled audio next to a live voice), so no usage is counted.
+		noneLoaded bool
 	}{
 		{
 			name:         "text_only",
@@ -118,9 +121,29 @@ func TestBuildMessages_Golden(t *testing.T) {
 			}},
 		},
 		{
-			// The bug-cluster configuration: live voice + recalled audio.
+			// The bug-cluster configuration: live voice + recalled audio. The
+			// recalled track is NOT attached (the model would transcribe both
+			// and merge them), so the output equals a plain voice turn: no 📄
+			// marker, no memory_ file, and hence no 🎤 current marker either.
 			name:         "voice_with_recalled_audio",
 			currentParts: []interface{}{textPart, voicePart},
+			history:      history,
+			artifacts:    []artifactFixture{audioArtifact},
+			noneLoaded:   true,
+		},
+		{
+			// Live voice + recalled image: only audio/video recall is held
+			// back, the image still rides along with both markers.
+			name:         "voice_with_recalled_image",
+			currentParts: []interface{}{textPart, voicePart},
+			history:      history,
+			artifacts:    []artifactFixture{imgArtifact},
+		},
+		{
+			// Text-only turn asking about a past recording: the recalled audio
+			// is attached — this is how the bot "pulls the audio back" later.
+			name:         "text_with_recalled_audio",
+			currentParts: []interface{}{textPart},
 			history:      history,
 			artifacts:    []artifactFixture{audioArtifact},
 		},
@@ -164,7 +187,7 @@ func TestBuildMessages_Golden(t *testing.T) {
 				mockStore.On("GetArtifact", storage.ScopeID("123"), a.ID).Return(&a, nil)
 				selectedIDs = append(selectedIDs, a.ID)
 			}
-			if len(selectedIDs) > 0 {
+			if len(selectedIDs) > 0 && !tt.noneLoaded {
 				mockStore.On("IncrementContextLoadCount", storage.ScopeID("123"), selectedIDs).Return(nil)
 			}
 

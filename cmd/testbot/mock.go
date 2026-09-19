@@ -4,9 +4,26 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync/atomic"
+	"time"
 
 	"github.com/runixer/laplaced/internal/telegram"
 )
+
+// mockMessageSeq hands out unique Telegram message ids for the mock transport.
+// Delivery persistence links every confirmed reply by transport identity
+// (transport/chat/message id), so a constant id would collide with the previous
+// turn on any database that outlives a single testbot run. Seeded from the
+// clock so ids stay unique across runs on the same database as well.
+var mockMessageSeq atomic.Int64
+
+func init() {
+	mockMessageSeq.Store(time.Now().Unix() % 1_000_000_000 * 1000)
+}
+
+func nextMockMessageID() int {
+	return int(mockMessageSeq.Add(1))
+}
 
 // mockFileDownloader implements telegram.FileDownloader for testbot.
 // It reads files from local disk instead of downloading from Telegram.
@@ -70,12 +87,12 @@ func (n *noOpBotAPI) SetDownloader(d telegram.FileDownloader) {
 
 // SendMessage is a no-op for testbot (returns a mock message).
 func (n *noOpBotAPI) SendMessage(ctx context.Context, req telegram.SendMessageRequest) (*telegram.Message, error) {
-	return &telegram.Message{MessageID: 1}, nil
+	return &telegram.Message{MessageID: nextMockMessageID()}, nil
 }
 
 // SendRichMessage is a no-op for testbot (returns a mock message).
 func (n *noOpBotAPI) SendRichMessage(ctx context.Context, req telegram.SendRichMessageRequest) (*telegram.Message, error) {
-	return &telegram.Message{MessageID: 1}, nil
+	return &telegram.Message{MessageID: nextMockMessageID()}, nil
 }
 
 // SendRichMessageDraft is a no-op for testbot.
@@ -90,22 +107,22 @@ func (n *noOpBotAPI) EditMessageText(ctx context.Context, req telegram.EditMessa
 
 // SendPhoto is a no-op for testbot.
 func (n *noOpBotAPI) SendPhoto(ctx context.Context, req telegram.SendPhotoRequest) (*telegram.Message, error) {
-	return &telegram.Message{MessageID: 1}, nil
+	return &telegram.Message{MessageID: nextMockMessageID()}, nil
 }
 
 // SendDocument is a no-op for testbot.
 func (n *noOpBotAPI) SendDocument(ctx context.Context, req telegram.SendDocumentRequest) (*telegram.Message, error) {
-	return &telegram.Message{MessageID: 1}, nil
+	return &telegram.Message{MessageID: nextMockMessageID()}, nil
 }
 
 // SendMediaGroup is a no-op for testbot.
 func (n *noOpBotAPI) SendMediaGroup(ctx context.Context, req telegram.SendMediaGroupRequest) ([]telegram.Message, error) {
-	return []telegram.Message{{MessageID: 1}}, nil
+	return []telegram.Message{{MessageID: nextMockMessageID()}}, nil
 }
 
 // SendMediaGroupDocuments is a no-op for testbot.
 func (n *noOpBotAPI) SendMediaGroupDocuments(ctx context.Context, req telegram.SendMediaGroupDocumentsRequest) ([]telegram.Message, error) {
-	return []telegram.Message{{MessageID: 1}}, nil
+	return []telegram.Message{{MessageID: nextMockMessageID()}}, nil
 }
 
 // SetMyCommands is a no-op for testbot (no Telegram commands needed).

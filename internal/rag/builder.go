@@ -289,7 +289,8 @@ func (b *ServiceBuilder) Build() (*Service, error) {
 		vectors:              NewMemoryVectorStore(),
 		stopChan:             make(chan struct{}),
 		consolidationTrigger: make(chan struct{}, 1),
-		chunkBreaker:         newChunkCircuitBreaker(),
+		chunkBreaker:         newRetryBreaker(),
+		factsBreaker:         newRetryBreaker(),
 	}
 
 	return svc, nil

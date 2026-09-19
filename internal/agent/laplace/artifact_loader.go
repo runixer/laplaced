@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/runixer/laplaced/internal/agent"
@@ -47,13 +48,32 @@ func (l *Laplace) artifactLoader() *ArtifactLoader {
 	return NewArtifactLoader(l.cfg, l.artifactRepo, l.fileStorage, l.logger)
 }
 
-// Load fetches the selected artifacts and returns them as recalled
+// LoadOptions tunes which recalled artifacts are attached as raw bytes.
+type LoadOptions struct {
+	// SkipAudioVideo drops recalled audio/video artifacts instead of
+	// attaching their bytes. Set when the current message carries its own
+	// audio or video: a chat model given two audio tracks transcribes both
+	// and stitches them into one quote, so a five-minute recording from
+	// weeks ago ends up "spoken" in today's voice message (and the turn
+	// pays for minutes of extra audio tokens). The artifact's summary still
+	// reaches the model through <artifact_context>; the bytes come back on
+	// a later text-only turn when the reranker selects it again.
+	SkipAudioVideo bool
+}
+
+// Load is LoadWithOptions with default options (everything loadable is
+// attached).
+func (al *ArtifactLoader) Load(ctx context.Context, userID storage.ScopeID, artifactIDs []int64) ([]TaggedPart, error) {
+	return al.LoadWithOptions(ctx, userID, artifactIDs, LoadOptions{})
+}
+
+// LoadWithOptions fetches the selected artifacts and returns them as recalled
 // TaggedParts, one per successfully loaded artifact, in selection order.
 // Unloadable artifacts (missing, failed extraction, unsupported MIME or file
 // type, unreadable bytes) are skipped with a log; hitting the count or size
 // limit stops loading. Side effects: emits the laplace.artifacts_loaded span
 // event and increments each loaded artifact's usage counter.
-func (al *ArtifactLoader) Load(ctx context.Context, userID storage.ScopeID, artifactIDs []int64) ([]TaggedPart, error) {
+func (al *ArtifactLoader) LoadWithOptions(ctx context.Context, userID storage.ScopeID, artifactIDs []int64, opts LoadOptions) ([]TaggedPart, error) {
 	if al.repo == nil || len(artifactIDs) == 0 || al.blobs == nil {
 		return nil, nil
 	}
@@ -75,6 +95,7 @@ func (al *ArtifactLoader) Load(ctx context.Context, userID storage.ScopeID, arti
 	// replay sees the full set as a single batch entry. content_hash matches
 	// artifacts.content_hash → enables snapshot-DB lookup without raw base64.
 	loadedEntries := make([]agent.MediaEntry, 0, len(artifactIDs))
+	var skippedAudioIDs []int64
 
 	for _, artifactID := range artifactIDs {
 		if len(out) >= maxArtifacts {
@@ -88,6 +109,16 @@ func (al *ArtifactLoader) Load(ctx context.Context, userID storage.ScopeID, arti
 
 		artifact := al.fetchLoadable(userID, artifactID)
 		if artifact == nil {
+			continue
+		}
+
+		if opts.SkipAudioVideo && isAudioVideoArtifact(artifact) {
+			skippedAudioIDs = append(skippedAudioIDs, artifact.ID)
+			al.logger.Info("skipping recalled audio next to live audio",
+				"artifact_id", artifact.ID,
+				"file_type", artifact.FileType,
+				"size_bytes", artifact.FileSize,
+			)
 			continue
 		}
 
@@ -162,6 +193,14 @@ func (al *ArtifactLoader) Load(ctx context.Context, userID storage.ScopeID, arti
 			obs.RecordContent(trace.SpanFromContext(ctx), "laplace.artifacts_loaded", string(body))
 		}
 	}
+	// Countable in TraceQL: `{ span.laplace.artifacts_recall_skipped_audio > 0 }`
+	// shows how often the guard engages without grepping INFO logs.
+	if len(skippedAudioIDs) > 0 {
+		trace.SpanFromContext(ctx).SetAttributes(
+			attribute.Int("laplace.artifacts_recall_skipped_audio", len(skippedAudioIDs)),
+			attribute.Int64Slice("laplace.artifacts_recall_skipped_audio_ids", skippedAudioIDs),
+		)
+	}
 
 	// Track artifact usage. Synchronous to avoid a race with shutdown;
 	// latency (~5-10ms) is negligible next to the LLM call.
@@ -223,6 +262,13 @@ func (al *ArtifactLoader) recalledPart(artifact *storage.Artifact, fileData []by
 	mimeType = files.NormalizeMimeForGemini(mimeType)
 	dataURL := fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(fileData))
 	return llm.MediaPart(al.cfg.LLM.ImageInputFormat, mimeType, fileName, dataURL), kind, true
+}
+
+// isAudioVideoArtifact reports whether a recalled artifact would be attached
+// as an audio or video track.
+func isAudioVideoArtifact(a *storage.Artifact) bool {
+	_, _, kind, ok := recalledFileMeta(a)
+	return ok && (kind == KindAudio || kind == KindVideo)
 }
 
 // recalledFileMeta resolves the per-file-type defaults for filename and MIME

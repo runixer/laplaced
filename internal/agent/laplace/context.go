@@ -78,10 +78,20 @@ func (l *Laplace) BuildMessages(
 	// ("у меня нет глаз для файлов из прошлого диалога"), especially once its own
 	// earlier refusals are in the session. Adjacent to the current message it
 	// reads them correctly (verified by replaying a failing request both ways).
+	//
+	// Recalled audio/video is NOT attached when the current message carries
+	// its own audio or video track. The prompt asks the model to transcribe
+	// only the live recording, but given two tracks it merges them anyway:
+	// a memory voice of several minutes gets "spoken" at the end of today's
+	// two-minute message, the reported duration is wrong, and old topics
+	// leak into the reply. The summary of the skipped file still rides in
+	// <artifact_context> above; its bytes return on a text-only turn.
+	taggedCurrent := tagCurrentParts(currentMessageParts)
 	var recalled []TaggedPart
 	if len(contextData.SelectedArtifactIDs) > 0 {
 		var err error
-		recalled, err = l.artifactLoader().Load(ctx, contextData.UserID, contextData.SelectedArtifactIDs)
+		recalled, err = l.artifactLoader().LoadWithOptions(ctx, contextData.UserID, contextData.SelectedArtifactIDs,
+			LoadOptions{SkipAudioVideo: hasLiveAudioVideo(taggedCurrent)})
 		if err != nil {
 			l.logger.Warn("failed to load artifact content", "error", err)
 		}
@@ -92,7 +102,7 @@ func (l *Laplace) BuildMessages(
 	// model can't confuse a same-named "photo.jpg" pulled from memory (📄)
 	// with what the user just sent. Without artifacts there is no ambiguity,
 	// and the common single-attachment prompt stays byte-for-byte unchanged.
-	currentParts := l.renderTagged(tagCurrentParts(currentMessageParts), len(recalled) > 0)
+	currentParts := l.renderTagged(taggedCurrent, len(recalled) > 0)
 	artifactParts := l.renderTagged(recalled, false)
 
 	// Add Recent History (active session). The current (last user) message carries
@@ -129,6 +139,17 @@ func (l *Laplace) BuildMessages(
 
 	contextData.TokenEstimates.FinalTotal = llm.EstimateMessagesTokens(orMessages)
 	return orMessages
+}
+
+// hasLiveAudioVideo reports whether the current message carries an audio or
+// video attachment of its own.
+func hasLiveAudioVideo(parts []TaggedPart) bool {
+	for _, tp := range parts {
+		if tp.Source == SourceCurrent && (tp.Kind == KindAudio || tp.Kind == KindVideo) {
+			return true
+		}
+	}
+	return false
 }
 
 // platformName maps the configured transport to the human-readable platform

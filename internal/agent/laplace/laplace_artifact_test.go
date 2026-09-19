@@ -384,3 +384,83 @@ func TestArtifactLoader_ProvenanceFields(t *testing.T) {
 
 	mockStore.AssertExpectations(t)
 }
+
+// TestArtifactLoader_SkipAudioVideoNextToLiveAudio: with SkipAudioVideo set
+// (the current message has its own voice/video), recalled audio and video
+// artifacts are dropped before their bytes are read, while an image still
+// loads. Usage counting covers only what was attached.
+func TestArtifactLoader_SkipAudioVideoNextToLiveAudio(t *testing.T) {
+	tests := []struct {
+		name     string
+		opts     LoadOptions
+		wantIDs  []int64
+		wantKind []MediaKind
+	}{
+		{
+			name:     "skip audio/video when live audio present",
+			opts:     LoadOptions{SkipAudioVideo: true},
+			wantIDs:  []int64{3},
+			wantKind: []MediaKind{KindImage},
+		},
+		{
+			name:     "default options attach everything",
+			opts:     LoadOptions{},
+			wantIDs:  []int64{1, 2, 3},
+			wantKind: []MediaKind{KindAudio, KindVideo, KindImage},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, agent, mockStore, tempDir := setupArtifactTest(t)
+			userID := storage.ScopeID("123")
+			for _, f := range []string{"old.ogg", "note.mp4", "pic.png"} {
+				require.NoError(t, os.WriteFile(filepath.Join(tempDir, f), []byte("BYTES"), 0600))
+			}
+			mockStore.On("GetArtifact", userID, int64(1)).Return(&storage.Artifact{
+				ID: 1, State: "ready", FileType: "voice", FilePath: "old.ogg", MimeType: "audio/ogg", FileSize: 5, CreatedAt: time.Now(),
+			}, nil).Once()
+			mockStore.On("GetArtifact", userID, int64(2)).Return(&storage.Artifact{
+				ID: 2, State: "ready", FileType: "video_note", FilePath: "note.mp4", MimeType: "video/mp4", FileSize: 5, CreatedAt: time.Now(),
+			}, nil).Once()
+			mockStore.On("GetArtifact", userID, int64(3)).Return(&storage.Artifact{
+				ID: 3, State: "ready", FileType: "image", FilePath: "pic.png", MimeType: "image/png", FileSize: 5, CreatedAt: time.Now(),
+			}, nil).Once()
+			mockStore.On("IncrementContextLoadCount", userID, tt.wantIDs).Return(nil).Once()
+
+			parts, err := agent.artifactLoader().LoadWithOptions(context.Background(), userID, []int64{1, 2, 3}, tt.opts)
+			require.NoError(t, err)
+			require.Len(t, parts, len(tt.wantIDs))
+			for i, tp := range parts {
+				assert.Equal(t, tt.wantIDs[i], tp.ArtifactID)
+				assert.Equal(t, tt.wantKind[i], tp.Kind)
+				assert.Equal(t, SourceRecalled, tp.Source)
+			}
+			mockStore.AssertExpectations(t)
+		})
+	}
+}
+
+// TestHasLiveAudioVideo pins the predicate that gates recalled-audio loading.
+func TestHasLiveAudioVideo(t *testing.T) {
+	voice := llm.FilePart{Type: "file", File: llm.File{FileName: "v.ogg", FileData: "data:audio/ogg;base64,AAAA"}}
+	video := llm.FilePart{Type: "file", File: llm.File{FileName: "v.mp4", FileData: "data:video/mp4;base64,AAAA"}}
+	image := llm.FilePart{Type: "file", File: llm.File{FileName: "p.jpg", FileData: "data:image/jpeg;base64,AAAA"}}
+	text := llm.TextPart{Type: "text", Text: "hi"}
+
+	tests := []struct {
+		name string
+		in   []interface{}
+		want bool
+	}{
+		{"text only", []interface{}{text}, false},
+		{"image", []interface{}{text, image}, false},
+		{"voice", []interface{}{voice}, true},
+		{"video", []interface{}{text, video}, true},
+		{"empty", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, hasLiveAudioVideo(tagCurrentParts(tt.in)))
+		})
+	}
+}

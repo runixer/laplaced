@@ -73,7 +73,8 @@ defined in a gitignored JSON --variants-file:
         }
       }]
     },
-    "no-raw-audio": { "drop_media_mime_types": ["audio/ogg"] }
+    "no-raw-audio": { "drop_media_mime_types": ["audio/ogg"] },
+    "no-recall":    { "drop_recalled_media": true }
   }
 
 Example (compare the captured preview model against GA on the enricher request):
@@ -143,6 +144,7 @@ type variantSpec struct {
 	MaxTokens                int                 `json:"max_tokens,omitempty"`
 	DropMedia                bool                `json:"drop_media"`
 	DropMediaMIMETypes       []string            `json:"drop_media_mime_types,omitempty"`
+	DropRecalledMedia        bool                `json:"drop_recalled_media,omitempty"`
 	StripSystemTags          []string            `json:"strip_system_tags"`
 	KeepFactIDs              []string            `json:"keep_fact_ids"`
 	SetUserText              *string             `json:"set_user_text"`
@@ -658,6 +660,9 @@ func prepareBody(bodyStr string, spec variantSpec, filesDir, modelOverride strin
 	if len(spec.DropMediaMIMETypes) > 0 {
 		dropMediaPartsByMIME(body, spec.DropMediaMIMETypes)
 	}
+	if spec.DropRecalledMedia {
+		dropRecalledMediaParts(body)
+	}
 	for _, tag := range spec.StripSystemTags {
 		stripSystemTag(body, tag)
 	}
@@ -934,6 +939,43 @@ func dropMediaPartsByMIME(body map[string]any, mimeTypes []string) {
 		}
 		mm["content"] = kept
 	}
+}
+
+// dropRecalledMediaParts removes only reranker-recalled media — file parts
+// whose filename carries the "memory_<id>_" anchor — together with the 📄
+// memory-artifact marker text that precedes each one. Current-message
+// attachments stay, so the variant models "the loader skipped recalled
+// audio next to a live voice" without touching what the user actually sent.
+func dropRecalledMediaParts(body map[string]any) {
+	msgs, _ := body["messages"].([]any)
+	for _, m := range msgs {
+		mm, _ := m.(map[string]any)
+		content, ok := mm["content"].([]any)
+		if !ok {
+			continue
+		}
+		kept := make([]any, 0, len(content))
+		for i, part := range content {
+			if isRecalledFilePart(part) {
+				if precededByMemoryMarker(content, i) && len(kept) > 0 {
+					kept = kept[:len(kept)-1]
+				}
+				continue
+			}
+			kept = append(kept, part)
+		}
+		mm["content"] = kept
+	}
+}
+
+func isRecalledFilePart(part any) bool {
+	pm, ok := part.(map[string]any)
+	if !ok || pm["type"] != "file" {
+		return false
+	}
+	file, _ := pm["file"].(map[string]any)
+	name, _ := file["filename"].(string)
+	return strings.HasPrefix(name, "memory_")
 }
 
 func replayMediaPartMIME(part any) string {
@@ -1463,7 +1505,46 @@ func postOnce(ctx context.Context, endpoint, apiKey string, body []byte, variant
 	return postOnceAtTurn(ctx, endpoint, apiKey, body, variant, run, -1, outDir, timeout)
 }
 
+// replayTransientRetries bounds retries on upstream rate limits and 5xx so a
+// batch eval is not decided by a provider's burst limiter (some routes return
+// 429 even at one request every few seconds).
+const replayTransientRetries = 3
+
 func postOnceAtTurn(ctx context.Context, endpoint, apiKey string, body []byte, variant string, run, turn int, outDir string, timeout time.Duration) replayRunResult {
+	var res replayRunResult
+	for attempt := 0; attempt <= replayTransientRetries; attempt++ {
+		res = postOnceAtTurnAttempt(ctx, endpoint, apiKey, body, variant, run, turn, outDir, timeout)
+		if res.Err == "" || !replayTransientFailure(res) || attempt == replayTransientRetries {
+			return res
+		}
+		delay := time.Duration(8*(attempt+1)) * time.Second
+		select {
+		case <-ctx.Done():
+			return res
+		case <-time.After(delay):
+		}
+	}
+	return res
+}
+
+// replayTransientFailure reports whether a failed generation is worth retrying:
+// HTTP 429/5xx, or an OpenRouter error body announcing an upstream rate limit.
+func replayTransientFailure(res replayRunResult) bool {
+	switch res.HTTPStatus {
+	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	if res.RawFile == "" {
+		return false
+	}
+	raw, err := os.ReadFile(res.RawFile)
+	if err != nil {
+		return false
+	}
+	return bytes.Contains(raw, []byte("rate-limited upstream")) || bytes.Contains(raw, []byte("Upstream idle timeout"))
+}
+
+func postOnceAtTurnAttempt(ctx context.Context, endpoint, apiKey string, body []byte, variant string, run, turn int, outDir string, timeout time.Duration) replayRunResult {
 	res := replayRunResult{Variant: variant, Run: run, RequestedModel: requestModel(body)}
 	fileVariant := safeFileComponent(variant)
 	if turn >= 0 {

@@ -9,6 +9,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"strings"
 	"time"
@@ -159,6 +160,10 @@ func (c *Client) makeRequest(ctx context.Context, method string, params interfac
 	return c.makeRequestWithAttempts(ctx, method, params, 2)
 }
 
+// requestRetryDelay is the pause between attempts in makeRequestWithAttempts.
+// A variable so tests can shorten it.
+var requestRetryDelay = 2 * time.Second
+
 func (c *Client) makeRequestWithAttempts(ctx context.Context, method string, params interface{}, maxAttempts int) (*APIResponse, error) {
 	startTime := time.Now()
 
@@ -173,7 +178,12 @@ func (c *Client) makeRequestWithAttempts(ctx context.Context, method string, par
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
-	retryDelay := 2 * time.Second
+	retryDelay := requestRetryDelay
+	// Methods sent once (sendMessage, sendRichMessage) still get one extra
+	// attempt when the failure happened before the request was written —
+	// proxy connect, DNS, TLS handshake. Telegram never saw such a call, so
+	// repeating it cannot duplicate a message.
+	unsentRetried := false
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
@@ -197,6 +207,11 @@ func (c *Client) makeRequestWithAttempts(ctx context.Context, method string, par
 		}
 		req.Header.Set("Content-Type", "application/json")
 
+		wroteRequest := false
+		req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
+			WroteRequest: func(httptrace.WroteRequestInfo) { wroteRequest = true },
+		}))
+
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			// Sanitize error to remove bot token from URL in error messages
@@ -213,6 +228,10 @@ func (c *Client) makeRequestWithAttempts(ctx context.Context, method string, par
 				recordError(method, errorTypeTimeout)
 			} else {
 				recordError(method, errorTypeNetwork)
+			}
+			if !wroteRequest && !unsentRetried && attempt == maxAttempts-1 {
+				unsentRetried = true
+				maxAttempts++
 			}
 			continue
 		}

@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- A past voice recording recalled from memory is no longer attached as raw audio next to the voice message you just sent, so its words stop leaking into your transcript and the reply no longer answers a weeks-old recording. Its summary is still available, and the recording itself is loaded again when you ask about it in text.
+- Voice transcripts no longer come wrapped in stray square brackets.
+- A topic that repeatedly fails fact extraction (for example when the provider's content filter rejects it) now backs off exponentially instead of being retried every minute.
+- Memory lookup no longer burns extra model calls when there is nothing left to load (no topic candidates, or an empty request), so replies that consult memory arrive several seconds sooner.
+- A reply is no longer lost when the connection to Telegram fails before the request is sent (proxy or TLS handshake errors); the send is repeated once.
+
+### Changed
+- Built with Go 1.26; dependency updates (AWS SDK, pgx, OpenTelemetry, SQLite driver and others).
+
+### Security
+- gRPC updated to 1.83.2, closing three published advisories in its xDS code paths (not reachable from this bot, per govulncheck).
+
 ## [0.11.0] - 2026-08-18
 
 ### Added

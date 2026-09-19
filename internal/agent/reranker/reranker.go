@@ -37,9 +37,10 @@ type rerankRunStats struct {
 	llmCalls       int
 	// llmAttempts counts agent-level CreateChatCompletion invocations. The LLM
 	// client's transport retries are reported separately as llm.attempts.
-	llmAttempts        int
-	forcedFinalization bool
-	tokens             agent.TokenUsage
+	llmAttempts          int
+	forcedFinalization   bool
+	explorationExhausted bool
+	tokens               agent.TokenUsage
 }
 
 // New creates a new Reranker agent.
@@ -129,6 +130,7 @@ func (r *Reranker) Execute(ctx context.Context, req *agent.Request) (*agent.Resp
 			"fallback_reason":        fallbackReason,
 			"input_tokens_estimated": inputTokensEstimated,
 			"forced_finalization":    runStats.forcedFinalization,
+			"exploration_exhausted":  runStats.explorationExhausted,
 			"tool_calls":             runStats.toolCallRounds,
 			"tool_call_rounds":       runStats.toolCallRounds,
 			"llm_calls":              runStats.llmCalls,
@@ -169,10 +171,11 @@ func (r *Reranker) rerank(
 	// right values regardless of which internal return fires. tr stays nil
 	// if we bail out via the "disabled or empty candidates" shortcut.
 	var (
-		iterations         int
-		llmAttempts        int
-		forcedFinalization bool
-		tr                 *trace
+		iterations           int
+		llmAttempts          int
+		forcedFinalization   bool
+		explorationExhausted bool
+		tr                   *trace
 	)
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/reranker").Start(
 		ctx, "reranker.Execute",
@@ -226,6 +229,7 @@ func (r *Reranker) rerank(
 			runStats.llmCalls = llmCalls
 			runStats.llmAttempts = llmAttempts
 			runStats.forcedFinalization = forcedFinalization
+			runStats.explorationExhausted = explorationExhausted
 			runStats.tokens = agent.TokenUsage{
 				Prompt:     promptTokens,
 				Completion: completionTokens,
@@ -242,6 +246,7 @@ func (r *Reranker) rerank(
 			attribute.Int("reranker.llm_calls", llmCalls),
 			attribute.Int("reranker.llm_attempts", llmAttempts),
 			attribute.Bool("reranker.forced_finalization", forcedFinalization),
+			attribute.Bool("reranker.exploration_exhausted", explorationExhausted),
 			attribute.String("reranker.fallback_reason", reason),
 			attribute.Int("reranker.candidates_in.topics", len(candidates)),
 			attribute.Int("reranker.candidates_in.people", len(personCandidates)),
@@ -455,24 +460,34 @@ func (r *Reranker) rerank(
 		var toolChoice any
 		var responseFormat interface{}
 		requestTools := tools
-		forcedFinal := iterations >= cfg.MaxToolCalls
+		capReached := iterations >= cfg.MaxToolCalls
+		forcedFinal := capReached || explorationExhausted
 
-		// v0.6.0: If no topic candidates (only artifacts/people), skip tool call and go directly to JSON.
-		// Phase 1: tool_choice "auto" instead of forcing get_topics_content — forced selection
+		// tool_choice "auto" instead of forcing get_topics_content — forced selection
 		// (named/required) is flaky through litellm+thinking; "auto" reliably calls the tool given
 		// an explicit prompt, and the existing fallback (no tool call → vector top-5) covers the rest.
+		//
+		// Offering tools together with response_format json_object makes flash-lite call the
+		// tool almost every time, with invented or empty IDs, until the cap. So the tool is
+		// withheld whenever a call could not load anything new: no topic candidates at all, or
+		// the previous round requested nothing valid (exploration exhausted).
 		switch {
 		case forcedFinal:
 			// MaxToolCalls limits exploration, not synthesis. The final request
 			// sees the last tool result but cannot start another tool round.
-			forcedFinalization = true
+			forcedFinalization = capReached
 			requestTools = nil
 			responseFormat = llm.ResponseFormat{Type: "json_object"}
-		case iterations == 0 && len(candidates) > 0:
+		case len(candidates) == 0:
+			// Nothing for get_topics_content to load (only people/artifacts).
+			requestTools = nil
+			responseFormat = llm.ResponseFormat{Type: "json_object"}
+		case iterations == 0:
 			toolChoice = "auto"
 		default:
 			responseFormat = llm.ResponseFormat{Type: "json_object"}
 		}
+		toolsOffered := requestTools != nil
 
 		llmAttempts++
 		tr.tracker.StartTurn()
@@ -554,9 +569,10 @@ func (r *Reranker) rerank(
 
 		// Check for tool calls
 		if len(choice.Message.ToolCalls) > 0 {
-			if forcedFinal {
-				logger.Warn("reranker forced finalization returned tool calls",
+			if !toolsOffered {
+				logger.Warn("reranker returned tool calls although no tools were offered",
 					"tool_calls", len(choice.Message.ToolCalls),
+					"forced_finalization", forcedFinal,
 				)
 				tr.fallbackReason = "protocol_violation"
 				result := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger)
@@ -647,6 +663,15 @@ func (r *Reranker) rerank(
 			}
 
 			tr.toolCalls = append(tr.toolCalls, toolCall)
+			if len(toolCall.Topics) == 0 {
+				// Empty or all-invalid request: another exploration round cannot
+				// help, so the next request is the final JSON one without tools.
+				explorationExhausted = true
+				logger.Debug("reranker exploration exhausted",
+					"iteration", iterations,
+					"requested_ids", toolCall.TopicIDs,
+				)
+			}
 
 			span.AddEvent("reranker.tool_call",
 				oteltrace.WithAttributes(

@@ -57,7 +57,8 @@ Examples:
 
 		if voicePath != "" {
 			// Send voice message
-			resultText, resultErr = sendVoiceMessage(ctx, tb, userID, voicePath, args)
+			maxWait := mustGetDuration(cmd, "max-wait")
+			resultText, resultErr = sendVoiceMessage(ctx, tb, userID, voicePath, args, maxWait)
 		} else {
 			// Send text message
 			if len(args) == 0 {
@@ -133,8 +134,9 @@ Examples:
 	},
 }
 
-// sendVoiceMessage sends a voice message through the bot pipeline.
-func sendVoiceMessage(ctx context.Context, tb *testBot, tgID int64, voicePath string, textArgs []string) (string, error) {
+// sendVoiceMessage sends a voice message through the bot pipeline and waits up
+// to maxWait for the assistant reply to land in history.
+func sendVoiceMessage(ctx context.Context, tb *testBot, tgID int64, voicePath string, textArgs []string, maxWait time.Duration) (string, error) {
 	// Read voice file to get size
 	fileInfo, err := os.Stat(voicePath)
 	if err != nil {
@@ -163,7 +165,7 @@ func sendVoiceMessage(ctx context.Context, tb *testBot, tgID int64, voicePath st
 
 	// Create mock voice message
 	voiceMsg := &telegram.Message{
-		MessageID: 1,
+		MessageID: nextMockMessageID(),
 		From: &telegram.User{
 			ID:        tgID,
 			IsBot:     false,
@@ -191,27 +193,56 @@ func sendVoiceMessage(ctx context.Context, tb *testBot, tgID int64, voicePath st
 		Message:  voiceMsg,
 	}
 
-	// Process the update
+	// Remember the newest assistant reply before sending so an older reply in the
+	// same DB is never mistaken for the answer to this voice message.
+	scope := storage.PassthroughScopeID("telegram", strconv.FormatInt(tgID, 10))
+	baseline, err := lastAssistantMessageID(tb, scope)
+	if err != nil {
+		return "", err
+	}
+
+	// ProcessUpdateAsync returns immediately; the reply lands in history when the
+	// pipeline (transcription, RAG, tools, LLM) finishes. Poll until then.
 	tb.bot.ProcessUpdateAsync(ctx, update, "testbot")
 
-	// Wait for response - this is tricky because ProcessUpdateAsync is async
-	// For now, we'll wait a bit and check history
-	time.Sleep(15 * time.Second) // Give time for processing
-
-	// Get last response from history
-	messages, err := tb.store.GetRecentHistory(storage.PassthroughScopeID("telegram", strconv.FormatInt(tgID, 10)), 10)
-	if err != nil {
-		return "", fmt.Errorf("failed to get history: %w", err)
-	}
-
-	// Find the last assistant message
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == "assistant" {
-			return messages[i].Content, nil
+	deadline := time.Now().Add(maxWait)
+	for {
+		if content, id, err := lastAssistantMessage(tb, scope); err != nil {
+			return "", err
+		} else if id > baseline {
+			return content, nil
+		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("no response found in history after %s (use --max-wait to wait longer)", maxWait)
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(2 * time.Second):
 		}
 	}
+}
 
-	return "", fmt.Errorf("no response found in history")
+// lastAssistantMessageID returns the id of the newest assistant message for the
+// scope, or 0 when there is none.
+func lastAssistantMessageID(tb *testBot, scope storage.ScopeID) (int64, error) {
+	_, id, err := lastAssistantMessage(tb, scope)
+	return id, err
+}
+
+// lastAssistantMessage returns the newest assistant message (content, id) for
+// the scope; id is 0 when there is none.
+func lastAssistantMessage(tb *testBot, scope storage.ScopeID) (string, int64, error) {
+	messages, err := tb.store.GetRecentHistory(scope, 10)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to get history: %w", err)
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "assistant" {
+			return messages[i].Content, messages[i].ID, nil
+		}
+	}
+	return "", 0, nil
 }
 
 func init() {
@@ -220,6 +251,7 @@ func init() {
 	sendCmd.Flags().Bool("process-session", false, "Force process session after message")
 	sendCmd.Flags().String("output", "text", "Output format: text, json")
 	sendCmd.Flags().String("voice", "", "Path to voice/audio file to send (for testing audio transcription)")
+	sendCmd.Flags().Duration("max-wait", 2*time.Minute, "Maximum time to wait for the reply to a --voice message")
 
 	rootCmd.AddCommand(sendCmd)
 }

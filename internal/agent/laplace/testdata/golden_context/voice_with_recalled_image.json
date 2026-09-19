@@ -34,10 +34,25 @@
         "text": "current question"
       },
       {
+        "type": "text",
+        "text": "🎤 Voice/audio from the CURRENT message (sent just now — transcribe and respond to THIS one)."
+      },
+      {
         "type": "file",
         "file": {
           "filename": "voice.ogg",
           "file_data": "data:audio/ogg;base64,QVVELUJZVEVT"
+        }
+      },
+      {
+        "type": "text",
+        "text": "📄 diagram.png — memory artifact #11 (31 Jan 2025)"
+      },
+      {
+        "type": "file",
+        "file": {
+          "filename": "memory_11_diagram.png",
+          "file_data": "data:image/png;base64,SU1HLUJZVEVT"
         }
       }
     ]

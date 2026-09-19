@@ -21,7 +21,13 @@ func TestNoOpBotAPI(t *testing.T) {
 		msg, err := api.SendMessage(ctx, req)
 		require.NoError(t, err)
 		assert.NotNil(t, msg)
-		assert.Equal(t, 1, msg.MessageID)
+		assert.Positive(t, msg.MessageID)
+
+		// Every send gets a fresh transport identity: delivery persistence
+		// rejects a message id that is already linked to another reply.
+		again, err := api.SendMessage(ctx, req)
+		require.NoError(t, err)
+		assert.Greater(t, again.MessageID, msg.MessageID)
 	})
 
 	t.Run("SetMyCommands no error", func(t *testing.T) {
