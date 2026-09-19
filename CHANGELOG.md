@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-09-19
+
 ### Fixed
 - A past voice recording recalled from memory is no longer attached as raw audio next to the voice message you just sent, so its words stop leaking into your transcript and the reply no longer answers a weeks-old recording. Its summary is still available, and the recording itself is loaded again when you ask about it in text.
 - Voice transcripts no longer come wrapped in stray square brackets.
@@ -683,7 +685,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-language support (en, ru)
 - Docker deployment
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/runixer/laplaced/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/runixer/laplaced/compare/v0.10.3...v0.11.0
 [0.10.3]: https://github.com/runixer/laplaced/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/runixer/laplaced/compare/v0.10.1...v0.10.2
