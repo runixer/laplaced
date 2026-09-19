@@ -1758,3 +1758,137 @@ func TestRerank_ResponseMetadata(t *testing.T) {
 	assert.Equal(t, 1, resp.Metadata["people_count"])
 	assert.Equal(t, 1, resp.Metadata["artifacts_count"])
 }
+
+// TestRerank_NoTopicCandidatesOmitsTools pins the request shape for a turn
+// whose candidate pool has no topics: get_topics_content has nothing to load,
+// so the tool is not offered and the model answers with JSON in one call.
+// (Offering the tool alongside json_object made flash-lite call it with IDs
+// copied from the prompt examples on every such turn.)
+func TestRerank_NoTopicCandidatesOmitsTools(t *testing.T) {
+	mockClient := &testutil.MockLLMClient{}
+	mockStorage := &testutil.MockStorage{}
+	cfg := testConfig()
+	reranker := New(mockClient, cfg, testutil.TestLogger(), testutil.TestTranslator(t), mockStorage, nil)
+
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
+		format, ok := req.ResponseFormat.(llm.ResponseFormat)
+		return req.Tools == nil && req.ToolChoice == nil && ok && format.Type == "json_object" && len(req.Messages) == 2
+	})).Return(makeFinalJSONResponse(`{"topic_ids":[],"people_ids":[],"artifact_ids":[{"id":"Artifact:1","reason":"the manual"}]}`), nil).Once()
+
+	resp, err := reranker.Execute(context.Background(), &agent.Request{
+		Params: map[string]any{
+			ParamCandidates:          []Candidate{},
+			ParamArtifactCandidates:  []ArtifactCandidate{mockArtifactCandidate(1, "pdf", "manual.pdf")},
+			ParamContextualizedQuery: "test query",
+			ParamOriginalQuery:       "original",
+			ParamCurrentMessages:     "recent messages",
+		},
+		Shared: &agent.SharedContext{UserID: "123"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []int64{1}, resp.Structured.(*Result).ArtifactIDs())
+	assert.Equal(t, 1, resp.Metadata["llm_calls"])
+	assert.Equal(t, false, resp.Metadata["forced_finalization"])
+	assert.Equal(t, false, resp.Metadata["exploration_exhausted"])
+	mockClient.AssertExpectations(t)
+}
+
+// TestRerank_EmptyExplorationRoundFinalizesNext verifies that a tool round
+// which loads nothing — an empty id list or only ids outside the candidate
+// pool — ends exploration: the next request carries no tools and asks for the
+// final JSON, instead of burning the remaining rounds on more empty calls.
+func TestRerank_EmptyExplorationRoundFinalizesNext(t *testing.T) {
+	tests := []struct {
+		name string
+		args string
+	}{
+		{name: "empty id list", args: `{"topic_ids":[]}`},
+		{name: "ids outside the candidate pool", args: `{"topic_ids":[42,18,5]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockClient := &testutil.MockLLMClient{}
+			mockStorage := &testutil.MockStorage{}
+			cfg := testConfig()
+			cfg.Agents.Reranker.MaxToolCalls = 3
+			reranker := New(mockClient, cfg, testutil.TestLogger(), testutil.TestTranslator(t), mockStorage, nil)
+
+			candidates := []Candidate{
+				{TopicID: 1001, Score: 0.9, Topic: mockTopic(1001, "First real topic")},
+				{TopicID: 1002, Score: 0.8, Topic: mockTopic(1002, "Second real topic")},
+			}
+
+			mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
+				return req.Tools != nil && req.ToolChoice == "auto" && len(req.Messages) == 2
+			})).Return(makeToolCallsResponse(makeToolCall("empty_round", "get_topics_content", tt.args)), nil).Once()
+			mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
+				format, ok := req.ResponseFormat.(llm.ResponseFormat)
+				if req.Tools != nil || req.ToolChoice != nil || !ok || format.Type != "json_object" || len(req.Messages) != 4 {
+					return false
+				}
+				toolMsg := req.Messages[3]
+				return toolMsg.Role == "tool" && toolMsg.ToolCallID == "empty_round"
+			})).Return(makeFinalJSONResponse(`{"topic_ids":[{"id":"Topic:1002","reason":"best match"}],"people_ids":[],"artifact_ids":[]}`), nil).Once()
+
+			resp, err := reranker.Execute(context.Background(), &agent.Request{
+				Params: map[string]any{
+					ParamCandidates:          candidates,
+					ParamContextualizedQuery: "test query",
+					ParamOriginalQuery:       "original",
+					ParamCurrentMessages:     "recent messages",
+				},
+				Shared: &agent.SharedContext{UserID: "123"},
+			})
+
+			require.NoError(t, err)
+			assert.Equal(t, []int64{1002}, resp.Structured.(*Result).TopicIDs())
+			assert.Empty(t, resp.Metadata["fallback_reason"])
+			assert.Equal(t, 2, resp.Metadata["llm_calls"])
+			assert.Equal(t, true, resp.Metadata["exploration_exhausted"])
+			assert.Equal(t, false, resp.Metadata["forced_finalization"], "the cap was not reached")
+			mockStorage.AssertNotCalled(t, "GetMessagesByTopicID", mock.Anything, mock.Anything)
+			mockClient.AssertExpectations(t)
+		})
+	}
+}
+
+// TestRerank_ValidExplorationRoundKeepsTools is the control: a round that did
+// load candidate content keeps the tool available for the next round.
+func TestRerank_ValidExplorationRoundKeepsTools(t *testing.T) {
+	mockClient := &testutil.MockLLMClient{}
+	mockStorage := &testutil.MockStorage{}
+	cfg := testConfig()
+	cfg.Agents.Reranker.MaxToolCalls = 3
+	reranker := New(mockClient, cfg, testutil.TestLogger(), testutil.TestTranslator(t), mockStorage, nil)
+
+	candidates := []Candidate{
+		{TopicID: 1001, Score: 0.9, Topic: mockTopic(1001, "First real topic")},
+		{TopicID: 1002, Score: 0.8, Topic: mockTopic(1002, "Second real topic")},
+	}
+	mockStorage.On("GetMessagesByTopicID", mock.Anything, int64(1001)).Return(mockMessagesForTopic(1001), nil).Once()
+
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
+		return req.Tools != nil && len(req.Messages) == 2
+	})).Return(makeToolCallsResponse(makeToolCall("real_round", "get_topics_content", `{"topic_ids":[1001]}`)), nil).Once()
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
+		format, ok := req.ResponseFormat.(llm.ResponseFormat)
+		return req.Tools != nil && ok && format.Type == "json_object" && len(req.Messages) == 4
+	})).Return(makeFinalJSONResponse(`{"topic_ids":[{"id":"Topic:1001","reason":"read it"}],"people_ids":[],"artifact_ids":[]}`), nil).Once()
+
+	resp, err := reranker.Execute(context.Background(), &agent.Request{
+		Params: map[string]any{
+			ParamCandidates:          candidates,
+			ParamContextualizedQuery: "test query",
+			ParamOriginalQuery:       "original",
+			ParamCurrentMessages:     "recent messages",
+		},
+		Shared: &agent.SharedContext{UserID: "123"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []int64{1001}, resp.Structured.(*Result).TopicIDs())
+	assert.Equal(t, false, resp.Metadata["exploration_exhausted"])
+	mockClient.AssertExpectations(t)
+	mockStorage.AssertExpectations(t)
+}
