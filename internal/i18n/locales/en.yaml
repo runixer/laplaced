@@ -56,7 +56,7 @@ bot:
     This is a voice message the user sent JUST NOW. MANDATORY:
     1. Quote the FULL text (cleaned of filler words, pauses) in this format:
        - If it's the user's message: > 🎤 text
-       - If FORWARDED from someone: > 🎤 **From sender name:** text
+       - If FORWARDED from someone: > 🎤 **From Mary:** text (with the real sender's name instead of Mary)
     2. Then respond to the content in English.
     Transcribe ONLY the voice message(s) in the current message (if several — quote each separately).
     Voice/audio from memory (tagged 📄 memory artifact) are recordings from past conversations: do NOT transcribe them or present their content as the words of the current message; use them only as reference if relevant.
