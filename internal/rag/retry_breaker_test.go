@@ -8,13 +8,13 @@ import (
 )
 
 func TestChunkCircuitBreaker_NoFailures_NoCooldown(t *testing.T) {
-	cb := newChunkCircuitBreaker()
+	cb := newRetryBreaker()
 	assert.Equal(t, time.Duration(0), cb.cooldownRemaining("1", 100))
 }
 
 func TestChunkCircuitBreaker_ExponentialBackoff(t *testing.T) {
 	now := time.Date(2026, 4, 21, 0, 0, 0, 0, time.UTC)
-	cb := newChunkCircuitBreaker()
+	cb := newRetryBreaker()
 	cb.now = func() time.Time { return now }
 
 	// 1st failure → 5m cooldown.
@@ -34,18 +34,18 @@ func TestChunkCircuitBreaker_ExponentialBackoff(t *testing.T) {
 }
 
 func TestChunkCircuitBreaker_CooldownCap(t *testing.T) {
-	cb := newChunkCircuitBreaker()
+	cb := newRetryBreaker()
 	// 20+ failures must not overflow.
 	var last time.Duration
 	for range 20 {
 		last = cb.recordFailure("1", 100)
 	}
-	assert.Equal(t, chunkCooldownCap, last)
+	assert.Equal(t, retryCooldownCap, last)
 }
 
 func TestChunkCircuitBreaker_RemainingDecreasesOverTime(t *testing.T) {
 	now := time.Date(2026, 4, 21, 0, 0, 0, 0, time.UTC)
-	cb := newChunkCircuitBreaker()
+	cb := newRetryBreaker()
 	cb.now = func() time.Time { return now }
 
 	cb.recordFailure("1", 100)
@@ -61,7 +61,7 @@ func TestChunkCircuitBreaker_RemainingDecreasesOverTime(t *testing.T) {
 }
 
 func TestChunkCircuitBreaker_SuccessClearsState(t *testing.T) {
-	cb := newChunkCircuitBreaker()
+	cb := newRetryBreaker()
 	cb.recordFailure("1", 100)
 	cb.recordFailure("1", 100)
 	cb.recordSuccess("1", 100)
@@ -73,7 +73,7 @@ func TestChunkCircuitBreaker_SuccessClearsState(t *testing.T) {
 }
 
 func TestChunkCircuitBreaker_PerChunkIsolation(t *testing.T) {
-	cb := newChunkCircuitBreaker()
+	cb := newRetryBreaker()
 	cb.recordFailure("1", 100)
 	cb.recordFailure("1", 100)
 

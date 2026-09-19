@@ -127,10 +127,11 @@ type Service struct {
 	stopChan             chan struct{}
 	consolidationTrigger chan struct{}
 	wg                   sync.WaitGroup
-	processingTopics     sync.Map             // Track topics currently being processed for facts (prevents race condition)
-	processingUsers      sync.Map             // Track users currently being processed (prevents concurrent people merges)
-	processingArtifacts  sync.Map             // Track artifacts currently being processed (prevents concurrent extraction)
-	chunkBreaker         *chunkCircuitBreaker // Exponential-backoff cooldown for persistently-failing chunks
+	processingTopics     sync.Map      // Track topics currently being processed for facts (prevents race condition)
+	processingUsers      sync.Map      // Track users currently being processed (prevents concurrent people merges)
+	processingArtifacts  sync.Map      // Track artifacts currently being processed (prevents concurrent extraction)
+	chunkBreaker         *retryBreaker // Exponential-backoff cooldown for persistently-failing chunks
+	factsBreaker         *retryBreaker // Same for topics whose fact extraction keeps failing
 
 	// Shutdown coordination (v0.6.0 - CRIT-2)
 	shuttingDown      atomic.Bool // Signal to stop accepting new work
