@@ -582,7 +582,10 @@ type Storage interface {
 | `artifacts.s3` задан | `S3Storage` | S3-совместимый бакет (ключ `user_<scope>/YYYY-MM/<uuid><ext>`) |
 
 **S3-бэкенд** (`internal/files/s3_storage.go`) использует AWS SDK v2 со статическими
-ключами и SigV4; работает с S3-совместимыми сервисами вроде Yandex Object Storage.
+ключами и SigV4; работает с S3-совместимыми сервисами вроде Yandex Object Storage,
+MinIO или versitygw. Адресация всегда path-style (`https://endpoint/<bucket>/<key>`):
+её понимают все S3-совместимые сервисы, а virtual-hosted требует wildcard-DNS и
+сертификат на `*.endpoint`, которых у self-hosted шлюзов обычно нет.
 `region` обязателен для подписи даже там, где провайдер его игнорирует. Конфиг:
 
 ```yaml

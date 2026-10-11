@@ -43,7 +43,10 @@ type S3Storage struct {
 var _ Storage = (*S3Storage)(nil)
 
 // NewS3Storage builds an S3-backed store with static credentials and a custom
-// endpoint (virtual-hosted addressing, which Yandex Object Storage supports).
+// endpoint. Requests use path-style addressing (https://endpoint/bucket/key):
+// every S3-compatible service accepts it (Yandex Object Storage, MinIO,
+// versitygw, Ceph RGW), while virtual-hosted addressing needs a wildcard DNS
+// name and TLS certificate per endpoint, which self-hosted gateways usually lack.
 func NewS3Storage(_ context.Context, opts S3Options, logger *slog.Logger) (*S3Storage, error) {
 	if opts.Bucket == "" {
 		return nil, fmt.Errorf("s3 storage: bucket is required")
@@ -58,6 +61,7 @@ func NewS3Storage(_ context.Context, opts S3Options, logger *slog.Logger) (*S3St
 	}
 	client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
 		o.BaseEndpoint = aws.String(opts.Endpoint)
+		o.UsePathStyle = true
 	})
 
 	return &S3Storage{
