@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - S3 artifact storage now uses path-style addressing (`https://endpoint/bucket/key`), so it works with self-hosted S3-compatible gateways (MinIO, versitygw and the like) that have no per-bucket DNS names. Yandex Object Storage accepts both styles, existing setups keep working unchanged.
 
+### Security
+- golang.org/x/net updated to 0.60.0, closing GO-2026-6611, GO-2026-6612 and GO-2026-6617 reported by govulncheck.
+
 ## [0.11.1] - 2026-09-19
 
 ### Fixed
