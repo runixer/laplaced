@@ -2,7 +2,7 @@ module github.com/runixer/laplaced
 
 go 1.26.0
 
-toolchain go1.26.8
+toolchain go1.26.9
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.47.0
