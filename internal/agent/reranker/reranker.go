@@ -175,7 +175,11 @@ func (r *Reranker) rerank(
 		llmAttempts          int
 		forcedFinalization   bool
 		explorationExhausted bool
-		tr                   *trace
+		// jsonRetry is set when a round offered tools (no JSON mode) and the
+		// model answered with unparseable text: the next request is the final
+		// JSON-mode one instead of a fallback.
+		jsonRetry bool
+		tr        *trace
 	)
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/reranker").Start(
 		ctx, "reranker.Execute",
@@ -247,6 +251,7 @@ func (r *Reranker) rerank(
 			attribute.Int("reranker.llm_attempts", llmAttempts),
 			attribute.Bool("reranker.forced_finalization", forcedFinalization),
 			attribute.Bool("reranker.exploration_exhausted", explorationExhausted),
+			attribute.Bool("reranker.json_retry", jsonRetry),
 			attribute.String("reranker.fallback_reason", reason),
 			attribute.Int("reranker.candidates_in.topics", len(candidates)),
 			attribute.Int("reranker.candidates_in.people", len(personCandidates)),
@@ -461,16 +466,19 @@ func (r *Reranker) rerank(
 		var responseFormat interface{}
 		requestTools := tools
 		capReached := iterations >= cfg.MaxToolCalls
-		forcedFinal := capReached || explorationExhausted
+		forcedFinal := capReached || explorationExhausted || jsonRetry
 
 		// tool_choice "auto" instead of forcing get_topics_content — forced selection
 		// (named/required) is flaky through litellm+thinking; "auto" reliably calls the tool given
 		// an explicit prompt, and the existing fallback (no tool call → vector top-5) covers the rest.
 		//
-		// Offering tools together with response_format json_object makes flash-lite call the
-		// tool almost every time, with invented or empty IDs, until the cap. So the tool is
-		// withheld whenever a call could not load anything new: no topic candidates at all, or
-		// the previous round requested nothing valid (exploration exhausted).
+		// A request either offers the tool or asks for JSON, never both. With tools and
+		// response_format json_object together, flash-lite calls the tool every round, with
+		// invented or empty IDs, until the cap, and Gemini intermittently rejects the pair
+		// with a 400. Exploration rounds therefore use tool_choice "auto" without JSON mode
+		// (a direct answer is parsed leniently), and every request that withholds the tool
+		// asks for JSON: no topic candidates, cap reached, exploration exhausted, or a retry
+		// after an exploration round answered with unparseable text.
 		switch {
 		case forcedFinal:
 			// MaxToolCalls limits exploration, not synthesis. The final request
@@ -482,10 +490,8 @@ func (r *Reranker) rerank(
 			// Nothing for get_topics_content to load (only people/artifacts).
 			requestTools = nil
 			responseFormat = llm.ResponseFormat{Type: "json_object"}
-		case iterations == 0:
-			toolChoice = "auto"
 		default:
-			responseFormat = llm.ResponseFormat{Type: "json_object"}
+			toolChoice = "auto"
 		}
 		toolsOffered := requestTools != nil
 
@@ -705,6 +711,16 @@ func (r *Reranker) rerank(
 		// relevant" (respected, same as the post-tool-call path). Only an
 		// unparseable response falls back.
 		result, err := parseResponse(choice.Message.Content, logger)
+		if err != nil && toolsOffered {
+			// An exploration round is not in JSON mode, so the model may answer
+			// in prose (sometimes it answers the user's question instead of
+			// selecting). Ask once more in JSON mode without tools; the prose
+			// stays out of the transcript so it isn't continued.
+			logger.Info("reranker answered without JSON, retrying in JSON mode",
+				"error", err, "tool_calls", iterations)
+			jsonRetry = true
+			continue
+		}
 		if err != nil {
 			logger.Warn("failed to parse reranker response", "error", err, "content", choice.Message.Content)
 			tr.fallbackReason = "parse_error"

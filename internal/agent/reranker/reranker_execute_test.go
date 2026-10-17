@@ -1253,9 +1253,12 @@ func TestRerank_ProtocolViolation_NoToolCallFirstTurn(t *testing.T) {
 		{TopicID: 2, Score: 0.8, Topic: mockTopic(2, "Topic 2")},
 	}
 
-	// No tool call, directly text response
-	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
-		Return(makeChatResponse("Here are the relevant topics..."), nil).Once()
+	// Prose instead of JSON in the exploration round, and again in the JSON-mode retry.
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
+		return req.Tools != nil && req.ResponseFormat == nil
+	})).Return(makeChatResponse("Here are the relevant topics..."), nil).Once()
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(isJSONRetry(2))).
+		Return(makeChatResponse("Still prose"), nil).Once()
 
 	req := &agent.Request{
 		Params: map[string]any{
@@ -1271,8 +1274,53 @@ func TestRerank_ProtocolViolation_NoToolCallFirstTurn(t *testing.T) {
 
 	require.NoError(t, err)
 	result := resp.Structured.(*Result)
-	// Should fallback to vector top
+	// Both attempts unparseable: fall back to vector top.
 	assert.Equal(t, []int64{1, 2}, result.TopicIDs())
+	assert.Equal(t, "parse_error", resp.Metadata["fallback_reason"])
+	mockClient.AssertExpectations(t)
+}
+
+// isJSONRetry matches the retry after an exploration round answered with
+// unparseable text: JSON mode, no tools, and the prose kept out of the transcript.
+func isJSONRetry(messages int) func(llm.ChatCompletionRequest) bool {
+	return func(req llm.ChatCompletionRequest) bool {
+		format, ok := req.ResponseFormat.(llm.ResponseFormat)
+		return req.Tools == nil && req.ToolChoice == nil && ok && format.Type == "json_object" && len(req.Messages) == messages
+	}
+}
+
+// TestRerank_ProseAnswerRetriedInJSONMode verifies that an exploration round
+// answered in prose is retried once in JSON mode and the retried selection is used.
+func TestRerank_ProseAnswerRetriedInJSONMode(t *testing.T) {
+	mockClient := &testutil.MockLLMClient{}
+	cfg := testConfig()
+	reranker := New(mockClient, cfg, testutil.TestLogger(), testutil.TestTranslator(t), &testutil.MockStorage{}, nil)
+
+	candidates := []Candidate{
+		{TopicID: 1, Score: 0.9, Topic: mockTopic(1, "Topic 1")},
+		{TopicID: 2, Score: 0.8, Topic: mockTopic(2, "Topic 2")},
+	}
+
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
+		return req.Tools != nil && req.ResponseFormat == nil
+	})).Return(makeChatResponse("Here is the answer to your question about the weather."), nil).Once()
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(isJSONRetry(2))).
+		Return(makeFinalJSONResponse(`{"topic_ids":[{"id":"Topic:2","reason":"relevant"}],"people_ids":[],"artifact_ids":[]}`), nil).Once()
+
+	resp, err := reranker.Execute(context.Background(), &agent.Request{
+		Params: map[string]any{
+			ParamCandidates:          candidates,
+			ParamContextualizedQuery: "test query",
+			ParamOriginalQuery:       "original",
+			ParamCurrentMessages:     "recent messages",
+		},
+		Shared: &agent.SharedContext{UserID: "123"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []int64{2}, resp.Structured.(*Result).TopicIDs())
+	assert.Empty(t, resp.Metadata["fallback_reason"])
+	mockClient.AssertExpectations(t)
 }
 
 // TestRerank_ParseError_InvalidJSON verifies fallback on invalid JSON.
@@ -1292,8 +1340,11 @@ func TestRerank_ParseError_InvalidJSON(t *testing.T) {
 		Return(makeToolCallResponse("get_topics_content", `{"topic_ids": [1]}`), nil).Once()
 	mockStorage.On("GetMessagesByTopicID", mock.Anything, int64(1)).
 		Return(mockMessagesForTopic(1), nil).Once()
-	// Invalid JSON response
-	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
+	// Invalid JSON in the exploration round, and again in the JSON-mode retry.
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
+		return req.Tools != nil && req.ResponseFormat == nil && len(req.Messages) == 4
+	})).Return(makeFinalJSONResponse(`{not valid json}`), nil).Once()
+	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(isJSONRetry(4))).
 		Return(makeFinalJSONResponse(`{not valid json}`), nil).Once()
 
 	req := &agent.Request{
@@ -1312,6 +1363,7 @@ func TestRerank_ParseError_InvalidJSON(t *testing.T) {
 	result := resp.Structured.(*Result)
 	// Should fallback to requested IDs (1)
 	assert.Equal(t, []int64{1}, result.TopicIDs())
+	mockClient.AssertExpectations(t)
 }
 
 // TestRerank_AllHallucinated_ReturnsEmpty verifies that when the model
@@ -1854,7 +1906,8 @@ func TestRerank_EmptyExplorationRoundFinalizesNext(t *testing.T) {
 }
 
 // TestRerank_ValidExplorationRoundKeepsTools is the control: a round that did
-// load candidate content keeps the tool available for the next round.
+// load candidate content keeps the tool available for the next round, without
+// JSON mode (tools and json_object are never sent together).
 func TestRerank_ValidExplorationRoundKeepsTools(t *testing.T) {
 	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
@@ -1872,8 +1925,7 @@ func TestRerank_ValidExplorationRoundKeepsTools(t *testing.T) {
 		return req.Tools != nil && len(req.Messages) == 2
 	})).Return(makeToolCallsResponse(makeToolCall("real_round", "get_topics_content", `{"topic_ids":[1001]}`)), nil).Once()
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
-		format, ok := req.ResponseFormat.(llm.ResponseFormat)
-		return req.Tools != nil && ok && format.Type == "json_object" && len(req.Messages) == 4
+		return req.Tools != nil && req.ToolChoice == "auto" && req.ResponseFormat == nil && len(req.Messages) == 4
 	})).Return(makeFinalJSONResponse(`{"topic_ids":[{"id":"Topic:1001","reason":"read it"}],"people_ids":[],"artifact_ids":[]}`), nil).Once()
 
 	resp, err := reranker.Execute(context.Background(), &agent.Request{
