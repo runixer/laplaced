@@ -111,6 +111,14 @@ agents:
     # it has gathered (one extra LLM turn without tools). Each turn re-sends
     # the whole context, so this cap bounds the worst-case cost of a reply.
     max_tool_iterations: 5
+    # Per-user chat settings, matched by transport-native sender id (Telegram
+    # numeric id or Mattermost user id). First matching entry wins; empty
+    # fields inherit the values above. An override also wins over the
+    # LAPLACED_AGENTS_CHAT_MODEL env var.
+    # user_overrides:
+    #   - user_ids: ["123456789"]
+    #     model: "google/gemini-4-argon"
+    #     thinking_level: "auto"
 
   # Archivist - extracts facts and people from conversations
   archivist:

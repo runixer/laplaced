@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -144,6 +145,28 @@ type ChatAgentConfig struct {
 	AgentConfig       `yaml:",inline"`
 	ThinkingLevel     string `yaml:"thinking_level" env:"LAPLACED_AGENTS_CHAT_THINKING_LEVEL"`
 	MaxToolIterations int    `yaml:"max_tool_iterations" env:"LAPLACED_AGENTS_CHAT_MAX_TOOL_ITERATIONS"`
+
+	// UserOverrides route specific users to a different chat model and/or
+	// thinking level. The first entry listing the sender's native id wins;
+	// empty fields inherit the global chat settings.
+	UserOverrides []ChatUserOverride `yaml:"user_overrides"`
+}
+
+// ChatUserOverride assigns chat settings to a set of users. UserIDs are
+// transport-native sender ids (a Telegram numeric id, a Mattermost user id),
+// not internal scope ids, so the operator can copy them from logs as-is.
+type ChatUserOverride struct {
+	UserIDs       []string `yaml:"user_ids"`
+	Model         string   `yaml:"model"`
+	ThinkingLevel string   `yaml:"thinking_level"`
+}
+
+// ChatSettings is the resolved chat model and thinking level for one turn.
+type ChatSettings struct {
+	Model         string
+	ThinkingLevel string
+	// Overridden is true when a user override matched the sender.
+	Overridden bool
 }
 
 // validThinkingLevels are the accepted thinking_level values for all agents.
@@ -434,6 +457,31 @@ func (a *AgentsConfig) GetChatThinkingLevel() string {
 		return a.Chat.ThinkingLevel
 	}
 	return "low"
+}
+
+// ChatSettingsFor resolves the chat model and thinking level for a sender.
+// A matching user override is the most specific setting and wins over the
+// global chat model from either source (LAPLACED_AGENTS_CHAT_MODEL or
+// agents.chat.model).
+func (a *AgentsConfig) ChatSettingsFor(nativeUserID string) ChatSettings {
+	s := ChatSettings{Model: a.GetChatModel(), ThinkingLevel: a.GetChatThinkingLevel()}
+	if nativeUserID == "" {
+		return s
+	}
+	for _, o := range a.Chat.UserOverrides {
+		if !slices.Contains(o.UserIDs, nativeUserID) {
+			continue
+		}
+		s.Overridden = true
+		if o.Model != "" {
+			s.Model = o.Model
+		}
+		if o.ThinkingLevel != "" {
+			s.ThinkingLevel = o.ThinkingLevel
+		}
+		return s
+	}
+	return s
 }
 
 // ArtifactsConfig defines configuration for the artifacts system (v0.6.0).

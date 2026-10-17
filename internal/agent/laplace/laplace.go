@@ -90,6 +90,28 @@ func (l *Laplace) Type() agent.AgentType {
 	return agent.TypeLaplace
 }
 
+// resolveChatSettings fills the request's unset chat fields from the global
+// config, so callers that don't resolve per-sender settings keep the default.
+func (l *Laplace) resolveChatSettings(req *Request) config.ChatSettings {
+	chat := req.Chat
+	if chat.Model == "" {
+		chat.Model = l.cfg.Agents.GetChatModel()
+	}
+	if chat.ThinkingLevel == "" {
+		chat.ThinkingLevel = l.cfg.Agents.GetChatThinkingLevel()
+	}
+	return chat
+}
+
+// loggedModel is the model recorded in agent_logs: the one the turn used,
+// or the global chat model for responses built outside Execute.
+func (l *Laplace) loggedModel(resp *Response) string {
+	if resp != nil && resp.Model != "" {
+		return resp.Model
+	}
+	return l.cfg.Agents.GetChatModel()
+}
+
 // Execute runs the main chat loop with tool calls.
 func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHandler) (resp *Response, err error) {
 	logger := l.logger.With("user_id", req.UserID)
@@ -99,9 +121,13 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 	// pipeline boundary. Pre-this commit they hung directly off bot.process-
 	// MessageGroup which made it hard to tell laplace turns from enricher /
 	// reranker calls in TraceQL.
+	chat := l.resolveChatSettings(req)
 	ctx, span := otel.Tracer("github.com/runixer/laplaced/internal/agent/laplace").Start(
 		ctx, "laplace.Execute",
-		trace.WithAttributes(attribute.String("user.id", string(req.UserID))),
+		trace.WithAttributes(
+			attribute.String("user.id", string(req.UserID)),
+			attribute.Bool("laplace.chat_override", chat.Overridden),
+		),
 	)
 	// Captured by the deferred closure for span attrs. tool/llm counters
 	// live with the existing tracker; we copy at end-of-turn into attrs.
@@ -112,6 +138,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 		llmCalls := 0
 		costUSD := 0.0
 		if resp != nil {
+			resp.Model = chat.Model
 			llmCalls = resp.TotalTurns
 			if resp.TotalCost != nil {
 				costUSD = *resp.TotalCost
@@ -130,7 +157,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 		// generated artifacts (LLM failure mid-loop).
 		if err != nil && l.agentLogger != nil {
 			l.agentLogger.LogError(ctx, req.UserID, agentlog.AgentLaplace, "", nil,
-				err.Error(), l.cfg.Agents.GetChatModel(),
+				err.Error(), chat.Model,
 				int(time.Since(execStart).Milliseconds()), nil)
 		}
 		_ = obs.ObserveErr(span, err)
@@ -189,7 +216,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 	// Explicit reasoning.effort prevents Gemini 3.1 Pro from leaking internal
 	// chain-of-thought into message.content (see docs/bugs/2026-04-22-laplace-thought-leak/).
 	// "auto" omits the field, letting Gemini pick its own thinking budget.
-	reasoning := llm.ReasoningFor(l.cfg.Agents.GetChatThinkingLevel())
+	reasoning := llm.ReasoningFor(chat.ThinkingLevel)
 
 	// Tool loop
 	tracker := agentlog.NewTurnTracker()
@@ -231,7 +258,7 @@ func (l *Laplace) Execute(ctx context.Context, req *Request, toolHandler ToolHan
 
 		contextData.TokenEstimates.FinalTotal = llm.EstimateMessagesTokens(orMessages)
 		orReq := llm.ChatCompletionRequest{
-			Model:     l.cfg.Agents.GetChatModel(),
+			Model:     chat.Model,
 			Messages:  orMessages,
 			Plugins:   plugins,
 			Tools:     requestTools,
@@ -837,7 +864,7 @@ func (l *Laplace) LogExecution(ctx context.Context, userID storage.ScopeID, resp
 		InputContext:      firstRequest,
 		OutputResponse:    resp.Content,
 		OutputContext:     lastResponse,
-		Model:             l.cfg.Agents.Chat.GetModel(l.cfg.Agents.Default.Model),
+		Model:             l.loggedModel(resp),
 		PromptTokens:      resp.PromptTokens,
 		CompletionTokens:  resp.CompletionTokens,
 		TotalCost:         &cost,

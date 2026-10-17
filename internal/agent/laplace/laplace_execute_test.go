@@ -548,6 +548,68 @@ func TestExecute_HappyPath(t *testing.T) {
 	_ = translator
 }
 
+// TestExecute_ChatSettings verifies the per-request chat settings reach the
+// LLM request and the response, and that unset fields use the global config.
+func TestExecute_ChatSettings(t *testing.T) {
+	tests := []struct {
+		name          string
+		chat          config.ChatSettings
+		wantModel     func(cfg *config.Config) string
+		wantReasoning func(cfg *config.Config) *llm.ReasoningConfig
+	}{
+		{
+			name:          "override model and thinking level",
+			chat:          config.ChatSettings{Model: "override-model", ThinkingLevel: "high", Overridden: true},
+			wantModel:     func(*config.Config) string { return "override-model" },
+			wantReasoning: func(*config.Config) *llm.ReasoningConfig { return &llm.ReasoningConfig{Effort: "high"} },
+		},
+		{
+			name:          "thinking only keeps global model",
+			chat:          config.ChatSettings{ThinkingLevel: "auto", Overridden: true},
+			wantModel:     func(cfg *config.Config) string { return cfg.Agents.GetChatModel() },
+			wantReasoning: func(*config.Config) *llm.ReasoningConfig { return nil },
+		},
+		{
+			name:      "empty settings use global config",
+			wantModel: func(cfg *config.Config) string { return cfg.Agents.GetChatModel() },
+			wantReasoning: func(cfg *config.Config) *llm.ReasoningConfig {
+				return llm.ReasoningFor(cfg.Agents.GetChatThinkingLevel())
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, _, agent, mockStore, mockORClient, handler := setupExecuteTest(t)
+
+			userID := storage.ScopeID("123")
+			req := &Request{
+				UserID:              userID,
+				RawQuery:            "Hello",
+				HistoryContent:      "Hello",
+				CurrentMessageParts: []interface{}{llm.TextPart{Type: "text", Text: "Hello"}},
+				Chat:                tt.chat,
+			}
+			wantModel := tt.wantModel(cfg)
+			wantReasoning := tt.wantReasoning(cfg)
+			require.NotEqual(t, "override-model", cfg.Agents.GetChatModel())
+
+			mockStore.On("GetUnprocessedMessages", userID).Return([]storage.Message{}, nil)
+			mockStore.On("GetFacts", userID).Return([]storage.Fact{}, nil)
+			mockORClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(r llm.ChatCompletionRequest) bool {
+				return r.Model == wantModel && assert.ObjectsAreEqual(wantReasoning, r.Reasoning)
+			})).Return(makeChatResponse("Hi", WithTokens(1, 1, 2)), nil)
+
+			resp, err := agent.Execute(context.Background(), req, handler)
+			require.NoError(t, err)
+			assert.Equal(t, wantModel, resp.Model)
+
+			mockStore.AssertExpectations(t)
+			mockORClient.AssertExpectations(t)
+		})
+	}
+}
+
 // TestExecute_WithToolCall tests execution with a tool call.
 func TestExecute_WithToolCall(t *testing.T) {
 	cfg, translator, agent, mockStore, mockORClient, handler := setupExecuteTest(t)
