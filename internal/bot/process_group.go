@@ -525,6 +525,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 	// exhausted path which is also the error path. Sanitized / echo do
 	// require non-empty content; their guards handle the no-op cases.
 	recordLaplaceAnomalies(span, resp, lastMsg.Text, hasCurrentMedia)
+	recordVoiceQuoteAnomaly(span, resp.Content, currentSpeechSeconds(allProcessedFiles))
 
 	// Check for partial execution error (e.g., max retries reached)
 	if resp.Error != nil {

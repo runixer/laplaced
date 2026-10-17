@@ -544,7 +544,7 @@ func (p *Processor) processData(
 		return &ProcessedFile{
 			LLMParts: []interface{}{p.mediaPart("photo.jpg", "image/jpeg", base64Data)},
 			FileType: FileTypePhoto, FileID: f.SourceID, MimeType: "image/jpeg",
-			Size: int64(len(data)), Duration: duration, ArtifactID: artifactID,
+			Size: int64(len(data)), Duration: duration, MediaSeconds: f.Duration, ArtifactID: artifactID,
 			Ordinal: f.Ordinal, BlockPath: f.BlockPath, Origin: f.Origin, FileUniqueID: f.FileUniqueID,
 		}, nil
 
@@ -553,7 +553,7 @@ func (p *Processor) processData(
 		return &ProcessedFile{
 			LLMParts: []interface{}{p.mediaPart(f.FileName, f.MIME, base64Data)},
 			FileType: FileTypeImage, FileID: f.SourceID, FileName: f.FileName, MimeType: f.MIME,
-			Size: int64(len(data)), Duration: duration, ArtifactID: artifactID,
+			Size: int64(len(data)), Duration: duration, MediaSeconds: f.Duration, ArtifactID: artifactID,
 			Ordinal: f.Ordinal, BlockPath: f.BlockPath, Origin: f.Origin, FileUniqueID: f.FileUniqueID,
 		}, nil
 
@@ -562,7 +562,7 @@ func (p *Processor) processData(
 		return &ProcessedFile{
 			LLMParts: []interface{}{p.mediaPart(f.FileName, "application/pdf", base64Data)},
 			FileType: FileTypePDF, FileID: f.SourceID, FileName: f.FileName, MimeType: "application/pdf",
-			Size: int64(len(data)), Duration: duration, ArtifactID: artifactID,
+			Size: int64(len(data)), Duration: duration, MediaSeconds: f.Duration, ArtifactID: artifactID,
 			Ordinal: f.Ordinal, BlockPath: f.BlockPath, Origin: f.Origin, FileUniqueID: f.FileUniqueID,
 		}, nil
 
@@ -571,7 +571,7 @@ func (p *Processor) processData(
 		return &ProcessedFile{
 			LLMParts: []interface{}{p.mediaPart(f.FileName, f.MIME, base64Data)},
 			FileType: f.Kind, FileID: f.SourceID, FileName: f.FileName, MimeType: f.MIME,
-			Size: int64(len(data)), Duration: duration, ArtifactID: artifactID,
+			Size: int64(len(data)), Duration: duration, MediaSeconds: f.Duration, ArtifactID: artifactID,
 			Ordinal: f.Ordinal, BlockPath: f.BlockPath, Origin: f.Origin, FileUniqueID: f.FileUniqueID,
 		}, nil
 
@@ -580,7 +580,7 @@ func (p *Processor) processData(
 		return &ProcessedFile{
 			LLMParts: []interface{}{p.mediaPart(f.FileName, "video/mp4", base64Data)},
 			FileType: FileTypeVideoNote, FileID: f.SourceID, FileName: f.FileName, MimeType: "video/mp4",
-			Size: int64(len(data)), Duration: duration, ArtifactID: artifactID,
+			Size: int64(len(data)), Duration: duration, MediaSeconds: f.Duration, ArtifactID: artifactID,
 			Ordinal: f.Ordinal, BlockPath: f.BlockPath, Origin: f.Origin, FileUniqueID: f.FileUniqueID,
 		}, nil
 
@@ -594,7 +594,7 @@ func (p *Processor) processData(
 			LLMParts:    []interface{}{p.mediaPart("voice.ogg", mimeType, base64Data)},
 			Instruction: p.translator.Get(p.language, "bot.voice_instruction"),
 			FileType:    FileTypeVoice, FileID: f.SourceID, MimeType: mimeType,
-			Size: int64(len(data)), Duration: duration, ArtifactID: artifactID,
+			Size: int64(len(data)), Duration: duration, MediaSeconds: f.Duration, ArtifactID: artifactID,
 			Ordinal: f.Ordinal, BlockPath: f.BlockPath, Origin: f.Origin, FileUniqueID: f.FileUniqueID,
 		}, nil
 
@@ -607,7 +607,7 @@ func (p *Processor) processData(
 		return &ProcessedFile{
 			LLMParts: []interface{}{p.mediaPart(f.FileName, mimeType, base64Data)},
 			FileType: FileTypeAudio, FileID: f.SourceID, FileName: f.FileName, MimeType: mimeType,
-			Size: int64(len(data)), Duration: duration, ArtifactID: artifactID,
+			Size: int64(len(data)), Duration: duration, MediaSeconds: f.Duration, ArtifactID: artifactID,
 			Ordinal: f.Ordinal, BlockPath: f.BlockPath, Origin: f.Origin, FileUniqueID: f.FileUniqueID,
 		}, nil
 
@@ -620,7 +620,7 @@ func (p *Processor) processData(
 		return &ProcessedFile{
 			LLMParts: []interface{}{llm.TextPart{Type: "text", Text: textContent}},
 			FileType: FileTypeDocument, FileID: f.SourceID, FileName: f.FileName, MimeType: f.MIME,
-			Size: int64(len(data)), Duration: duration, ArtifactID: artifactID,
+			Size: int64(len(data)), Duration: duration, MediaSeconds: f.Duration, ArtifactID: artifactID,
 			Ordinal: f.Ordinal, BlockPath: f.BlockPath, Origin: f.Origin, FileUniqueID: f.FileUniqueID,
 		}, nil
 	}
