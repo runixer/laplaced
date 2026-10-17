@@ -205,6 +205,38 @@ func (c *Config) validateAgents() []error {
 	if c.Agents.Chat.ThinkingLevel != "" && !validThinkingLevels[c.Agents.Chat.ThinkingLevel] {
 		errs = append(errs, fmt.Errorf("agents.chat.thinking_level: must be one of 'auto', 'off', 'minimal', 'low', 'medium', 'high', got %q", c.Agents.Chat.ThinkingLevel))
 	}
+	errs = append(errs, validateChatUserOverrides(c.Agents.Chat.UserOverrides)...)
+	return errs
+}
+
+// validateChatUserOverrides rejects overrides that would silently do nothing
+// or shadow each other: an id listed twice only ever matches its first entry.
+func validateChatUserOverrides(overrides []ChatUserOverride) []error {
+	var errs []error
+	seen := make(map[string]int)
+	for i, o := range overrides {
+		field := fmt.Sprintf("agents.chat.user_overrides[%d]", i)
+		if len(o.UserIDs) == 0 {
+			errs = append(errs, fmt.Errorf("%s.user_ids: must not be empty", field))
+		}
+		if o.Model == "" && o.ThinkingLevel == "" {
+			errs = append(errs, fmt.Errorf("%s: set model and/or thinking_level", field))
+		}
+		if o.ThinkingLevel != "" && !validThinkingLevels[o.ThinkingLevel] {
+			errs = append(errs, fmt.Errorf("%s.thinking_level: must be one of 'auto', 'off', 'minimal', 'low', 'medium', 'high', got %q", field, o.ThinkingLevel))
+		}
+		for _, id := range o.UserIDs {
+			if strings.TrimSpace(id) != id || id == "" {
+				errs = append(errs, fmt.Errorf("%s.user_ids: invalid id %q", field, id))
+				continue
+			}
+			if prev, ok := seen[id]; ok {
+				errs = append(errs, fmt.Errorf("%s.user_ids: %q already listed in agents.chat.user_overrides[%d]", field, id, prev))
+				continue
+			}
+			seen[id] = i
+		}
+	}
 	return errs
 }
 

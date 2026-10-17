@@ -473,6 +473,7 @@ func (b *Bot) processMessageGroup(ctx context.Context, group *MessageGroup) {
 		ReplyToMsgID:        path.tgReplyID,
 		UseStreaming:        path.usesStreaming(),
 		RichOutput:          richOutput,
+		Chat:                b.cfg.Agents.ChatSettingsFor(lastMsg.SenderID),
 		TrustedArtifactIDs:  trustedArtifactIDs,
 		OnIntermediateMessage: func(text string) {
 			if path.usesRichDraft() {

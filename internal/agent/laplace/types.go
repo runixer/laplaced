@@ -6,6 +6,7 @@ import (
 
 	"github.com/runixer/laplaced/internal/agentlog"
 	"github.com/runixer/laplaced/internal/artifactdelivery"
+	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/llm"
 	"github.com/runixer/laplaced/internal/rag"
 	"github.com/runixer/laplaced/internal/storage"
@@ -36,6 +37,11 @@ type Request struct {
 	// Telegram Rich Message delivery. It is per-turn (canary-aware), not a
 	// process-wide transport capability; shadow/off turns keep legacy guidance.
 	RichOutput bool
+
+	// Chat is the per-sender model and thinking level resolved by the caller
+	// (see config.AgentsConfig.ChatSettingsFor). Empty fields fall back to the
+	// global chat settings.
+	Chat config.ChatSettings
 
 	// TrustedArtifactIDs are app-resolved artifacts attached to the current
 	// message. They are never inferred from user-authored text. Execute combines
@@ -78,6 +84,9 @@ type Response struct {
 	// Error (non-nil if execution failed after partial completion)
 	// When set, Content may be empty or partial, but other fields (tokens, timing, turns) are valid
 	Error error
+
+	// Model is the chat model this turn actually used.
+	Model string
 
 	// Token usage
 	PromptTokens     int

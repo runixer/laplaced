@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `agents.chat.user_overrides` lets the operator give specific users a different chat model or thinking level.
+
 ### Changed
 - Built with Go 1.27; all dependencies updated to their latest releases.
 
