@@ -184,6 +184,53 @@ func salvageStragglers(topics []ExtractedTopic, stragglerIDs []int64) []Extracte
 	return topics
 }
 
+// resolveOverlaps makes topic ranges disjoint. The splitter sometimes returns
+// overlapping topics, e.g. one topic spanning the whole chunk plus finer ones
+// inside it. Every saved topic re-points history.topic_id over its range, so
+// the last write wins and the earlier topics end up with no messages: they
+// keep an embedding and surface in retrieval as empty candidates.
+//
+// Topics are ordered by start, the wider one first on a tie. A topic fully
+// inside an earlier one is dropped; a partial overlap is trimmed off the later
+// topic's start. Dropping the inner topic rather than the outer one never
+// lowers coverage, so it cannot push a chunk under the salvage threshold.
+// Trimmed ranges are re-fitted to the chunk's real message IDs; a topic left
+// with no messages is dropped.
+func resolveOverlaps(chunk []storage.Message, topics []ExtractedTopic) (out []ExtractedTopic, dropped, trimmed int) {
+	sorted := append([]ExtractedTopic(nil), topics...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if sorted[i].StartMsgID != sorted[j].StartMsgID {
+			return sorted[i].StartMsgID < sorted[j].StartMsgID
+		}
+		return sorted[i].EndMsgID > sorted[j].EndMsgID
+	})
+	lastEnd := int64(-1)
+	for _, t := range sorted {
+		if len(out) > 0 && t.EndMsgID <= lastEnd {
+			dropped++
+			continue
+		}
+		if len(out) > 0 && t.StartMsgID <= lastEnd {
+			t.StartMsgID = lastEnd + 1
+			var inRange []storage.Message
+			for _, msg := range chunk {
+				if msg.ID >= t.StartMsgID && msg.ID <= t.EndMsgID {
+					inRange = append(inRange, msg)
+				}
+			}
+			if len(inRange) == 0 {
+				dropped++
+				continue
+			}
+			t.StartMsgID, t.EndMsgID = findChunkBounds(inRange)
+			trimmed++
+		}
+		out = append(out, t)
+		lastEnd = t.EndMsgID
+	}
+	return out, dropped, trimmed
+}
+
 // resolveStragglers applies the coverage gate shared by both chunk-processing
 // paths: it records coverage telemetry, fails the chunk for retry when the
 // splitter covered too little of it to trust the segmentation, and otherwise
@@ -339,6 +386,19 @@ func (s *Service) processChunkCore(ctx context.Context, userID storage.ScopeID, 
 		// Update IDs to match actual messages found to ensure AddTopic updates them
 		t.StartMsgID, t.EndMsgID = findChunkBounds(foundMessages)
 		validTopics = append(validTopics, t)
+	}
+
+	// Overlapping ranges would leave earlier topics without messages.
+	validTopics, overlapDropped, overlapTrimmed := resolveOverlaps(chunk, validTopics)
+	if overlapDropped > 0 || overlapTrimmed > 0 {
+		s.logger.Warn("splitter returned overlapping topics",
+			"user_id", userID, "dropped", overlapDropped, "trimmed", overlapTrimmed)
+		if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
+			span.SetAttributes(
+				attribute.Int("splitter.overlap_dropped", overlapDropped),
+				attribute.Int("splitter.overlap_trimmed", overlapTrimmed),
+			)
+		}
 	}
 
 	// Check for stragglers — messages the splitter left out of every topic.
