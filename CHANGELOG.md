@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Built with Go 1.27; all dependencies updated to their latest releases.
 
+### Fixed
+- S3 artifact storage now uses path-style addressing, so it works with self-hosted S3-compatible gateways (MinIO, versitygw and the like) that have no per-bucket DNS names; existing Yandex Object Storage setups keep working.
+
 ## [0.11.1] - 2026-09-19
 
 ### Fixed
