@@ -896,7 +896,7 @@ func TestRoutesVerification(t *testing.T) {
 
 	// Clean up - context cancel will stop server
 	cancel()
-	<-errCh
+	assert.NoError(t, <-errCh)
 }
 
 // TestNewServer_DefaultConfig tests server creation with default config.

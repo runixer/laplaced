@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  GO_VERSION: '1.26'
+  GO_VERSION: '1.27'
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
@@ -62,7 +62,7 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
         with:
           # golangci-lint v2.x; config migrated to v2 schema in same PR
-          version: v2.11.4
+          version: v2.15.0
           args: --timeout=5m
 
   test:

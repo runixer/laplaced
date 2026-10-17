@@ -191,7 +191,7 @@ func serializeJSON(v interface{}) string {
 	// Check for nil pointer wrapped in interface{}
 	// This is needed because a nil pointer converted to interface{} is NOT nil
 	rv := reflect.ValueOf(v)
-	if rv.Kind() == reflect.Ptr && rv.IsNil() {
+	if rv.Kind() == reflect.Pointer && rv.IsNil() {
 		return ""
 	}
 
