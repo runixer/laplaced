@@ -82,7 +82,8 @@ func ParseMemoryOpParams(params map[string]interface{}) (MemoryOpParams, error) 
 	}
 
 	p := MemoryOpParams{
-		Action:   action,
+		// Models occasionally pad or capitalize the action (" update", "Update").
+		Action:   strings.ToLower(strings.TrimSpace(action)),
 		Content:  "",
 		Category: "",
 		FactType: "",

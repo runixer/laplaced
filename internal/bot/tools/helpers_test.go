@@ -292,6 +292,20 @@ func TestParseMemoryOpParams(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "padded and capitalized action is normalized",
+			input: map[string]interface{}{
+				"action":  " Update ",
+				"fact_id": "Fact:7",
+				"content": "Normalized",
+			},
+			want: MemoryOpParams{
+				Action:  "update",
+				Content: "Normalized",
+				FactID:  7,
+			},
+			wantErr: false,
+		},
+		{
 			name: "minimal add operation",
 			input: map[string]interface{}{
 				"action":  "add",

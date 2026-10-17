@@ -613,3 +613,21 @@ func TestPerformManagePeople_UpdateCompositeNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found")
 	mockStore.AssertExpectations(t)
 }
+
+// TestPerformManagePeople_OperationNormalized verifies that a padded,
+// capitalized operation reaches its branch instead of "unknown operation".
+func TestPerformManagePeople_OperationNormalized(t *testing.T) {
+	mockStore := new(testutil.MockStorage)
+	mockORClient := new(testutil.MockLLMClient)
+
+	exec := NewToolExecutor(mockORClient, mockStore, mockStore, testutil.TestConfig(), testutil.TestLogger())
+	exec.SetPeopleRepository(mockStore)
+
+	_, err := exec.performManagePeople(context.Background(), "123", map[string]interface{}{
+		"query": `{"operation":" Delete "}`,
+	})
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "required for delete operation")
+	assert.NotContains(t, err.Error(), "unknown operation")
+}
