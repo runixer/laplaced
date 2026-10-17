@@ -92,6 +92,7 @@ func TestProcessor_ProcessMessage_Voice(t *testing.T) {
 	assert.Equal(t, "voice-456", files[0].FileID)
 	assert.Equal(t, "audio/ogg", files[0].MimeType)
 	assert.Equal(t, "Listen to the voice message and respond.", files[0].Instruction)
+	assert.Equal(t, 10, files[0].MediaSeconds, "declared voice length is kept for the transcript check")
 	mockDownloader.AssertExpectations(t)
 }
 

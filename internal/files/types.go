@@ -51,6 +51,10 @@ type ProcessedFile struct {
 	// Duration is the download time (for metrics)
 	Duration time.Duration
 
+	// MediaSeconds is the playback length the transport declared for audio
+	// and video (voice, audio, video notes, videos); 0 when unknown or not media.
+	MediaSeconds int
+
 	// ArtifactID is the ID of the saved artifact (nil if not saved or disabled)
 	ArtifactID *int64
 

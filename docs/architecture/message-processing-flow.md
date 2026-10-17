@@ -402,6 +402,7 @@ rich drafts. Незакрытый Markdown автозакрывается на �
 | `bot.anomaly.echo_user_message` | Gemini-style degenerate echo: completion дословно совпадает с последним user-сообщением (≥30 символов, после strip'а voice-quote). Сопровождается `bot.anomaly.echo_output_tokens`. |
 | `bot.anomaly.fabricated_url` | Модель вставила ссылку, чей URL не вернул ни один поиск этого хода; citation guard развернул её в обычный текст. Сопровождается `bot.anomaly.fabricated_url_count` и событием `bot.anomaly.fabricated_urls` (список URL, гейтится `trace_content`). |
 | `bot.anomaly.safety_blocked` | Провайдер отклонил запрос по контент-политике (Gemini `PROHIBITED_CONTENT`/`RECITATION` и т.п. — класс `safety`). Юзеру отправлен `bot.safety_blocked` вместо молчания. Ставится на корневом спане (низкоуровневый `error.upstream_kind="safety"` уже есть на `llm.CreateChatCompletion`); приложенные файлы видно в событии `laplace.media_parts`. |
+| `bot.anomaly.voice_quote_overlong` | В цитате расшифровки (`> 🎤 …`) больше слов, чем помещается в приложенное аудио: больше `4 × секунды + 8` при длительности, которую сообщил транспорт. Честная очищенная речь — до ~3 слов/с, так что это признак, что модель не расслышала голосовое и сочинила цитату. Сопровождается `bot.anomaly.voice_quote_words` и `bot.anomaly.voice_seconds`. Ловит только раздутые выдумки; выдуманная цитата правдоподобной длины так не видна. |
 
 ## Ключевые паттерны
 
