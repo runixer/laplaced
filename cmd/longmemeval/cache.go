@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -129,19 +130,33 @@ func (c *ingestionCache) key(eval evalCase, sessions []datedSession, mode string
 	return hex.EncodeToString(sum[:]), nil
 }
 
+// openRoot confines every cache file operation to the cache directory, so a
+// key can never address a path outside it.
+func (c *ingestionCache) openRoot() (*os.Root, error) {
+	root, err := os.OpenRoot(c.dir)
+	if err != nil {
+		return nil, fmt.Errorf("open cache directory: %w", err)
+	}
+	return root, nil
+}
+
 func (c *ingestionCache) materialize(key, destination string) (ingestionSnapshot, bool, error) {
 	if c == nil {
 		return ingestionSnapshot{}, false, nil
 	}
-	source := filepath.Join(c.dir, key+".db")
-	metadataPath := filepath.Join(c.dir, key+".json")
-	if _, err := os.Stat(source); err != nil {
+	root, err := c.openRoot()
+	if err != nil {
+		return ingestionSnapshot{}, false, err
+	}
+	defer root.Close()
+	source := key + ".db"
+	if _, err := root.Stat(source); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return ingestionSnapshot{}, false, nil
 		}
 		return ingestionSnapshot{}, false, fmt.Errorf("stat ingestion cache: %w", err)
 	}
-	metadata, err := os.ReadFile(metadataPath)
+	metadata, err := root.ReadFile(key + ".json")
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return ingestionSnapshot{}, false, nil
@@ -152,7 +167,7 @@ func (c *ingestionCache) materialize(key, destination string) (ingestionSnapshot
 	if err := json.Unmarshal(metadata, &snapshot); err != nil {
 		return ingestionSnapshot{}, false, nil
 	}
-	if err := copyFile(source, destination, 0o600); err != nil {
+	if err := copyFromRoot(root, source, destination, 0o600); err != nil {
 		return ingestionSnapshot{}, false, fmt.Errorf("materialize ingestion cache: %w", err)
 	}
 	return snapshot, true, nil
@@ -162,19 +177,24 @@ func (c *ingestionCache) publish(ctx context.Context, key, source string, snapsh
 	if c == nil {
 		return nil
 	}
-	finalPath := filepath.Join(c.dir, key+".db")
-	metadataPath := filepath.Join(c.dir, key+".json")
-	lockPath := filepath.Join(c.dir, key+".lock")
+	root, err := c.openRoot()
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	finalName := key + ".db"
+	metadataName := key + ".json"
+	lockName := key + ".lock"
 	for {
-		err := os.Mkdir(lockPath, 0o700)
+		err := root.Mkdir(lockName, 0o700)
 		if err == nil {
 			break
 		}
 		if !errors.Is(err, os.ErrExist) {
 			return fmt.Errorf("acquire ingestion cache lock: %w", err)
 		}
-		if _, statErr := os.Stat(finalPath); statErr == nil {
-			if _, metadataErr := os.Stat(metadataPath); metadataErr == nil {
+		if _, statErr := root.Stat(finalName); statErr == nil {
+			if _, metadataErr := root.Stat(metadataName); metadataErr == nil {
 				return nil
 			}
 		}
@@ -184,22 +204,21 @@ func (c *ingestionCache) publish(ctx context.Context, key, source string, snapsh
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
-	defer os.Remove(lockPath)
-	if _, err := os.Stat(finalPath); err == nil {
-		if _, metadataErr := os.Stat(metadataPath); metadataErr == nil {
+	defer func() { _ = root.Remove(lockName) }()
+	if _, err := root.Stat(finalName); err == nil {
+		if _, metadataErr := root.Stat(metadataName); metadataErr == nil {
 			return nil
 		}
-		_ = os.Remove(finalPath)
+		_ = root.Remove(finalName)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("stat ingestion cache destination: %w", err)
 	}
 
-	staging, err := os.CreateTemp(c.dir, "."+key+"-*.tmp")
+	staging, stagingName, err := createStaging(root, "."+key+"-%s.tmp")
 	if err != nil {
 		return fmt.Errorf("create ingestion cache staging file: %w", err)
 	}
-	stagingPath := staging.Name()
-	defer os.Remove(stagingPath)
+	defer func() { _ = root.Remove(stagingName) }()
 	input, err := os.Open(source)
 	if err != nil {
 		_ = staging.Close()
@@ -221,22 +240,21 @@ func (c *ingestionCache) publish(ctx context.Context, key, source string, snapsh
 	if closeErr != nil {
 		return fmt.Errorf("close ingestion cache: %w", closeErr)
 	}
-	if err := os.Rename(stagingPath, finalPath); err != nil {
+	if err := root.Rename(stagingName, finalName); err != nil {
 		return fmt.Errorf("publish ingestion cache: %w", err)
 	}
-	if err := os.Chmod(finalPath, 0o400); err != nil {
+	if err := root.Chmod(finalName, 0o400); err != nil {
 		return fmt.Errorf("protect ingestion cache: %w", err)
 	}
 	metadata, err := json.Marshal(snapshot)
 	if err != nil {
 		return fmt.Errorf("encode ingestion cache metadata: %w", err)
 	}
-	metadataStaging, err := os.CreateTemp(c.dir, "."+key+"-*.json.tmp")
+	metadataStaging, metadataStagingName, err := createStaging(root, "."+key+"-%s.json.tmp")
 	if err != nil {
 		return fmt.Errorf("create ingestion metadata staging file: %w", err)
 	}
-	metadataStagingPath := metadataStaging.Name()
-	defer os.Remove(metadataStagingPath)
+	defer func() { _ = root.Remove(metadataStagingName) }()
 	if _, err := metadataStaging.Write(metadata); err != nil {
 		_ = metadataStaging.Close()
 		return fmt.Errorf("write ingestion cache metadata: %w", err)
@@ -248,17 +266,32 @@ func (c *ingestionCache) publish(ctx context.Context, key, source string, snapsh
 	if err := metadataStaging.Close(); err != nil {
 		return fmt.Errorf("close ingestion cache metadata: %w", err)
 	}
-	if err := os.Rename(metadataStagingPath, metadataPath); err != nil {
+	if err := root.Rename(metadataStagingName, metadataName); err != nil {
 		return fmt.Errorf("publish ingestion cache metadata: %w", err)
 	}
-	if err := os.Chmod(metadataPath, 0o400); err != nil {
+	if err := root.Chmod(metadataName, 0o400); err != nil {
 		return fmt.Errorf("protect ingestion cache metadata: %w", err)
 	}
 	return nil
 }
 
-func copyFile(source, destination string, mode os.FileMode) error {
-	input, err := os.Open(source)
+// createStaging creates a uniquely named file inside root; os.Root has no
+// CreateTemp. pattern must contain one %s for the random part.
+func createStaging(root *os.Root, pattern string) (*os.File, string, error) {
+	var suffix [8]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return nil, "", err
+	}
+	name := fmt.Sprintf(pattern, hex.EncodeToString(suffix[:]))
+	f, err := root.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return nil, "", err
+	}
+	return f, name, nil
+}
+
+func copyFromRoot(root *os.Root, source, destination string, mode os.FileMode) error {
+	input, err := root.Open(source)
 	if err != nil {
 		return err
 	}
