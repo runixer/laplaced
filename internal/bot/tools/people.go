@@ -28,6 +28,8 @@ func (e *ToolExecutor) performManagePeople(ctx context.Context, userID storage.S
 	}
 
 	operation, _ := params["operation"].(string)
+	// Models occasionally pad or capitalize the operation (" update", "Update").
+	operation = strings.ToLower(strings.TrimSpace(operation))
 	name, _ := params["name"].(string)
 
 	switch operation {
