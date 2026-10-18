@@ -31,10 +31,10 @@ flowchart TB
         A[LLM Response - Markdown]
     end
 
-    subgraph goldmark["Goldmark Parser"]
-        B[Lexer → AST]
-        C[GFM Extension - strikethrough, tables]
-        D[Spoiler Extension - custom spoiler syntax]
+    subgraph goldmark["Goldmark v2 Parser"]
+        B[Lexer → AST, escapes/entities decoded]
+        C[GFM Parser - strikethrough, tables, tasks, linkify]
+        D[Spoiler inline parser - custom spoiler syntax]
     end
 
     subgraph renderer["TelegramHTMLRenderer"]
@@ -48,13 +48,7 @@ flowchart TB
         E8["||spoiler|| → &lt;tg-spoiler&gt;"]
         E9["- item → • item (эмуляция)"]
         E10["| table | → &lt;pre&gt; monospace"]
-    end
-
-    subgraph postprocess["Постобработка"]
-        F1["&lt;del&gt; → &lt;s&gt;"]
-        F2["&lt;strong&gt; → &lt;b&gt;"]
-        F3["&lt;em&gt; → &lt;i&gt;"]
-        F4["checkbox → ☑/☐"]
+        E11["- [x] task → ☑/☐"]
     end
 
     subgraph output["Выход"]
@@ -63,8 +57,7 @@ flowchart TB
 
     input --> goldmark
     goldmark --> renderer
-    renderer --> postprocess
-    postprocess --> output
+    renderer --> output
 ```
 
 ### Структура файлов
@@ -104,26 +97,26 @@ internal/markdown/
 
 **Проблема:** Стандартный HTML рендерер Goldmark генерирует `<p>`, `<ul>`, `<ol>` — теги, которые Telegram не поддерживает.
 
-**Решение:** `TelegramHTMLRenderer` переопределяет рендеринг для каждого типа AST-узла:
+**Решение:** `TelegramHTMLRenderer` (и `richHTMLRenderer` для Rich Messages) сам рендерит
+каждый поддерживаемый тип AST-узла. Используется не `html.New()` из goldmark v2, а голый
+`renderer.Helper` (`internal/markdown/goldmark.go`): у него нет стандартных HTML-рендереров,
+поэтому узел без зарегистрированного рендерера выводит только своих детей и не может
+«провалиться» в стандартный HTML.
 
 ```go
-type TelegramHTMLRenderer struct {
-    ghtml.Config
-    // Table rendering state
-    tableData   [][]string
-    currentRow  []string
-    currentCell *bytes.Buffer
-    alignments  []extast.Alignment
-}
-
-func (r *TelegramHTMLRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
-    reg.Register(ast.KindHeading, r.renderHeading)      // → <b>
-    reg.Register(ast.KindList, r.renderList)            // → bullets
-    reg.Register(ast.KindBlockquote, r.renderBlockquote) // → <blockquote>
-    reg.Register(extast.KindTable, r.renderTable)       // → <pre> monospace
-    // ... 20+ handlers
+func (r *TelegramHTMLRenderer) nodeRenderers() nodeRenderers {
+    return nodeRenderers{
+        ast.KindHeading:    adapt(r.renderHeading),    // → <b>
+        ast.KindList:       adapt(r.renderList),       // → bullets
+        ast.KindBlockquote: adapt(r.renderBlockquote), // → <blockquote>
+        extast.KindTable:   adapt(r.renderTable),      // → <pre> vertical
+        // ... 20+ handlers
+    }
 }
 ```
+
+Goldmark v2 декодирует экранирование (`\*`) и HTML-сущности (`&amp;`) ещё при парсинге,
+поэтому рендереры пишут готовое значение `text.Value` и только экранируют HTML.
 
 ### 3. Таблицы в вертикальном формате
 
@@ -148,17 +141,9 @@ Age : 25
 </pre>
 ```
 
-**Реализация:**
-```go
-func (r *TelegramHTMLRenderer) renderTable(w util.BufWriter, source []byte, n ast.Node, entering bool) {
-    if entering {
-        r.tableData = [][]string{}  // Накапливаем данные
-    } else {
-        tableText := formatTableVertical(r.tableData)  // Рендерим
-        w.WriteString("<pre>" + tableText + "</pre>")
-    }
-}
-```
+**Реализация:** строки (`TableHeader`, `TableRow`) накапливаются, содержимое каждой ячейки
+рендерится теми же рендерерами и сводится к видимому тексту, а на выходе из `Table`
+пишется `formatTableVertical(rows)`.
 
 ### 4. Кастомное расширение для спойлеров
 
@@ -187,8 +172,8 @@ func (s *spoilerParser) Parse(...) ast.Node {
     }
 }
 
-// Рендерер
-func (r *SpoilerHTMLRenderer) renderSpoiler(...) {
+// Рендерер (метод TelegramHTMLRenderer / richHTMLRenderer)
+func (r *TelegramHTMLRenderer) renderSpoiler(...) {
     if entering {
         w.WriteString("<tg-spoiler>")
     } else {
@@ -213,24 +198,11 @@ func UTF16Length(s string) int {
 - После конвертации в HTML проверяется UTF-16 длина
 - Если > 4096, дополнительное разбиение (редкий случай)
 
-### 6. Постобработка для совместимости
+### 6. GFM-узлы без постобработки
 
-**Проблема:** GFM генерирует некоторые теги, которые Telegram не понимает.
-
-**Решение:** Замена после рендеринга:
-```go
-// GFM strikethrough → Telegram strikethrough
-result = strings.ReplaceAll(result, "<del>", "<s>")
-result = strings.ReplaceAll(result, "</del>", "</s>")
-
-// Semantic tags → presentation tags
-result = strings.ReplaceAll(result, "<strong>", "<b>")
-result = strings.ReplaceAll(result, "<em>", "<i>")
-
-// GFM task lists → Unicode checkboxes
-result = strings.ReplaceAll(result, `<input checked="" ...>`, "☑")
-result = strings.ReplaceAll(result, `<input disabled="" ...>`, "☐")
-```
+Зачёркивание (`<s>`), задачи (`☑`/`☐` в начале первого абзаца пункта — статус хранится
+атрибутом на `ListItem`) и таблицы рендерятся собственными рендерерами. Строковой
+постобработки HTML-вывода нет.
 
 ### 7. Raw HTML пропускается
 
@@ -247,12 +219,12 @@ func (r *TelegramHTMLRenderer) renderHTMLBlock(...) {
 
 | Markdown | AST Node | Telegram HTML |
 |----------|----------|---------------|
-| `**bold**` | Emphasis(2) | `<b>bold</b>` |
-| `*italic*` | Emphasis(1) | `<i>italic</i>` |
+| `**bold**` | Strong | `<b>bold</b>` |
+| `*italic*` | Emphasis | `<i>italic</i>` |
 | `~~strike~~` | Strikethrough | `<s>strike</s>` |
 | двойные `||` | SpoilerNode | `<tg-spoiler>spoiler</tg-spoiler>` |
 | `` `code` `` | CodeSpan | `<code>code</code>` |
-| ` ```lang ` | FencedCodeBlock | `<pre><code class="language-lang">` |
+| ` ```lang ` | CodeBlock (fenced) | `<pre><code class="language-lang">` |
 | `[text](url)` | Link | `<a href="url">text</a>` |
 | `> quote` | Blockquote | `<blockquote>quote</blockquote>` |
 | `# Heading` | Heading | `<b>Heading</b>` |
@@ -362,10 +334,10 @@ func (r *TelegramHTMLRenderer) renderBlockquote(...) {
 - Показывать какой язык определён
 - Предупреждать если язык не в [списке Telegram](https://github.com/TelegramMessenger/libprisma#supported-languages)
 
-### 3. ✅ Кэширование Goldmark Instance (РЕАЛИЗОВАНО v0.6.0)
+### 3. Кэширование парсера
 
-`goldmark.New()` теперь вызывается один раз при старте (singleton), а не при каждом `ToHTML()`.
-Уменьшило накладные расходы на ~10% по метрикам.
+Сейчас парсер goldmark создаётся на каждый вызов `ToHTML()` / `ToRichHTML()`. Его можно
+создавать один раз, если подтвердить потокобезопасность `parser.Parser.Parse`.
 
 ### 4. Поддержка Underline
 
@@ -373,7 +345,7 @@ Telegram поддерживает `<u>underline</u>`, но стандартны�
 ```go
 type UnderlineExtension struct{}
 
-func (e *UnderlineExtension) Extend(m goldmark.Markdown) {
+func (e *UnderlineExtension) ParserOptions(c *parser.Config) []parser.Option {
     // Парсер для __ ... __
 }
 ```

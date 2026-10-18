@@ -1,7 +1,6 @@
 package markdown
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	stdhtml "html"
@@ -11,15 +10,13 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/yuin/goldmark"
-	"github.com/yuin/goldmark/ast"
-	"github.com/yuin/goldmark/extension"
-	extast "github.com/yuin/goldmark/extension/ast"
-	"github.com/yuin/goldmark/parser"
-	"github.com/yuin/goldmark/renderer"
-	ghtml "github.com/yuin/goldmark/renderer/html"
-	"github.com/yuin/goldmark/text"
-	"github.com/yuin/goldmark/util"
+	"github.com/yuin/goldmark/v2/ast"
+	"github.com/yuin/goldmark/v2/extension"
+	extast "github.com/yuin/goldmark/v2/extension/ast"
+	"github.com/yuin/goldmark/v2/parser"
+	ghtml "github.com/yuin/goldmark/v2/renderer/html"
+	"github.com/yuin/goldmark/v2/text"
+	"github.com/yuin/goldmark/v2/util"
 )
 
 // RichStats describes the Telegram rich-message limits represented by a
@@ -104,13 +101,18 @@ type richMathNode struct {
 
 var kindRichMath = ast.NewNodeKind("RichMath")
 
-func (n *richMathNode) Kind() ast.NodeKind { return kindRichMath }
-func (n *richMathNode) Inline()            {}
+func newRichMathNode(content string, display bool) *richMathNode {
+	n := &richMathNode{content: content, display: display}
+	n.Init(n)
+	return n
+}
 
-func (n *richMathNode) Dump(source []byte, level int) {
-	ast.DumpHelper(n, source, level, map[string]string{
-		"Display": strconv.FormatBool(n.display),
-	}, nil)
+func (n *richMathNode) Kind() ast.NodeKind { return kindRichMath }
+
+func (n *richMathNode) Dump(_ []byte) *ast.NodeDump {
+	return ast.NewNodeDump(n, map[string]any{
+		"Display": n.display,
+	})
 }
 
 // richMathParser reuses the established LaTeX delimiter/currency matchers from
@@ -144,7 +146,7 @@ func (p *richMathParser) Parse(parent ast.Node, block text.Reader, pc parser.Con
 			return nil
 		}
 		block.Advance(len(raw))
-		return &richMathNode{content: content, display: true}
+		return newRichMathNode(content, true)
 	}
 	if line[0] != '$' {
 		return nil
@@ -156,7 +158,7 @@ func (p *richMathParser) Parse(parent ast.Node, block text.Reader, pc parser.Con
 			return nil
 		}
 		block.Advance(len(raw))
-		return &richMathNode{content: content}
+		return newRichMathNode(content, false)
 	}
 	return nil
 }
@@ -182,53 +184,49 @@ func richReaderRemainder(reader text.Reader) string {
 }
 
 type richHTMLRenderer struct {
-	writer        ghtml.Writer
 	stats         RichStats
 	depth         int
 	suppressLinks bool
 }
 
 func newRichHTMLRenderer() *richHTMLRenderer {
-	return &richHTMLRenderer{writer: ghtml.NewWriter()}
+	return &richHTMLRenderer{}
 }
 
 func newRichHTMLPreviewRenderer() *richHTMLRenderer {
-	return &richHTMLRenderer{
-		writer:        ghtml.NewWriter(),
-		suppressLinks: true,
-	}
+	return &richHTMLRenderer{suppressLinks: true}
 }
 
-func (r *richHTMLRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
-	reg.Register(ast.KindDocument, r.renderDocument)
-	reg.Register(ast.KindHeading, r.renderHeading)
-	reg.Register(ast.KindBlockquote, r.renderBlockquote)
-	reg.Register(ast.KindCodeBlock, r.renderCodeBlock)
-	reg.Register(ast.KindFencedCodeBlock, r.renderFencedCodeBlock)
-	reg.Register(ast.KindHTMLBlock, r.renderHTMLBlock)
-	reg.Register(ast.KindList, r.renderList)
-	reg.Register(ast.KindListItem, r.renderListItem)
-	reg.Register(ast.KindParagraph, r.renderParagraph)
-	reg.Register(ast.KindTextBlock, r.renderTextBlock)
-	reg.Register(ast.KindThematicBreak, r.renderThematicBreak)
+// nodeRenderers registers the strict allowlist. Kinds without an entry (the
+// document, table bodies, link reference definitions) only render children.
+func (r *richHTMLRenderer) nodeRenderers() nodeRenderers {
+	return nodeRenderers{
+		ast.KindHeading:       adapt(r.renderHeading),
+		ast.KindBlockquote:    adapt(r.renderBlockquote),
+		ast.KindCodeBlock:     adapt(r.renderCodeBlock),
+		ast.KindHTMLBlock:     adapt(r.renderHTMLBlock),
+		ast.KindList:          adapt(r.renderList),
+		ast.KindListItem:      adapt(r.renderListItem),
+		ast.KindParagraph:     adapt(r.renderParagraph),
+		ast.KindThematicBreak: adapt(r.renderThematicBreak),
 
-	reg.Register(ast.KindAutoLink, r.renderAutoLink)
-	reg.Register(ast.KindCodeSpan, r.renderCodeSpan)
-	reg.Register(ast.KindEmphasis, r.renderEmphasis)
-	reg.Register(ast.KindImage, r.renderImage)
-	reg.Register(ast.KindLink, r.renderLink)
-	reg.Register(ast.KindRawHTML, r.renderRawHTML)
-	reg.Register(ast.KindText, r.renderText)
-	reg.Register(ast.KindString, r.renderString)
+		ast.KindAutoLink: adapt(r.renderAutoLink),
+		ast.KindCodeSpan: adapt(r.renderCodeSpan),
+		ast.KindEmphasis: adapt(r.renderEmphasis),
+		ast.KindStrong:   adapt(r.renderStrong),
+		ast.KindImage:    adapt(r.renderImage),
+		ast.KindLink:     adapt(r.renderLink),
+		ast.KindRawHTML:  adapt(r.renderRawHTML),
+		ast.KindText:     adapt(r.renderText),
 
-	reg.Register(extast.KindStrikethrough, r.renderStrikethrough)
-	reg.Register(extast.KindTaskCheckBox, r.renderTaskCheckBox)
-	reg.Register(extast.KindTable, r.renderTable)
-	reg.Register(extast.KindTableHeader, r.renderTableHeader)
-	reg.Register(extast.KindTableRow, r.renderTableRow)
-	reg.Register(extast.KindTableCell, r.renderTableCell)
-	reg.Register(KindSpoiler, r.renderSpoiler)
-	reg.Register(kindRichMath, r.renderMath)
+		extast.KindStrikethrough: adapt(r.renderStrikethrough),
+		extast.KindTable:         adapt(r.renderTable),
+		extast.KindTableHeader:   adapt(r.renderTableHeader),
+		extast.KindTableRow:      adapt(r.renderTableRow),
+		extast.KindTableCell:     adapt(r.renderTableCell),
+		KindSpoiler:              adapt(r.renderSpoiler),
+		kindRichMath:             adapt(r.renderMath),
+	}
 }
 
 func (r *richHTMLRenderer) open(w util.BufWriter, tag string) {
@@ -270,28 +268,19 @@ func (r *richHTMLRenderer) leaf(w util.BufWriter, value string) {
 
 func (r *richHTMLRenderer) block() { r.stats.Blocks++ }
 
-func (r *richHTMLRenderer) writeText(w util.BufWriter, value []byte, raw bool) {
-	var escaped bytes.Buffer
-	escapedWriter := bufio.NewWriter(&escaped)
-	if raw {
-		r.writer.RawWrite(escapedWriter, value)
-	} else {
-		r.writer.Write(escapedWriter, value)
-	}
-	_ = escapedWriter.Flush()
-	rendered := escaped.String()
-	_, _ = w.WriteString(rendered)
-	r.stats.Characters += utf8.RuneCountInString(stdhtml.UnescapeString(rendered))
+// writeText escapes an already decoded text value. Goldmark resolves
+// backslash escapes and entity references while parsing, so the value is
+// written verbatim apart from HTML escaping.
+func (r *richHTMLRenderer) writeText(w util.BufWriter, value string) {
+	rendered := util.EscapeHTML([]byte(value))
+	_, _ = w.Write(rendered)
+	r.stats.Characters += utf8.RuneCountInString(stdhtml.UnescapeString(string(rendered)))
 }
 
 func (r *richHTMLRenderer) writeCode(w util.BufWriter, value []byte) {
 	rendered := stdhtml.EscapeString(string(value))
 	_, _ = w.WriteString(rendered)
 	r.stats.Characters += utf8.RuneCount(value)
-}
-
-func (r *richHTMLRenderer) renderDocument(util.BufWriter, []byte, ast.Node, bool) (ast.WalkStatus, error) {
-	return ast.WalkContinue, nil
 }
 
 func (r *richHTMLRenderer) renderHeading(w util.BufWriter, _ []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
@@ -319,51 +308,31 @@ func (r *richHTMLRenderer) renderCodeBlock(w util.BufWriter, source []byte, node
 	if !entering {
 		return ast.WalkContinue, nil
 	}
+	codeBlock := node.(*ast.CodeBlock)
 	r.block()
 	r.open(w, "pre")
-	r.open(w, "code")
-	lines := node.Lines()
-	for i := 0; i < lines.Len(); i++ {
-		line := lines.At(i)
-		r.writeCode(w, line.Value(source))
-	}
-	r.close(w, "code")
-	r.close(w, "pre")
-	return ast.WalkSkipChildren, nil
-}
-
-func (r *richHTMLRenderer) renderFencedCodeBlock(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
-	if !entering {
-		return ast.WalkContinue, nil
-	}
-	r.block()
-	r.open(w, "pre")
-	language := safeCodeLanguage(node.(*ast.FencedCodeBlock).Language(source))
-	if language == "" {
+	language, _ := codeBlock.Language(source)
+	if language = safeCodeLanguage(language); language == "" {
 		r.open(w, "code")
 	} else {
 		r.openAttrs(w, "code", ` class="language-`+stdhtml.EscapeString(language)+`"`)
 	}
-	lines := node.Lines()
-	for i := 0; i < lines.Len(); i++ {
-		line := lines.At(i)
-		r.writeCode(w, line.Value(source))
-	}
+	r.writeCode(w, codeBlock.Value.Bytes(source))
 	r.close(w, "code")
 	r.close(w, "pre")
 	return ast.WalkSkipChildren, nil
 }
 
-func safeCodeLanguage(language []byte) string {
-	if len(language) == 0 || len(language) > 32 {
+func safeCodeLanguage(language string) string {
+	if language == "" || len(language) > 32 {
 		return ""
 	}
-	for _, c := range string(language) {
+	for _, c := range language {
 		if !unicode.IsLetter(c) && !unicode.IsDigit(c) && c != '_' && c != '+' && c != '-' {
 			return ""
 		}
 	}
-	return string(language)
+	return language
 }
 
 func (r *richHTMLRenderer) renderHTMLBlock(util.BufWriter, []byte, ast.Node, bool) (ast.WalkStatus, error) {
@@ -402,12 +371,17 @@ func (r *richHTMLRenderer) renderListItem(w util.BufWriter, _ []byte, _ ast.Node
 func (r *richHTMLRenderer) renderParagraph(w util.BufWriter, _ []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
 	// A direct display formula is a block. Avoid invalid <p><tg-math-block>
 	// nesting; mixed text becomes implicit rich text around the formula block.
-	if paragraphHasDisplayMath(node) {
+	// Paragraphs of tight list items stay implicit text, like HTML renders them.
+	if paragraphHasDisplayMath(node) || ghtml.IsInTightBlock(node) {
+		if entering {
+			r.renderTaskCheckBox(w, node)
+		}
 		return ast.WalkContinue, nil
 	}
 	if entering {
 		r.block()
 		r.open(w, "p")
+		r.renderTaskCheckBox(w, node)
 	} else {
 		r.close(w, "p")
 	}
@@ -423,10 +397,6 @@ func paragraphHasDisplayMath(node ast.Node) bool {
 	return false
 }
 
-func (r *richHTMLRenderer) renderTextBlock(util.BufWriter, []byte, ast.Node, bool) (ast.WalkStatus, error) {
-	return ast.WalkContinue, nil
-}
-
 func (r *richHTMLRenderer) renderThematicBreak(w util.BufWriter, _ []byte, _ ast.Node, entering bool) (ast.WalkStatus, error) {
 	if entering {
 		r.block()
@@ -440,17 +410,15 @@ func (r *richHTMLRenderer) renderAutoLink(w util.BufWriter, source []byte, node 
 		return ast.WalkContinue, nil
 	}
 	n := node.(*ast.AutoLink)
-	href := string(n.URL(source))
-	if n.AutoLinkType == ast.AutoLinkEmail && !strings.HasPrefix(strings.ToLower(href), "mailto:") {
-		href = "mailto:" + href
-	}
-	label := n.Label(source)
+	// Email autolinks already carry the mailto: scheme in Destination.
+	href := n.Destination.Value(source)
+	label := n.Label.Value(source)
 	if !r.suppressLinks && safeRichURL(href) {
 		r.openAttrs(w, "a", ` href="`+stdhtml.EscapeString(href)+`"`)
-		r.writeText(w, label, true)
+		r.writeText(w, label)
 		r.close(w, "a")
 	} else {
-		r.writeText(w, label, true)
+		r.writeText(w, label)
 	}
 	return ast.WalkSkipChildren, nil
 }
@@ -459,30 +427,27 @@ func (r *richHTMLRenderer) renderCodeSpan(w util.BufWriter, source []byte, node 
 	if !entering {
 		return ast.WalkContinue, nil
 	}
+	// Goldmark already folds code span line endings into spaces.
 	r.open(w, "code")
-	for child := node.FirstChild(); child != nil; child = child.NextSibling() {
-		segment := child.(*ast.Text).Segment
-		value := segment.Value(source)
-		if bytes.HasSuffix(value, []byte("\n")) {
-			r.writeCode(w, value[:len(value)-1])
-			r.writeCode(w, []byte(" "))
-		} else {
-			r.writeCode(w, value)
-		}
-	}
+	r.writeCode(w, []byte(node.(*ast.CodeSpan).Value.Value(source)))
 	r.close(w, "code")
 	return ast.WalkSkipChildren, nil
 }
 
-func (r *richHTMLRenderer) renderEmphasis(w util.BufWriter, _ []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
-	tag := "em"
-	if node.(*ast.Emphasis).Level == 2 {
-		tag = "strong"
-	}
+func (r *richHTMLRenderer) renderEmphasis(w util.BufWriter, _ []byte, _ ast.Node, entering bool) (ast.WalkStatus, error) {
 	if entering {
-		r.open(w, tag)
+		r.open(w, "em")
 	} else {
-		r.close(w, tag)
+		r.close(w, "em")
+	}
+	return ast.WalkContinue, nil
+}
+
+func (r *richHTMLRenderer) renderStrong(w util.BufWriter, _ []byte, _ ast.Node, entering bool) (ast.WalkStatus, error) {
+	if entering {
+		r.open(w, "strong")
+	} else {
+		r.close(w, "strong")
 	}
 	return ast.WalkContinue, nil
 }
@@ -493,8 +458,8 @@ func (r *richHTMLRenderer) renderImage(util.BufWriter, []byte, ast.Node, bool) (
 	return ast.WalkContinue, nil
 }
 
-func (r *richHTMLRenderer) renderLink(w util.BufWriter, _ []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
-	href := string(node.(*ast.Link).Destination)
+func (r *richHTMLRenderer) renderLink(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	href := node.(*ast.Link).Destination.Value(source)
 	if r.suppressLinks || !safeRichURL(href) {
 		// Preserve the label, discard the unsafe destination and wrapper.
 		return ast.WalkContinue, nil
@@ -564,21 +529,13 @@ func (r *richHTMLRenderer) renderText(w util.BufWriter, source []byte, node ast.
 		return ast.WalkContinue, nil
 	}
 	n := node.(*ast.Text)
-	r.writeText(w, n.Segment.Value(source), n.IsRaw())
+	r.writeText(w, n.Value.Value(source))
 	if n.HardLineBreak() {
 		r.leaf(w, "<br>")
 		r.stats.Characters++
 	} else if n.SoftLineBreak() {
 		_, _ = w.WriteString("\n")
 		r.stats.Characters++
-	}
-	return ast.WalkContinue, nil
-}
-
-func (r *richHTMLRenderer) renderString(w util.BufWriter, _ []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
-	if entering {
-		n := node.(*ast.String)
-		r.writeText(w, n.Value, n.IsRaw())
 	}
 	return ast.WalkContinue, nil
 }
@@ -592,23 +549,36 @@ func (r *richHTMLRenderer) renderStrikethrough(w util.BufWriter, _ []byte, _ ast
 	return ast.WalkContinue, nil
 }
 
-func (r *richHTMLRenderer) renderTaskCheckBox(w util.BufWriter, _ []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
-	if !entering {
-		return ast.WalkContinue, nil
-	}
-	if node.(*extast.TaskCheckBox).IsChecked {
+// renderTaskCheckBox emits the checkbox of a GFM task item. Goldmark keeps
+// the task state on the list item; the checkbox opens its first paragraph.
+func (r *richHTMLRenderer) renderTaskCheckBox(w util.BufWriter, paragraph ast.Node) {
+	switch taskStatus(paragraph) {
+	case extension.TaskStatusCompleted:
 		r.leaf(w, `<input type="checkbox" checked>`)
-	} else {
+	case extension.TaskStatusActive:
 		r.leaf(w, `<input type="checkbox">`)
 	}
-	return ast.WalkContinue, nil
+}
+
+// taskStatus returns the task state rendered at the start of paragraph, or ""
+// when paragraph does not open a task list item.
+func taskStatus(paragraph ast.Node) extension.TaskStatus {
+	item := paragraph.Parent()
+	if item == nil || item.FirstChild() != paragraph {
+		return ""
+	}
+	status, _ := extension.TaskStatusOf(item)
+	return status
 }
 
 func (r *richHTMLRenderer) renderTable(w util.BufWriter, _ []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
 	if entering {
 		r.block()
 		r.open(w, "table")
-		columns := len(node.(*extast.Table).Alignments)
+		columns := 0
+		if header := node.FirstChild(); header != nil && header.Kind() == extast.KindTableHeader {
+			columns = header.ChildCount()
+		}
 		if columns > r.stats.MaxTableColumns {
 			r.stats.MaxTableColumns = columns
 		}
@@ -715,32 +685,20 @@ func renderRichHTML(input string, richRenderer *richHTMLRenderer) (string, RichS
 	if !utf8.ValidString(input) {
 		return "", RichStats{}, fmt.Errorf("rich markdown is not valid UTF-8")
 	}
-	input = normalizeRichListBoundaries(input)
+	source := []byte(normalizeRichListBoundaries(input))
+	root := newRichMarkdownParser().Parse(source)
 
-	md := newRichMarkdown(richRenderer)
-
-	var out bytes.Buffer
-	if err := md.Convert([]byte(input), &out); err != nil {
+	out, err := renderNode(source, root, richRenderer.nodeRenderers())
+	if err != nil {
 		return "", RichStats{}, fmt.Errorf("render rich markdown: %w", err)
 	}
-	return out.String(), richRenderer.stats, nil
+	return out, richRenderer.stats, nil
 }
 
-func newRichMarkdown(richRenderer *richHTMLRenderer) goldmark.Markdown {
-	return goldmark.New(
-		goldmark.WithExtensions(extension.GFM),
-		goldmark.WithParserOptions(parser.WithInlineParsers(
-			util.Prioritized(&richMathParser{}, 50),
-			util.Prioritized(defaultSpoilerParser, 450),
-		)),
-		goldmark.WithRenderer(renderer.NewRenderer(
-			renderer.WithNodeRenderers(
-				// Goldmark registers node renderers from high to low priority;
-				// the lowest priority wins duplicate node kinds. Override GFM's
-				// table/task/strike HTML renderers with our strict allowlist.
-				util.Prioritized(richRenderer, 0),
-			),
-		)),
+func newRichMarkdownParser() parser.Parser {
+	return newMarkdownParser(
+		util.Prioritized[parser.InlineParser](&richMathParser{}, 50),
+		spoilerInlineParser(450),
 	)
 }
 
@@ -757,8 +715,7 @@ func ParseRichFragments(input string) (RichDocument, error) {
 
 	normalized := normalizeRichListBoundaries(input)
 	normalizedSource := []byte(normalized)
-	markdownParser := newRichMarkdown(newRichHTMLRenderer()).Parser()
-	root := markdownParser.Parse(text.NewReader(normalizedSource))
+	root := newRichMarkdownParser().Parse(normalizedSource)
 	if root.FirstChild() == nil {
 		return document, nil
 	}
@@ -828,14 +785,11 @@ func ParseRichFragments(input string) (RichDocument, error) {
 
 func renderRichFragmentNode(source []byte, node ast.Node) (string, RichStats, error) {
 	richRenderer := newRichHTMLRenderer()
-	nodeRenderer := renderer.NewRenderer(renderer.WithNodeRenderers(
-		util.Prioritized(richRenderer, 0),
-	))
-	var out bytes.Buffer
-	if err := nodeRenderer.Render(&out, source, node); err != nil {
+	out, err := renderNode(source, node, richRenderer.nodeRenderers())
+	if err != nil {
 		return "", RichStats{}, err
 	}
-	return out.String(), richRenderer.stats, nil
+	return out, richRenderer.stats, nil
 }
 
 func richFragmentKind(node ast.Node) RichFragmentKind {
@@ -846,7 +800,7 @@ func richFragmentKind(node ast.Node) RichFragmentKind {
 		return RichFragmentList
 	case extast.KindTable:
 		return RichFragmentTable
-	case ast.KindCodeBlock, ast.KindFencedCodeBlock:
+	case ast.KindCodeBlock:
 		return RichFragmentCode
 	case ast.KindBlockquote:
 		return RichFragmentBlockquote
@@ -888,10 +842,11 @@ func richBoundaryTextRanges(node ast.Node, offsetMap []int) ([]RichSourceRange, 
 	var ranges []RichSourceRange
 	for child := node.FirstChild(); child != nil; child = child.NextSibling() {
 		textNode, ok := child.(*ast.Text)
-		if !ok {
+		if !ok || textNode.Value.IsOwned() {
 			continue
 		}
-		start, end := textNode.Segment.Start, textNode.Segment.Stop
+		index := textNode.Value.Index()
+		start, end := index.Start, index.Stop
 		if start < 0 || end < start || start >= len(offsetMap) || end >= len(offsetMap) {
 			return nil, fmt.Errorf("boundary text range [%d,%d) exceeds normalized source", start, end)
 		}
@@ -909,15 +864,14 @@ func richBoundaryTextRanges(node ast.Node, offsetMap []int) ([]RichSourceRange, 
 func richTopLevelLineStart(node ast.Node, source []byte) (int, error) {
 	position := len(source)
 	if err := ast.Walk(node, func(current ast.Node, _ bool) (ast.WalkStatus, error) {
-		if pos := current.Pos(); pos >= 0 && pos < position {
+		// A table carved out of a paragraph ("text\n| a |\n|---|") keeps the
+		// paragraph's start as its own position; its rows carry the real one.
+		if pos := current.Pos(); pos >= 0 && pos < position && current.Kind() != extast.KindTable {
 			position = pos
 		}
-		if current.Type() == ast.TypeBlock {
-			lines := current.Lines()
-			for i := 0; i < lines.Len(); i++ {
-				if start := lines.At(i).Start; start >= 0 && start < position {
-					position = start
-				}
+		for _, segment := range richNodeSegments(current) {
+			if start := segment.Start; start >= 0 && start < position {
+				position = start
 			}
 		}
 		return ast.WalkContinue, nil
@@ -934,6 +888,21 @@ func richTopLevelLineStart(node ast.Node, source []byte) (int, error) {
 		return lineBreak + 1, nil
 	}
 	return 0, nil
+}
+
+// richNodeSegments returns the source lines owned by a block node. Code and
+// HTML blocks keep their content in Value rather than in BlockNode.Source.
+func richNodeSegments(node ast.Node) []text.Segment {
+	switch n := node.(type) {
+	case *ast.CodeBlock:
+		return n.Value.Segments()
+	case *ast.HTMLBlock:
+		return n.Value.Segments()
+	case ast.BlockNode:
+		return n.Source()
+	default:
+		return nil
+	}
 }
 
 // richNormalizedOffsetMap maps every byte boundary in normalized back to the

@@ -789,9 +789,11 @@ func TestThinSpace(t *testing.T) {
 			expected: "45 000 + 15 000", // thin space becomes regular space for readability
 		},
 		{
-			name:     "thin space in plain text (no dollar delimiters)",
-			input:    "Price: 100\\,000 rub",
-			expected: "Price: 100\\,000 rub", // unchanged - not inside $...$
+			name:  "thin space in plain text (no dollar delimiters)",
+			input: "Price: 100\\,000 rub",
+			// LaTeX is not converted outside $...$; Markdown then drops the
+			// backslash of the escaped punctuation, as CommonMark requires.
+			expected: "Price: 100,000 rub",
 		},
 		{
 			name:     "multiple thin spaces",
@@ -815,9 +817,11 @@ func TestPlainTextWithLatexCommands(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "thin space in plain text (no dollar signs)",
-			input:    "Price: 100\\,000 rub",
-			expected: "Price: 100\\,000 rub", // unchanged - no $...$ delimiters
+			name:  "thin space in plain text (no dollar signs)",
+			input: "Price: 100\\,000 rub",
+			// No $...$ delimiters, so no LaTeX conversion; Markdown still
+			// unescapes the punctuation.
+			expected: "Price: 100,000 rub",
 		},
 		{
 			name:     "thin space with dollar signs",

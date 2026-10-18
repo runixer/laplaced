@@ -5,99 +5,79 @@ import (
 	"errors"
 	"html"
 	"io"
-	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
 
-	"github.com/yuin/goldmark"
-	"github.com/yuin/goldmark/ast"
-	"github.com/yuin/goldmark/extension"
-	extast "github.com/yuin/goldmark/extension/ast"
-	"github.com/yuin/goldmark/renderer"
-	ghtml "github.com/yuin/goldmark/renderer/html"
-	"github.com/yuin/goldmark/util"
+	"github.com/yuin/goldmark/v2/ast"
+	"github.com/yuin/goldmark/v2/extension"
+	extast "github.com/yuin/goldmark/v2/extension/ast"
+	"github.com/yuin/goldmark/v2/renderer"
+	"github.com/yuin/goldmark/v2/util"
 	htmlparser "golang.org/x/net/html"
 )
 
 // TelegramHTMLRenderer is a custom renderer for Telegram HTML format
 type TelegramHTMLRenderer struct {
-	ghtml.Config
 	// safeLinks/preserveImageAlt are enabled only for the pre-rendered
 	// Rich-Message fallback. The ordinary legacy renderer stays byte-compatible.
 	safeLinks        bool
 	preserveImageAlt bool
-	// Table rendering state
-	tableData   [][]string
-	currentRow  []string
-	currentCell *bytes.Buffer
-	alignments  []extast.Alignment
+	// Table rendering state: plain-text cells of the rows seen so far.
+	tableRows  [][]string
+	currentRow []string
 }
 
 // NewTelegramHTMLRenderer creates a new TelegramHTMLRenderer
-func NewTelegramHTMLRenderer(opts ...ghtml.Option) renderer.NodeRenderer {
-	r := &TelegramHTMLRenderer{
-		Config: ghtml.NewConfig(),
-	}
-	for _, opt := range opts {
-		opt.SetHTMLOption(&r.Config)
-	}
-	return r
+func NewTelegramHTMLRenderer() *TelegramHTMLRenderer {
+	return &TelegramHTMLRenderer{}
 }
 
-func newSafeTelegramHTMLRenderer() renderer.NodeRenderer {
+func newSafeTelegramHTMLRenderer() *TelegramHTMLRenderer {
 	return &TelegramHTMLRenderer{
-		Config:           ghtml.NewConfig(),
 		safeLinks:        true,
 		preserveImageAlt: true,
 	}
 }
 
-// RegisterFuncs implements renderer.NodeRenderer.RegisterFuncs
-func (r *TelegramHTMLRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
-	// Block nodes
-	reg.Register(ast.KindDocument, r.renderDocument)
-	reg.Register(ast.KindHeading, r.renderHeading)
-	reg.Register(ast.KindBlockquote, r.renderBlockquote)
-	reg.Register(ast.KindCodeBlock, r.renderCodeBlock)
-	reg.Register(ast.KindFencedCodeBlock, r.renderFencedCodeBlock)
-	reg.Register(ast.KindHTMLBlock, r.renderHTMLBlock)
-	reg.Register(ast.KindList, r.renderList)
-	reg.Register(ast.KindListItem, r.renderListItem)
-	reg.Register(ast.KindParagraph, r.renderParagraph)
-	reg.Register(ast.KindTextBlock, r.renderTextBlock)
-	reg.Register(ast.KindThematicBreak, r.renderThematicBreak)
+// nodeRenderers returns the renderer for every supported node kind. Kinds
+// without an entry (the document, table bodies, link reference definitions)
+// only render their children.
+func (r *TelegramHTMLRenderer) nodeRenderers() nodeRenderers {
+	return nodeRenderers{
+		// Block nodes
+		ast.KindHeading:       adapt(r.renderHeading),
+		ast.KindBlockquote:    adapt(r.renderBlockquote),
+		ast.KindCodeBlock:     adapt(r.renderCodeBlock),
+		ast.KindHTMLBlock:     adapt(r.renderHTMLBlock),
+		ast.KindList:          adapt(r.renderList),
+		ast.KindListItem:      adapt(r.renderListItem),
+		ast.KindParagraph:     adapt(r.renderParagraph),
+		ast.KindThematicBreak: adapt(r.renderThematicBreak),
 
-	// Inline nodes
-	reg.Register(ast.KindAutoLink, r.renderAutoLink)
-	reg.Register(ast.KindCodeSpan, r.renderCodeSpan)
-	reg.Register(ast.KindEmphasis, r.renderEmphasis)
-	reg.Register(ast.KindImage, r.renderImage)
-	reg.Register(ast.KindLink, r.renderLink)
-	reg.Register(ast.KindRawHTML, r.renderRawHTML)
-	reg.Register(ast.KindText, r.renderText)
-	reg.Register(ast.KindString, r.renderString)
+		// Inline nodes
+		ast.KindAutoLink: adapt(r.renderAutoLink),
+		ast.KindCodeSpan: adapt(r.renderCodeSpan),
+		ast.KindEmphasis: adapt(r.renderEmphasis),
+		ast.KindStrong:   adapt(r.renderStrong),
+		ast.KindImage:    adapt(r.renderImage),
+		ast.KindLink:     adapt(r.renderLink),
+		ast.KindRawHTML:  adapt(r.renderRawHTML),
+		ast.KindText:     adapt(r.renderText),
+		KindSpoiler:      adapt(r.renderSpoiler),
 
-	// GFM extension nodes - strikethrough
-	// Note: extension.Strikethrough is the actual node type
-	strikethroughKind := ast.NewNodeKind("Strikethrough")
-	reg.Register(strikethroughKind, r.renderStrikethrough)
-
-	// GFM extension nodes - tables
-	reg.Register(extast.KindTable, r.renderTable)
-	reg.Register(extast.KindTableHeader, r.renderTableHeader)
-	reg.Register(extast.KindTableRow, r.renderTableRow)
-	reg.Register(extast.KindTableCell, r.renderTableCell)
+		// GFM extension nodes
+		extast.KindStrikethrough: adapt(r.renderStrikethrough),
+		extast.KindTable:         adapt(r.renderTable),
+		extast.KindTableHeader:   adapt(r.renderTableRow),
+		extast.KindTableRow:      adapt(r.renderTableRow),
+		extast.KindTableCell:     renderer.NodeRendererFunc(r.renderTableCell),
+	}
 }
 
 // Block renderers
-
-func (r *TelegramHTMLRenderer) renderDocument(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
-	// Document node doesn't need any output
-	return ast.WalkContinue, nil
-}
 
 func (r *TelegramHTMLRenderer) renderHeading(w util.BufWriter, source []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
 	// Telegram doesn't support headings, render as bold
@@ -130,42 +110,18 @@ func (r *TelegramHTMLRenderer) renderCodeBlock(w util.BufWriter, source []byte, 
 		if parent != nil && parent.Kind() != ast.KindDocument {
 			_, _ = w.WriteString("\n")
 		}
-		_, _ = w.WriteString("<pre><code>")
-		lines := n.Lines()
-		for i := 0; i < lines.Len(); i++ {
-			line := lines.At(i)
-			_, _ = w.Write(escapeHTML(line.Value(source)))
-		}
-		_, _ = w.WriteString("</code></pre>\n\n")
-	}
-	return ast.WalkSkipChildren, nil
-}
 
-func (r *TelegramHTMLRenderer) renderFencedCodeBlock(w util.BufWriter, source []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
-	if entering {
-		// Add newline before code block
-		parent := n.Parent()
-		if parent != nil && parent.Kind() != ast.KindDocument {
-			_, _ = w.WriteString("\n")
-		}
-		_, _ = w.WriteString("<pre>")
-
-		// Check for language
-		cb := n.(*ast.FencedCodeBlock)
-		language := cb.Language(source)
-		if language != nil {
-			_, _ = w.WriteString("<code class=\"language-")
-			_, _ = w.Write(escapeHTML(language))
+		// Check for language (fenced code blocks only)
+		cb := n.(*ast.CodeBlock)
+		if language, ok := cb.Language(source); ok {
+			_, _ = w.WriteString("<pre><code class=\"language-")
+			_, _ = w.WriteString(html.EscapeString(language))
 			_, _ = w.WriteString("\">")
 		} else {
-			_, _ = w.WriteString("<code>")
+			_, _ = w.WriteString("<pre><code>")
 		}
 
-		lines := n.Lines()
-		for i := 0; i < lines.Len(); i++ {
-			line := lines.At(i)
-			_, _ = w.Write(escapeHTML(line.Value(source)))
-		}
+		_, _ = w.Write(escapeHTML(cb.Value.Bytes(source)))
 		_, _ = w.WriteString("</code></pre>\n\n")
 	}
 	return ast.WalkSkipChildren, nil
@@ -218,7 +174,15 @@ func (r *TelegramHTMLRenderer) renderListItem(w util.BufWriter, source []byte, n
 
 func (r *TelegramHTMLRenderer) renderParagraph(w util.BufWriter, source []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
 	// Don't render <p> tags, just add newlines between paragraphs
-	if !entering {
+	if entering {
+		// Telegram has no checkboxes; a task item opens with a ballot box.
+		switch taskStatus(n) {
+		case extension.TaskStatusCompleted:
+			_, _ = w.WriteString("☑ ")
+		case extension.TaskStatusActive:
+			_, _ = w.WriteString("☐ ")
+		}
+	} else {
 		// Add newline after paragraph, but not if it's inside a list item or blockquote
 		parent := n.Parent()
 		if parent != nil && (parent.Kind() == ast.KindListItem || parent.Kind() == ast.KindBlockquote) {
@@ -229,19 +193,6 @@ func (r *TelegramHTMLRenderer) renderParagraph(w util.BufWriter, source []byte, 
 		if n.NextSibling() != nil {
 			_, _ = w.WriteString("\n\n")
 		}
-	}
-	return ast.WalkContinue, nil
-}
-
-func (r *TelegramHTMLRenderer) renderTextBlock(w util.BufWriter, source []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
-	if !entering {
-		// Don't add newline if TextBlock is inside a ListItem
-		parent := n.Parent()
-		if parent != nil && parent.Kind() == ast.KindListItem {
-			// ListItem will handle newlines
-			return ast.WalkContinue, nil
-		}
-		_, _ = w.WriteString("\n")
 	}
 	return ast.WalkContinue, nil
 }
@@ -258,11 +209,9 @@ func (r *TelegramHTMLRenderer) renderThematicBreak(w util.BufWriter, source []by
 func (r *TelegramHTMLRenderer) renderAutoLink(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
 	n := node.(*ast.AutoLink)
 	if entering {
-		href := string(n.URL(source))
-		if r.safeLinks && n.AutoLinkType == ast.AutoLinkEmail && !strings.HasPrefix(strings.ToLower(href), "mailto:") {
-			href = "mailto:" + href
-		}
-		label := n.Label(source)
+		// Email autolinks already carry the mailto: scheme in Destination.
+		href := n.Destination.Value(source)
+		label := []byte(n.Label.Value(source))
 		if r.safeLinks && !safeRichURL(href) {
 			_, _ = w.Write(escapeHTML(label))
 			return ast.WalkSkipChildren, nil
@@ -279,30 +228,26 @@ func (r *TelegramHTMLRenderer) renderAutoLink(w util.BufWriter, source []byte, n
 func (r *TelegramHTMLRenderer) renderCodeSpan(w util.BufWriter, source []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
 	if entering {
 		_, _ = w.WriteString("<code>")
-		for c := n.FirstChild(); c != nil; c = c.NextSibling() {
-			segment := c.(*ast.Text).Segment
-			value := segment.Value(source)
-			_, _ = w.Write(escapeHTML(value))
-		}
+		_, _ = w.WriteString(html.EscapeString(n.(*ast.CodeSpan).Value.Value(source)))
 		_, _ = w.WriteString("</code>")
 	}
 	return ast.WalkSkipChildren, nil
 }
 
 func (r *TelegramHTMLRenderer) renderEmphasis(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
-	n := node.(*ast.Emphasis)
-	tag := "i"
-	if n.Level == 2 {
-		tag = "b"
-	}
 	if entering {
-		_, _ = w.WriteString("<")
-		_, _ = w.WriteString(tag)
-		_, _ = w.WriteString(">")
+		_, _ = w.WriteString("<i>")
 	} else {
-		_, _ = w.WriteString("</")
-		_, _ = w.WriteString(tag)
-		_, _ = w.WriteString(">")
+		_, _ = w.WriteString("</i>")
+	}
+	return ast.WalkContinue, nil
+}
+
+func (r *TelegramHTMLRenderer) renderStrong(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	if entering {
+		_, _ = w.WriteString("<b>")
+	} else {
+		_, _ = w.WriteString("</b>")
 	}
 	return ast.WalkContinue, nil
 }
@@ -318,14 +263,14 @@ func (r *TelegramHTMLRenderer) renderImage(w util.BufWriter, source []byte, node
 }
 
 func (r *TelegramHTMLRenderer) renderLink(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
-	n := node.(*ast.Link)
-	if r.safeLinks && !safeRichURL(string(n.Destination)) {
+	destination := node.(*ast.Link).Destination.Value(source)
+	if r.safeLinks && !safeRichURL(destination) {
 		// Keep the visible label, discard the active wrapper/destination.
 		return ast.WalkContinue, nil
 	}
 	if entering {
 		_, _ = w.WriteString("<a href=\"")
-		_, _ = w.Write(escapeHTML(n.Destination))
+		_, _ = w.WriteString(html.EscapeString(destination))
 		_, _ = w.WriteString("\">")
 	} else {
 		_, _ = w.WriteString("</a>")
@@ -341,8 +286,7 @@ func (r *TelegramHTMLRenderer) renderRawHTML(w util.BufWriter, source []byte, no
 func (r *TelegramHTMLRenderer) renderText(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
 	if entering {
 		n := node.(*ast.Text)
-		segment := n.Segment
-		_, _ = w.Write(escapeHTML(segment.Value(source)))
+		_, _ = w.WriteString(html.EscapeString(n.Value.Value(source)))
 		if n.HardLineBreak() {
 			_, _ = w.WriteString("\n")
 		} else if n.SoftLineBreak() {
@@ -352,10 +296,11 @@ func (r *TelegramHTMLRenderer) renderText(w util.BufWriter, source []byte, node 
 	return ast.WalkContinue, nil
 }
 
-func (r *TelegramHTMLRenderer) renderString(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+func (r *TelegramHTMLRenderer) renderSpoiler(w util.BufWriter, source []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
 	if entering {
-		n := node.(*ast.String)
-		_, _ = w.Write(escapeHTML(n.Value))
+		_, _ = w.WriteString("<tg-spoiler>")
+	} else {
+		_, _ = w.WriteString("</tg-spoiler>")
 	}
 	return ast.WalkContinue, nil
 }
@@ -370,177 +315,51 @@ func (r *TelegramHTMLRenderer) renderStrikethrough(w util.BufWriter, source []by
 }
 
 // Table renderers
+//
+// Telegram has no tables. A table becomes a vertical record list in a <pre>
+// block (see formatTableVertical), built from the plain text of each cell.
 
 func (r *TelegramHTMLRenderer) renderTable(w util.BufWriter, source []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
 	if entering {
-		// Initialize table state
-		r.tableData = [][]string{}
-
-		// Get alignments from table node
-		table := n.(*extast.Table)
-		r.alignments = table.Alignments
-	} else {
-		// Render the complete table as monospace text
-		tableText := r.formatTableAsMonospace()
-
-		// Add newline before table if not at document start
-		parent := n.Parent()
-		if parent != nil && parent.Kind() != ast.KindDocument {
-			_, _ = w.WriteString("\n")
-		}
-
-		_, _ = w.WriteString("<pre>")
-		_, _ = w.WriteString(tableText)
-		_, _ = w.WriteString("</pre>\n\n")
-
-		// Clear table state
-		r.tableData = nil
-		r.alignments = nil
+		r.tableRows = nil
+		return ast.WalkContinue, nil
 	}
+	_, _ = w.WriteString(formatTableVertical(r.tableRows))
+	_, _ = w.WriteString("\n")
+	r.tableRows = nil
 	return ast.WalkContinue, nil
 }
 
-func (r *TelegramHTMLRenderer) renderTableHeader(w util.BufWriter, source []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
-	// TableHeader is just a container, no special rendering needed
-	return ast.WalkContinue, nil
-}
-
+// renderTableRow collects one row; the header row is the first row.
 func (r *TelegramHTMLRenderer) renderTableRow(w util.BufWriter, source []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
 	if entering {
 		r.currentRow = []string{}
 	} else {
-		// Add completed row to table data
-		r.tableData = append(r.tableData, r.currentRow)
+		r.tableRows = append(r.tableRows, r.currentRow)
 		r.currentRow = nil
 	}
 	return ast.WalkContinue, nil
 }
 
-func (r *TelegramHTMLRenderer) renderTableCell(w util.BufWriter, source []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
-	if entering {
-		// Start capturing cell content
-		r.currentCell = &bytes.Buffer{}
-	} else {
-		// Extract text content from cell
-		cellContent := r.extractCellText(n, source)
-		r.currentRow = append(r.currentRow, cellContent)
-		r.currentCell = nil
+// renderTableCell renders the cell's inline content with the same renderers
+// and keeps only its visible text: link targets, formatting and spoilers do
+// not survive inside a <pre> block.
+func (r *TelegramHTMLRenderer) renderTableCell(_ util.BufWriter, source []byte, n ast.Node, entering bool, rc renderer.Context) (ast.WalkStatus, error) {
+	if !entering {
+		return ast.WalkSkipChildren, nil
 	}
-	return ast.WalkContinue, nil
-}
-
-// extractCellText recursively extracts plain text from a table cell
-func (r *TelegramHTMLRenderer) extractCellText(n ast.Node, source []byte) string {
-	var buf bytes.Buffer
-
+	var cell bytes.Buffer
+	cellWriter := util.NewErrorBufWriter(&cell)
 	for child := n.FirstChild(); child != nil; child = child.NextSibling() {
-		switch child.Kind() {
-		case ast.KindText:
-			text := child.(*ast.Text)
-			buf.Write(text.Segment.Value(source))
-		case ast.KindString:
-			str := child.(*ast.String)
-			buf.Write(str.Value)
-		case ast.KindCodeSpan:
-			// Extract code span content
-			for c := child.FirstChild(); c != nil; c = c.NextSibling() {
-				if c.Kind() == ast.KindText {
-					text := c.(*ast.Text)
-					buf.Write(text.Segment.Value(source))
-				}
-			}
-		case ast.KindEmphasis:
-			// Recursively extract from emphasis
-			buf.WriteString(r.extractCellText(child, source))
-		case ast.KindLink:
-			// Extract link text
-			buf.WriteString(r.extractCellText(child, source))
-		default:
-			// Try to extract text from other node types
-			buf.WriteString(r.extractCellText(child, source))
+		if err := rc.Render(cellWriter, source, child); err != nil {
+			return ast.WalkStop, err
 		}
 	}
-
-	return strings.TrimSpace(buf.String())
-}
-
-// formatTableAsMonospace formats the table data as aligned monospace text
-func (r *TelegramHTMLRenderer) formatTableAsMonospace() string {
-	if len(r.tableData) == 0 {
-		return ""
+	if err := cellWriter.Flush(); err != nil {
+		return ast.WalkStop, err
 	}
-
-	// Calculate column widths
-	numCols := len(r.tableData[0])
-	colWidths := make([]int, numCols)
-
-	for _, row := range r.tableData {
-		for i, cell := range row {
-			if i < numCols {
-				width := utf8.RuneCountInString(cell)
-				if width > colWidths[i] {
-					colWidths[i] = width
-				}
-			}
-		}
-	}
-
-	var buf bytes.Buffer
-
-	// Render each row
-	for rowIdx, row := range r.tableData {
-		for colIdx, cell := range row {
-			if colIdx < numCols {
-				// Determine alignment
-				align := extast.AlignNone
-				if colIdx < len(r.alignments) {
-					align = r.alignments[colIdx]
-				}
-
-				// Pad cell according to alignment
-				cellWidth := utf8.RuneCountInString(cell)
-				padding := colWidths[colIdx] - cellWidth
-
-				switch align {
-				case extast.AlignLeft, extast.AlignNone:
-					buf.WriteString(cell)
-					buf.WriteString(strings.Repeat(" ", padding))
-				case extast.AlignRight:
-					buf.WriteString(strings.Repeat(" ", padding))
-					buf.WriteString(cell)
-				case extast.AlignCenter:
-					leftPad := padding / 2
-					rightPad := padding - leftPad
-					buf.WriteString(strings.Repeat(" ", leftPad))
-					buf.WriteString(cell)
-					buf.WriteString(strings.Repeat(" ", rightPad))
-				}
-
-				// Add column separator (except for last column)
-				if colIdx < numCols-1 {
-					buf.WriteString(" │ ")
-				}
-			}
-		}
-
-		// Add separator line after header (first row)
-		if rowIdx == 0 && len(r.tableData) > 1 {
-			buf.WriteString("\n")
-			for colIdx := 0; colIdx < numCols; colIdx++ {
-				buf.WriteString(strings.Repeat("─", colWidths[colIdx]))
-				if colIdx < numCols-1 {
-					buf.WriteString("─┼─")
-				}
-			}
-		}
-
-		// Add newline (except for last row)
-		if rowIdx < len(r.tableData)-1 {
-			buf.WriteString("\n")
-		}
-	}
-
-	return buf.String()
+	r.currentRow = append(r.currentRow, htmlCellText(cell.String()))
+	return ast.WalkSkipChildren, nil
 }
 
 // ToHTML converts Markdown to Telegram-compatible HTML
@@ -557,59 +376,19 @@ func ToSafeLegacyHTML(markdown string) (string, error) {
 	return toTelegramHTML(markdown, newSafeTelegramHTMLRenderer(), true)
 }
 
-func toTelegramHTML(markdown string, nodeRenderer renderer.NodeRenderer, neutralizeMentions bool) (string, error) {
+func toTelegramHTML(markdown string, nodeRenderer *TelegramHTMLRenderer, neutralizeMentions bool) (string, error) {
 	// Convert LaTeX to Unicode BEFORE markdown parsing
 	markdown = convertLatexToUnicode(markdown)
 
-	// Create Goldmark with GFM and custom renderer
-	md := goldmark.New(
-		goldmark.WithExtensions(
-			extension.GFM,
-			NewSpoilerExtension(),
-		),
-		goldmark.WithRenderer(
-			renderer.NewRenderer(
-				renderer.WithNodeRenderers(
-					util.Prioritized(nodeRenderer, 1000),
-				),
-			),
-		),
-	)
-
-	var buf bytes.Buffer
-	if err := md.Convert([]byte(markdown), &buf); err != nil {
+	source := []byte(markdown)
+	root := newMarkdownParser(spoilerInlineParser(500)).Parse(source)
+	result, err := renderNode(source, root, nodeRenderer.nodeRenderers())
+	if err != nil {
 		return "", err
 	}
 
-	result := buf.String()
-
-	// Convert HTML tables to monospace text BEFORE other replacements
-	result = convertTablesToMonospace(result)
-
-	// Remove <p> tags (Telegram doesn't support them)
-	result = strings.ReplaceAll(result, "<p>", "")
-	result = strings.ReplaceAll(result, "</p>", "")
-
 	// Trim trailing newlines
 	result = strings.TrimRight(result, "\n")
-
-	// Replace HTML tags with Telegram-compatible equivalents
-	result = strings.ReplaceAll(result, "<del>", "<s>")
-	result = strings.ReplaceAll(result, "</del>", "</s>")
-	result = strings.ReplaceAll(result, "<strong>", "<b>")
-	result = strings.ReplaceAll(result, "</strong>", "</b>")
-	result = strings.ReplaceAll(result, "<em>", "<i>")
-	result = strings.ReplaceAll(result, "</em>", "</i>")
-
-	// Remove unsupported <input> tags from GFM task lists and replace with emoji
-	// Checked: <input checked="" disabled="" type="checkbox"> → ☑
-	// Unchecked: <input disabled="" type="checkbox"> → ☐
-	result = strings.ReplaceAll(result, `<input checked="" disabled="" type="checkbox">`, "☑")
-	result = strings.ReplaceAll(result, `<input disabled="" type="checkbox">`, "☐")
-	// Also handle variations in attribute order
-	result = strings.ReplaceAll(result, `<input type="checkbox" checked="" disabled="">`, "☑")
-	result = strings.ReplaceAll(result, `<input type="checkbox" disabled="">`, "☐")
-	result = strings.ReplaceAll(result, `<input type="checkbox" disabled="" checked="">`, "☑")
 	if neutralizeMentions {
 		result = neutralizeTelegramMentionsInHTML(result)
 	}
@@ -752,68 +531,14 @@ func formatTableVertical(rows [][]string) string {
 	return buf.String()
 }
 
-// convertTablesToMonospace converts HTML tables to monospace text blocks
-func convertTablesToMonospace(htmlStr string) string {
-	// Find all table tags
-	tableRegex := regexp.MustCompile(`(?s)<table>.*?</table>`)
-
-	return tableRegex.ReplaceAllStringFunc(htmlStr, func(tableHTML string) string {
-		// Parse the table HTML
-		doc, err := htmlparser.Parse(strings.NewReader(tableHTML))
-		if err != nil {
-			// If parsing fails, return original
-			return tableHTML
-		}
-
-		// Extract table data
-		var rows [][]string
-		var alignments []string
-
-		var extractTable func(*htmlparser.Node)
-		extractTable = func(n *htmlparser.Node) {
-			if n.Type == htmlparser.ElementNode && n.Data == "tr" {
-				var row []string
-				for c := n.FirstChild; c != nil; c = c.NextSibling {
-					if c.Type == htmlparser.ElementNode && (c.Data == "th" || c.Data == "td") {
-						cellText := extractText(c)
-						row = append(row, cellText)
-
-						// Extract alignment from style attribute (only for first row)
-						if len(rows) == 0 && c.Data == "th" {
-							align := "left"
-							for _, attr := range c.Attr {
-								if attr.Key == "style" && strings.Contains(attr.Val, "text-align") {
-									if strings.Contains(attr.Val, "center") {
-										align = "center"
-									} else if strings.Contains(attr.Val, "right") {
-										align = "right"
-									}
-								}
-							}
-							alignments = append(alignments, align)
-						}
-					}
-				}
-				if len(row) > 0 {
-					rows = append(rows, row)
-				}
-			}
-
-			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				extractTable(c)
-			}
-		}
-
-		extractTable(doc)
-
-		if len(rows) == 0 {
-			return tableHTML
-		}
-
-		// Always use vertical format for reliability and better mobile readability
-		// Horizontal format has alignment issues with HTML entities and proportional fonts
-		return formatTableVertical(rows)
-	})
+// htmlCellText returns the visible text of a rendered table cell.
+func htmlCellText(cellHTML string) string {
+	doc, err := htmlparser.Parse(strings.NewReader(cellHTML))
+	if err != nil {
+		// Rendered cell HTML always parses; fall back to the raw markup.
+		return strings.TrimSpace(cellHTML)
+	}
+	return extractText(doc)
 }
 
 // extractText recursively extracts text content from an HTML node

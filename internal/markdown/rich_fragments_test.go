@@ -395,3 +395,47 @@ func aggregateFragmentStats(fragments []RichFragment) RichStats {
 	}
 	return stats
 }
+
+// A table written right under a line of text (no blank line) is carved out of
+// that paragraph; it must still become its own fragment starting at its header.
+func TestParseRichFragmentsTableDirectlyAfterText(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		starts []int
+		kinds  []RichFragmentKind
+	}{
+		{
+			name:   "text then table",
+			input:  "Total\n| x |\n|---|\n| 1 |",
+			starts: []int{0, 6},
+			kinds:  []RichFragmentKind{RichFragmentParagraph, RichFragmentTable},
+		},
+		{
+			name:   "repeated delimiter rows",
+			input:  "Total\n| x |\n|---|\n|---|\n|---|",
+			starts: []int{0, 6},
+			kinds:  []RichFragmentKind{RichFragmentParagraph, RichFragmentTable},
+		},
+		{
+			name:   "text, table, text",
+			input:  "intro\n| a | b |\n|---|---|\n| 1 | 2 |\n\nafter",
+			starts: []int{0, 6, 37},
+			kinds:  []RichFragmentKind{RichFragmentParagraph, RichFragmentTable, RichFragmentParagraph},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			document, err := ParseRichFragments(tt.input)
+			require.NoError(t, err)
+			require.Len(t, document.Fragments, len(tt.kinds))
+			var legacy strings.Builder
+			for i, fragment := range document.Fragments {
+				assert.Equal(t, tt.kinds[i], fragment.Kind)
+				assert.Equal(t, tt.starts[i], fragment.SourceStart)
+				legacy.WriteString(fragment.LegacySource)
+			}
+			assert.Equal(t, tt.input, legacy.String())
+		})
+	}
+}
