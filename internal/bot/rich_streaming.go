@@ -160,7 +160,9 @@ func newRichDraftSink(
 	s.active = true
 	heartbeatCtx, cancel := context.WithCancel(context.Background())
 	s.cancelHeartbeat = cancel
-	go s.heartbeat(heartbeatCtx)
+	// Schedule the first wake from the preview just accepted, not from
+	// whenever the goroutine first runs: a late start must not shorten it.
+	go s.heartbeat(heartbeatCtx, s.nextHeartbeatDelayLocked())
 	return s
 }
 
@@ -531,15 +533,7 @@ func (s *richDraftSink) sendWithContextLocked(ctx context.Context, payload strin
 	return nil
 }
 
-func (s *richDraftSink) heartbeat(ctx context.Context) {
-	s.mu.Lock()
-	delay := s.nextHeartbeatDelayLocked()
-	active := s.callbackAllowedLocked()
-	s.mu.Unlock()
-	if !active {
-		return
-	}
-
+func (s *richDraftSink) heartbeat(ctx context.Context, delay time.Duration) {
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	for {
@@ -549,7 +543,7 @@ func (s *richDraftSink) heartbeat(ctx context.Context) {
 		case <-timer.C:
 			s.mu.Lock()
 			s.heartbeatLocked()
-			active = s.callbackAllowedLocked()
+			active := s.callbackAllowedLocked()
 			delay = s.nextHeartbeatDelayLocked()
 			s.mu.Unlock()
 			if !active {
