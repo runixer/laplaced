@@ -1042,3 +1042,35 @@ func TestNewResponsePath_NoRichDraftOutsideEligiblePrivateContext(t *testing.T) 
 	api.AssertNotCalled(t, "SendRichMessageDraft", mock.Anything, mock.Anything)
 	api.AssertExpectations(t)
 }
+
+// TestRichDraftSink_FirstHeartbeatIsScheduledAtStart pins the first heartbeat
+// to the moment the initial preview is accepted. The heartbeat goroutine may
+// start long after the sink is returned; if it computed its first delay only
+// then, a clock that moved in between (a slow wake, or a test driving a fake
+// clock) would make the heartbeat fire at once and resend the placeholder.
+func TestRichDraftSink_FirstHeartbeatIsScheduledAtStart(t *testing.T) {
+	api := new(testutil.MockBotAPI)
+	expectInitialRichDraft(api)
+	translator, err := i18n.NewTranslator("en")
+	require.NoError(t, err)
+
+	sink := newRichDraftSink(
+		context.Background(), api, translator, "en", defaultStreamingCfg(),
+		123, 0, 42, testutil.TestLogger(),
+	)
+	// Holding the lock keeps a not-yet-started heartbeat goroutine from
+	// reading the clock until it has moved past the heartbeat interval.
+	clock := newFakeClock()
+	sink.mu.Lock()
+	sink.now = clock.Now
+	sink.lastDraftAt = clock.Now()
+	sink.lastAttemptAt = clock.Now()
+	clock.Advance(time.Hour)
+	sink.mu.Unlock()
+
+	time.Sleep(100 * time.Millisecond)
+	sink.Close()
+
+	api.AssertNumberOfCalls(t, "SendRichMessageDraft", 1)
+	api.AssertExpectations(t)
+}
