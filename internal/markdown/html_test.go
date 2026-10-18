@@ -3,6 +3,7 @@ package markdown
 import (
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
@@ -452,7 +453,7 @@ func TestAdditionalMarkdownElements(t *testing.T) {
 		{
 			name:     "Autolink email",
 			input:    "<user@example.com>",
-			expected: "<a href=\"user@example.com\">user@example.com</a>",
+			expected: "<a href=\"mailto:user@example.com\">user@example.com</a>",
 		},
 		{
 			name:     "Indented code block",
@@ -838,4 +839,49 @@ func TestHardSplitUTF16(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestToHTML_DecodesEscapesAndEntities(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"backslash escapes", `\*not emphasis\* and \_x\_`, "*not emphasis* and _x_"},
+		{"entity references", "a &amp; b &copy; &#169;", "a &amp; b © ©"},
+		{"escaped html stays text", "&lt;b&gt;", "&lt;b&gt;"},
+		{"escape inside table cell", "| a |\n|---|\n| x \\| y |", "<pre>a: x | y</pre>"},
+		{"code span keeps backslashes", "`C:\\dir\\`", "<code>C:\\dir\\</code>"},
+		{"loose task list", "- [x] done\n\n- [ ] todo", "• ☑ done\n• ☐ todo"},
+		{"bold strikethrough", "~~**x**~~", "<s><b>x</b></s>"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ToHTML(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+// TestToHTML_LinkifyInsideEmphasis guards a GFM rule goldmark v2.1.6 breaks:
+// a URL that fills an emphasis span must still become a link.
+func TestToHTML_LinkifyInsideEmphasis(t *testing.T) {
+	t.Skip("goldmark v2.1.6 regression, see github.com/yuin/goldmark/issues/608")
+	for _, input := range []string{"**https://example.com**", "*www.example.com*", "~~https://example.com~~"} {
+		got, err := ToHTML(input)
+		require.NoError(t, err)
+		assert.Contains(t, got, "<a href=", input)
+	}
+}
+
+// TestToHTML_RepeatedTableDelimitersStayLinear guards against quadratic
+// table parsing on model output that loops on delimiter rows (goldmark v2.1.6).
+func TestToHTML_RepeatedTableDelimitersStayLinear(t *testing.T) {
+	t.Skip("goldmark v2.1.6 regression, see github.com/yuin/goldmark/issues/611")
+	input := "a\n|x|\n|-|\n" + strings.Repeat("|-|\n", 3000)
+	start := time.Now()
+	_, err := ToHTML(input)
+	require.NoError(t, err)
+	assert.Less(t, time.Since(start), time.Second)
 }

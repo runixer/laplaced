@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yuin/goldmark/ast"
-	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/v2/ast"
+	"github.com/yuin/goldmark/v2/text"
 )
 
 func TestSpoiler(t *testing.T) {
@@ -82,13 +82,8 @@ func TestSpoilerNodeDump(t *testing.T) {
 
 	// Dump should not panic - it's a debugging function
 	assert.NotPanics(t, func() {
-		node.Dump(source, 0)
-	})
-
-	// Test with different levels
-	assert.NotPanics(t, func() {
-		node.Dump(source, 1)
-		node.Dump(source, 2)
+		dump := node.Dump(source)
+		require.NotNil(t, dump)
 	})
 
 	// Test node properties
@@ -111,9 +106,8 @@ func TestSpoilerNodeBaseInline(t *testing.T) {
 	node := NewSpoilerNode()
 
 	// SpoilerNode should be able to have children
-	segment := text.NewSegment(0, 5)
-	textNode := ast.NewTextSegment(segment)
-	node.AppendChild(node, textNode)
+	textNode := ast.NewText(text.NewSingleLineValueFromIndex(text.NewIndex(0, 5), text.IdentityDecoder))
+	node.AppendChild(textNode)
 
 	assert.Equal(t, node.FirstChild(), textNode)
 }
