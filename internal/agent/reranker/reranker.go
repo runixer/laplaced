@@ -503,6 +503,15 @@ func (r *Reranker) rerank(
 			toolChoice = "auto"
 		}
 		toolsOffered := requestTools != nil
+		requestMessages := messages
+		if !toolsOffered {
+			requestMessages = flattenToolTranscript(messages,
+				func(topics string) string {
+					return r.translator.Get(lang, "rag.reranker_transcript_requested", topics)
+				},
+				r.translator.Get(lang, "rag.reranker_transcript_result"),
+			)
+		}
 
 		llmAttempts++
 		tr.tracker.StartTurn()
@@ -513,7 +522,7 @@ func (r *Reranker) rerank(
 
 		resp, err := r.client.CreateChatCompletion(turnCtx, llm.ChatCompletionRequest{
 			Model:      cfg.GetModel(r.cfg.Agents.Default.Model),
-			Messages:   messages,
+			Messages:   requestMessages,
 			Tools:      requestTools,
 			ToolChoice: toolChoice,
 			// NOTE: response-healing plugin breaks reasoning visibility when combined with json_object format.

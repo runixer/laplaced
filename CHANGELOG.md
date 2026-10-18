@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Memory lookup no longer occasionally gives up on choosing past conversations after reading them, which made a reply fall back to a cruder memory match.
+
 ## [0.12.0] - 2026-10-18
 
 ### Added

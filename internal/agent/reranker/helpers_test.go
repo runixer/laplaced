@@ -1,6 +1,7 @@
 package reranker
 
 import (
+	"strings"
 	"time"
 
 	"github.com/runixer/laplaced/internal/config"
@@ -172,4 +173,22 @@ func mockArtifactCandidate(id int64, fileType, name string) ArtifactCandidate {
 		Entities:     []string{"Entity1", "Entity2"},
 		RAGHints:     []string{"What is this about?"},
 	}
+}
+
+// isFlattenedRound reports whether an exploration round reached a request
+// without tools as plain conversation: an assistant line naming the requested
+// topics, then a user message with the tool result, and no tool-call fields.
+func isFlattenedRound(request, result llm.Message, topics ...string) bool {
+	line, _ := request.Content.(string)
+	content, _ := result.Content.(string)
+	if request.Role != "assistant" || len(request.ToolCalls) != 0 ||
+		result.Role != "user" || result.ToolCallID != "" || content == "" {
+		return false
+	}
+	for _, topic := range topics {
+		if !strings.Contains(line, topic) {
+			return false
+		}
+	}
+	return true
 }

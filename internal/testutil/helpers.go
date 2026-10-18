@@ -101,6 +101,8 @@ rag:
   reranker_tool_description: "Load topic content"
   reranker_tool_param_description: "Topic IDs"
   reranker_media_instruction: "The user sent media content. Analyze it and select relevant context."
+  reranker_transcript_requested: "Requested topics: %s"
+  reranker_transcript_result: "Requested topic content:"
 memory:
   system_prompt: "Archivist {{.Date}} limit={{.UserFactsLimit}} user={{.UserFactsCount}}"
   user_prompt: "User: {{.UserFacts}}\n{{.KnownPeople}}\nConversation: {{.Conversation}}"
