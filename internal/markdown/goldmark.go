@@ -29,9 +29,16 @@ func adapt(f func(w util.BufWriter, source []byte, n ast.Node, entering bool) (a
 }
 
 // newMarkdownParser returns a GFM parser with the given extra inline parsers.
+// It assembles extension.GFMParser by hand to use the patched table parser
+// from gfm_table.go.
 func newMarkdownParser(inlineParsers ...util.PrioritizedValue[parser.InlineParser]) parser.Parser {
 	return parser.New(
-		parser.WithExtensions(extension.GFMParser),
+		parser.WithExtensions(
+			extension.NewLinkifyParser(),
+			&gfmTableParserExtension{},
+			extension.NewStrikethroughParser(),
+			extension.NewTaskListItemParser(),
+		),
 		parser.WithInlineParsers(inlineParsers...),
 	)
 }

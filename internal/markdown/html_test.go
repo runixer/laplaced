@@ -875,13 +875,20 @@ func TestToHTML_LinkifyInsideEmphasis(t *testing.T) {
 	}
 }
 
-// TestToHTML_RepeatedTableDelimitersStayLinear guards against quadratic
-// table parsing on model output that loops on delimiter rows (goldmark v2.1.6).
+// TestToHTML_RepeatedTableDelimitersStayLinear guards the patched table
+// parser (gfm_table.go): model output that loops on delimiter rows must parse
+// in linear time and keep the text above the table.
 func TestToHTML_RepeatedTableDelimitersStayLinear(t *testing.T) {
-	t.Skip("goldmark v2.1.6 regression, see github.com/yuin/goldmark/issues/611")
 	input := "a\n|x|\n|-|\n" + strings.Repeat("|-|\n", 3000)
 	start := time.Now()
-	_, err := ToHTML(input)
+	got, err := ToHTML(input)
 	require.NoError(t, err)
 	assert.Less(t, time.Since(start), time.Second)
+	assert.True(t, strings.HasPrefix(got, "a\n\n<pre>x: -\n"), got[:min(len(got), 40)])
+	assert.Equal(t, 1, strings.Count(got, "<pre>"), "one table only")
+
+	rich, _, err := ToRichHTML(input)
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(rich, "<p>a</p><table>"), rich[:min(len(rich), 40)])
+	assert.Equal(t, 1, strings.Count(rich, "<table>"), "one table only")
 }
