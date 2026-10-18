@@ -864,7 +864,9 @@ func richBoundaryTextRanges(node ast.Node, offsetMap []int) ([]RichSourceRange, 
 func richTopLevelLineStart(node ast.Node, source []byte) (int, error) {
 	position := len(source)
 	if err := ast.Walk(node, func(current ast.Node, _ bool) (ast.WalkStatus, error) {
-		if pos := current.Pos(); pos >= 0 && pos < position {
+		// A table carved out of a paragraph ("text\n| a |\n|---|") keeps the
+		// paragraph's start as its own position; its rows carry the real one.
+		if pos := current.Pos(); pos >= 0 && pos < position && current.Kind() != extast.KindTable {
 			position = pos
 		}
 		for _, segment := range richNodeSegments(current) {
