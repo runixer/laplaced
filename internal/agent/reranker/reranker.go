@@ -466,7 +466,19 @@ func (r *Reranker) rerank(
 		var responseFormat interface{}
 		requestTools := tools
 		capReached := iterations >= cfg.MaxToolCalls
-		forcedFinal := capReached || explorationExhausted || jsonRetry
+		// finalReason says why this request withholds the tool; "" means an
+		// exploration round that offers it.
+		finalReason := ""
+		switch {
+		case capReached:
+			finalReason = "tool_round_cap"
+		case explorationExhausted:
+			finalReason = "exploration_exhausted"
+		case jsonRetry:
+			finalReason = "json_retry"
+		case len(candidates) == 0:
+			finalReason = "no_topic_candidates"
+		}
 
 		// tool_choice "auto" instead of forcing get_topics_content — forced selection
 		// (named/required) is flaky through litellm+thinking; "auto" reliably calls the tool given
@@ -479,18 +491,15 @@ func (r *Reranker) rerank(
 		// (a direct answer is parsed leniently), and every request that withholds the tool
 		// asks for JSON: no topic candidates, cap reached, exploration exhausted, or a retry
 		// after an exploration round answered with unparseable text.
-		switch {
-		case forcedFinal:
-			// MaxToolCalls limits exploration, not synthesis. The final request
-			// sees the last tool result but cannot start another tool round.
+		//
+		// MaxToolCalls limits exploration, not synthesis: the final request sees
+		// the last tool result but cannot start another tool round. With no
+		// topic candidates there is nothing for get_topics_content to load.
+		if finalReason != "" {
 			forcedFinalization = capReached
 			requestTools = nil
 			responseFormat = llm.ResponseFormat{Type: "json_object"}
-		case len(candidates) == 0:
-			// Nothing for get_topics_content to load (only people/artifacts).
-			requestTools = nil
-			responseFormat = llm.ResponseFormat{Type: "json_object"}
-		default:
+		} else {
 			toolChoice = "auto"
 		}
 		toolsOffered := requestTools != nil
@@ -578,7 +587,7 @@ func (r *Reranker) rerank(
 			if !toolsOffered {
 				logger.Warn("reranker returned tool calls although no tools were offered",
 					"tool_calls", len(choice.Message.ToolCalls),
-					"forced_finalization", forcedFinal,
+					"final_request_reason", finalReason,
 				)
 				tr.fallbackReason = "protocol_violation"
 				result := fallbackFromState(r.cfg, st, candidates, personCandidates, artifactCandidates, cfg.Topics.Max, logger)

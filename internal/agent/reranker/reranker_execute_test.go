@@ -1,9 +1,12 @@
 package reranker
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -1029,7 +1032,9 @@ func TestRerank_ForcedFinalizationDoesNotExecuteUnexpectedTool(t *testing.T) {
 	mockStorage := &testutil.MockStorage{}
 	cfg := testConfig()
 	cfg.Agents.Reranker.MaxToolCalls = 1
-	reranker := New(mockClient, cfg, testutil.TestLogger(), testutil.TestTranslator(t), mockStorage, nil)
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	reranker := New(mockClient, cfg, logger, testutil.TestTranslator(t), mockStorage, nil)
 
 	candidates := []Candidate{{TopicID: 1, Score: 0.9, Topic: mockTopic(1, "Topic 1")}}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
@@ -1053,6 +1058,19 @@ func TestRerank_ForcedFinalizationDoesNotExecuteUnexpectedTool(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []int64{1}, resp.Structured.(*Result).TopicIDs())
 	assert.Equal(t, "protocol_violation", resp.Metadata["fallback_reason"])
+	// The warning names why the tool was withheld, not a boolean that reads
+	// like the span's forced_finalization but means something else.
+	var warning map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		var entry map[string]any
+		require.NoError(t, json.Unmarshal([]byte(line), &entry))
+		if entry["msg"] == "reranker returned tool calls although no tools were offered" {
+			warning = entry
+		}
+	}
+	require.NotNil(t, warning, logs.String())
+	assert.Equal(t, "tool_round_cap", warning["final_request_reason"])
+	assert.NotContains(t, warning, "forced_finalization")
 	mockClient.AssertExpectations(t)
 	mockStorage.AssertExpectations(t)
 }
