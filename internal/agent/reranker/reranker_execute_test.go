@@ -1,9 +1,12 @@
 package reranker
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -645,7 +648,7 @@ func TestRerank_MultipleToolCalls(t *testing.T) {
 	assert.Equal(t, []int64{1, 3}, result.TopicIDs())
 }
 
-func TestRerank_PrefixedToolArgsPreserveTranscript(t *testing.T) {
+func TestRerank_PrefixedToolArgsReachFinalRequest(t *testing.T) {
 	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	cfg := testConfig()
@@ -671,11 +674,15 @@ func TestRerank_PrefixedToolArgsPreserveTranscript(t *testing.T) {
 		if !ok || format.Type != "json_object" {
 			return false
 		}
+		// The final request withholds the tool, so the exploration round
+		// arrives as plain conversation: no tool calls, no tool messages.
 		assistantMsg := req.Messages[2]
-		toolMsg := req.Messages[3]
-		content, _ := toolMsg.Content.(string)
-		return len(assistantMsg.ToolCalls) == 1 && assistantMsg.ToolCalls[0].ID == "prefix_call" &&
-			toolMsg.Role == "tool" && toolMsg.ToolCallID == "prefix_call" &&
+		resultMsg := req.Messages[3]
+		request, _ := assistantMsg.Content.(string)
+		content, _ := resultMsg.Content.(string)
+		return assistantMsg.Role == "assistant" && len(assistantMsg.ToolCalls) == 0 &&
+			strings.Contains(request, "Topic:6523") && strings.Contains(request, "Topic:6000") &&
+			resultMsg.Role == "user" && resultMsg.ToolCallID == "" &&
 			strings.Contains(content, "Topic 6523") && strings.Contains(content, "Topic 6000")
 	})).Return(makeFinalJSONResponse(`{"topic_ids":[{"id":"Topic:6523","reason":"best match"}]}`), nil).Once()
 
@@ -700,7 +707,10 @@ func TestRerank_ToolResultsPairEveryCall(t *testing.T) {
 	mockClient := &testutil.MockLLMClient{}
 	mockStorage := &testutil.MockStorage{}
 	cfg := testConfig()
-	cfg.Agents.Reranker.MaxToolCalls = 1
+	// A second exploration round still offers the tool, so it carries the
+	// native tool transcript whose pairing this test checks. A final request
+	// would flatten it (see TestRerank_PrefixedToolArgsReachFinalRequest).
+	cfg.Agents.Reranker.MaxToolCalls = 2
 	reranker := New(mockClient, cfg, testutil.TestLogger(), testutil.TestTranslator(t), mockStorage, nil)
 
 	candidates := []Candidate{{TopicID: 1, Score: 0.9, Topic: mockTopic(1, "Topic 1")}}
@@ -712,7 +722,7 @@ func TestRerank_ToolResultsPairEveryCall(t *testing.T) {
 	mockStorage.On("GetMessagesByTopicID", mock.Anything, int64(1)).
 		Return(mockMessagesForTopic(1), nil).Once()
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.MatchedBy(func(req llm.ChatCompletionRequest) bool {
-		if req.Tools != nil || len(req.Messages) != 6 {
+		if req.Tools == nil || len(req.Messages) != 6 {
 			return false
 		}
 		assistantMsg := req.Messages[2]
@@ -801,11 +811,7 @@ func TestRerank_MaxToolCallsForcesFinalization(t *testing.T) {
 		if !ok || format.Type != "json_object" {
 			return false
 		}
-		assistantMsg := req.Messages[len(req.Messages)-2]
-		toolMsg := req.Messages[len(req.Messages)-1]
-		return assistantMsg.Role == "assistant" && len(assistantMsg.ToolCalls) == 1 &&
-			toolMsg.Role == "tool" && toolMsg.ToolCallID == assistantMsg.ToolCalls[0].ID &&
-			toolMsg.Content != ""
+		return isFlattenedRound(req.Messages[2], req.Messages[3], "Topic:1")
 	})).Return(finalResponse, nil).Once()
 
 	req := &agent.Request{
@@ -865,11 +871,8 @@ func TestRerank_ForcedFinalizationAfterThreeExplorationRounds(t *testing.T) {
 			return false
 		}
 		for round := 0; round < 3; round++ {
-			assistantMsg := req.Messages[2+round*2]
-			toolMsg := req.Messages[3+round*2]
-			wantID := fmt.Sprintf("round_%d", round+1)
-			if len(assistantMsg.ToolCalls) != 1 || assistantMsg.ToolCalls[0].ID != wantID ||
-				toolMsg.Role != "tool" || toolMsg.ToolCallID != wantID {
+			topic := fmt.Sprintf("Topic:%d", round+1)
+			if !isFlattenedRound(req.Messages[2+round*2], req.Messages[3+round*2], topic) {
 				return false
 			}
 		}
@@ -1029,7 +1032,9 @@ func TestRerank_ForcedFinalizationDoesNotExecuteUnexpectedTool(t *testing.T) {
 	mockStorage := &testutil.MockStorage{}
 	cfg := testConfig()
 	cfg.Agents.Reranker.MaxToolCalls = 1
-	reranker := New(mockClient, cfg, testutil.TestLogger(), testutil.TestTranslator(t), mockStorage, nil)
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	reranker := New(mockClient, cfg, logger, testutil.TestTranslator(t), mockStorage, nil)
 
 	candidates := []Candidate{{TopicID: 1, Score: 0.9, Topic: mockTopic(1, "Topic 1")}}
 	mockClient.On("CreateChatCompletion", mock.Anything, mock.Anything).
@@ -1053,6 +1058,19 @@ func TestRerank_ForcedFinalizationDoesNotExecuteUnexpectedTool(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []int64{1}, resp.Structured.(*Result).TopicIDs())
 	assert.Equal(t, "protocol_violation", resp.Metadata["fallback_reason"])
+	// The warning names why the tool was withheld, not a boolean that reads
+	// like the span's forced_finalization but means something else.
+	var warning map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		var entry map[string]any
+		require.NoError(t, json.Unmarshal([]byte(line), &entry))
+		if entry["msg"] == "reranker returned tool calls although no tools were offered" {
+			warning = entry
+		}
+	}
+	require.NotNil(t, warning, logs.String())
+	assert.Equal(t, "tool_round_cap", warning["final_request_reason"])
+	assert.NotContains(t, warning, "forced_finalization")
 	mockClient.AssertExpectations(t)
 	mockStorage.AssertExpectations(t)
 }
@@ -1281,12 +1299,24 @@ func TestRerank_ProtocolViolation_NoToolCallFirstTurn(t *testing.T) {
 }
 
 // isJSONRetry matches the retry after an exploration round answered with
-// unparseable text: JSON mode, no tools, and the prose kept out of the transcript.
+// unparseable text: JSON mode, no tools, the prose kept out of the transcript
+// and earlier tool rounds flattened into plain conversation.
 func isJSONRetry(messages int) func(llm.ChatCompletionRequest) bool {
 	return func(req llm.ChatCompletionRequest) bool {
 		format, ok := req.ResponseFormat.(llm.ResponseFormat)
-		return req.Tools == nil && req.ToolChoice == nil && ok && format.Type == "json_object" && len(req.Messages) == messages
+		return req.Tools == nil && req.ToolChoice == nil && ok && format.Type == "json_object" &&
+			len(req.Messages) == messages && !hasToolTranscript(req.Messages)
 	}
+}
+
+// hasToolTranscript reports whether any message carries tool-calling fields.
+func hasToolTranscript(messages []llm.Message) bool {
+	for _, m := range messages {
+		if len(m.ToolCalls) > 0 || m.Role == "tool" || m.ToolCallID != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // TestRerank_ProseAnswerRetriedInJSONMode verifies that an exploration round
@@ -1879,8 +1909,7 @@ func TestRerank_EmptyExplorationRoundFinalizesNext(t *testing.T) {
 				if req.Tools != nil || req.ToolChoice != nil || !ok || format.Type != "json_object" || len(req.Messages) != 4 {
 					return false
 				}
-				toolMsg := req.Messages[3]
-				return toolMsg.Role == "tool" && toolMsg.ToolCallID == "empty_round"
+				return isFlattenedRound(req.Messages[2], req.Messages[3])
 			})).Return(makeFinalJSONResponse(`{"topic_ids":[{"id":"Topic:1002","reason":"best match"}],"people_ids":[],"artifact_ids":[]}`), nil).Once()
 
 			resp, err := reranker.Execute(context.Background(), &agent.Request{

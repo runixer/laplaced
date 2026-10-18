@@ -537,6 +537,8 @@ rag:
 
   reranker_tool_description: "Load full content of topics for detailed study. Consider size — load large topics (>10K chars) only if the topic is very relevant."
   reranker_tool_param_description: "Topic IDs to load"
+  reranker_transcript_requested: "Requested the full content of topics: %s"
+  reranker_transcript_result: "Content of the requested topics:"
   reranker_media_instruction: |
     IMPORTANT: The query contains media (image or audio). When selecting topics, consider the media content — what is shown, what technologies, interfaces or topics are involved.
 
