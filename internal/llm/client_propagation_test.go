@@ -42,7 +42,7 @@ func TestNewAPIRequest_TraceContextPropagation(t *testing.T) {
 		ctx, span := otel.Tracer("test").Start(context.Background(), "parent")
 		defer span.End()
 
-		req, err := c.newAPIRequest(ctx, "http://example.com/v1/chat/completions", []byte("{}"))
+		req, err := c.newAPIRequest(ctx, "", "http://example.com/v1/chat/completions", []byte("{}"))
 		require.NoError(t, err)
 
 		tp := req.Header.Get("traceparent")
@@ -60,7 +60,7 @@ func TestNewAPIRequest_TraceContextPropagation(t *testing.T) {
 	t.Run("no span in context means no traceparent", func(t *testing.T) {
 		withW3CPropagator(t)
 
-		req, err := c.newAPIRequest(context.Background(), "http://example.com/v1/chat/completions", []byte("{}"))
+		req, err := c.newAPIRequest(context.Background(), "", "http://example.com/v1/chat/completions", []byte("{}"))
 		require.NoError(t, err)
 		assert.Empty(t, req.Header.Get("traceparent"))
 	})
@@ -75,7 +75,7 @@ func TestNewAPIRequest_TraceContextPropagation(t *testing.T) {
 		ctx, span := otel.Tracer("test").Start(context.Background(), "parent")
 		defer span.End()
 
-		req, err := c.newAPIRequest(ctx, "http://example.com/v1/chat/completions", []byte("{}"))
+		req, err := c.newAPIRequest(ctx, "", "http://example.com/v1/chat/completions", []byte("{}"))
 		require.NoError(t, err)
 		assert.Empty(t, req.Header.Get("traceparent"))
 	})

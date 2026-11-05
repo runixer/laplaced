@@ -294,6 +294,32 @@ agents:
     document_threshold_bytes: 2097152 # legacy off/shadow path only; private rich delivery uses explicit preview/original intent
     max_concurrent: 4              # Parallel generate_image calls per turn ("draw three pictures"); other tools stay sequential
 
+  # Video generator - short clips via the asynchronous /videos endpoint
+  # (submit → poll → download), backing the generate_video tool. The call
+  # blocks the turn while the job runs (~75s for 6s at 720p). Text-to-video,
+  # or image-to-video with an input photo as the first frame (optionally a
+  # second one as the last frame).
+  #
+  # google/veo-3.1-lite — verified on real requests: speaks Russian verbatim,
+  # ~$0.05/s at 720p with audio (~$0.30 per 6s clip). Veo accepts only 16:9
+  # and 9:16 and letterboxes inputs of other shapes, so input frames are
+  # center-cropped to the requested ratio before upload.
+  # Alternative: "google/veo-3.1-fast" — same quality on our cases, ~90s,
+  # twice the price, also offers resolution "4K".
+  # model: "" disables the tool.
+  video_generator:
+    name: "VideoGenerator"
+    model: "google/veo-3.1-lite"
+    timeout: "5m"                  # whole job incl. queueing; typical 60-120s
+    poll_interval: "5s"
+    resolution: "720p"             # veo-3.1-lite: 720p / 1080p
+    default_aspect_ratio: "9:16"
+    default_duration: 6
+    supported_aspect_ratios: ["9:16", "16:9"]
+    supported_durations: [4, 6, 8]
+    generate_audio: true           # speech/ambience by default; the tool call can turn it off
+    max_concurrent: 2
+
 # Embedding Configuration
 # v0.7.0: migrated to gemini-embedding-2 at 1536 dim (graduated from the
 # -preview alias; verified byte-identical vector space — cosine 1.0 on
@@ -338,6 +364,8 @@ tools:
     model: "memory"
   - name: "generate_image"
     model: "openai/gpt-image-2.6-sunburst"
+  - name: "generate_video"
+    model: "google/veo-3.1-lite"
   - name: "read_url"
 
 # Web-page fetcher backing the read_url tool. backend selects the

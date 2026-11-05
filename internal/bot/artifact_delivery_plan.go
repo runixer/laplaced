@@ -64,6 +64,8 @@ func safeArtifactFilename(original string, fallbackOrdinal int, mediaType string
 			extension = ".png"
 		case "image/jpeg":
 			extension = ".jpg"
+		case "video/mp4":
+			extension = ".mp4"
 		case "application/pdf":
 			extension = ".pdf"
 		case "text/plain":
@@ -93,6 +95,25 @@ func asPhotoItem(item OutgoingMediaItem) (OutgoingMediaItem, bool) {
 	item.WireKind = OutgoingMediaWireKindPhoto
 	item.AsDocument = false
 	return item, true
+}
+
+// asVideoItem presents a video artifact as an inline-playing video message.
+func asVideoItem(item OutgoingMediaItem) (OutgoingMediaItem, bool) {
+	if !strings.HasPrefix(persistentMediaType(item), "video/") || len(item.Data) == 0 {
+		return OutgoingMediaItem{}, false
+	}
+	item.WireKind = OutgoingMediaWireKindVideo
+	item.AsDocument = false
+	return item, true
+}
+
+// asPreviewItem is the native presentation of a stored artifact: Photo for
+// images, Video for clips.
+func asPreviewItem(item OutgoingMediaItem) (OutgoingMediaItem, bool) {
+	if video, ok := asVideoItem(item); ok {
+		return video, true
+	}
+	return asPhotoItem(item)
 }
 
 func asDocumentItem(item OutgoingMediaItem) OutgoingMediaItem {
@@ -134,6 +155,20 @@ func materializeArtifactPresentations(
 		if extension == "" {
 			extension = ".bin"
 		}
+		// A generated clip's preview is a native video sent after the reply.
+		// It takes no MEDIA ordinal and never enters the photo compositor.
+		if video, ok := asVideoItem(raw); ok {
+			video.Filename = fmt.Sprintf("generated-video-%d%s", max(item.ordinal, 1), extension)
+			if item.mode == artifactdelivery.ModeOriginal {
+				tail = append(tail, asDocumentItem(video))
+				tailReferences = appendPlannedReference(tailReferences, item, artifactdelivery.ModeOriginal)
+				generatedOriginals++
+				continue
+			}
+			tail = append(tail, video)
+			tailReferences = appendPlannedReference(tailReferences, item, artifactdelivery.ModePreview)
+			continue
+		}
 		raw.Filename = fmt.Sprintf("generated-image-%d%s", max(item.ordinal, 1), extension)
 		wantsPreview := item.mode == artifactdelivery.ModePreview || item.mode == artifactdelivery.ModePreviewAndOriginal
 		wantsOriginal := item.mode == artifactdelivery.ModeOriginal || item.mode == artifactdelivery.ModePreviewAndOriginal
@@ -158,7 +193,7 @@ func materializeArtifactPresentations(
 
 	for _, item := range selected {
 		raw := outgoingItemForLoaded(item.loadedArtifact)
-		photo, previewable := asPhotoItem(raw)
+		photo, previewable := asPreviewItem(raw)
 		mode := item.mode
 		if mode == artifactdelivery.ModeAuto {
 			if previewable {

@@ -177,7 +177,7 @@ func TestValidatePersistentMediaItemRejectsUnsafeMetadata(t *testing.T) {
 		{name: "filename newline", item: func() OutgoingMediaItem { v := base; v.Filename = "bad\r\nname.bin"; return v }(), want: "control characters"},
 		{name: "MIME newline", item: func() OutgoingMediaItem { v := base; v.MIME = "application/pdf\r\nx: y"; return v }(), want: "control characters"},
 		{name: "malformed MIME", item: func() OutgoingMediaItem { v := base; v.MIME = "image/[png"; return v }(), want: "invalid MIME"},
-		{name: "unknown wire kind", item: func() OutgoingMediaItem { v := base; v.WireKind = "video"; return v }(), want: "unsupported media wire kind"},
+		{name: "unknown wire kind", item: func() OutgoingMediaItem { v := base; v.WireKind = "animation"; return v }(), want: "unsupported media wire kind"},
 	}
 
 	for _, tt := range tests {

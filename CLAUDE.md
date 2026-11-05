@@ -39,6 +39,7 @@ internal/
     enricher/            # Query enrichment for RAG
     extractor/           # File metadata extraction (artifacts system)
     imagegen/            # Image generation/editing (generate_image tool)
+    videogen/            # Video generation (generate_video tool)
     laplace/             # Main chat agent with tool calls
     merger/              # Topic merge verification
     reactor/             # Emoji reaction decisions for user messages
@@ -108,6 +109,7 @@ type Agent interface {
 - **Extractor** (`agent/extractor/`): Processes artifact files to extract metadata (summary, keywords, entities, rag_hints)
 - **Reactor** (`agent/reactor/`): Decides whether to add an emoji reaction to a user message and picks one from the transport's allowed set; runs in parallel with the main response
 - **ImageGenerator** (`agent/imagegen/`): Backs the `generate_image` tool — text-to-image, editing attached/remembered photos, with typed failure classification
+- **VideoGenerator** (`agent/videogen/`): Backs the `generate_video` tool — async submit/poll/download of short clips, delivered as native Telegram videos
 
 **Agent Wiring (in `cmd/bot/main.go`):**
 ```go
@@ -698,5 +700,6 @@ Further architecture docs in `docs/architecture/` (not auto-loaded — read on d
 `transports.md` (Telegram/Mattermost abstraction, ScopeID, SSO), `database-backends.md`
 (SQLite/Postgres dialect layer), `observability.md` (OpenTelemetry + Prometheus),
 `streaming.md` (progressive replies), `image-generation.md` (`generate_image`),
+`video-generation.md` (`generate_video`),
 `reactor.md` (emoji reactions), `topics.md`, `people-graph.md`, `embedding-storage.md`,
 `graceful-shutdown.md`, `telegram-html-rendering.md`, `vault-secrets.md`.

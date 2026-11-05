@@ -260,10 +260,11 @@ sequenceDiagram
 | `manage_people` | Управление профилями людей (v0.5.1) |
 | `internet_search` | Веб-поиск (по умолчанию `perplexity/sonar-pro`) |
 | `generate_image` | Генерация/редактирование изображений (v0.8.0; см. [image-generation.md](./image-generation.md)) |
+| `generate_video` | Генерация коротких роликов (см. [video-generation.md](./video-generation.md)) |
 | `send_artifacts` | Декларативная отправка user-owned артефактов из trusted inventory; private rich V1 |
 
-Вызовы `generate_image` выполняются **параллельно** (с ограничением
-`max_concurrent`), остальные инструменты — последовательно, т.к. могут менять
+Вызовы `generate_image` и `generate_video` выполняются **параллельно** (у каждого
+свой `max_concurrent`), остальные инструменты — последовательно, т.к. могут менять
 общее состояние (память, люди). `send_artifacts` не вызывает транспорт: он
 валидирует user ownership и turn-local allowlist, затем возвращает typed
 selection в единый финальный delivery plan. Помимо ограничения видимости tool,

@@ -178,7 +178,7 @@ func validatePersistentMediaItem(item OutgoingMediaItem) error {
 		return fmt.Errorf("invalid MIME type: %w", err)
 	}
 	switch item.WireKind {
-	case OutgoingMediaWireKindLegacy, OutgoingMediaWireKindPhoto, OutgoingMediaWireKindDocument:
+	case OutgoingMediaWireKindLegacy, OutgoingMediaWireKindPhoto, OutgoingMediaWireKindDocument, OutgoingMediaWireKindVideo:
 	default:
 		return fmt.Errorf("unsupported media wire kind %q", item.WireKind)
 	}
@@ -201,7 +201,15 @@ func resolvedTelegramMediaWireKind(item OutgoingMediaItem, threshold int) Outgoi
 	if item.WireKind != OutgoingMediaWireKindLegacy {
 		return item.WireKind
 	}
-	if item.AsDocument || (threshold > 0 && len(item.Data) > threshold) {
+	if item.AsDocument {
+		return OutgoingMediaWireKindDocument
+	}
+	// The photo-size threshold is about image recompression; a clip is never
+	// a photo, so legacy callers get an inline video instead.
+	if strings.HasPrefix(persistentMediaType(item), "video/") {
+		return OutgoingMediaWireKindVideo
+	}
+	if threshold > 0 && len(item.Data) > threshold {
 		return OutgoingMediaWireKindDocument
 	}
 	return OutgoingMediaWireKindPhoto
@@ -231,7 +239,7 @@ func validateTelegramPersistentMediaBatch(items []OutgoingMediaItem, threshold i
 		if i == 0 {
 			batchKind = kind
 		} else if kind != batchKind {
-			return OutgoingMediaWireKindLegacy, fmt.Errorf("mixes photo and document at index %d", i)
+			return OutgoingMediaWireKindLegacy, fmt.Errorf("mixes %s and %s at index %d", batchKind, kind, i)
 		}
 
 		switch kind {
@@ -242,6 +250,16 @@ func validateTelegramPersistentMediaBatch(items []OutgoingMediaItem, threshold i
 		case OutgoingMediaWireKindPhoto:
 			if !strings.HasPrefix(persistentMediaType(item), "image/") || !generatedPhotoCanBePreviewed(item) {
 				return OutgoingMediaWireKindLegacy, fmt.Errorf("photo item %d is outside the Telegram photo envelope", i)
+			}
+		case OutgoingMediaWireKindVideo:
+			if len(items) != 1 {
+				return OutgoingMediaWireKindLegacy, fmt.Errorf("video operation must carry exactly one item, got %d", len(items))
+			}
+			if !strings.HasPrefix(persistentMediaType(item), "video/") {
+				return OutgoingMediaWireKindLegacy, fmt.Errorf("video item %d has non-video MIME %q", i, item.MIME)
+			}
+			if err := validateTelegramDocumentSize(len(item.Data)); err != nil {
+				return OutgoingMediaWireKindLegacy, fmt.Errorf("video item %d %w", i, err)
 			}
 		default:
 			return OutgoingMediaWireKindLegacy, fmt.Errorf("item %d has unsupported media wire kind %q", i, kind)

@@ -58,3 +58,15 @@ func (c *routedClient) CreateEmbeddings(ctx context.Context, req llm.EmbeddingRe
 func (c *routedClient) CreateImages(ctx context.Context, req llm.ImageGenerationRequest) (llm.ImageGenerationResponse, error) {
 	return c.route(ctx).client.CreateImages(ctx, req)
 }
+
+func (c *routedClient) SubmitVideo(ctx context.Context, req llm.VideoGenerationRequest) (llm.VideoJob, error) {
+	return c.route(ctx).client.SubmitVideo(ctx, req)
+}
+
+func (c *routedClient) GetVideo(ctx context.Context, jobID string) (llm.VideoJob, error) {
+	return c.route(ctx).client.GetVideo(ctx, jobID)
+}
+
+func (c *routedClient) GetVideoContent(ctx context.Context, jobID string, index int) ([]byte, error) {
+	return c.route(ctx).client.GetVideoContent(ctx, jobID, index)
+}

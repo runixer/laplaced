@@ -39,6 +39,9 @@ type Client interface {
 	CreateChatCompletionStream(ctx context.Context, req ChatCompletionRequest) (*ChatCompletionStream, error)
 	CreateEmbeddings(ctx context.Context, req EmbeddingRequest) (EmbeddingResponse, error)
 	CreateImages(ctx context.Context, req ImageGenerationRequest) (ImageGenerationResponse, error)
+	SubmitVideo(ctx context.Context, req VideoGenerationRequest) (VideoJob, error)
+	GetVideo(ctx context.Context, jobID string) (VideoJob, error)
+	GetVideoContent(ctx context.Context, jobID string, index int) ([]byte, error)
 }
 
 // FilterReasoningForLog filters out encrypted reasoning entries from reasoning_details.
@@ -712,18 +715,28 @@ func (c *clientImpl) spanBaseAttributes() []attribute.KeyValue {
 	return attrs
 }
 
-// newAPIRequest builds a POST request with the standard API headers and
+// newAPIRequest builds a request (POST when method is empty) with the
+// standard API headers and
 // injects W3C trace context (traceparent/tracestate) so an OpenAI-compatible
 // gateway with OTel instrumentation can parent its spans to ours. With
 // tracing disabled the global propagator is the noop default and Inject
 // writes nothing.
-func (c *clientImpl) newAPIRequest(ctx context.Context, endpoint string, body []byte) (*http.Request, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(body))
+func (c *clientImpl) newAPIRequest(ctx context.Context, method, endpoint string, body []byte) (*http.Request, error) {
+	if method == "" {
+		method = http.MethodPost
+	}
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewBuffer(body)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, endpoint, reader)
 	if err != nil {
 		return nil, err
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-	httpReq.Header.Set("Content-Type", "application/json")
+	if body != nil {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
 	httpReq.Header.Set("User-Agent", "laplaced/1.0")
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(httpReq.Header))
 	return httpReq, nil

@@ -45,6 +45,10 @@ func (m *mockBotAPI) SendDocument(ctx context.Context, req SendDocumentRequest) 
 	return nil, nil
 }
 
+func (m *mockBotAPI) SendVideo(ctx context.Context, req SendVideoRequest) (*Message, error) {
+	return nil, nil
+}
+
 func (m *mockBotAPI) SendMediaGroup(ctx context.Context, req SendMediaGroupRequest) ([]Message, error) {
 	return nil, nil
 }

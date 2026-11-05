@@ -445,6 +445,55 @@ func (c *Client) SendDocument(ctx context.Context, req SendDocumentRequest) (*Me
 	return decodeSentMessage(resp, "sendDocument")
 }
 
+// SendVideoRequest uploads one video as an inline-playing message.
+type SendVideoRequest struct {
+	ChatID           int64
+	MessageThreadID  *int
+	Data             []byte
+	Filename         string
+	MIME             string
+	Caption          string
+	ParseMode        string
+	ReplyToMessageID int
+}
+
+// SendVideo uploads a video via multipart (sendVideo with
+// supports_streaming) and returns the resulting message. It uses the
+// long-timeout upload client.
+func (c *Client) SendVideo(ctx context.Context, req SendVideoRequest) (*Message, error) {
+	fields := map[string]string{
+		"chat_id":            strconv.FormatInt(req.ChatID, 10),
+		"supports_streaming": "true",
+	}
+	if req.Caption != "" {
+		fields["caption"] = req.Caption
+	}
+	if req.ParseMode != "" {
+		fields["parse_mode"] = req.ParseMode
+	}
+	if req.ReplyToMessageID != 0 {
+		fields["reply_to_message_id"] = strconv.Itoa(req.ReplyToMessageID)
+	}
+	if req.MessageThreadID != nil {
+		fields["message_thread_id"] = strconv.Itoa(*req.MessageThreadID)
+	}
+	filename := req.Filename
+	if filename == "" {
+		filename = "video.mp4"
+	}
+	files := []multipartFile{{FieldName: "video", Filename: filename, Data: req.Data, ContentType: req.MIME}}
+
+	client := c.uploadClient
+	if client == nil {
+		client = c.httpClient
+	}
+	resp, err := c.makeMultipartRequestWith(ctx, client, "sendVideo", fields, files)
+	if err != nil {
+		return nil, err
+	}
+	return decodeSentMessage(resp, "sendVideo")
+}
+
 // SendMediaGroup uploads 2–10 photos as an album and returns the resulting
 // messages (one per photo). For a single photo, use SendPhoto instead.
 func (c *Client) SendMediaGroup(ctx context.Context, req SendMediaGroupRequest) ([]Message, error) {
@@ -568,6 +617,12 @@ type multipartFile struct {
 //
 // Metrics & error sanitization mirror makeRequest where sensible.
 func (c *Client) makeMultipartRequest(ctx context.Context, method string, fields map[string]string, files []multipartFile) (*APIResponse, error) {
+	return c.makeMultipartRequestWith(ctx, c.httpClient, method, fields, files)
+}
+
+// makeMultipartRequestWith is makeMultipartRequest over an explicit HTTP
+// client, so large uploads can use the long-timeout upload client.
+func (c *Client) makeMultipartRequestWith(ctx context.Context, httpClient *http.Client, method string, fields map[string]string, files []multipartFile) (*APIResponse, error) {
 	startTime := time.Now()
 
 	var body bytes.Buffer
@@ -606,7 +661,7 @@ func (c *Client) makeMultipartRequest(ctx context.Context, method string, fields
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		duration := time.Since(startTime).Seconds()
 		recordRequestDuration(method, statusError, duration)

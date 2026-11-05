@@ -1,6 +1,8 @@
 package laplace
 
 import (
+	"fmt"
+
 	"github.com/runixer/laplaced/internal/config"
 	"github.com/runixer/laplaced/internal/i18n"
 	"github.com/runixer/laplaced/internal/llm"
@@ -26,6 +28,8 @@ func BuildTools(cfg *config.Config, translator *i18n.Translator) []llm.Tool {
 		switch toolCfg.Name {
 		case "generate_image":
 			parameters = buildImageGenerationSchema(&cfg.Agents.ImageGenerator)
+		case "generate_video":
+			parameters = buildVideoGenerationSchema(&cfg.Agents.VideoGenerator)
 		case "privacy_mode":
 			// privacy_mode takes an enable/disable action, not a query.
 			paramDesc := toolCfg.ParameterDescription
@@ -212,6 +216,43 @@ func buildImageGenerationSchema(cfg *config.ImageGeneratorConfig) map[string]int
 			},
 		},
 		"required": []string{"prompt", "delivery_mode"},
+	}
+}
+
+// buildVideoGenerationSchema returns the generate_video JSON schema; the
+// aspect_ratio and duration enums come from VideoGeneratorConfig so the model
+// only sees values the configured upstream model accepts.
+func buildVideoGenerationSchema(cfg *config.VideoGeneratorConfig) map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"prompt": map[string]interface{}{
+				"type": "string",
+				"description": "Detailed shot description in any language: subject, action, camera movement, style, lighting. " +
+					"Put any spoken lines in quotes in the language they should be spoken. " +
+					"Do not ask for phone frames, app UI, Reels/Stories overlays or captions — describe only the scene itself.",
+			},
+			"aspect_ratio": map[string]interface{}{
+				"type":        "string",
+				"enum":        cfg.SupportedAspectRatios,
+				"description": fmt.Sprintf("Frame shape. Default %s. An input photo is center-cropped to it, so match the photo's orientation.", cfg.DefaultAspectRatio),
+			},
+			"duration": map[string]interface{}{
+				"type":        "integer",
+				"enum":        cfg.SupportedDurations,
+				"description": fmt.Sprintf("Clip length in seconds. Default %d. Cost grows with length.", cfg.DefaultDuration),
+			},
+			"audio": map[string]interface{}{
+				"type":        "boolean",
+				"description": "Generate a soundtrack (speech, ambience, music). Default true; set false only when the user wants a silent clip.",
+			},
+			"input_artifact_ids": map[string]interface{}{
+				"type":        "array",
+				"items":       map[string]interface{}{"type": "integer"},
+				"description": "Optional image artifact IDs from <artifact_context> or history: the first becomes the first frame, a second one the last frame. When omitted, photos attached to the current user message are used automatically.",
+			},
+		},
+		"required": []string{"prompt"},
 	}
 }
 

@@ -32,6 +32,7 @@ func (c *Config) Validate() error {
 	errs = append(errs, c.validateArtifacts()...)
 	errs = append(errs, c.validateTelemetry()...)
 	errs = append(errs, c.validateImageGenerator()...)
+	errs = append(errs, c.validateVideoGenerator()...)
 	return errors.Join(errs...)
 }
 
@@ -378,6 +379,28 @@ func validateImagePixelSizes(ig *ImageGeneratorConfig) []error {
 				errs = append(errs, fmt.Errorf("agents.image_generator.pixel_sizes %s / %s = %q is not WxH", tier, ratio, px))
 			}
 		}
+	}
+	return errs
+}
+
+// validateVideoGenerator checks that the defaults sit inside the supported
+// lists the tool schema offers. An empty model disables the tool; nothing to
+// check then.
+func (c *Config) validateVideoGenerator() []error {
+	vg := &c.Agents.VideoGenerator
+	if vg.Model == "" {
+		return nil
+	}
+	var errs []error
+	if len(vg.SupportedAspectRatios) == 0 || len(vg.SupportedDurations) == 0 {
+		errs = append(errs, fmt.Errorf("agents.video_generator requires supported_aspect_ratios and supported_durations when model is set"))
+		return errs
+	}
+	if vg.DefaultAspectRatio != "" && !slices.Contains(vg.SupportedAspectRatios, vg.DefaultAspectRatio) {
+		errs = append(errs, fmt.Errorf("agents.video_generator.default_aspect_ratio %q is not in supported_aspect_ratios %v", vg.DefaultAspectRatio, vg.SupportedAspectRatios))
+	}
+	if vg.DefaultDuration != 0 && !slices.Contains(vg.SupportedDurations, vg.DefaultDuration) {
+		errs = append(errs, fmt.Errorf("agents.video_generator.default_duration %d is not in supported_durations %v", vg.DefaultDuration, vg.SupportedDurations))
 	}
 	return errs
 }
