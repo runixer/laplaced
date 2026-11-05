@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-11-05
+
 ### Added
 - The bot can now make short videos with sound and speech (`generate_video`, Google Veo 3.1 Lite by default), from a description or by animating a photo; clips arrive as playable Telegram videos.
 - Support for a self-hosted Telegram Bot API server (`telegram.api_base_url`, `telegram.local_mode`), which lifts the 20 MB download and 50 MB upload limits via the new `telegram.max_download_mb` / `telegram.max_upload_mb` options.
@@ -711,7 +713,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-language support (en, ru)
 - Docker deployment
 
-[Unreleased]: https://github.com/runixer/laplaced/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/runixer/laplaced/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/runixer/laplaced/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/runixer/laplaced/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/runixer/laplaced/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/runixer/laplaced/compare/v0.10.3...v0.11.0
