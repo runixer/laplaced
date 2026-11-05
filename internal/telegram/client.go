@@ -24,6 +24,7 @@ type BotAPI interface {
 	EditMessageText(ctx context.Context, req EditMessageTextRequest) (*Message, error)
 	SendPhoto(ctx context.Context, req SendPhotoRequest) (*Message, error)
 	SendDocument(ctx context.Context, req SendDocumentRequest) (*Message, error)
+	SendVideo(ctx context.Context, req SendVideoRequest) (*Message, error)
 	SendMediaGroup(ctx context.Context, req SendMediaGroupRequest) ([]Message, error)
 	SendMediaGroupDocuments(ctx context.Context, req SendMediaGroupDocumentsRequest) ([]Message, error)
 	SetMyCommands(ctx context.Context, req SetMyCommandsRequest) error
@@ -65,7 +66,11 @@ type Client struct {
 	token             string
 	httpClient        *http.Client // For short API calls with retry
 	longPollingClient *http.Client // For getUpdates with long waits
-	apiURL            string
+	// uploadClient carries large media uploads (sendVideo): a multi-megabyte
+	// body over a proxy, plus server-side video processing before Telegram
+	// answers, routinely exceeds the 30s budget of httpClient.
+	uploadClient *http.Client
+	apiURL       string
 }
 
 // NewClient creates a new Telegram API client.
@@ -124,6 +129,9 @@ func NewClient(token, proxyURL string) (*Client, error) {
 		longPollingTransport.Proxy = http.ProxyURL(proxy)
 	}
 
+	uploadTransport := transport.Clone()
+	uploadTransport.ResponseHeaderTimeout = 2 * time.Minute
+
 	return &Client{
 		token: token,
 		// 30s timeout; retry count is selected by the API method.
@@ -137,6 +145,10 @@ func NewClient(token, proxyURL string) (*Client, error) {
 		longPollingClient: &http.Client{
 			Timeout:   0,
 			Transport: longPollingTransport,
+		},
+		uploadClient: &http.Client{
+			Timeout:   3 * time.Minute,
+			Transport: uploadTransport,
 		},
 		apiURL: fmt.Sprintf("https://api.telegram.org/bot%s", token),
 	}, nil

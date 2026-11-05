@@ -203,6 +203,14 @@ func (b *Bot) SetImageGenerator(gen tools.ImageGenerator) {
 	}
 }
 
+// SetVideoGenerator wires the video-generation agent so the generate_video
+// tool becomes operational.
+func (b *Bot) SetVideoGenerator(gen tools.VideoGenerator) {
+	if b.toolExecutor != nil {
+		b.toolExecutor.SetVideoGenerator(gen)
+	}
+}
+
 // SetFetcher wires the web-page fetcher so the read_url tool becomes
 // operational. Unwired, the tool tells the LLM page reading is unavailable.
 func (b *Bot) SetFetcher(f fetch.Fetcher) {

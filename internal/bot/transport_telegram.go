@@ -494,10 +494,15 @@ func (t *TelegramTransport) SendMediaPersistent(ctx context.Context, m OutgoingM
 		parseMode = "HTML"
 	}
 	var ids []string
-	if wireKind == OutgoingMediaWireKindDocument {
+	switch wireKind {
+	case OutgoingMediaWireKindDocument:
 		ids, err = t.sendItemsAsDocuments(ctx, chatID, thread, replyTo, m.Items, m.Caption, parseMode)
-	} else {
+	case OutgoingMediaWireKindPhoto:
 		ids, err = t.sendItemsAsPhotos(ctx, chatID, thread, replyTo, m.Items, m.Caption, parseMode)
+	case OutgoingMediaWireKindVideo:
+		ids, err = t.sendItemsAsVideos(ctx, chatID, thread, replyTo, m.Items, m.Caption, parseMode)
+	default:
+		return persistentSendResult{}, fmt.Errorf("persistent Telegram media operation has unsupported wire kind %q", wireKind)
 	}
 	return persistentSendResult{MessageIDs: ids}, err
 }
@@ -529,13 +534,15 @@ func (t *TelegramTransport) sendMediaCompatibility(ctx context.Context, m Outgoi
 	// 2K/4K outputs (Telegram re-encodes photos to ~1280px; documents preserve
 	// originals).
 	threshold := t.cfg.Agents.ImageGenerator.DocumentThresholdBytes
-	var photoBatch, docBatch []OutgoingMediaItem
+	var photoBatch, docBatch, videoBatch []OutgoingMediaItem
 	for _, it := range m.Items {
 		switch resolvedTelegramMediaWireKind(it, threshold) {
 		case OutgoingMediaWireKindDocument:
 			docBatch = append(docBatch, it)
 		case OutgoingMediaWireKindPhoto:
 			photoBatch = append(photoBatch, it)
+		case OutgoingMediaWireKindVideo:
+			videoBatch = append(videoBatch, it)
 		default:
 			return persistentSendResult{}, fmt.Errorf("telegram media item has unsupported wire kind %q", it.WireKind)
 		}
@@ -572,6 +579,17 @@ func (t *TelegramTransport) sendMediaCompatibility(ctx context.Context, m Outgoi
 	}
 	if sendErr := sendBatches(photoBatch, false); sendErr != nil {
 		return persistentSendResult{MessageIDs: messageIDs}, sendErr
+	}
+	for _, it := range videoBatch {
+		videoCaption, videoParseMode, videoReplyTo := "", "", 0
+		if len(messageIDs) == 0 {
+			videoCaption, videoParseMode, videoReplyTo = caption, parseMode, replyTo
+		}
+		ids, sendErr := t.sendItemsAsVideos(ctx, chatID, thread, videoReplyTo, []OutgoingMediaItem{it}, videoCaption, videoParseMode)
+		messageIDs = append(messageIDs, ids...)
+		if sendErr != nil {
+			return persistentSendResult{MessageIDs: messageIDs}, sendErr
+		}
 	}
 	if len(messageIDs) == 0 {
 		return persistentSendResult{}, fmt.Errorf("telegram media delivery returned no stable message id")
@@ -673,6 +691,36 @@ func (t *TelegramTransport) sendItemsAsDocuments(ctx context.Context, chatID int
 		return nil, err
 	}
 	return confirmedTelegramMediaGroupIDs(sent, len(batch), "sendMediaGroup(documents)")
+}
+
+// sendItemsAsVideos sends each item as its own sendVideo message (Telegram
+// albums would mix poorly with the one-operation-per-request ledger), with
+// the caption and reply anchor on the first one only.
+func (t *TelegramTransport) sendItemsAsVideos(ctx context.Context, chatID int64, thread *int, replyTo int, batch []OutgoingMediaItem, caption, parseMode string) ([]string, error) {
+	ids := make([]string, 0, len(batch))
+	for i, it := range batch {
+		req := telegram.SendVideoRequest{
+			ChatID:          chatID,
+			MessageThreadID: thread,
+			Data:            it.Data,
+			Filename:        it.Filename,
+			MIME:            persistentMediaType(it),
+		}
+		if i == 0 {
+			req.Caption, req.ParseMode, req.ReplyToMessageID = caption, parseMode, replyTo
+		}
+		sent, err := t.api.SendVideo(ctx, req)
+		if err != nil {
+			t.logger.Error("sendVideo failed", "error", err)
+			return ids, err
+		}
+		id, confirmErr := confirmedTelegramMessageID(sent, "sendVideo")
+		if confirmErr != nil {
+			return ids, confirmErr
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
 }
 
 func confirmedTelegramMessageID(message *telegram.Message, method string) (string, error) {

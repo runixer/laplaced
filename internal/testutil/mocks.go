@@ -64,6 +64,14 @@ func (m *MockBotAPI) SendDocument(ctx context.Context, req telegram.SendDocument
 	return args.Get(0).(*telegram.Message), args.Error(1)
 }
 
+func (m *MockBotAPI) SendVideo(ctx context.Context, req telegram.SendVideoRequest) (*telegram.Message, error) {
+	args := m.Called(ctx, req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*telegram.Message), args.Error(1)
+}
+
 func (m *MockBotAPI) SendMediaGroup(ctx context.Context, req telegram.SendMediaGroupRequest) ([]telegram.Message, error) {
 	args := m.Called(ctx, req)
 	if args.Get(0) == nil {
@@ -962,6 +970,24 @@ func (m *MockLLMClient) CreateImages(ctx context.Context, req llm.ImageGeneratio
 		return llm.ImageGenerationResponse{}, args.Error(1)
 	}
 	return args.Get(0).(llm.ImageGenerationResponse), args.Error(1)
+}
+
+func (m *MockLLMClient) SubmitVideo(ctx context.Context, req llm.VideoGenerationRequest) (llm.VideoJob, error) {
+	args := m.Called(ctx, req)
+	return args.Get(0).(llm.VideoJob), args.Error(1)
+}
+
+func (m *MockLLMClient) GetVideo(ctx context.Context, jobID string) (llm.VideoJob, error) {
+	args := m.Called(ctx, jobID)
+	return args.Get(0).(llm.VideoJob), args.Error(1)
+}
+
+func (m *MockLLMClient) GetVideoContent(ctx context.Context, jobID string, index int) ([]byte, error) {
+	args := m.Called(ctx, jobID, index)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]byte), args.Error(1)
 }
 
 // MockFileDownloader implements telegram.FileDownloader for tests.

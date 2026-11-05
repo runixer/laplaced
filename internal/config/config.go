@@ -409,6 +409,57 @@ func (c *ImageGeneratorConfig) GetTimeout() time.Duration {
 	return d
 }
 
+// VideoGeneratorConfig configures the asynchronous video-generation agent
+// behind the generate_video tool. SupportedAspectRatios / SupportedDurations
+// drive the tool's JSON schema and must match what Model accepts upstream.
+type VideoGeneratorConfig struct {
+	AgentConfig `yaml:",inline"`
+
+	// Timeout bounds the whole job: submit, polling and download.
+	Timeout string `yaml:"timeout" env:"LAPLACED_VIDEO_GENERATOR_TIMEOUT"`
+	// PollInterval is the delay between job status checks.
+	PollInterval          string   `yaml:"poll_interval" env:"LAPLACED_VIDEO_GENERATOR_POLL_INTERVAL"`
+	Resolution            string   `yaml:"resolution" env:"LAPLACED_VIDEO_GENERATOR_RESOLUTION"`
+	DefaultAspectRatio    string   `yaml:"default_aspect_ratio" env:"LAPLACED_VIDEO_GENERATOR_DEFAULT_ASPECT_RATIO"`
+	DefaultDuration       int      `yaml:"default_duration" env:"LAPLACED_VIDEO_GENERATOR_DEFAULT_DURATION"`
+	SupportedAspectRatios []string `yaml:"supported_aspect_ratios" env:"LAPLACED_VIDEO_GENERATOR_SUPPORTED_ASPECT_RATIOS" env-separator:","`
+	SupportedDurations    []int    `yaml:"supported_durations" env:"LAPLACED_VIDEO_GENERATOR_SUPPORTED_DURATIONS" env-separator:","`
+	// GenerateAudio is the default for the soundtrack (speech, ambience);
+	// the tool call may override it per request.
+	GenerateAudio bool `yaml:"generate_audio" env:"LAPLACED_VIDEO_GENERATOR_GENERATE_AUDIO"`
+	// MaxConcurrent bounds parallel generate_video calls in one turn.
+	MaxConcurrent int `yaml:"max_concurrent" env:"LAPLACED_VIDEO_GENERATOR_MAX_CONCURRENT"`
+}
+
+// GetTimeout returns the whole-job timeout, defaulting to 5 minutes.
+func (c *VideoGeneratorConfig) GetTimeout() time.Duration {
+	return parseDurationOr(c.Timeout, 5*time.Minute)
+}
+
+// GetPollInterval returns the status polling interval, defaulting to 5s.
+func (c *VideoGeneratorConfig) GetPollInterval() time.Duration {
+	return parseDurationOr(c.PollInterval, 5*time.Second)
+}
+
+// GetMaxConcurrent returns the parallel-generation cap, defaulting to 2.
+func (c *VideoGeneratorConfig) GetMaxConcurrent() int {
+	if c.MaxConcurrent <= 0 {
+		return 2
+	}
+	return c.MaxConcurrent
+}
+
+func parseDurationOr(raw string, fallback time.Duration) time.Duration {
+	if raw == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return fallback
+	}
+	return d
+}
+
 // ReactorAgentConfig configures the emoji-reaction agent. Standalone struct
 // (not inline AgentConfig) so the env tags stay agent-unique.
 type ReactorAgentConfig struct {
@@ -438,6 +489,7 @@ type AgentsConfig struct {
 	Merger         AgentConfig          `yaml:"merger"`                             // Merges similar topics
 	Extractor      ExtractorAgentConfig `yaml:"extractor"`                          // Extracts content from artifacts
 	ImageGenerator ImageGeneratorConfig `yaml:"image_generator"`                    // Generates/edits images (v0.8.0)
+	VideoGenerator VideoGeneratorConfig `yaml:"video_generator"`                    // Generates short videos (generate_video tool)
 }
 
 // GetModel returns the agent's model, falling back to default if not set.

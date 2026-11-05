@@ -120,8 +120,9 @@ type OutgoingMedia struct {
 }
 
 // OutgoingMediaWireKind selects the exact Telegram upload method for a media
-// item. The zero value preserves the legacy size-threshold/AsDocument policy;
-// durable delivery plans should always select Photo or Document explicitly.
+// item. The zero value preserves the legacy size-threshold/AsDocument policy
+// (video MIME types resolve to Video); durable delivery plans should always
+// select Photo, Document or Video explicitly.
 // Transports without a photo/document distinction may ignore it.
 type OutgoingMediaWireKind string
 
@@ -129,6 +130,9 @@ const (
 	OutgoingMediaWireKindLegacy   OutgoingMediaWireKind = ""
 	OutgoingMediaWireKindPhoto    OutgoingMediaWireKind = "photo"
 	OutgoingMediaWireKindDocument OutgoingMediaWireKind = "document"
+	// OutgoingMediaWireKindVideo is an inline-playing video (Telegram
+	// sendVideo). It is always sent as its own single-item operation.
+	OutgoingMediaWireKindVideo OutgoingMediaWireKind = "video"
 )
 
 // OutgoingMediaItem is one file in an OutgoingMedia batch.

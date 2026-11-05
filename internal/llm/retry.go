@@ -13,6 +13,8 @@ import (
 
 // retryRequest describes one POST-with-retry operation for doRequestWithRetry.
 type retryRequest struct {
+	// method defaults to POST; GET requests carry a nil body.
+	method   string
 	endpoint string
 	body     []byte
 	// opName labels log lines ("LLM request", "embeddings request",
@@ -77,7 +79,7 @@ func (c *clientImpl) doRequestWithRetry(ctx context.Context, span trace.Span, r 
 			}
 		}
 
-		httpReq, err := c.newAPIRequest(ctx, r.endpoint, r.body)
+		httpReq, err := c.newAPIRequest(ctx, r.method, r.endpoint, r.body)
 		if err != nil {
 			return out, err
 		}
@@ -115,7 +117,9 @@ func (c *clientImpl) doRequestWithRetry(ctx context.Context, span trace.Span, r 
 			return out, err
 		}
 
-		if resp.StatusCode == http.StatusOK {
+		// Any 2xx is success: the async video endpoint answers a submit with
+		// 202 Accepted.
+		if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
 			// The provider sometimes returns 200 with an error payload in the
 			// body when the upstream fails. Treat as retryable unless the
 			// classified ErrorKind is permanent.

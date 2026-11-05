@@ -618,25 +618,31 @@ func (l *Laplace) executeToolCalls(
 	// bounded by max_concurrent. Every other tool may mutate shared state
 	// (memory/people) and runs inline in declared order. onToolStart fires up
 	// front for each call so the UI reflects every dispatched tool.
+	// generate_video jobs are likewise independent and take a minute or more,
+	// with their own (smaller) concurrency cap.
 	var wg sync.WaitGroup
-	imageConcurrency := 4
+	imageConcurrency, videoConcurrency := 4, 2
 	if l.cfg != nil {
 		imageConcurrency = l.cfg.Agents.ImageGenerator.GetMaxConcurrent()
+		videoConcurrency = l.cfg.Agents.VideoGenerator.GetMaxConcurrent()
 	}
-	sem := make(chan struct{}, imageConcurrency)
+	sems := map[string]chan struct{}{
+		"generate_image": make(chan struct{}, imageConcurrency),
+		"generate_video": make(chan struct{}, videoConcurrency),
+	}
 
 	for i, tc := range toolCalls {
 		if onToolStart != nil {
 			onToolStart(tc.Function.Name, tc.Function.Arguments)
 		}
-		if tc.Function.Name == "generate_image" {
+		if sem, parallel := sems[tc.Function.Name]; parallel {
 			wg.Add(1)
 			sem <- struct{}{}
-			go func(i int, tc llm.ToolCall) {
+			go func(i int, tc llm.ToolCall, sem chan struct{}) {
 				defer wg.Done()
 				defer func() { <-sem }()
 				run(i, tc)
-			}(i, tc)
+			}(i, tc, sem)
 			continue
 		}
 		run(i, tc)
@@ -737,9 +743,14 @@ func normalizeGeneratedDelivery(result *ToolResult) ([]int64, []artifactdelivery
 	return ids, generated
 }
 
+// countGeneratedPreviews counts photo previews, the only outputs that take a
+// MEDIA:n ordinal. Generated videos are delivered after the reply instead.
 func countGeneratedPreviews(generated []artifactdelivery.Generated) int {
 	count := 0
 	for _, item := range generated {
+		if item.Video {
+			continue
+		}
 		if item.Mode == artifactdelivery.ModePreview || item.Mode == artifactdelivery.ModePreviewAndOriginal {
 			count++
 		}

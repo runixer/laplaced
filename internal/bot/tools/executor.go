@@ -80,6 +80,7 @@ type ToolExecutor struct {
 	// generator is enabled; nil otherwise → generate_image tool returns
 	// a configuration error instead of silently failing).
 	imageGen     ImageGenerator
+	videoGen     VideoGenerator
 	artifactRepo storage.ArtifactRepository
 	fileStorage  files.Storage
 
@@ -266,6 +267,10 @@ func (e *ToolExecutor) ExecuteToolCall(ctx context.Context, cc CallContext, tool
 	case "generate_image":
 		e.logger.Info("Executing image generation tool", "tool", matchedTool.Name, "prompt", args["prompt"])
 		return e.performImageGeneration(ctx, cc, args)
+
+	case "generate_video":
+		e.logger.Info("Executing video generation tool", "tool", matchedTool.Name, "prompt", args["prompt"])
+		return e.performVideoGeneration(ctx, cc, args)
 
 	case "read_url":
 		e.logger.Info("Executing read_url tool", "tool", matchedTool.Name, "url", args["url"])

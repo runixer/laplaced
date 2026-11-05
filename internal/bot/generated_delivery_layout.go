@@ -274,6 +274,14 @@ func generatedMediaOperationsStable(path *responsePath, items []OutgoingMediaIte
 		batch = nil
 	}
 	for i, raw := range items {
+		// A video is never a photo or album member: it is its own operation,
+		// so flush around it and keep its explicit wire kind.
+		if raw.WireKind == OutgoingMediaWireKindVideo {
+			flush()
+			batch = append(batch, raw)
+			flush()
+			continue
+		}
 		item := normalizedGeneratedPhotoItem(raw, i)
 		asDocument := raw.WireKind == OutgoingMediaWireKindDocument || raw.AsDocument ||
 			(threshold > 0 && len(item.Data) > threshold) ||

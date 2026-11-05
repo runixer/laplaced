@@ -33,6 +33,9 @@ func (n *noOpBotAPI) SendPhoto(_ context.Context, _ telegram.SendPhotoRequest) (
 func (n *noOpBotAPI) SendDocument(_ context.Context, _ telegram.SendDocumentRequest) (*telegram.Message, error) {
 	return &telegram.Message{MessageID: 1}, nil
 }
+func (n *noOpBotAPI) SendVideo(_ context.Context, _ telegram.SendVideoRequest) (*telegram.Message, error) {
+	return &telegram.Message{MessageID: 1}, nil
+}
 func (n *noOpBotAPI) SendMediaGroup(_ context.Context, _ telegram.SendMediaGroupRequest) ([]telegram.Message, error) {
 	return []telegram.Message{{MessageID: 1}}, nil
 }

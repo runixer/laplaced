@@ -485,6 +485,33 @@ func TestValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "video_generator default duration outside supported list",
+			modify: func(c *Config) {
+				c.Agents.VideoGenerator.Model = "google/veo-3.1-lite"
+				c.Agents.VideoGenerator.SupportedAspectRatios = []string{"9:16"}
+				c.Agents.VideoGenerator.SupportedDurations = []int{4, 6}
+				c.Agents.VideoGenerator.DefaultDuration = 8
+			},
+			wantErr:     true,
+			errContains: "default_duration",
+		},
+		{
+			name: "video_generator model without supported lists",
+			modify: func(c *Config) {
+				c.Agents.VideoGenerator.Model = "google/veo-3.1-lite"
+				c.Agents.VideoGenerator.SupportedAspectRatios = nil
+			},
+			wantErr:     true,
+			errContains: "video_generator requires",
+		},
+		{
+			name: "video_generator disabled skips checks",
+			modify: func(c *Config) {
+				c.Agents.VideoGenerator = VideoGeneratorConfig{}
+			},
+			wantErr: false,
+		},
+		{
 			name: "image_generator empty supported lists skip the check",
 			modify: func(c *Config) {
 				c.Agents.ImageGenerator.SupportedImageSizes = nil

@@ -39,6 +39,7 @@ var toolArgField = map[string]string{
 	"search_history":  "query",
 	"search_people":   "query",
 	"generate_image":  "prompt",
+	"generate_video":  "prompt",
 	"read_url":        "url",
 }
 

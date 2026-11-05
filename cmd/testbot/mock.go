@@ -115,6 +115,11 @@ func (n *noOpBotAPI) SendDocument(ctx context.Context, req telegram.SendDocument
 	return &telegram.Message{MessageID: nextMockMessageID()}, nil
 }
 
+// SendVideo is a no-op for testbot.
+func (n *noOpBotAPI) SendVideo(ctx context.Context, req telegram.SendVideoRequest) (*telegram.Message, error) {
+	return &telegram.Message{MessageID: nextMockMessageID()}, nil
+}
+
 // SendMediaGroup is a no-op for testbot.
 func (n *noOpBotAPI) SendMediaGroup(ctx context.Context, req telegram.SendMediaGroupRequest) ([]telegram.Message, error) {
 	return []telegram.Message{{MessageID: nextMockMessageID()}}, nil

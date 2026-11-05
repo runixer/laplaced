@@ -20,6 +20,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/runixer/laplaced/internal/agent/imagegen"
+	"github.com/runixer/laplaced/internal/agent/videogen"
 	"github.com/runixer/laplaced/internal/app"
 	"github.com/runixer/laplaced/internal/bot"
 	botTools "github.com/runixer/laplaced/internal/bot/tools"
@@ -422,6 +423,13 @@ func run() int {
 			"artifacts_enabled", cfg.Artifacts.Enabled,
 			"model", cfg.Agents.ImageGenerator.Model,
 		)
+	}
+
+	// Wire video generation: same artifacts prerequisite as images.
+	if cfg.Artifacts.Enabled && cfg.Agents.VideoGenerator.Model != "" {
+		b.SetVideoGenerator(videogen.New(llmClient, &cfg.Agents.VideoGenerator, logger))
+		b.SetFileStorage(fileStorage)
+		logger.Info("Video generation enabled", "model", cfg.Agents.VideoGenerator.Model)
 	}
 
 	// Wire the read_url page fetcher constructed above (nil when the tool is

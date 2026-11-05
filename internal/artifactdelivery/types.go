@@ -30,6 +30,10 @@ const (
 type Generated struct {
 	ArtifactID int64
 	Mode       Mode
+	// Video marks a generated clip. Its preview is a native video message
+	// sent after the reply; it never takes a MEDIA:n placement ordinal,
+	// which address photo previews only.
+	Video bool
 }
 
 // Selected is one user-owned stored artifact staged by send_artifacts.
