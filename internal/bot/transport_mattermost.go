@@ -384,7 +384,7 @@ func (b *Bot) extractMattermostFiles(client *mattermost.Client, post mattermost.
 			Fetch: func(ctx context.Context, maxBytes int64) ([]byte, error) {
 				data, err := client.GetFile(ctx, id)
 				if err == nil && maxBytes > 0 && int64(len(data)) > maxBytes {
-					return nil, &files.FileTooLargeError{Size: int64(len(data)), FileName: fileName}
+					return nil, &files.FileTooLargeError{Size: int64(len(data)), FileName: fileName, Max: maxBytes}
 				}
 				return data, err
 			},

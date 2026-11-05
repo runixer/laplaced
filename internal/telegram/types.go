@@ -380,6 +380,7 @@ type SetWebhookRequest struct {
 	URL            string   `json:"url"`
 	SecretToken    string   `json:"secret_token,omitempty"`
 	AllowedUpdates []string `json:"allowed_updates,omitempty"`
+	MaxConnections int      `json:"max_connections,omitempty"`
 }
 
 // SendChatActionRequest represents the parameters for the sendChatAction method.

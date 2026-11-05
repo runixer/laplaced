@@ -23,7 +23,7 @@ bot:
   generic_error: "Oops, something went wrong. I couldn't send the answer. Please try repeating your request a bit later."
   access_denied: "Sorry, you don't have access to this bot."
   file_unsupported_format: "Sorry, I can't process .{ext} files. Supported formats: images (PNG, JPEG, WEBP, HEIC, HEIF), PDF, video, audio, and text files."
-  file_too_large: "Sorry, the file is too large ({size} MB). Maximum size is 20 MB."
+  file_too_large: "Sorry, the file is too large ({size} MB). Maximum size is {max} MB."
   file_read_error: "Sorry, I couldn't read the file properly. The AI might not understand its contents. Please try again or convert it to a supported format."
   rich_message_unsupported: "Sorry, I couldn't read this rich message. Please send it as regular text or attach a supported file."
   rich_media_unavailable: "Sorry, I couldn't read any of the media in this rich message. Please resend it as a supported file up to 20 MB."

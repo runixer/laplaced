@@ -158,8 +158,9 @@ func TestExecuteDeliveryPlanRejectsMixedExplicitWireKindsBeforeLedgerSend(t *tes
 }
 
 func TestValidateTelegramDocumentSizeBoundary(t *testing.T) {
-	require.NoError(t, validateTelegramDocumentSize(telegramDocumentMaxBytes))
-	require.ErrorContains(t, validateTelegramDocumentSize(telegramDocumentMaxBytes+1), "limit is")
+	require.NoError(t, validateTelegramDocumentSize(50<<20, 50<<20))
+	require.ErrorContains(t, validateTelegramDocumentSize(50<<20+1, 50<<20), "limit is")
+	require.NoError(t, validateTelegramDocumentSize(500<<20, 2000<<20), "a raised local-server cap admits larger uploads")
 }
 
 func TestValidatePersistentMediaItemRejectsUnsafeMetadata(t *testing.T) {

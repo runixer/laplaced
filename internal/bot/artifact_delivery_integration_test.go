@@ -369,7 +369,7 @@ func TestArtifactDeliveryIntegration_InvalidSelectionRejectsBeforeArtifactNetwor
 		{
 			name: "oversize",
 			makeInvalid: func(t *testing.T, f *artifactDeliveryFixture) int64 {
-				data := make([]byte, telegramDocumentMaxBytes+1)
+				data := make([]byte, config.TelegramPublicMaxUploadMB<<20+1)
 				return f.addArtifact(t, f.userID, 0, "stored/oversize.bin", "application/octet-stream", "oversize.bin", data)
 			},
 		},

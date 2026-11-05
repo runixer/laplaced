@@ -700,6 +700,6 @@ Further architecture docs in `docs/architecture/` (not auto-loaded — read on d
 `transports.md` (Telegram/Mattermost abstraction, ScopeID, SSO), `database-backends.md`
 (SQLite/Postgres dialect layer), `observability.md` (OpenTelemetry + Prometheus),
 `streaming.md` (progressive replies), `image-generation.md` (`generate_image`),
-`video-generation.md` (`generate_video`),
+`video-generation.md` (`generate_video`), `telegram-local-bot-api.md` (self-hosted Bot API, big files),
 `reactor.md` (emoji reactions), `topics.md`, `people-graph.md`, `embedding-storage.md`,
 `graceful-shutdown.md`, `telegram-html-rendering.md`, `vault-secrets.md`.

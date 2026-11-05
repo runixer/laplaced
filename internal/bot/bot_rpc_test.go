@@ -257,6 +257,7 @@ func TestSetWebhook_CallsAPI(t *testing.T) {
 		URL:            webhookURL,
 		SecretToken:    secretToken,
 		AllowedUpdates: telegram.AllowedUpdateTypes(),
+		MaxConnections: 1,
 	}
 
 	mockAPI.On("SetWebhook", mock.Anything, expectedReq).Return(nil)
@@ -264,6 +265,20 @@ func TestSetWebhook_CallsAPI(t *testing.T) {
 	err := bot.SetWebhook(webhookURL, secretToken)
 
 	assert.NoError(t, err)
+	mockAPI.AssertExpectations(t)
+}
+
+// TestSetWebhook_ClearOmitsMaxConnections verifies that clearing the webhook
+// (long-polling startup) sends no max_connections.
+func TestSetWebhook_ClearOmitsMaxConnections(t *testing.T) {
+	mockAPI := new(testutil.MockBotAPI)
+	bot := &Bot{api: mockAPI, cfg: &config.Config{}, logger: testutil.TestLogger()}
+
+	mockAPI.On("SetWebhook", mock.Anything, telegram.SetWebhookRequest{
+		AllowedUpdates: telegram.AllowedUpdateTypes(),
+	}).Return(nil)
+
+	assert.NoError(t, bot.SetWebhook("", ""))
 	mockAPI.AssertExpectations(t)
 }
 

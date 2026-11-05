@@ -292,7 +292,6 @@ const (
 	generatedRichPhotoHTML     = `<img src="tg://photo?id=rich_photo_0"/>`
 	generatedRichGalleryMax    = 10
 	telegramRichPhotoMaxBytes  = 10 << 20
-	telegramDocumentMaxBytes   = 50 << 20
 )
 
 func generatedRichGalleryHTML(media []telegram.InputRichMessageMedia) (string, error) {
@@ -483,7 +482,7 @@ func (t *TelegramTransport) SendMediaPersistent(ctx context.Context, m OutgoingM
 		return persistentSendResult{}, err
 	}
 	threshold := t.cfg.Agents.ImageGenerator.DocumentThresholdBytes
-	wireKind, err := validateTelegramPersistentMediaBatch(m.Items, threshold)
+	wireKind, err := validateTelegramPersistentMediaBatch(m.Items, threshold, t.cfg.Telegram.GetMaxUploadBytes())
 	if err != nil {
 		return persistentSendResult{}, fmt.Errorf("persistent Telegram media operation %w", err)
 	}

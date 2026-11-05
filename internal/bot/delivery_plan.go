@@ -215,9 +215,11 @@ func resolvedTelegramMediaWireKind(item OutgoingMediaItem, threshold int) Outgoi
 	return OutgoingMediaWireKindPhoto
 }
 
-func validateTelegramDocumentSize(size int) error {
-	if size > telegramDocumentMaxBytes {
-		return fmt.Errorf("has %d bytes, limit is %d", size, telegramDocumentMaxBytes)
+// validateTelegramDocumentSize checks a document or video against the
+// configured upload cap (telegram.max_upload_mb).
+func validateTelegramDocumentSize(size, maxUpload int) error {
+	if size > maxUpload {
+		return fmt.Errorf("has %d bytes, limit is %d", size, maxUpload)
 	}
 	return nil
 }
@@ -225,7 +227,7 @@ func validateTelegramDocumentSize(size int) error {
 // validateTelegramPersistentMediaBatch validates the complete one-call media
 // operation before the delivery ledger can enter its non-idempotent sending
 // state. Telegram albums cannot mix InputMediaPhoto and InputMediaDocument.
-func validateTelegramPersistentMediaBatch(items []OutgoingMediaItem, threshold int) (OutgoingMediaWireKind, error) {
+func validateTelegramPersistentMediaBatch(items []OutgoingMediaItem, threshold, maxUpload int) (OutgoingMediaWireKind, error) {
 	if len(items) == 0 || len(items) > 10 {
 		return OutgoingMediaWireKindLegacy, fmt.Errorf("requires 1-10 items, got %d", len(items))
 	}
@@ -244,7 +246,7 @@ func validateTelegramPersistentMediaBatch(items []OutgoingMediaItem, threshold i
 
 		switch kind {
 		case OutgoingMediaWireKindDocument:
-			if err := validateTelegramDocumentSize(len(item.Data)); err != nil {
+			if err := validateTelegramDocumentSize(len(item.Data), maxUpload); err != nil {
 				return OutgoingMediaWireKindLegacy, fmt.Errorf("document item %d %w", i, err)
 			}
 		case OutgoingMediaWireKindPhoto:
@@ -258,7 +260,7 @@ func validateTelegramPersistentMediaBatch(items []OutgoingMediaItem, threshold i
 			if !strings.HasPrefix(persistentMediaType(item), "video/") {
 				return OutgoingMediaWireKindLegacy, fmt.Errorf("video item %d has non-video MIME %q", i, item.MIME)
 			}
-			if err := validateTelegramDocumentSize(len(item.Data)); err != nil {
+			if err := validateTelegramDocumentSize(len(item.Data), maxUpload); err != nil {
 				return OutgoingMediaWireKindLegacy, fmt.Errorf("video item %d %w", i, err)
 			}
 		default:
@@ -408,7 +410,7 @@ func validateTelegramRoutingValue(name, value string, allowEmpty bool) error {
 	return nil
 }
 
-func validateTelegramDeliveryOperation(op deliveryOperation, threshold int) error {
+func validateTelegramDeliveryOperation(op deliveryOperation, threshold, maxUpload int) error {
 	if err := validateTelegramRoutingValue("conversation id", deliveryOperationConversationID(op), false); err != nil {
 		return err
 	}
@@ -433,7 +435,7 @@ func validateTelegramDeliveryOperation(op deliveryOperation, threshold int) erro
 		}
 	}
 	if op.Media != nil {
-		if _, err := validateTelegramPersistentMediaBatch(op.Media.Items, threshold); err != nil {
+		if _, err := validateTelegramPersistentMediaBatch(op.Media.Items, threshold, maxUpload); err != nil {
 			return fmt.Errorf("media operation %w", err)
 		}
 	}
@@ -469,7 +471,7 @@ func (b *Bot) validateDeliveryExecution(plan deliveryPlan, metadata []deliveryLe
 			}
 		}
 		if b.transport.Kind() == transportTelegram {
-			if err := validateTelegramDeliveryOperation(op, b.cfg.Agents.ImageGenerator.DocumentThresholdBytes); err != nil {
+			if err := validateTelegramDeliveryOperation(op, b.cfg.Agents.ImageGenerator.DocumentThresholdBytes, b.cfg.Telegram.GetMaxUploadBytes()); err != nil {
 				return err
 			}
 		}

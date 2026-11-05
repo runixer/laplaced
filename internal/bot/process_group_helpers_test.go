@@ -40,6 +40,18 @@ func TestPrepareErrorText(t *testing.T) {
 			notContains: "{size}",
 		},
 		{
+			name:        "file too large reports the default cap",
+			err:         &files.FileTooLargeError{FileName: "big.pdf", Size: 25 * 1024 * 1024},
+			contains:    "max 20 MB",
+			notContains: "{max}",
+		},
+		{
+			name:        "file too large reports a raised cap",
+			err:         &files.FileTooLargeError{FileName: "huge.mp4", Size: 600 * 1024 * 1024, Max: 500 * 1024 * 1024},
+			contains:    "max 500 MB",
+			notContains: "{max}",
+		},
+		{
 			name:        "wrapped errors unwrap through errors.As",
 			err:         fmt.Errorf("processing: %w", &files.FileTooLargeError{Size: 1024 * 1024}),
 			contains:    "1.0",

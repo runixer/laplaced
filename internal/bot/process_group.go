@@ -174,7 +174,8 @@ func (b *Bot) prepareErrorText(err error) string {
 	case errors.As(err, &tooLarge):
 		msg := b.translator.Get(b.cfg.Bot.Language, "bot.file_too_large")
 		sizeMB := float64(tooLarge.Size) / (1024 * 1024)
-		return strings.ReplaceAll(msg, "{size}", fmt.Sprintf("%.1f", sizeMB))
+		msg = strings.ReplaceAll(msg, "{size}", fmt.Sprintf("%.1f", sizeMB))
+		return strings.ReplaceAll(msg, "{max}", strconv.FormatInt(tooLarge.Limit()/(1024*1024), 10))
 	default:
 		return b.translator.Get(b.cfg.Bot.Language, "bot.api_error")
 	}

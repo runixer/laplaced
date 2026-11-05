@@ -483,11 +483,7 @@ func (c *Client) SendVideo(ctx context.Context, req SendVideoRequest) (*Message,
 	}
 	files := []multipartFile{{FieldName: "video", Filename: filename, Data: req.Data, ContentType: req.MIME}}
 
-	client := c.uploadClient
-	if client == nil {
-		client = c.httpClient
-	}
-	resp, err := c.makeMultipartRequestWith(ctx, client, "sendVideo", fields, files)
+	resp, err := c.makeMultipartRequest(ctx, "sendVideo", fields, files)
 	if err != nil {
 		return nil, err
 	}
@@ -617,7 +613,13 @@ type multipartFile struct {
 //
 // Metrics & error sanitization mirror makeRequest where sensible.
 func (c *Client) makeMultipartRequest(ctx context.Context, method string, fields map[string]string, files []multipartFile) (*APIResponse, error) {
-	return c.makeMultipartRequestWith(ctx, c.httpClient, method, fields, files)
+	// Uploads answer only after the bytes reach Telegram, which routinely
+	// exceeds the 30s budget of httpClient for documents near the size cap.
+	httpClient := c.uploadClient
+	if httpClient == nil {
+		httpClient = c.httpClient
+	}
+	return c.makeMultipartRequestWith(ctx, httpClient, method, fields, files)
 }
 
 // makeMultipartRequestWith is makeMultipartRequest over an explicit HTTP

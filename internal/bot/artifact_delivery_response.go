@@ -69,15 +69,15 @@ func (b *Bot) loadArtifactDeliveryStrict(
 	if artifact == nil || artifact.UserID != userID {
 		return loadedArtifactDelivery{}, fmt.Errorf("artifact %d is unavailable for this user", artifactID)
 	}
-	// Neither Telegram Photo nor hosted-Bot-API Document upload can carry a
-	// blob above this bound. Reject from trusted metadata before allocating or
+	// No Telegram upload can carry a blob above the configured cap (50 MB on
+	// the public Bot API). Reject from trusted metadata before allocating or
 	// reading it; an unknown/legacy zero size is verified after the read.
 	if artifact.FileSize < 0 {
 		return loadedArtifactDelivery{}, fmt.Errorf("artifact %d has invalid negative size %d", artifactID, artifact.FileSize)
 	}
-	if artifact.FileSize > telegramDocumentMaxBytes {
+	if maxUpload := int64(b.cfg.Telegram.GetMaxUploadBytes()); artifact.FileSize > maxUpload {
 		return loadedArtifactDelivery{}, fmt.Errorf("artifact %d has %d bytes, Telegram upload limit is %d",
-			artifactID, artifact.FileSize, telegramDocumentMaxBytes)
+			artifactID, artifact.FileSize, maxUpload)
 	}
 	data, err := b.fileStorage.ReadFile(ctx, artifact.FilePath)
 	if err != nil {

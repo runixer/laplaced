@@ -159,6 +159,7 @@ func sendVoiceMessage(ctx context.Context, tb *testBot, tgID int64, voicePath st
 	}
 	fileProcessor := files.NewProcessor(downloader, translator, tb.cfg.Bot.Language, tb.logger)
 	fileProcessor.SetMinVoiceDurationSec(tb.cfg.Artifacts.MinVoiceDurationSeconds)
+	fileProcessor.SetMaxFileSize(tb.cfg.Telegram.GetMaxDownloadBytes())
 
 	// Set custom file processor
 	tb.bot.SetFileProcessor(fileProcessor)

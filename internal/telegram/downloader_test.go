@@ -285,7 +285,7 @@ func TestDownloadFile_SizeBound(t *testing.T) {
 
 	t.Run("rejects oversized Content-Length before reading", func(t *testing.T) {
 		fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Length", fmt.Sprint(maxFileDownloadSize+1))
+			w.Header().Set("Content-Length", fmt.Sprint(defaultMaxFileDownloadSize+1))
 			w.WriteHeader(http.StatusOK)
 		}))
 		defer fileServer.Close()
@@ -299,7 +299,7 @@ func TestDownloadFile_SizeBound(t *testing.T) {
 	})
 
 	t.Run("accepts exact limit", func(t *testing.T) {
-		payload := bytes.Repeat([]byte{'x'}, int(maxFileDownloadSize))
+		payload := bytes.Repeat([]byte{'x'}, int(defaultMaxFileDownloadSize))
 		fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Length", fmt.Sprint(len(payload)))
 			_, _ = w.Write(payload)
@@ -311,11 +311,11 @@ func TestDownloadFile_SizeBound(t *testing.T) {
 		content, err := downloader.DownloadFile(context.Background(), "exact-limit")
 
 		require.NoError(t, err)
-		assert.Len(t, content, int(maxFileDownloadSize))
+		assert.Len(t, content, int(defaultMaxFileDownloadSize))
 	})
 
 	t.Run("rejects chunked body one byte over limit", func(t *testing.T) {
-		payload := bytes.Repeat([]byte{'x'}, int(maxFileDownloadSize+1))
+		payload := bytes.Repeat([]byte{'x'}, int(defaultMaxFileDownloadSize+1))
 		fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			// Flushing headers before the first write prevents net/http from
 			// synthesizing Content-Length and exercises the LimitReader guard.
