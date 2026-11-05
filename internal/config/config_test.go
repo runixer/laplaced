@@ -439,6 +439,52 @@ func TestValidate(t *testing.T) {
 			errContains: "default_aspect_ratio",
 		},
 		{
+			name: "image_generator unknown api",
+			modify: func(c *Config) {
+				c.Agents.ImageGenerator.API = "responses"
+			},
+			wantErr:     true,
+			errContains: "agents.image_generator.api",
+		},
+		{
+			name: "image_generator images api requires a pixel size per tier and ratio",
+			modify: func(c *Config) {
+				c.Agents.ImageGenerator.API = ImageAPIImages
+				c.Agents.ImageGenerator.SupportedImageSizes = []string{"1K"}
+				c.Agents.ImageGenerator.SupportedAspectRatios = []string{"1:1", "9:16"}
+				c.Agents.ImageGenerator.DefaultImageSize = "1K"
+				c.Agents.ImageGenerator.DefaultAspectRatio = "9:16"
+				c.Agents.ImageGenerator.PixelSizes = map[string]map[string]string{"1K": {"1:1": "1536x1536"}}
+			},
+			wantErr:     true,
+			errContains: "missing 1K / 9:16",
+		},
+		{
+			name: "image_generator images api rejects malformed pixel size",
+			modify: func(c *Config) {
+				c.Agents.ImageGenerator.API = ImageAPIImages
+				c.Agents.ImageGenerator.SupportedImageSizes = []string{"1K"}
+				c.Agents.ImageGenerator.SupportedAspectRatios = []string{"1:1"}
+				c.Agents.ImageGenerator.DefaultImageSize = "1K"
+				c.Agents.ImageGenerator.DefaultAspectRatio = "1:1"
+				c.Agents.ImageGenerator.PixelSizes = map[string]map[string]string{"1K": {"1:1": "2K"}}
+			},
+			wantErr:     true,
+			errContains: "is not WxH",
+		},
+		{
+			name: "image_generator images api with a complete table",
+			modify: func(c *Config) {
+				c.Agents.ImageGenerator.API = ImageAPIImages
+				c.Agents.ImageGenerator.SupportedImageSizes = []string{"1K"}
+				c.Agents.ImageGenerator.SupportedAspectRatios = []string{"1:1"}
+				c.Agents.ImageGenerator.DefaultImageSize = "1K"
+				c.Agents.ImageGenerator.DefaultAspectRatio = "1:1"
+				c.Agents.ImageGenerator.PixelSizes = map[string]map[string]string{"1K": {"1:1": "1536x1536"}}
+			},
+			wantErr: false,
+		},
+		{
 			name: "image_generator empty supported lists skip the check",
 			modify: func(c *Config) {
 				c.Agents.ImageGenerator.SupportedImageSizes = nil
@@ -1694,4 +1740,22 @@ func TestValidate_FetcherBackend(t *testing.T) {
 		cfg.Fetcher.Firecrawl.APIKey = ""
 		assert.NoError(t, cfg.Validate())
 	})
+}
+
+// TestLoadDefault_ImageGeneratorTableComplete guards the shipped default: the
+// images API needs an explicit pixel size for every size × ratio the tool
+// schema can offer.
+func TestLoadDefault_ImageGeneratorTableComplete(t *testing.T) {
+	cfg, err := LoadDefault()
+	if !assert.NoError(t, err) {
+		return
+	}
+	assert.Empty(t, cfg.validateImageGenerator())
+	ig := cfg.Agents.ImageGenerator
+	assert.True(t, ig.UsesImagesAPI())
+	for _, tier := range ig.SupportedImageSizes {
+		for _, ratio := range ig.SupportedAspectRatios {
+			assert.NotEmpty(t, ig.PixelSize(tier, ratio), "%s / %s", tier, ratio)
+		}
+	}
 }

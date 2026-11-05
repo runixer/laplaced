@@ -351,5 +351,33 @@ func (c *Config) validateImageGenerator() []error {
 	if ig.DefaultAspectRatio != "" && len(ig.SupportedAspectRatios) > 0 && !slices.Contains(ig.SupportedAspectRatios, ig.DefaultAspectRatio) {
 		errs = append(errs, fmt.Errorf("agents.image_generator.default_aspect_ratio %q is not in supported_aspect_ratios %v", ig.DefaultAspectRatio, ig.SupportedAspectRatios))
 	}
+	switch ig.API {
+	case "", ImageAPIChat:
+	case ImageAPIImages:
+		errs = append(errs, validateImagePixelSizes(ig)...)
+	default:
+		errs = append(errs, fmt.Errorf("agents.image_generator.api must be %q or %q, got %q", ImageAPIChat, ImageAPIImages, ig.API))
+	}
+	return errs
+}
+
+// validateImagePixelSizes requires a well-formed "WxH" pixel_sizes entry for
+// every supported size × ratio the tool schema can offer, so a request never
+// falls through to the provider's own (silently coarsened) sizing.
+func validateImagePixelSizes(ig *ImageGeneratorConfig) []error {
+	var errs []error
+	for _, tier := range ig.SupportedImageSizes {
+		for _, ratio := range ig.SupportedAspectRatios {
+			px := ig.PixelSize(tier, ratio)
+			if px == "" {
+				errs = append(errs, fmt.Errorf("agents.image_generator.pixel_sizes is missing %s / %s (required when api=images)", tier, ratio))
+				continue
+			}
+			var w, h int
+			if n, err := fmt.Sscanf(px, "%dx%d", &w, &h); err != nil || n != 2 || w <= 0 || h <= 0 || fmt.Sprintf("%dx%d", w, h) != px {
+				errs = append(errs, fmt.Errorf("agents.image_generator.pixel_sizes %s / %s = %q is not WxH", tier, ratio, px))
+			}
+		}
+	}
 	return errs
 }

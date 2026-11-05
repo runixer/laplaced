@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Image generation now defaults to OpenAI's gpt-image-2.6 (via the new `agents.image_generator.api: images` endpoint option) — several times cheaper and faster, with exact sizes up to 4K.
+
 ### Fixed
+- Content-policy rejections reported as HTTP errors are now explained to the user as such instead of as a generic API failure.
 - Memory lookup no longer occasionally gives up on choosing past conversations after reading them, which made a reply fall back to a cruder memory match.
 
 ## [0.12.0] - 2026-10-18

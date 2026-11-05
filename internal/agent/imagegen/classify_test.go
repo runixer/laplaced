@@ -3,6 +3,7 @@ package imagegen
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/runixer/laplaced/internal/llm"
@@ -33,6 +34,11 @@ func TestClassifyFailure(t *testing.T) {
 			name:   "generic upstream error → upstream_error",
 			genErr: errors.New("llm API error: 502 Bad Gateway"),
 			want:   KindUpstreamError,
+		},
+		{
+			name:   "explicit content-policy error → safety_block",
+			genErr: fmt.Errorf("wrap: %w", llm.NewSafetyBlockErrorForTest("Your request was rejected by the safety system.", 400)),
+			want:   KindSafetyBlock,
 		},
 		{
 			name:     "google text refusal → text_refusal",

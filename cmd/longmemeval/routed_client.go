@@ -54,3 +54,7 @@ func applyChatOptions(req *llm.ChatCompletionRequest, enableThinking bool) {
 func (c *routedClient) CreateEmbeddings(ctx context.Context, req llm.EmbeddingRequest) (llm.EmbeddingResponse, error) {
 	return c.embeddings.CreateEmbeddings(ctx, req)
 }
+
+func (c *routedClient) CreateImages(ctx context.Context, req llm.ImageGenerationRequest) (llm.ImageGenerationResponse, error) {
+	return c.route(ctx).client.CreateImages(ctx, req)
+}

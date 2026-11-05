@@ -54,6 +54,11 @@ const (
 	// KindUnknownNoImages — non-OpenAI provider returned no images and no
 	// text. Genuinely unknown cause.
 	KindUnknownNoImages
+
+	// KindSafetyBlock — the provider rejected the request with an explicit
+	// content-policy error (e.g. HTTP 400 "rejected by the safety system"
+	// from the images endpoint). Occasionally a false positive.
+	KindSafetyBlock
 )
 
 // String returns a stable lower_snake identifier suitable for span attrs,
@@ -70,6 +75,8 @@ func (k FailureKind) String() string {
 		return "silent_block_oai"
 	case KindUnknownNoImages:
 		return "unknown_no_images"
+	case KindSafetyBlock:
+		return "safety_block"
 	default:
 		return "unknown"
 	}

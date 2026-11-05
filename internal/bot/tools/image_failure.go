@@ -21,6 +21,7 @@ const (
 	ImageGenKindTextRefusal
 	ImageGenKindSilentBlockOAI
 	ImageGenKindUnknownNoImages
+	ImageGenKindSafetyBlock
 )
 
 // String returns the same lower_snake identifiers as imagegen.FailureKind
@@ -37,6 +38,8 @@ func (k ImageGenFailureKind) String() string {
 		return "silent_block_oai"
 	case ImageGenKindUnknownNoImages:
 		return "unknown_no_images"
+	case ImageGenKindSafetyBlock:
+		return "safety_block"
 	default:
 		return "unknown"
 	}

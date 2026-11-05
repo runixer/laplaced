@@ -956,6 +956,14 @@ func (m *MockLLMClient) CreateEmbeddings(ctx context.Context, req llm.EmbeddingR
 	return args.Get(0).(llm.EmbeddingResponse), args.Error(1)
 }
 
+func (m *MockLLMClient) CreateImages(ctx context.Context, req llm.ImageGenerationRequest) (llm.ImageGenerationResponse, error) {
+	args := m.Called(ctx, req)
+	if args.Get(0) == nil {
+		return llm.ImageGenerationResponse{}, args.Error(1)
+	}
+	return args.Get(0).(llm.ImageGenerationResponse), args.Error(1)
+}
+
 // MockFileDownloader implements telegram.FileDownloader for tests.
 type MockFileDownloader struct {
 	mock.Mock

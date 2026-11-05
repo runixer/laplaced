@@ -345,9 +345,22 @@ type ImageGeneratorConfig struct {
 	// see the commented alternative in default.yaml for verified per-model sets.
 	SupportedImageSizes   []string `yaml:"supported_image_sizes" env:"LAPLACED_IMAGE_GENERATOR_SUPPORTED_IMAGE_SIZES" env-separator:","`
 	SupportedAspectRatios []string `yaml:"supported_aspect_ratios" env:"LAPLACED_IMAGE_GENERATOR_SUPPORTED_ASPECT_RATIOS" env-separator:","`
-	MaxInputImages        int      `yaml:"max_input_images" env:"LAPLACED_IMAGE_GENERATOR_MAX_INPUT_IMAGES"`
-	MaxOutputImages       int      `yaml:"max_output_images" env:"LAPLACED_IMAGE_GENERATOR_MAX_OUTPUT_IMAGES"`
-	MaxInputImageBytes    int      `yaml:"max_input_image_bytes" env:"LAPLACED_IMAGE_GENERATOR_MAX_INPUT_IMAGE_BYTES"`
+	// API selects the upstream endpoint: "chat" (default) sends
+	// chat-completions with modalities=["image","text"]; "images" uses the
+	// dedicated /images endpoint, which some models (openai/gpt-image-*) are
+	// only served on.
+	API string `yaml:"api" env:"LAPLACED_IMAGE_GENERATOR_API"`
+	// Quality and OutputFormat are passed through on the images API only
+	// (e.g. "low"/"medium"/"high", "png"/"jpeg"/"webp"); empty = provider default.
+	Quality      string `yaml:"quality" env:"LAPLACED_IMAGE_GENERATOR_QUALITY"`
+	OutputFormat string `yaml:"output_format" env:"LAPLACED_IMAGE_GENERATOR_OUTPUT_FORMAT"`
+	// PixelSizes maps image_size tier → aspect ratio → explicit "WxH" for the
+	// images API, which ignores tier/ratio hints for some models and needs
+	// exact pixels. Must cover every supported size × ratio when API=images.
+	PixelSizes         map[string]map[string]string `yaml:"pixel_sizes"`
+	MaxInputImages     int                          `yaml:"max_input_images" env:"LAPLACED_IMAGE_GENERATOR_MAX_INPUT_IMAGES"`
+	MaxOutputImages    int                          `yaml:"max_output_images" env:"LAPLACED_IMAGE_GENERATOR_MAX_OUTPUT_IMAGES"`
+	MaxInputImageBytes int                          `yaml:"max_input_image_bytes" env:"LAPLACED_IMAGE_GENERATOR_MAX_INPUT_IMAGE_BYTES"`
 	// DocumentThresholdBytes: generated images larger than this are sent via
 	// sendDocument instead of sendPhoto, preserving full resolution (Telegram
 	// recompresses photos to ~1280 px on long side). Default 2 MB covers
@@ -357,6 +370,23 @@ type ImageGeneratorConfig struct {
 	// assistant turn run in parallel (e.g. "draw three pictures"). Other tools
 	// stay sequential. Defaults to 4.
 	MaxConcurrent int `yaml:"max_concurrent" env:"LAPLACED_IMAGE_GENERATOR_MAX_CONCURRENT"`
+}
+
+// Image generator endpoint kinds for ImageGeneratorConfig.API.
+const (
+	ImageAPIChat   = "chat"
+	ImageAPIImages = "images"
+)
+
+// UsesImagesAPI reports whether generation goes through the /images endpoint.
+func (c *ImageGeneratorConfig) UsesImagesAPI() bool {
+	return c.API == ImageAPIImages
+}
+
+// PixelSize returns the configured "WxH" for a size tier and aspect ratio,
+// or "" when the table has no entry.
+func (c *ImageGeneratorConfig) PixelSize(tier, ratio string) string {
+	return c.PixelSizes[tier][ratio]
 }
 
 // GetMaxConcurrent returns the parallel-generation cap, defaulting to 4.

@@ -31,6 +31,12 @@ func classifyFailure(genErr error, msg llm.ResponseMessage, provider string) Fai
 		if errors.Is(genErr, context.DeadlineExceeded) {
 			return KindTimeout
 		}
+		// The images endpoint reports content-policy rejections as HTTP 400
+		// ("rejected by the safety system") — a refusal, not a transient
+		// provider error the user should simply retry.
+		if llm.IsSafetyBlock(genErr) {
+			return KindSafetyBlock
+		}
 		return KindUpstreamError
 	}
 	if len(msg.Images) == 0 {
