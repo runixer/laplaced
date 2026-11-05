@@ -61,16 +61,16 @@ func TestResolvedTelegramMediaWireKind_Video(t *testing.T) {
 
 func TestValidateTelegramPersistentMediaBatch_Video(t *testing.T) {
 	clip := OutgoingMediaItem{Data: testMP4, Filename: "a.mp4", MIME: "video/mp4", WireKind: OutgoingMediaWireKindVideo}
-	kind, err := validateTelegramPersistentMediaBatch([]OutgoingMediaItem{clip}, 0)
+	kind, err := validateTelegramPersistentMediaBatch([]OutgoingMediaItem{clip}, 0, 50<<20)
 	require.NoError(t, err)
 	assert.Equal(t, OutgoingMediaWireKindVideo, kind)
 
-	_, err = validateTelegramPersistentMediaBatch([]OutgoingMediaItem{clip, clip}, 0)
+	_, err = validateTelegramPersistentMediaBatch([]OutgoingMediaItem{clip, clip}, 0, 50<<20)
 	assert.ErrorContains(t, err, "exactly one item")
 
 	notVideo := clip
 	notVideo.MIME = "image/png"
-	_, err = validateTelegramPersistentMediaBatch([]OutgoingMediaItem{notVideo}, 0)
+	_, err = validateTelegramPersistentMediaBatch([]OutgoingMediaItem{notVideo}, 0, 50<<20)
 	assert.ErrorContains(t, err, "non-video MIME")
 }
 

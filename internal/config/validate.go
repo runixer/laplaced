@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -72,14 +73,46 @@ func (c *Config) validateTransport() []error {
 		if c.Mattermost.BotToken == "" {
 			errs = append(errs, errors.New("mattermost.bot_token is required when transport is \"mattermost\""))
 		}
-	} else if c.Telegram.Token == "" {
-		errs = append(errs, errors.New("telegram.token is required"))
+	} else {
+		if c.Telegram.Token == "" {
+			errs = append(errs, errors.New("telegram.token is required"))
+		}
+		errs = append(errs, c.validateTelegramLimits()...)
 	}
 	// A principal resolver only makes sense for the transport that owns its trust
 	// source (Mattermost auth_service). Catch a misplaced block at load time
 	// instead of silently never resolving.
 	if c.Mattermost.PrincipalResolver != nil && c.Transport != "mattermost" {
 		errs = append(errs, errors.New("mattermost.principal_resolver requires transport \"mattermost\""))
+	}
+	return errs
+}
+
+// validateTelegramLimits keeps the file caps inside what the configured Bot
+// API server can serve: the public one stops at 20 MB down / 50 MB up.
+func (c *Config) validateTelegramLimits() []error {
+	var errs []error
+	t := &c.Telegram
+	if t.MaxDownloadMB < 0 {
+		errs = append(errs, errors.New("telegram.max_download_mb must not be negative"))
+	} else if t.MaxDownloadMB > TelegramPublicMaxDownloadMB && !t.LocalMode {
+		errs = append(errs, fmt.Errorf("telegram.max_download_mb above %d requires telegram.local_mode", TelegramPublicMaxDownloadMB))
+	}
+	switch {
+	case t.MaxUploadMB < 0:
+		errs = append(errs, errors.New("telegram.max_upload_mb must not be negative"))
+	case t.MaxUploadMB > TelegramLocalMaxUploadMB:
+		errs = append(errs, fmt.Errorf("telegram.max_upload_mb must not exceed %d", TelegramLocalMaxUploadMB))
+	case t.MaxUploadMB > TelegramPublicMaxUploadMB && !t.LocalMode:
+		errs = append(errs, fmt.Errorf("telegram.max_upload_mb above %d requires telegram.local_mode", TelegramPublicMaxUploadMB))
+	}
+	if t.LocalMode {
+		if t.GetAPIBaseURL() == TelegramPublicAPIBaseURL {
+			errs = append(errs, errors.New("telegram.local_mode requires telegram.api_base_url pointing at a self-hosted Bot API server"))
+		}
+		if !filepath.IsAbs(t.GetLocalFilesDir()) {
+			errs = append(errs, errors.New("telegram.local_files_dir must be an absolute path"))
+		}
 	}
 	return errs
 }

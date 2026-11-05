@@ -336,7 +336,9 @@ func run() int {
 	}
 	logger.Info("LLM client created successfully.")
 
-	api, err := telegram.NewExtendedClient(cfg.Telegram.Token, cfg.Telegram.ProxyURL)
+	api, err := telegram.NewExtendedClient(cfg.Telegram.Token, cfg.Telegram.ProxyURL,
+		telegram.WithAPIBaseURL(cfg.Telegram.GetAPIBaseURL()),
+		telegram.WithLocalMode(cfg.Telegram.LocalMode))
 	if err != nil {
 		logger.Error("failed to create telegram client", "error", err)
 		return 1

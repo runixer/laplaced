@@ -66,11 +66,10 @@ type ProcessedFile struct {
 	FileUniqueID string
 }
 
-const (
-	// maxTelegramDownloadSize is the maximum file size Telegram Bot API allows for getFile.
-	// From Telegram docs: "The maximum file size to download is 20 MB"
-	maxTelegramDownloadSize = 20 * 1024 * 1024
-)
+// DefaultMaxFileSize is the public Bot API getFile limit ("The maximum file
+// size to download is 20 MB"). A self-hosted --local server lifts it; the
+// processor then takes the configured telegram.max_download_mb instead.
+const DefaultMaxFileSize int64 = 20 * 1024 * 1024
 
 // geminiSupportedMimeTypes lists MIME types supported by Gemini API.
 // See: https://ai.google.dev/gemini-api/docs/models/gemini-2.0-flash#supported-input-types
@@ -150,16 +149,6 @@ func NormalizeMimeForGemini(mimeType string) string {
 	return mimeType
 }
 
-// IsFileSizeAllowed checks if a file size is within Telegram Bot API limits.
-func IsFileSizeAllowed(size int64) bool {
-	return size > 0 && size <= maxTelegramDownloadSize
-}
-
-// MaxFileSize returns the maximum file size allowed for download.
-func MaxFileSize() int64 {
-	return maxTelegramDownloadSize
-}
-
 // UnsupportedFormatError is returned when a file format is not supported by Gemini.
 type UnsupportedFormatError struct {
 	MimeType string
@@ -181,10 +170,20 @@ func (e *UnsupportedFormatError) Error() string {
 type FileTooLargeError struct {
 	Size     int64
 	FileName string
+	// Max is the limit that was exceeded; zero means DefaultMaxFileSize.
+	Max int64
+}
+
+// Limit returns the size limit the file exceeded.
+func (e *FileTooLargeError) Limit() int64 {
+	if e.Max > 0 {
+		return e.Max
+	}
+	return DefaultMaxFileSize
 }
 
 func (e *FileTooLargeError) Error() string {
-	return fmt.Sprintf("file too large: %s (%d bytes, max %d bytes)", e.FileName, e.Size, maxTelegramDownloadSize)
+	return fmt.Sprintf("file too large: %s (%d bytes, max %d bytes)", e.FileName, e.Size, e.Limit())
 }
 
 // AggregateBudgetExceededError is returned for an otherwise valid occurrence

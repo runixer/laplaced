@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - The bot can now make short videos with sound and speech (`generate_video`, Google Veo 3.1 Lite by default), from a description or by animating a photo; clips arrive as playable Telegram videos.
+- Support for a self-hosted Telegram Bot API server (`telegram.api_base_url`, `telegram.local_mode`), which lifts the 20 MB download and 50 MB upload limits via the new `telegram.max_download_mb` / `telegram.max_upload_mb` options.
 
 ### Changed
 - Image generation now defaults to OpenAI's gpt-image-2.6 (via the new `agents.image_generator.api: images` endpoint option) — several times cheaper and faster, with exact sizes up to 4K.

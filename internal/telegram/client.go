@@ -71,15 +71,57 @@ type Client struct {
 	// answers, routinely exceeds the 30s budget of httpClient.
 	uploadClient *http.Client
 	apiURL       string
+	// localMode is set for a self-hosted --local server; see WithLocalMode.
+	localMode bool
 }
+
+// ClientOption customizes NewClient.
+type ClientOption func(*clientOptions)
+
+type clientOptions struct {
+	baseURL   string
+	localMode bool
+}
+
+// WithAPIBaseURL points the client at a self-hosted Bot API server instead of
+// https://api.telegram.org. An empty value keeps the default.
+func WithAPIBaseURL(baseURL string) ClientOption {
+	return func(o *clientOptions) {
+		if u := strings.TrimRight(strings.TrimSpace(baseURL), "/"); u != "" {
+			o.baseURL = u
+		}
+	}
+}
+
+// WithLocalMode adapts timeouts to a self-hosted server running with --local.
+// Such a server finishes the transfer to or from Telegram before it answers:
+// getFile returns only after the whole file is on its disk, and an upload of
+// up to 2000 MB returns only after Telegram has accepted it.
+func WithLocalMode(local bool) ClientOption {
+	return func(o *clientOptions) { o.localMode = local }
+}
+
+// Upload/transfer budgets. The public server caps uploads at 50 MB; a local
+// one accepts 2000 MB, which takes minutes even on a fast link.
+const (
+	publicUploadTimeout        = 3 * time.Minute
+	publicUploadHeaderTimeout  = 2 * time.Minute
+	localTransferTimeout       = 30 * time.Minute
+	localTransferHeaderTimeout = 30 * time.Minute
+)
 
 // NewClient creates a new Telegram API client.
 //
-// Creates two isolated HTTP clients with different settings:
+// Creates isolated HTTP clients with different settings:
 //   - httpClient: 30s timeout for sendMessage/sendChatAction (retry policy is
 //     selected per method)
 //   - longPollingClient: no timeout (controlled via context), for getUpdates
-func NewClient(token, proxyURL string) (*Client, error) {
+//   - uploadClient: multipart uploads, and getFile against a local server
+func NewClient(token, proxyURL string, opts ...ClientOption) (*Client, error) {
+	options := clientOptions{baseURL: "https://api.telegram.org"}
+	for _, opt := range opts {
+		opt(&options)
+	}
 	// Transport for regular API calls (sendMessage, sendChatAction, etc.)
 	// DisableKeepAlives=true - each request creates a new connection,
 	// which eliminates problems with "stuck" keep-alive connections
@@ -129,8 +171,12 @@ func NewClient(token, proxyURL string) (*Client, error) {
 		longPollingTransport.Proxy = http.ProxyURL(proxy)
 	}
 
+	uploadTimeout, uploadHeaderTimeout := publicUploadTimeout, publicUploadHeaderTimeout
+	if options.localMode {
+		uploadTimeout, uploadHeaderTimeout = localTransferTimeout, localTransferHeaderTimeout
+	}
 	uploadTransport := transport.Clone()
-	uploadTransport.ResponseHeaderTimeout = 2 * time.Minute
+	uploadTransport.ResponseHeaderTimeout = uploadHeaderTimeout
 
 	return &Client{
 		token: token,
@@ -147,10 +193,11 @@ func NewClient(token, proxyURL string) (*Client, error) {
 			Transport: longPollingTransport,
 		},
 		uploadClient: &http.Client{
-			Timeout:   3 * time.Minute,
+			Timeout:   uploadTimeout,
 			Transport: uploadTransport,
 		},
-		apiURL: fmt.Sprintf("https://api.telegram.org/bot%s", token),
+		apiURL:    fmt.Sprintf("%s/bot%s", options.baseURL, token),
+		localMode: options.localMode,
 	}, nil
 }
 
@@ -177,6 +224,12 @@ func (c *Client) makeRequest(ctx context.Context, method string, params interfac
 var requestRetryDelay = 2 * time.Second
 
 func (c *Client) makeRequestWithAttempts(ctx context.Context, method string, params interface{}, maxAttempts int) (*APIResponse, error) {
+	return c.makeRequestWithClient(ctx, c.httpClient, method, params, maxAttempts)
+}
+
+// makeRequestWithClient is makeRequestWithAttempts over an explicit client,
+// for calls whose duration does not fit the 30s budget of httpClient.
+func (c *Client) makeRequestWithClient(ctx context.Context, httpClient *http.Client, method string, params interface{}, maxAttempts int) (*APIResponse, error) {
 	startTime := time.Now()
 
 	jsonParams, err := json.Marshal(params)
@@ -224,7 +277,7 @@ func (c *Client) makeRequestWithAttempts(ctx context.Context, method string, par
 			WroteRequest: func(httptrace.WroteRequestInfo) { wroteRequest = true },
 		}))
 
-		resp, err := c.httpClient.Do(req)
+		resp, err := httpClient.Do(req)
 		if err != nil {
 			// Sanitize error to remove bot token from URL in error messages
 			lastErr = fmt.Errorf("failed to perform request: %w", sanitizeError(err, c.token))
@@ -452,7 +505,13 @@ func (c *Client) SendChatAction(ctx context.Context, req SendChatActionRequest) 
 
 // GetFile returns a File object with a file_path that can be used to download the file.
 func (c *Client) GetFile(ctx context.Context, req GetFileRequest) (*File, error) {
-	resp, err := c.makeRequest(ctx, "getFile", req)
+	httpClient := c.httpClient
+	if c.localMode && c.uploadClient != nil {
+		// A local server downloads the whole file from Telegram before it
+		// answers getFile; for a large file that takes far longer than 30s.
+		httpClient = c.uploadClient
+	}
+	resp, err := c.makeRequestWithClient(ctx, httpClient, "getFile", req, 2)
 	if err != nil {
 		return nil, err
 	}
@@ -570,8 +629,8 @@ type ExtendedClient struct {
 	*Client
 }
 
-func NewExtendedClient(token, proxyURL string) (BotAPI, error) {
-	client, err := NewClient(token, proxyURL)
+func NewExtendedClient(token, proxyURL string, opts ...ClientOption) (BotAPI, error) {
+	client, err := NewClient(token, proxyURL, opts...)
 	if err != nil {
 		return nil, err
 	}

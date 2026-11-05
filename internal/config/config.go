@@ -21,6 +21,78 @@ const (
 	TelegramRichMessagesSend   = "send"
 )
 
+// TelegramConfig configures the Telegram transport.
+type TelegramConfig struct {
+	Token         string `yaml:"token" env:"LAPLACED_TELEGRAM_TOKEN"`
+	WebhookURL    string `yaml:"webhook_url" env:"LAPLACED_TELEGRAM_WEBHOOK_URL"`
+	WebhookPath   string // Auto-generated from token hash (not configurable)
+	WebhookSecret string // Auto-generated from token hash (not configurable)
+	ProxyURL      string `yaml:"proxy_url" env:"LAPLACED_TELEGRAM_PROXY_URL"`
+	// APIBaseURL points the bot at a self-hosted Bot API server
+	// (github.com/tdlib/telegram-bot-api); empty means the public
+	// https://api.telegram.org.
+	APIBaseURL string `yaml:"api_base_url" env:"LAPLACED_TELEGRAM_API_BASE_URL"`
+	// LocalMode must match a self-hosted server started with --local: getFile
+	// then returns an absolute path on the server's disk, which the bot reads
+	// from a shared volume, and the 20 MB download / 50 MB upload caps of the
+	// public API no longer apply.
+	LocalMode bool `yaml:"local_mode" env:"LAPLACED_TELEGRAM_LOCAL_MODE"`
+	// LocalFilesDir is the server's working directory as mounted into the
+	// bot. getFile paths outside it are rejected. Mount the volume at the same
+	// path the server uses so the paths match without translation.
+	LocalFilesDir string `yaml:"local_files_dir" env:"LAPLACED_TELEGRAM_LOCAL_FILES_DIR"`
+	// MaxDownloadMB caps a single incoming file and the per-turn aggregate of
+	// all incoming files (they are inlined into one LLM request). 0 means the
+	// public API limit of 20; larger values require local_mode.
+	MaxDownloadMB int `yaml:"max_download_mb" env:"LAPLACED_TELEGRAM_MAX_DOWNLOAD_MB"`
+	// MaxUploadMB caps one outgoing document or video. 0 means the public API
+	// limit of 50; larger values (up to 2000) require local_mode.
+	MaxUploadMB  int                        `yaml:"max_upload_mb" env:"LAPLACED_TELEGRAM_MAX_UPLOAD_MB"`
+	RichMessages TelegramRichMessagesConfig `yaml:"rich_messages"`
+}
+
+// Bot API limits: the public server, and a self-hosted one in --local mode.
+const (
+	TelegramPublicAPIBaseURL     = "https://api.telegram.org"
+	TelegramPublicMaxDownloadMB  = 20
+	TelegramPublicMaxUploadMB    = 50
+	TelegramLocalMaxUploadMB     = 2000
+	TelegramDefaultLocalFilesDir = "/var/lib/telegram-bot-api"
+	telegramBytesPerMB           = 1 << 20
+)
+
+// GetAPIBaseURL returns the Bot API base URL without a trailing slash.
+func (c *TelegramConfig) GetAPIBaseURL() string {
+	if u := strings.TrimRight(strings.TrimSpace(c.APIBaseURL), "/"); u != "" {
+		return u
+	}
+	return TelegramPublicAPIBaseURL
+}
+
+// GetLocalFilesDir returns the directory local-mode getFile paths must live in.
+func (c *TelegramConfig) GetLocalFilesDir() string {
+	if d := strings.TrimSpace(c.LocalFilesDir); d != "" {
+		return d
+	}
+	return TelegramDefaultLocalFilesDir
+}
+
+// GetMaxDownloadBytes returns the incoming-file cap in bytes.
+func (c *TelegramConfig) GetMaxDownloadBytes() int64 {
+	if c.MaxDownloadMB > 0 {
+		return int64(c.MaxDownloadMB) * telegramBytesPerMB
+	}
+	return TelegramPublicMaxDownloadMB * telegramBytesPerMB
+}
+
+// GetMaxUploadBytes returns the outgoing document/video cap in bytes.
+func (c *TelegramConfig) GetMaxUploadBytes() int {
+	if c.MaxUploadMB > 0 {
+		return c.MaxUploadMB * telegramBytesPerMB
+	}
+	return TelegramPublicMaxUploadMB * telegramBytesPerMB
+}
+
 // TelegramRichMessagesConfig controls outbound model-authored Rich Messages.
 // Inbound Rich Messages are intentionally not feature-gated: disabling this
 // config only selects the outbound representation.
@@ -1016,15 +1088,8 @@ type Config struct {
 		} `yaml:"auth"`
 	} `yaml:"server"`
 	// Transport selects the chat backend: "telegram" (default) | "mattermost".
-	Transport string `yaml:"transport" env:"LAPLACED_TRANSPORT"`
-	Telegram  struct {
-		Token         string                     `yaml:"token" env:"LAPLACED_TELEGRAM_TOKEN"`
-		WebhookURL    string                     `yaml:"webhook_url" env:"LAPLACED_TELEGRAM_WEBHOOK_URL"`
-		WebhookPath   string                     // Auto-generated from token hash (not configurable)
-		WebhookSecret string                     // Auto-generated from token hash (not configurable)
-		ProxyURL      string                     `yaml:"proxy_url" env:"LAPLACED_TELEGRAM_PROXY_URL"`
-		RichMessages  TelegramRichMessagesConfig `yaml:"rich_messages"`
-	} `yaml:"telegram"`
+	Transport  string           `yaml:"transport" env:"LAPLACED_TRANSPORT"`
+	Telegram   TelegramConfig   `yaml:"telegram"`
 	Mattermost MattermostConfig `yaml:"mattermost"`
 	LLM        LLMConfig        `yaml:"llm"`
 	Agents     AgentsConfig     `yaml:"agents"`

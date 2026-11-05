@@ -82,12 +82,17 @@ type Bot struct {
 
 func NewBot(logger *slog.Logger, api telegram.BotAPI, cfg *config.Config, userRepo storage.UserRepository, msgRepo storage.MessageRepository, statsRepo storage.StatsRepository, factRepo storage.FactRepository, factHistoryRepo storage.FactHistoryRepository, peopleRepo storage.PeopleRepository, orClient llm.Client, ragService *rag.Service, contextService *agent.ContextService, translator *i18n.Translator) (*Bot, error) {
 	botLogger := logger.With("component", "bot")
-	downloader, err := telegram.NewHTTPFileDownloader(api, "https://api.telegram.org", cfg.Telegram.ProxyURL)
+	downloaderOpts := []telegram.DownloaderOption{telegram.WithMaxDownloadBytes(cfg.Telegram.GetMaxDownloadBytes())}
+	if cfg.Telegram.LocalMode {
+		downloaderOpts = append(downloaderOpts, telegram.WithLocalFilesDir(cfg.Telegram.GetLocalFilesDir()))
+	}
+	downloader, err := telegram.NewHTTPFileDownloader(api, cfg.Telegram.GetAPIBaseURL(), cfg.Telegram.ProxyURL, downloaderOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create file downloader: %w", err)
 	}
 
 	fileProcessor := files.NewProcessor(downloader, translator, cfg.Bot.Language, botLogger)
+	fileProcessor.SetMaxFileSize(cfg.Telegram.GetMaxDownloadBytes())
 	fileProcessor.SetMinVoiceDurationSec(cfg.Artifacts.MinVoiceDurationSeconds)
 	fileProcessor.SetImageInputFormat(cfg.LLM.ImageInputFormat)
 
@@ -288,6 +293,11 @@ func (b *Bot) SetWebhook(webhookURL, secretToken string) error {
 		URL:            webhookURL,
 		SecretToken:    secretToken,
 		AllowedUpdates: telegram.AllowedUpdateTypes(),
+	}
+	if webhookURL != "" {
+		// One connection delivers updates in order, as long polling does;
+		// the default of 40 lets a burst of messages arrive reordered.
+		req.MaxConnections = 1
 	}
 	return b.api.SetWebhook(context.Background(), req)
 }

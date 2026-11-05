@@ -19,6 +19,18 @@ telegram:
   token: ""
   webhook_url: ""
   proxy_url: ""
+  # Self-hosted Bot API server (github.com/tdlib/telegram-bot-api). Empty =
+  # the public api.telegram.org. With local_mode (server started with --local)
+  # getFile returns absolute paths under local_files_dir, which must be the
+  # server's volume mounted into the bot at the same path.
+  api_base_url: ""
+  local_mode: false
+  local_files_dir: "/var/lib/telegram-bot-api"
+  # Incoming-file cap: one file and the per-turn total, inlined into a single
+  # LLM request. Above 20 requires local_mode.
+  max_download_mb: 20
+  # Outgoing document/video cap. Above 50 (up to 2000) requires local_mode.
+  max_upload_mb: 50
   # Outbound Rich Messages. Inbound Rich Messages are always decoded.
   # send = native rich replies (headings, lists, tables, quotes, code,
   # spoilers, LaTeX) plus artifact delivery in private chats; shadow = render

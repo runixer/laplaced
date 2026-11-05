@@ -271,7 +271,7 @@ func TestProcessFilesDetailed_FalselySmallDeclarationsCannotEscapeFetchReservati
 			t.Fatal("timed out waiting for bounded rich fetch")
 		}
 	}
-	assert.LessOrEqual(t, maxActiveReserved.Load(), MaxFileSize())
+	assert.LessOrEqual(t, maxActiveReserved.Load(), DefaultMaxFileSize)
 	close(release)
 
 	select {

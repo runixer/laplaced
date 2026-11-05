@@ -110,7 +110,7 @@ type detailedFetchJob struct {
 }
 
 // ProcessFilesDetailed processes a multi-occurrence rich attachment set under
-// a single 20 MiB aggregate budget. Downloads are coalesced by a non-empty
+// a single aggregate budget (the processor file cap, 20 MiB by default). Downloads are coalesced by a non-empty
 // FileUniqueID, run with at most three concurrent fetches, and results always
 // correspond one-for-one with incoming in input order.
 //
@@ -136,7 +136,7 @@ func (p *Processor) ProcessFilesDetailed(
 		normalized[i] = f
 		results[i] = ProcessFileResult{Incoming: f, DuplicateOf: -1}
 
-		if err := validateIncomingFile(f); err != nil {
+		if err := validateIncomingFile(f, p.maxFileSize); err != nil {
 			results[i].Status = statusForProcessError(err)
 			results[i].Err = err
 			p.logRejectedIncomingFile(userID, f, err)
@@ -174,7 +174,7 @@ func (p *Processor) ProcessFilesDetailed(
 		for active < maxConcurrentFileFetches && next < len(candidates) {
 			index := candidates[next]
 			f := normalized[index]
-			remaining := MaxFileSize() - committedBytes - reservedBytes
+			remaining := p.maxFileSize - committedBytes - reservedBytes
 			reservation := f.Size
 			if reservation <= 0 {
 				// An unknown-size file can consume the entire remaining budget;
@@ -247,10 +247,10 @@ func (p *Processor) ProcessFilesDetailed(
 
 		actualSize := int64(len(fetchResult.data))
 		results[job.index].DownloadedSize = actualSize
-		if actualSize > MaxFileSize() {
+		if actualSize > p.maxFileSize {
 			fetched[job.index].data = nil
 			results[job.index].Status = ProcessFileOmittedLimit
-			results[job.index].Err = &FileTooLargeError{Size: actualSize, FileName: f.FileName}
+			results[job.index].Err = &FileTooLargeError{Size: actualSize, FileName: f.FileName, Max: p.maxFileSize}
 			continue
 		}
 		if actualSize > job.reservation {
@@ -269,12 +269,12 @@ func (p *Processor) ProcessFilesDetailed(
 			}
 			continue
 		}
-		if actualSize > MaxFileSize()-committedBytes-reservedBytes {
+		if actualSize > p.maxFileSize-committedBytes-reservedBytes {
 			fetched[job.index].data = nil
 			results[job.index].Status = ProcessFileOmittedLimit
 			results[job.index].Err = &AggregateBudgetExceededError{
 				Size:      actualSize,
-				Remaining: max64(MaxFileSize()-committedBytes-reservedBytes, 0),
+				Remaining: max64(p.maxFileSize-committedBytes-reservedBytes, 0),
 				FileName:  f.FileName,
 			}
 			continue
@@ -410,9 +410,9 @@ func inferVideoMIME(fileName, fallback string) string {
 	}
 }
 
-func validateIncomingFile(f IncomingFile) error {
-	if f.Size > 0 && !IsFileSizeAllowed(f.Size) {
-		return &FileTooLargeError{Size: f.Size, FileName: f.FileName}
+func validateIncomingFile(f IncomingFile, maxSize int64) error {
+	if f.Size > maxSize {
+		return &FileTooLargeError{Size: f.Size, FileName: f.FileName, Max: maxSize}
 	}
 
 	switch f.Kind {
@@ -447,7 +447,7 @@ func (p *Processor) logRejectedIncomingFile(userID storage.ScopeID, f IncomingFi
 			"file_id", f.SourceID,
 			"file_name", f.FileName,
 			"size", tooLarge.Size,
-			"max_size", MaxFileSize(),
+			"max_size", p.maxFileSize,
 		)
 		return
 	}
@@ -496,7 +496,7 @@ func coarseIncomingFileErrorClass(err error) string {
 // and (nil, err) for validation failures.
 func (p *Processor) processOne(ctx context.Context, f IncomingFile, userID storage.ScopeID, groupText string) (*ProcessedFile, error) {
 	f = normalizeIncomingFile(f)
-	if err := validateIncomingFile(f); err != nil {
+	if err := validateIncomingFile(f, p.maxFileSize); err != nil {
 		p.logRejectedIncomingFile(userID, f, err)
 		return nil, err
 	}
@@ -517,8 +517,8 @@ func (p *Processor) processOne(ctx context.Context, f IncomingFile, userID stora
 		}
 		return nil, nil // skip — non-fatal, matches legacy download-failure handling
 	}
-	if int64(len(data)) > MaxFileSize() {
-		return nil, &FileTooLargeError{Size: int64(len(data)), FileName: f.FileName}
+	if int64(len(data)) > p.maxFileSize {
+		return nil, &FileTooLargeError{Size: int64(len(data)), FileName: f.FileName, Max: p.maxFileSize}
 	}
 
 	processed, err := p.processData(ctx, f, data, duration, userID, groupText)

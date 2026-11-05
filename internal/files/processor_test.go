@@ -394,31 +394,41 @@ func TestIsGeminiSupported(t *testing.T) {
 	}
 }
 
-func TestIsFileSizeAllowed(t *testing.T) {
+func TestValidateIncomingFile_SizeCap(t *testing.T) {
+	const mb = int64(1024 * 1024)
 	tests := []struct {
-		name string
-		size int64
-		want bool
+		name    string
+		size    int64
+		max     int64
+		wantErr bool
 	}{
-		{"Zero bytes", 0, false},
-		{"1 byte", 1, true},
-		{"1 MB", 1024 * 1024, true},
-		{"10 MB", 10 * 1024 * 1024, true},
-		{"20 MB (exact limit)", 20 * 1024 * 1024, true},
-		{"20 MB + 1 byte (over limit)", 20*1024*1024 + 1, false},
-		{"25 MB", 25 * 1024 * 1024, false},
-		{"100 MB", 100 * 1024 * 1024, false},
+		{"unknown size passes to post-download check", 0, 20 * mb, false},
+		{"at the default cap", 20 * mb, 20 * mb, false},
+		{"one byte over the default cap", 20*mb + 1, 20 * mb, true},
+		{"raised cap admits a larger file", 100 * mb, 200 * mb, false},
+		{"raised cap still rejects above it", 201 * mb, 200 * mb, true},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, IsFileSizeAllowed(tt.size))
+			err := validateIncomingFile(IncomingFile{Kind: FileTypeVoice, FileName: "a.ogg", Size: tt.size}, tt.max)
+			if !tt.wantErr {
+				assert.NoError(t, err)
+				return
+			}
+			var tooLarge *FileTooLargeError
+			require.ErrorAs(t, err, &tooLarge)
+			assert.Equal(t, tt.max, tooLarge.Limit())
 		})
 	}
 }
 
-func TestMaxFileSize(t *testing.T) {
-	assert.Equal(t, int64(20*1024*1024), MaxFileSize())
+func TestProcessor_SetMaxFileSize(t *testing.T) {
+	p := NewProcessor(nil, nil, "en", testutil.TestLogger())
+	assert.Equal(t, DefaultMaxFileSize, p.MaxFileSize())
+	p.SetMaxFileSize(0)
+	assert.Equal(t, DefaultMaxFileSize, p.MaxFileSize(), "non-positive keeps the default")
+	p.SetMaxFileSize(500 << 20)
+	assert.Equal(t, int64(500<<20), p.MaxFileSize())
 }
 
 func TestProcessor_ProcessMessage_UnsupportedFormat(t *testing.T) {

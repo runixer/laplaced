@@ -25,6 +25,9 @@ type Processor struct {
 	retryDelay          time.Duration
 	minVoiceDurationSec int    // Min voice duration (sec) to RAG-index. 0 = index all, -1 = disable voice artifacts, N = index >= N (shorter still retained raw for replay)
 	imageInputFormat    string // How image/video parts are encoded for the LLM (llm.ImageInputFormat*). "" = file.
+	// maxFileSize caps one incoming file and the per-turn aggregate of all of
+	// them; see SetMaxFileSize.
+	maxFileSize int64
 }
 
 // FileSaver is the interface for saving artifacts (to avoid circular dependency).
@@ -42,13 +45,28 @@ func NewProcessor(
 	logger *slog.Logger,
 ) *Processor {
 	return &Processor{
-		downloader: downloader,
-		translator: translator,
-		language:   language,
-		logger:     logger.With("component", "file_processor"),
-		maxRetries: 3,
-		retryDelay: 500 * time.Millisecond,
+		downloader:  downloader,
+		translator:  translator,
+		language:    language,
+		logger:      logger.With("component", "file_processor"),
+		maxRetries:  3,
+		retryDelay:  500 * time.Millisecond,
+		maxFileSize: DefaultMaxFileSize,
 	}
+}
+
+// SetMaxFileSize sets the incoming-file cap: a single file and the aggregate
+// of one turn's files (they share one LLM request). Non-positive keeps the
+// 20 MB public Bot API default.
+func (p *Processor) SetMaxFileSize(n int64) {
+	if n > 0 {
+		p.maxFileSize = n
+	}
+}
+
+// MaxFileSize returns the incoming-file cap in bytes.
+func (p *Processor) MaxFileSize() int64 {
+	return p.maxFileSize
 }
 
 // SetFileHandler sets the optional file handler for saving artifacts.
