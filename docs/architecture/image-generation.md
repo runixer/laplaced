@@ -62,9 +62,35 @@ tool-loop → индекс `tool_calls` → порядок outputs провай�
 backward-compatible default `preview` для старых трасс, хотя актуальная схема
 требует поле явно.
 
-**Дефолты** (`internal/agent/imagegen/imagegen.go`): если ratio пуст и входных
-картинок нет → `default_aspect_ratio`; если есть входные картинки → ratio не
-навязывается (сохраняется исходный); `image_size` пуст → `default_image_size`.
+**Дефолты** (`internal/agent/imagegen/`): если ratio пуст и входных картинок нет →
+`default_aspect_ratio`; `image_size` пуст → `default_image_size`. Если ratio пуст,
+а входные картинки есть, исходное кадрирование сохраняется: на chat API ratio
+просто не отправляется, на images API берётся ближайшее поддерживаемое
+соотношение к первой входной картинке (JPEG/PNG; иначе размер выбирает провайдер).
+Источник ratio виден на спане как `imagegen.aspect_ratio_source`
+(`requested` / `default` / `input` / `none`).
+
+## Два API: chat и images
+
+`agents.image_generator.api` выбирает эндпоинт:
+
+| `api` | Эндпоинт | Модели |
+|-------|----------|--------|
+| `chat` (по умолчанию в коде) | chat-completions с `modalities: ["image","text"]` и `image_config` | `openai/gpt-5.4-image-2`, `google/gemini-3.1-flash-image-preview` |
+| `images` (по умолчанию в `default.yaml`) | `POST /images` → `data[].b64_json` | `openai/gpt-image-2.6-*` — доступны только здесь |
+
+Особенности `/images` для gpt-image-2.6 (проверено curl'ом):
+
+- `aspect_ratio` молча огрубляется до 1024², 1536×1024, 1024×1536 (9:16 → 2:3),
+  а `resolution: 2K/4K` молча игнорируется. Поэтому мы всегда шлём явный
+  `size: "WxH"` из таблицы `pixel_sizes` (тир × ratio); при `api: images`
+  валидация конфига требует запись для каждой пары из supported-списков.
+- Обе стороны кратны 16, длинная сторона ≤ 3840, площадь ≤ ~8.3 Мп.
+  1K = 1536 по длинной стороне, 2K = 2048, 4K = 3840.
+- Отказ модерации приходит как **HTTP 400** «rejected by the safety system»
+  (иногда ложноположительный) → режим `safety_block`, без ретраев.
+- `quality` (low / medium / high) и `output_format` передаются как есть. PNG в 4K
+  весит ~10 МБ и уходит Document'ом (лимит фото Telegram 10 МБ).
 
 ## Доставка результата: private V1
 
@@ -138,7 +164,7 @@ history; приложение добавляет в history только соб�
 Rollout и stop-сигналы описаны в
 [telegram-rich-messages.md](../telegram-rich-messages.md).
 
-## Обработка ошибок: пять режимов
+## Обработка ошибок: шесть режимов
 
 Раньше бот при любой неудаче выдавал одну из трёх причин «наугад» (почти всегда
 «safety filter»). Теперь классификатор (`internal/agent/imagegen/classify.go`)
@@ -152,6 +178,7 @@ Rollout и stop-сигналы описаны в
 | `text_refusal` | есть текст, нет картинок | дословная цитата отказа модели (переведённая) |
 | `silent_block_oai` | OpenAI, ни картинок, ни текста | вероятно политика контента, перефразируй |
 | `unknown_no_images` | нет картинок и текста (не OpenAI) | причина неизвестна |
+| `safety_block` | явная ошибка модерации (`llm.IsSafetyBlock`, напр. HTTP 400 от `/images`) | заблокировано политикой, перефразируй; бывают ложные срабатывания |
 
 Tool-слой (`internal/bot/tools/image.go`) распознаёт типизированный
 `ImageGenFailure` и формирует результат, который **останавливает** дальнейшие
@@ -171,12 +198,16 @@ Tool-слой (`internal/bot/tools/image.go`) распознаёт типизи�
 ```yaml
 agents:
   image_generator:
-    model: "openai/gpt-5.4-image-2"   # "" → инструмент generate_image выключен
-    timeout: "720s"                   # gpt-5.4-image-2 медленный; nano banana — 90s
+    model: "openai/gpt-image-2.6-sunburst"  # "" → инструмент generate_image выключен
+    api: "images"                     # chat | images
+    quality: "medium"                 # только images API
+    timeout: "180s"
     default_aspect_ratio: "9:16"
     default_image_size: "1K"
-    supported_image_sizes: ["1K", "2K"]
+    supported_image_sizes: ["1K", "2K", "4K"]
     supported_aspect_ratios: ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"]
+    pixel_sizes:                      # тир → ratio → WxH, только images API
+      "1K": {"9:16": "864x1536", "16:9": "1536x864", ...}
     max_input_images: 4
     max_output_images: 4
     max_input_image_bytes: 20971520    # 20MB
@@ -184,11 +215,13 @@ agents:
     max_concurrent: 4
 ```
 
-`default.yaml` содержит две выверенные конфигурации (curl-verified):
-`openai/gpt-5.4-image-2` (выше качество, медленнее, дороже, потолок 2K) и
-`google/gemini-3.1-flash-image-preview` («nano banana» — быстрее, дешевле,
-поддерживает 4K и экстремальные соотношения сторон 1:4 / 4:1 / 1:8 / 8:1).
-Переключение модели = замена `model` + `timeout` + двух списков.
+`default.yaml` содержит выверенные конфигурации (curl-verified):
+`openai/gpt-image-2.6-sunburst` на `medium` (по умолчанию: ~$0.03–0.05 и ~30 с
+за 1K, лучше держит детали и цифры), `openai/gpt-image-2.6-flare` (~11 с, слабее
+в мелких деталях), а также chat-варианты `openai/gpt-5.4-image-2` (дороже,
+минуты на вызов, потолок 2K) и `google/gemini-3.1-flash-image-preview`
+(«nano banana», поддерживает 1:4 / 4:1 / 1:8 / 8:1). Переключение модели =
+замена `model` + `api` + `timeout` + списков (и `pixel_sizes` для images API).
 
 ## Связанные документы
 

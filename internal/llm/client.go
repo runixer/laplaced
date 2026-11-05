@@ -38,6 +38,7 @@ type Client interface {
 	CreateChatCompletion(ctx context.Context, req ChatCompletionRequest) (ChatCompletionResponse, error)
 	CreateChatCompletionStream(ctx context.Context, req ChatCompletionRequest) (*ChatCompletionStream, error)
 	CreateEmbeddings(ctx context.Context, req EmbeddingRequest) (EmbeddingResponse, error)
+	CreateImages(ctx context.Context, req ImageGenerationRequest) (ImageGenerationResponse, error)
 }
 
 // FilterReasoningForLog filters out encrypted reasoning entries from reasoning_details.

@@ -353,6 +353,9 @@ func stopRetryResultForFailure(f *ImageGenFailure) *Result {
 	case ImageGenKindSilentBlockOAI:
 		reason = "OpenAI's image model returned no image and no explanation"
 		instructionTwo = "OpenAI's image model returned no image and gave no explanation. This almost always means the upstream safety pipeline blocked the output — the model itself doesn't say what was flagged. Tell the user this looks like a content-policy issue and suggest they rephrase the prompt or, if an input image was provided, try a different one."
+	case ImageGenKindSafetyBlock:
+		reason = "the image provider's safety system rejected the request"
+		instructionTwo = "The image provider's safety system explicitly rejected this request. Tell the user it was blocked by the content policy and suggest rephrasing the prompt or, if an input image was provided, trying a different one. Such blocks are occasionally false positives, so a reworded request may go through."
 	default: // ImageGenKindUnknownNoImages, ImageGenKindUnknown
 		reason = "the model returned an empty response with no explanation"
 		instructionTwo = "The model returned an empty response with no specific reason. Tell the user the generation didn't work and suggest they try again or rephrase — no specific reason is known."

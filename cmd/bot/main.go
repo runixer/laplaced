@@ -88,6 +88,8 @@ func toToolsImageGenKind(k imagegen.FailureKind) botTools.ImageGenFailureKind {
 		return botTools.ImageGenKindSilentBlockOAI
 	case imagegen.KindUnknownNoImages:
 		return botTools.ImageGenKindUnknownNoImages
+	case imagegen.KindSafetyBlock:
+		return botTools.ImageGenKindSafetyBlock
 	default:
 		return botTools.ImageGenKindUnknown
 	}

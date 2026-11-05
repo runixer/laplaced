@@ -307,6 +307,13 @@ func TestPerformImageGeneration_FailureKindWording(t *testing.T) {
 			expectGuardPhrase: true,
 		},
 		{
+			name:              "safety_block_names_content_policy",
+			failure:           &ImageGenFailure{Kind: ImageGenKindSafetyBlock, Cause: errors.New("llm API error: 400 Bad Request: rejected by the safety system")},
+			mustContain:       []string{"content policy", "rephras", "false positive"},
+			mustNotContain:    []string{"transient API error", "rejected by the safety system"},
+			expectGuardPhrase: true,
+		},
+		{
 			name:              "unknown_no_images_is_honest",
 			failure:           &ImageGenFailure{Kind: ImageGenKindUnknownNoImages},
 			mustContain:       []string{"no specific reason", "didn't work"},

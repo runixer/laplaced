@@ -152,7 +152,11 @@ func (c *clientImpl) doRequestWithRetry(ctx context.Context, span trace.Span, r 
 		c.logger.Error(r.opName+" returned non-OK status",
 			"status", resp.Status, "body", truncateForLog(string(responseBody), 500))
 		recordProviderError(span, responseBody, resp.StatusCode)
-		return out, fmt.Errorf("llm API error: %s: %s", resp.Status, truncateForLog(string(responseBody), 500))
+		return out, &httpStatusError{
+			status:  resp.Status,
+			body:    truncateForLog(string(responseBody), 500),
+			bodyErr: detectProviderBodyError(responseBody),
+		}
 	}
 
 	// Retries exhausted with a retryable error carried over from the last
@@ -162,4 +166,26 @@ func (c *clientImpl) doRequestWithRetry(ctx context.Context, span trace.Span, r 
 		return out, lastErr
 	}
 	return out, errors.New(r.opName + ": exhausted retries")
+}
+
+// httpStatusError is the terminal error for a non-OK HTTP response. Its text
+// keeps the historical "llm API error: <status>: <body>" form; Unwrap exposes
+// the parsed provider envelope (when the body carried one) so classifiers
+// such as IsSafetyBlock see 4xx content-policy rejections — the image
+// endpoint reports them as HTTP 400, not as an error inside a 200 body.
+type httpStatusError struct {
+	status  string
+	body    string
+	bodyErr *providerBodyError
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("llm API error: %s: %s", e.status, e.body)
+}
+
+func (e *httpStatusError) Unwrap() error {
+	if e.bodyErr == nil {
+		return nil
+	}
+	return e.bodyErr
 }

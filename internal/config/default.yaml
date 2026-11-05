@@ -198,19 +198,29 @@ agents:
     recent_message_count: 10    # Number of recent session messages to include in artifact context (0 = disable)
 
   # Image generator - creates/edits images (v0.8.0).
-  # Two verified configurations below — pick one. supported_image_sizes /
-  # supported_aspect_ratios drive the generate_image tool's JSON schema, so the
-  # LLM only sees options the upstream model actually accepts; switching models
-  # requires updating these lists or you'll get runtime 400s.
+  # supported_image_sizes / supported_aspect_ratios drive the generate_image
+  # tool's JSON schema, so the LLM only sees options the upstream model
+  # actually accepts; switching models requires updating these lists or you'll
+  # get runtime 400s.
+  #
+  # api: "images" uses the dedicated /images endpoint (the openai/gpt-image
+  # family is served only there). That endpoint silently coarsens aspect_ratio
+  # to three sizes and ignores resolution tiers for these models, so every
+  # tier × ratio maps to explicit pixels in pixel_sizes. Verified for
+  # gpt-image-2.6: exact output for every entry below; both sides must be
+  # divisible by 16, long edge <= 3840, <= ~8.3M pixels. 1K = 1536 long edge.
+  # Edits without an explicit ratio use the supported ratio nearest to the
+  # first input image.
   image_generator:
     name: "ImageGenerator"
-    model: "openai/gpt-5.4-image-2"
-    timeout: "720s"                # ~10x slower than nano banana; first call routinely runs minutes, the previous 90s/180s caps tripped it
+    model: "openai/gpt-image-2.6-sunburst"
+    api: "images"
+    quality: "medium"              # low / medium / high; high is ~40% slower with little visible gain
+    # output_format: "jpeg"        # default PNG; 4K PNGs (~10 MB) exceed Telegram's photo limit and go out as documents
+    timeout: "180s"                # medium 1K ~30s, 4K ~60s
     default_aspect_ratio: "9:16"   # Vertical phone format. Only applied for text-to-image; edits keep the input image's own ratio.
     default_image_size: "1K"
-    # Curl-verified for openai/gpt-5.4-image-2: image_size accepts {"1K","2K"} only
-    # (0.5K and 4K return 400); aspect_ratio drops the {1:4, 4:1, 1:8, 8:1} extremes.
-    supported_image_sizes: ["1K", "2K"]
+    supported_image_sizes: ["1K", "2K", "4K"]
     supported_aspect_ratios:
       - "1:1"
       - "2:3"
@@ -222,29 +232,62 @@ agents:
       - "9:16"
       - "16:9"
       - "21:9"
-    # Alternative: google/gemini-3.1-flash-image-preview ("nano banana") — ~10x
-    # faster, ~2x cheaper (~$0.07 per 1K image vs ~$0.13). Accepts {"1K","2K","4K"}
-    # for image_size and four additional aspect ratios {1:4, 4:1, 1:8, 8:1}.
-    # To switch, replace the four fields above with:
+    pixel_sizes:
+      "1K":
+        "1:1": "1536x1536"
+        "2:3": "1024x1536"
+        "3:2": "1536x1024"
+        "3:4": "1152x1536"
+        "4:3": "1536x1152"
+        "4:5": "1216x1536"
+        "5:4": "1536x1216"
+        "9:16": "864x1536"
+        "16:9": "1536x864"
+        "21:9": "1536x656"
+      "2K":
+        "1:1": "2048x2048"
+        "2:3": "1360x2048"
+        "3:2": "2048x1360"
+        "3:4": "1536x2048"
+        "4:3": "2048x1536"
+        "4:5": "1632x2048"
+        "5:4": "2048x1632"
+        "9:16": "1152x2048"
+        "16:9": "2048x1152"
+        "21:9": "2048x864"
+      "4K":
+        "1:1": "2880x2880"
+        "2:3": "2336x3520"
+        "3:2": "3520x2336"
+        "3:4": "2480x3312"
+        "4:3": "3312x2480"
+        "4:5": "2560x3216"
+        "5:4": "3216x2560"
+        "9:16": "2160x3840"
+        "16:9": "3840x2160"
+        "21:9": "3840x1632"
+    # Faster alternative: model "openai/gpt-image-2.6-flare" (~11s vs ~30s at
+    # medium, same price) — weaker at keeping small details and exact numbers.
     #
+    # Chat-completions alternatives (api: "chat"; drop quality and pixel_sizes):
+    #
+    # openai/gpt-5.4-image-2 — ~$0.13 per 1K image, minutes per call.
+    # image_size accepts {"1K","2K"} only (0.5K and 4K return 400);
+    # aspect_ratio drops the {1:4, 4:1, 1:8, 8:1} extremes.
+    # model: "openai/gpt-5.4-image-2"
+    # api: "chat"
+    # timeout: "720s"
+    # supported_image_sizes: ["1K", "2K"]
+    # supported_aspect_ratios: (the ten ratios above)
+    #
+    # google/gemini-3.1-flash-image-preview ("nano banana") — ~$0.07 per 1K
+    # image. Accepts {"1K","2K","4K"} and four extra aspect ratios
+    # {1:4, 4:1, 1:8, 8:1}.
     # model: "google/gemini-3.1-flash-image-preview"
+    # api: "chat"
     # timeout: "90s"
     # supported_image_sizes: ["1K", "2K", "4K"]
-    # supported_aspect_ratios:
-    #   - "1:1"
-    #   - "2:3"
-    #   - "3:2"
-    #   - "3:4"
-    #   - "4:3"
-    #   - "4:5"
-    #   - "5:4"
-    #   - "9:16"
-    #   - "16:9"
-    #   - "21:9"
-    #   - "1:4"
-    #   - "4:1"
-    #   - "1:8"
-    #   - "8:1"
+    # supported_aspect_ratios: (the ten ratios above plus "1:4", "4:1", "1:8", "8:1")
     max_input_images: 4            # Max reference images accepted as tool input
     max_output_images: 4           # Max images shown to user per tool call
     max_input_image_bytes: 20971520 # 20MB per input image
@@ -294,7 +337,7 @@ tools:
   - name: "manage_people"
     model: "memory"
   - name: "generate_image"
-    model: "openai/gpt-5.4-image-2"
+    model: "openai/gpt-image-2.6-sunburst"
   - name: "read_url"
 
 # Web-page fetcher backing the read_url tool. backend selects the

@@ -33,6 +33,7 @@ const (
 	OutcomeTextRefusal      = "text_refusal"      // KindTextRefusal (Google-style)
 	OutcomeSilentBlockOAI   = "silent_block_oai"  // KindSilentBlockOAI (output-side filter)
 	OutcomeUnknownNoImages  = "unknown_no_images" // KindUnknownNoImages
+	OutcomeSafetyBlock      = "safety_block"      // KindSafetyBlock (explicit content-policy error)
 	OutcomeEmptyPrompt      = "empty_prompt"
 	OutcomeNoChoices        = "no_choices"
 	OutcomeAllDecodesFailed = "all_decodes_failed" // model produced images but base64 unwrap failed
@@ -54,6 +55,8 @@ func outcomeFromKind(k FailureKind) string {
 		return OutcomeSilentBlockOAI
 	case KindUnknownNoImages:
 		return OutcomeUnknownNoImages
+	case KindSafetyBlock:
+		return OutcomeSafetyBlock
 	default:
 		return OutcomeUnknownFailure
 	}
@@ -129,6 +132,35 @@ func (a *Agent) Generate(ctx context.Context, req Request) (resp *Response, err 
 		defer cancel()
 	}
 
+	aspectRatio, aspectSource := a.effectiveAspectRatio(req)
+	imageSize := req.ImageSize
+	if imageSize == "" {
+		imageSize = a.cfg.DefaultImageSize
+	}
+	// Effective values (after defaulting) — separate from *_requested attrs
+	// so triage can distinguish "user/LLM asked for 0.5K" from "we defaulted
+	// to 1K because nothing was set". 2026-04-29 incident specifically came
+	// from edit-with-explicit-0.5K, so this distinction matters.
+	span.SetAttributes(
+		attribute.String("imagegen.aspect_ratio", aspectRatio),
+		attribute.String("imagegen.aspect_ratio_source", aspectSource),
+		attribute.String("imagegen.image_size", imageSize),
+	)
+
+	if a.cfg.UsesImagesAPI() {
+		span.SetAttributes(attribute.String("imagegen.api", config.ImageAPIImages))
+		resp, outcome, err = a.generateViaImages(ctx, span, req, aspectRatio, imageSize)
+		return resp, err
+	}
+	span.SetAttributes(attribute.String("imagegen.api", config.ImageAPIChat))
+	resp, outcome, err = a.generateViaChat(ctx, span, req, aspectRatio, imageSize)
+	return resp, err
+}
+
+// generateViaChat drives chat-completions with modalities=["image","text"].
+// It returns the span outcome alongside the result so Generate's deferred
+// span bookkeeping stays in one place.
+func (a *Agent) generateViaChat(ctx context.Context, span trace.Span, req Request, aspectRatio, imageSize string) (*Response, string, error) {
 	// Build multimodal user message: prompt text first, then any input images.
 	// Image-generation models require input images in OpenAI-compatible
 	// "image_url" shape — the unified "file" FilePart shape used by text
@@ -142,18 +174,6 @@ func (a *Agent) Generate(ctx context.Context, req Request) (resp *Response, err 
 		})
 	}
 
-	aspectRatio := req.AspectRatio
-	// Default aspect ratio only applies for text-to-image (no input images).
-	// When editing, passing an explicit aspect would force the model to reframe
-	// the input — users expect edits to preserve the original photo's ratio.
-	if aspectRatio == "" && len(req.InputImages) == 0 {
-		aspectRatio = a.cfg.DefaultAspectRatio
-	}
-	imageSize := req.ImageSize
-	if imageSize == "" {
-		imageSize = a.cfg.DefaultImageSize
-	}
-
 	var imgCfg *llm.ImageConfig
 	if aspectRatio != "" || imageSize != "" {
 		imgCfg = &llm.ImageConfig{
@@ -161,14 +181,6 @@ func (a *Agent) Generate(ctx context.Context, req Request) (resp *Response, err 
 			ImageSize:   imageSize,
 		}
 	}
-	// Effective values (after defaulting) — separate from *_requested attrs
-	// so triage can distinguish "user/LLM asked for 0.5K" from "we defaulted
-	// to 1K because nothing was set". 2026-04-29 incident specifically came
-	// from edit-with-explicit-0.5K, so this distinction matters.
-	trace.SpanFromContext(ctx).SetAttributes(
-		attribute.String("imagegen.aspect_ratio", aspectRatio),
-		attribute.String("imagegen.image_size", imageSize),
-	)
 
 	orReq := llm.ChatCompletionRequest{
 		Model:       a.cfg.Model,
@@ -191,8 +203,7 @@ func (a *Agent) Generate(ctx context.Context, req Request) (resp *Response, err 
 			Kind:  classifyFailure(callErr, llm.ResponseMessage{}, ""),
 			Cause: callErr,
 		}
-		outcome = outcomeFromKind(failure.Kind)
-		return nil, failure
+		return nil, outcomeFromKind(failure.Kind), failure
 	}
 	// Resolved snapshot string (e.g. "openai/gpt-5.4-image-2-20260421") catches
 	// upstream model-version rotations that change behavior under us.
@@ -208,8 +219,7 @@ func (a *Agent) Generate(ctx context.Context, req Request) (resp *Response, err 
 		span.SetAttributes(attribute.String("imagegen.provider", orResp.Provider))
 	}
 	if len(orResp.Choices) == 0 {
-		outcome = OutcomeNoChoices
-		return nil, &ImagegenFailure{Kind: KindUnknownNoImages, Provider: orResp.Provider}
+		return nil, OutcomeNoChoices, &ImagegenFailure{Kind: KindUnknownNoImages, Provider: orResp.Provider}
 	}
 
 	msg := orResp.Choices[0].Message
@@ -231,8 +241,7 @@ func (a *Agent) Generate(ctx context.Context, req Request) (resp *Response, err 
 			Text:     msg.Content,
 			Provider: orResp.Provider,
 		}
-		outcome = outcomeFromKind(failure.Kind)
-		return nil, failure
+		return nil, outcomeFromKind(failure.Kind), failure
 	}
 
 	decoded := make([]DecodedImage, 0, len(msg.Images))
@@ -245,11 +254,9 @@ func (a *Agent) Generate(ctx context.Context, req Request) (resp *Response, err 
 		decoded = append(decoded, DecodedImage{MimeType: mime, Data: data})
 	}
 	if len(decoded) == 0 {
-		outcome = OutcomeAllDecodesFailed
-		return nil, fmt.Errorf("imagegen: all %d output images failed to decode", len(msg.Images))
+		return nil, OutcomeAllDecodesFailed, fmt.Errorf("imagegen: all %d output images failed to decode", len(msg.Images))
 	}
 
-	outcome = OutcomeSuccess
 	return &Response{
 		Images:           decoded,
 		TextContent:      msg.Content,
@@ -257,7 +264,7 @@ func (a *Agent) Generate(ctx context.Context, req Request) (resp *Response, err 
 		CompletionTokens: orResp.Usage.CompletionTokens,
 		Cost:             orResp.Usage.Cost,
 		Duration:         duration,
-	}, nil
+	}, OutcomeSuccess, nil
 }
 
 // decodeDataURL parses a "data:<mime>;base64,<payload>" URL.
